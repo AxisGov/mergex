@@ -69,5 +69,7 @@ grep -Fq '**Reação positiva verificável.**' "$review" && grep -Fq 'hoje, só 
   || fail 'verifiable +1 reaction on the evidence comment as R6 closure missing'
 grep -Fq 'Reação genérica ou ambígua não satisfaz R6' "$review" \
   || fail 'rule that generic or ambiguous reactions do not satisfy R6 missing'
+grep -Fq '(resposta explícita, aprovação, ou reação positiva verificável conforme "Reação positiva' "$review" \
+  || fail 'FÁBRICA-resolved branch must accept a prior verifiable positive reaction as external confirmation'
 
 printf 'contract checks passed\n'

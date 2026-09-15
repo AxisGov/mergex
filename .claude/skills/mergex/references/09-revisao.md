@@ -245,7 +245,8 @@ Política:
     esclarecimento, questiona ou rejeita a correção **não** satisfaz R6.
   - **FÁBRICA** resolveu — inclusive com a conta pessoal do operador: não conta sozinha como
     confirmação externa. Só vale se houver confirmação anterior de reviewer/bot externo
-    (resposta ou aprovação), ou closure histórico comprovado de confirmação humana específica
+    (resposta explícita, aprovação, ou reação positiva verificável conforme "Reação positiva
+    verificável", abaixo), ou closure histórico comprovado de confirmação humana específica
     (ver "Closure histórico comprovado", abaixo); sem uma das duas, o finding volta a
     `AWAITING_REREVIEW`.
   - **HUMANO OPERADOR** confirmou, nesta execução, a pergunta específica da mergex (por exemplo,
