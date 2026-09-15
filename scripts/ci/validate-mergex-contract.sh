@@ -60,4 +60,14 @@ grep -Fq -- '--match-head-commit <headRefOid>' "$review" \
 grep -Fq 'Sem mecanismo atômico' "$review" && grep -Fq 'a mergex não executa o merge' "$review" \
   || fail 'refusal to merge without an atomic head-bound mechanism missing'
 
+# R6 external closure by reaction: verifiable +1 on the evidence comment may count; generic reactions never do.
+if grep -Fq 'Reação isolada (emoji) não é confirmação' "$review"; then
+  fail 'absolute "no reaction is confirmation" rule reintroduced; verifiable +1 closure must be allowed'
+fi
+grep -Fq '**Reação positiva verificável.**' "$review" && grep -Fq 'hoje, só `+1`' "$review" \
+  && grep -Fq 'comentário específico de evidência daquele finding' "$review" \
+  || fail 'verifiable +1 reaction on the evidence comment as R6 closure missing'
+grep -Fq 'Reação genérica ou ambígua não satisfaz R6' "$review" \
+  || fail 'rule that generic or ambiguous reactions do not satisfy R6 missing'
+
 printf 'contract checks passed\n'

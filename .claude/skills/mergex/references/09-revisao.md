@@ -147,6 +147,7 @@ ferramenta oferece; operação que o serviço, o plano ou a permissão não exp�
 | Estado do PR | `gh pr view <n> --json headRefOid,isDraft,statusCheckRollup,reviewDecision,reviews,latestReviews` | `glab api projects/:id/merge_requests/:iid` (`sha`, `draft`, `head_pipeline`); aprovações em `projects/:id/merge_requests/:iid/approvals`; estado de pedido de mudança dos reviewers em `projects/:id/merge_requests/:iid/reviewers`, quando a instância expuser — sem isso, R2 `NÃO VERIFICÁVEL` |
 | Identificar threads | `gh api graphql` em `pullRequest.reviewThreads`: `id`, `isResolved`, `isOutdated`, `resolvedBy { login }`, `path`, `line`, `comments { id url createdAt author { login } body }` | `glab api projects/:id/merge_requests/:iid/discussions`: `id` da discussion; em cada note, `id`, `author`, `created_at`, `resolvable`, `resolved`, `resolved_by`, e `resolved_at` quando a instância devolver |
 | Identificar review/comentário geral | `gh api graphql` em `pullRequest.reviews { id url state submittedAt author { login } body }` e `pullRequest.comments { id url createdAt author { login } body }` | notes sem discussion resolvível em `projects/:id/merge_requests/:iid/notes` (`id`, `author`, `created_at`, `body`) |
+| Ler reações | REST, paginado: `gh api repos/<owner>/<repo>/pulls/comments/<comment_id>/reactions --paginate` (comentário de review) ou `.../issues/comments/<comment_id>/reactions` (comentário geral): `content`, `created_at`, `user.login`, `user.type` | `glab api projects/:id/merge_requests/:iid/notes/:note_id/award_emoji`, paginado: `name`, `user`, `created_at` |
 | Responder thread | mutation `addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId, body})` | `glab api -X POST projects/:id/merge_requests/:iid/discussions/:discussion_id/notes -f body=...` |
 | Resolver thread | mutation `resolveReviewThread(input: {threadId})` | `glab api -X PUT projects/:id/merge_requests/:iid/discussions/:discussion_id -f resolved=true` |
 | Comentar no PR | `gh pr comment <n> --body-file <arquivo>` | `glab api -X POST projects/:id/merge_requests/:iid/notes -f body=...` |
@@ -238,7 +239,8 @@ Política:
   de uma execução anterior da mergex com a sequência registrada). Sem dado suficiente, R5 é
   `NÃO VERIFICÁVEL`.
 - **C. Quem encerrou (R6), por proveniência:**
-  - **REVIEWER/BOT EXTERNO** confirmou explicitamente a correção, ou resolveu o finding com
+  - **REVIEWER/BOT EXTERNO** confirmou explicitamente a correção (inclusive por reação positiva
+    verificável, ver abaixo), ou resolveu o finding com
     closure verificável: confirmação externa normal (R6 caso A). Resposta que só pede
     esclarecimento, questiona ou rejeita a correção **não** satisfaz R6.
   - **FÁBRICA** resolveu — inclusive com a conta pessoal do operador: não conta sozinha como
@@ -252,6 +254,28 @@ Política:
   - **Proveniência indeterminável** (thread já resolvida antes da execução, `resolvedBy` de conta
     que pode ser operador ou automação, campo ausente, sem rastro que prove a origem): R6 é
     `NÃO VERIFICÁVEL`, confirmável humanamente.
+
+**Reação positiva verificável.** Reação não vale por ser emoji. Ela só satisfaz R6 caso A, como
+confirmação explícita do **REVIEWER/BOT EXTERNO**, quando **todas** estas condições valem:
+
+1. o autor da reação é o reviewer/bot externo responsável pelo finding, ou claramente
+   participante daquele review (proveniência externa, conforme acima);
+2. a reação está no comentário específico de evidência daquele finding (`Fixed in <commit>` ou
+   `Not applicable` com evidência);
+3. o provider expõe, de forma verificável, o autor, o tipo, o comentário alvo e o timestamp da
+   reação (ver "Ler reações" em "Operações de review por plataforma");
+4. a reação é posterior à publicação da evidência;
+5. a semântica é de concordância positiva inequívoca — hoje, só `+1` (`thumbsup`, o equivalente
+   no GitLab);
+6. depois dela não há resposta contraditória, novo pedido de mudança equivalente, reabertura da
+   thread nem finding novo com a mesma preocupação.
+
+Não é closure: emoji de qualquer outra pessoa; reação da fábrica; reação do operador que não é
+reviewer externo; `eyes`, `laugh`, `heart` ou qualquer reação que não seja `+1`; `+1` em
+comentário genérico do PR; `+1` anterior à evidência; reação cuja autoria, alvo ou timestamp não
+possam ser verificados. **Reação genérica ou ambígua não satisfaz R6**: o finding fica em
+`AWAITING_REREVIEW`, ou R6 fica `NÃO VERIFICÁVEL` quando o dado não é verificável, conforme as
+regras acima.
 
 **Closure histórico comprovado.** Confirmação humana **não persiste como autorização**: a
 próxima execução nunca a usa como override genérico, nem para outro finding. O **encerramento**
@@ -531,7 +555,8 @@ temporal e identidade").
 
 - **Reviewer ou bot concordou** com a rejeição (respondeu concordando, aprovou estado posterior,
   ou resolveu a thread com proveniência externa verificada): o finding vai para `RESOLVED` normalmente, R6
-  satisfeito. Reação isolada (emoji) não é confirmação.
+  satisfeito. Reação genérica ou ambígua não satisfaz R6; só conta a reação descrita em "Reação
+  positiva verificável".
 - **Reviewer não respondeu** à rejeição publicada: o finding fica em `AWAITING_REREVIEW` e R6
   **não** é satisfeito por conta própria. É bloqueio confirmável humanamente (ver "Dois tipos
   de bloqueio"): o passo 7 do E9 pergunta, especificamente para aquele finding, se o
