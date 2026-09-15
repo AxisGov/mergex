@@ -828,10 +828,16 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
      exatamente o que mudou.
    - **Releitura impossível**: trate como mudança; não faça o merge.
 
-   Quando o serviço oferecer, amarre o merge ao HEAD revalidado (`gh pr merge <n>
-   --match-head-commit <headRefOid>`; parâmetro `sha` no merge do GitLab), para que um push
-   entre a releitura e o merge faça a operação falhar em vez de integrar código não revalidado.
-6. Revalidado sem mudança, faça o merge com a estratégia que o repositório usa (detecte em `CONVENCOES.md` da stackx ou nos merges anteriores; na ausência, use o padrão do serviço). Nunca force, nunca reescreva histórico já enviado.
+   **Merge atomicamente preso ao HEAD revalidado — obrigatório.** O merge só é executado com um
+   mecanismo do serviço que faça a própria operação falhar se o HEAD do PR mudou depois da
+   revalidação: `gh pr merge <n> --match-head-commit <headRefOid>` no GitHub; parâmetro `sha`
+   no merge do GitLab; em outro serviço, garantia equivalente comprovável. Sem mecanismo atômico
+   desse tipo, **a mergex não executa o merge**: informe que o serviço não oferece merge atômico
+   seguro (safe atomic merge) para a automação, mantenha o PR aberto e registre no rastro. Nunca
+   degrade para "reli e vou tentar rápido" — releitura sem amarra atômica não impede que um push
+   entre a releitura e o merge integre código não revalidado. A confirmação humana específica
+   do PR continua obrigatória e não substitui a garantia atômica.
+6. Revalidado sem mudança **e com o merge atomicamente preso ao HEAD revalidado** (item 5), faça o merge com a estratégia que o repositório usa (detecte em `CONVENCOES.md` da stackx ou nos merges anteriores; na ausência, use o padrão do serviço). Nunca force, nunca reescreva histórico já enviado.
 7. Atualize `pr_estado: merged` no `ENTREGA.md` correspondente, quando ele existir localmente.
 
    **E, somente se o PR mergeado for o do trabalho atual**, grave `pr_estado: merged`
@@ -864,7 +870,8 @@ Não faça merge, em nenhuma hipótese:
 
 A confirmação humana específica do gate não é exceção à recusa 6: ela só permite **recalcular**
 o gate nesta execução. Merge exige o resultado recalculado `SATISFEITO`, a confirmação final
-daquele PR **e** a revalidação do item 5 imediatamente antes da operação. Nenhuma confirmação
+daquele PR **e** a revalidação do item 5 imediatamente antes da operação, com o merge
+atomicamente preso ao HEAD revalidado. Nenhuma confirmação
 humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIFICÁVEL`).
 
 ## Critério de saída
@@ -955,6 +962,7 @@ lista teve confirmação explícita daquele PR específico.
 | Leitura paginada incompleta (alguma página de `reviewThreads`, `reviews`, `comments`, `discussions` ou `notes` não obtida) | Critérios que dependem da coleção (R2/R3/R5/R6) ficam `NÃO VERIFICÁVEL`; `REVIEW EVIDENCE` permanece `BLOQUEADO`; nunca conclui a partir da primeira página |
 | Plataforma não expõe responder, resolver ou comentar no PR | Capacidade `NÃO VERIFICÁVEL`; nada é simulado; R5 não é produzido nesta execução e a thread fica aberta |
 | Plataforma não expõe quem resolveu ou quando | Thread resolvida antes da execução: R5 continua podendo ser `OK` se um rastro anterior da mergex comprovar evidência publicada e, depois, a resolução; R5 só é `NÃO VERIFICÁVEL` quando não há timestamp suficiente da plataforma nem rastro histórico suficiente. Proveniência da resolução indeterminável (conta que pode ser operador ou automação, sem rastro que prove a origem): R6 `NÃO VERIFICÁVEL`, nunca inferido pelo login. Ambos confirmáveis humanamente, com recálculo |
+| Serviço sem merge atômico preso ao HEAD (sem `--match-head-commit`, sem `sha` no merge, sem garantia equivalente comprovável) | Não executa o merge; informa que o serviço não oferece merge atômico seguro para a automação; mantém o PR aberto e registra no rastro |
 | Revalidação pré-merge detecta mudança ou não consegue reler | Não faz o merge nesta passagem; HEAD novo invalida as confirmações anteriores; diz o que mudou |
 | Nenhum canal de escrita para publicar `REVIEW REMEDIATION` | Handoff `NÃO VERIFICÁVEL`, PR segue `BLOQUEADO`; informa o motivo literal e mostra o pacote completo na saída; nunca diz que persistiu |
 | Plataforma não expõe estado resolved/outdated de uma thread | Trata como fonte ausente para aquele campo; o finding correspondente não passa de `FIXED_AWAITING_EVIDENCE` — nunca vira `RESOLVED` sem confirmação verificável |

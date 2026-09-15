@@ -53,5 +53,11 @@ grep -Fq 'SATISFEITO' "$review" || fail 'SATISFEITO verdict missing'
 grep -Fq 'BLOQUEADO' "$review" || fail 'BLOQUEADO verdict missing'
 grep -Fq 'Revalidação obrigatória imediatamente antes do merge' "$review" \
   || fail 'pre-merge revalidation requirement missing'
+grep -Fq 'Merge atomicamente preso ao HEAD revalidado — obrigatório.' "$review" \
+  || fail 'atomic head-bound merge requirement missing'
+grep -Fq -- '--match-head-commit <headRefOid>' "$review" \
+  || fail 'GitHub --match-head-commit binding missing'
+grep -Fq 'Sem mecanismo atômico' "$review" && grep -Fq 'a mergex não executa o merge' "$review" \
+  || fail 'refusal to merge without an atomic head-bound mechanism missing'
 
 printf 'contract checks passed\n'
