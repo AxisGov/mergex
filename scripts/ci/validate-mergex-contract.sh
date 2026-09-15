@@ -25,7 +25,11 @@ grep -Fq 'só roda por chamada explícita do desenvolvedor' "$claude_cmd" \
   || fail 'Claude command no longer requires explicit developer invocation'
 
 # No E10 stage may be introduced in active skill/command/reference contracts.
-if grep -R -n -E '^#{1,6}[[:space:]].*\bE10\b|\*\*E10\b' \
+# Detects E10 declared as a stage: in a heading, in bold, or as the first token of a line after
+# optional structural markers (blockquote, list bullet, ordered item, table cell, heading, bold).
+# Prose that only mentions E10 mid-sentence ("sem E10", "não existe E10") is not a declaration.
+if grep -R -n -E \
+  '^#{1,6}[[:space:]].*\bE10\b|\*\*E10\b|^[[:space:]]*((>|[-*+]|[0-9]+[.)]|\||#{1,6}|\*\*|__)[[:space:]]*)*E10\b' \
   "$skill" .claude/skills/mergex/references .claude/commands .opencode/commands; then
   fail 'E10 stage detected'
 fi
