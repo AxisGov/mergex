@@ -169,7 +169,9 @@ correspondente, `pr_aberto` (E7) com a URL, e `veredito_emitido` (E3) do
 `revisor-diff`.
 
 No comando manual (E9), grava a lista de PRs avaliados, a ordem apresentada e o
-que foi mergeado — e **nunca faz merge por conta própria em nenhum caminho**.
+que foi mergeado — e **nunca faz merge por conta própria em nenhum caminho**. Sem
+trabalho atual, esse rastro da sessão vai para `docs/eventos/sem-trabalho.jsonl`,
+nunca para o stream do trabalho de um PR revisado (ver `references/09-revisao.md`).
 
 Com isso o painel mostra, sem tocar no versionador: por trabalho, a branch, os
 commits e a task de cada um; o que aguarda revisão e há quanto tempo; e a

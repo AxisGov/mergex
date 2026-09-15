@@ -49,6 +49,32 @@ Para cada PR, junte **o que estiver disponível**. Fonte ausente vira "não disp
 | Reviews, requested changes, comentários e threads | API do serviço — ver "Operações de review por plataforma", abaixo | Trate como fonte ausente para o REVIEW EVIDENCE GATE — ver "Quando falha" |
 | HEAD autoritativo do PR | `headRefOid` do PR (GitHub); `sha` do merge request (GitLab) — ver "HEAD autoritativo", abaixo | R1 `NÃO VERIFICÁVEL`, R4 não pode ser `OK`; `REVIEW EVIDENCE: BLOQUEADO` |
 
+### Trabalho atual no E9
+
+Esta é a **única** definição de "trabalho atual" no E9. Ela decide duas coisas: o destino do
+rastro da sessão (ver "Destino do rastro") e se um PR mergeado atualiza `pr_estado` no
+`.expx/estado.json` (passo 7, item 7). A fonte é o versionador e o registro da entrega:
+
+1. `git branch --show-current`.
+2. Localize `docs/entregas/*/ENTREGA.md`.
+3. Há trabalho atual **somente** se existir **exatamente um** `ENTREGA.md` cujo campo `branch`
+   seja igual à branch Git atual. O trabalho atual é o `trabalho_id` desse `ENTREGA.md`.
+
+**Trabalho atual = nenhum** quando:
+
+- a branch atual é a principal do repositório (`main` ou equivalente);
+- o HEAD está destacado (`git branch --show-current` vazio);
+- nenhum `ENTREGA.md` tem `branch` igual à branch atual;
+- mais de um `ENTREGA.md` tem essa `branch`;
+- houver qualquer dúvida (frontmatter ilegível, `branch` ausente).
+
+Nunca decida o trabalho atual por:
+
+- `.expx/estado.json` — é só **saída** (ver `10-estado.md`): pode ser escrito depois que a
+  decisão foi tomada por Git + `ENTREGA.md`, nunca lido para tomá-la;
+- o `ENTREGA.md` modificado mais recentemente;
+- o PR que está sendo revisado.
+
 ### A marcação de trabalho próprio
 
 Se o PR foi aberto pela mergex **na mesma máquina** — a `pr_url` de algum `ENTREGA.md` local casa com a URL do PR —, marque-o na lista:
@@ -733,10 +759,11 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    pessoas; a barra mostra **um** trabalho, o que está em andamento nesta sessão. Mergear o
    PR de outro trabalho não muda o estado do seu.
 
-   O PR é do trabalho atual quando a `pr_url` do `ENTREGA.md` daquele PR casa com a do
-   `ENTREGA.md` do trabalho nomeado em `trabalho` no próprio `estado.json`. Se `trabalho`
-   for `null`, se o `estado.json` não existir, ou se a correspondência não for certa,
-   **não grave nada** — na dúvida, deixe a barra como está.
+   O PR é do trabalho atual quando existe trabalho atual (ver "Trabalho atual no E9", no
+   passo 2) e a URL do PR mergeado casa com a `pr_url` do `ENTREGA.md` desse trabalho. Sem
+   trabalho atual, ou se a correspondência não for certa, **não grave nada** — na dúvida,
+   deixe a barra como está. O `estado.json` só é escrito depois dessa decisão; nunca é lido
+   para tomá-la.
 
    Não toque em `branch`. O procedimento é o de `10-estado.md`, e falha de gravação vai
    para o rastro sem interromper a condução dos PRs seguintes.
@@ -777,6 +804,7 @@ humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIF
 - [ ] Cada merge feito teve confirmação específica; os de OLHO OBRIGATÓRIO tiveram a confirmação dupla.
 - [ ] PRs abertos por esta instalação da mergex estão marcados.
 - [ ] `pr_estado: merged` foi para o `.expx/estado.json` **apenas** se o PR mergeado era o do trabalho atual; PR de outro trabalho não alterou a barra.
+- [ ] O rastro da sessão foi para o stream do trabalho atual ou, sem trabalho atual certo, para `docs/eventos/sem-trabalho.jsonl` — nunca para o stream do trabalho de um PR revisado.
 
 Ao fim, um resumo: o que foi integrado, o que ficou pendente e por quê.
 
@@ -784,8 +812,36 @@ Ao fim, um resumo: o que foi integrado, o que ficou pendente e por quê.
 
 Grave em `docs/eventos/<trabalho_id>.jsonl`: **a lista de PRs avaliados, a ordem
 apresentada, as confirmações humanas do gate dadas nesta execução, as escritas de review feitas
-(com o ID/URL devolvido pela plataforma), as revalidações pré-merge que barraram merge, e o que
-foi mergeado.**
+(com o ID/URL devolvido pela plataforma), as revalidações pré-merge que barraram merge, o que
+foi mergeado e os merges recusados.**
+
+### Destino do rastro — a sessão de revisão, não os PRs revisados
+
+O rastro do E9 é da **sessão de revisão**. Ele nunca é atribuído a um dos PRs revisados só
+porque o PR pertence a um trabalho.
+
+| Situação | Destino |
+|---|---|
+| Existe trabalho atual (ver "Trabalho atual no E9", no passo 2: um único `ENTREGA.md` com `branch` igual à branch Git atual) | `docs/eventos/<trabalho_id>.jsonl` desse trabalho, como hoje |
+| Trabalho atual = nenhum (branch principal, HEAD destacado, nenhuma ou mais de uma correspondência, dúvida) | `docs/eventos/sem-trabalho.jsonl`, com `"trabalho_id":"sem-trabalho"` |
+
+`sem-trabalho` é o identificador que a implementação do contrato `expx-eventos` v1 já usa
+quando não há trabalho corrente (`expx_trabalho_id`, em `.claude/hooks/comum/base.sh`): mesmo
+diretório, mesmo formato de linha, mesmo `.gitignore` e mesma rotação. Não é um trabalho fictício
+— não tem forma de slug de feature nem de OC-ID — e nenhuma skill de execução o usa como
+`trabalho_id`. O caminho é fixo, portanto recuperável em outra sessão.
+
+Regras:
+
+- **Nunca grave a sessão no stream de um PR revisado.** Revisar ou mergear o PR de outro
+  trabalho não leva o evento para `docs/eventos/<trabalho daquele PR>.jsonl`; o evento vai para
+  o destino da tabela acima, e o PR aparece só no `detalhe`.
+- **Não use o `ENTREGA.md` modificado mais recentemente** para escolher o destino, como faz o
+  hook: no E9, o `ENTREGA.md` mais recente pode ser justamente o de outro trabalho em revisão.
+- **Na dúvida, `sem-trabalho`** — a mesma disciplina do item 7 do passo 7 ("na dúvida, deixe a
+  barra como está").
+- PR aberto fora do método (sem `ENTREGA.md`) entra no `detalhe` como qualquer outro, sem
+  alterar o destino.
 
 ```json
 {"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"veredito_emitido","fase":"e9","task":null,"agente":"analista-de-conflito","resultado":"ok","detalhe":"PRs avaliados: #479, #482; ordem: #479 < #482; confirmações humanas: #482 R2 (API não expõe decisão de review); mergeado: #479","arquivos":[]}
