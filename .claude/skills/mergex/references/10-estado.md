@@ -83,12 +83,14 @@ reescreva `atualizado_em`, não toque em `.expx/`.
 ### O caso do merge no comando manual
 
 O E9 percorre pull requests de **vários** trabalhos, inclusive de outras pessoas. Grave
-`pr_estado: merged` **somente quando o PR mergeado for o do trabalho atual** — aquele cuja
-`pr_url` casa com a do `ENTREGA.md` do trabalho que está em `trabalho` no próprio
-`estado.json`.
+`pr_estado: merged` **somente quando o PR mergeado for o do trabalho atual**. Quem decide
+isso é o versionador e o registro da entrega, nunca este arquivo: o trabalho atual é o único
+`ENTREGA.md` cujo `branch` é igual a `git branch --show-current`, e o PR é dele quando a URL
+casa com a `pr_url` desse `ENTREGA.md` (definição completa em "Trabalho atual no E9", em
+`references/09-revisao.md`).
 
-Mergear o PR de outro trabalho não muda o estado do seu. Se o E9 rodar fora de um trabalho
-em andamento (`trabalho: null`), não grave nada.
+Mergear o PR de outro trabalho não muda o estado do seu. Sem trabalho atual — branch
+principal, HEAD destacado, nenhuma ou mais de uma correspondência —, não grave nada.
 
 ## O procedimento de gravação
 
@@ -198,7 +200,8 @@ push, nunca barra uma etapa, nunca vira aviso na saída ao usuário.
 | Repositório sem versionador | Não grava nada |
 
 Falha de gravação vai para `docs/eventos/<trabalho_id>.jsonl`, com `resultado` `falha`, e o
-trabalho continua:
+trabalho continua. No E9 sem trabalho atual, o destino é `docs/eventos/sem-trabalho.jsonl` (ver
+"Destino do rastro" em `references/09-revisao.md`):
 
 ```json
 {"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"artefato_gravado","fase":"<e0|e7|e8|e9>","task":null,"agente":null,"resultado":"falha","detalhe":"estado.json nao gravado: <erro literal>","arquivos":[".expx/estado.json"]}
