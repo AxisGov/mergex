@@ -875,7 +875,7 @@ humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIF
 - [ ] Toda escrita de review (resposta, resolução, comentário) foi contada só com ID/URL ou releitura devolvidos pela plataforma.
 - [ ] PR bloqueado mostrou os findings pendentes nomeados e o tipo de bloqueio.
 - [ ] PR com bloqueio confirmável só chegou à pergunta de merge depois das confirmações específicas e do gate recalculado `SATISFEITO`; as confirmações aparecem na saída e no rastro.
-- [ ] Finding válido virou pacote `REVIEW REMEDIATION` devolvido à skill de origem, nunca corrigido pela mergex, persistido na thread ou em comentário do PR — ou informado como não persistido.
+- [ ] Finding válido virou pacote `REVIEW REMEDIATION` devolvido à skill de origem; a mergex não corrigiu o código do produto. O pacote foi persistido na thread do finding ou em comentário durável do PR — ou, se não havia canal de escrita, a saída informou explicitamente o handoff como `NÃO PERSISTIDO` (`NÃO VERIFICÁVEL`), com o pacote completo.
 - [ ] Conflitos foram relatados com as duas intenções, sem resolução.
 - [ ] Cada merge feito teve confirmação específica; os de OLHO OBRIGATÓRIO tiveram a confirmação dupla.
 - [ ] PRs abertos por esta instalação da mergex estão marcados.
@@ -902,9 +902,14 @@ porque o PR pertence a um trabalho.
 | Existe trabalho atual (ver "Trabalho atual no E9", no passo 2: um único `ENTREGA.md` com `branch` igual à branch Git atual) | `docs/eventos/<trabalho_id>.jsonl` desse trabalho, como hoje |
 | Trabalho atual = nenhum (branch principal, HEAD destacado, nenhuma ou mais de uma correspondência, dúvida) | `docs/eventos/sem-trabalho.jsonl`, com `"trabalho_id":"sem-trabalho"` |
 
-`sem-trabalho` é o identificador que a implementação do contrato `expx-eventos` v1 já usa
-quando não há trabalho corrente (`expx_trabalho_id`, em `.claude/hooks/comum/base.sh`): mesmo
-diretório, mesmo formato de linha, mesmo `.gitignore` e mesma rotação. Não é um trabalho fictício
+`sem-trabalho` já existe como identificador sentinela no mecanismo `expx-eventos` v1: o helper
+`expx_trabalho_id`, em `.claude/hooks/comum/base.sh`, devolve o trabalho do `ENTREGA.md`
+modificado mais recentemente quando existe algum, e `sem-trabalho` só quando não existe nenhum
+`ENTREGA.md`. O E9 reutiliza esse identificador e o mesmo mecanismo de arquivo — mesmo
+diretório, mesmo formato de linha, mesmo `.gitignore` e mesma rotação —, mas **não** a
+heurística do helper: decide usar `sem-trabalho` pela própria regra autoritativa (ver "Trabalho
+atual no E9": branch Git + exatamente um `ENTREGA.md` correspondente) e nunca pelo `ENTREGA.md`
+mais recente. Não é um trabalho fictício
 — não tem forma de slug de feature nem de OC-ID — e nenhuma skill de execução o usa como
 `trabalho_id`. O caminho é fixo, portanto recuperável em outra sessão.
 
