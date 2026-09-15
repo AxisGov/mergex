@@ -100,15 +100,40 @@ CONFLITO — #{{n}} contra {{base | #n}}
 
 {{cada PR aqui também mostra, na fila acima ou junto do motivo, o bloco R1–R6 completo}}
 
+{{motivo: rascunho, integração contínua vermelha, ou REVIEW EVIDENCE: BLOQUEADO (corrigível por remediação)}}
+
 | PR | Motivo |
 |---|---|
-| #{{n}} | {{rascunho | integração contínua vermelha | REVIEW EVIDENCE: BLOQUEADO (corrigível por remediação)}} |
+| #{{n}} | {{motivo}} |
 
 ## Review Remediation
 
-{{um item por finding válido devolvido à skill de origem}}
+{{um bloco por finding válido devolvido à skill de origem — o pacote é o de "O pacote de
+remediação", em references/09-revisao.md; o template só o materializa}}
 
-- #{{n}} {{arquivo}}:{{linha}} — publicado em {{thread <url> | comentário no PR <url> | NÃO PERSISTIDO — <motivo literal>; pacote completo abaixo}}
+- #{{n}} {{arquivo}}:{{linha}} — publicado em {{thread <url> | comentário no PR <url> | NÃO PERSISTIDO — <motivo literal>}}
+
+```
+REVIEW REMEDIATION
+
+Finding:
+{{texto normalizado}}
+
+Arquivo:
+{{caminho/linha}}
+
+Validação:
+{{por que é válido}}
+
+Correção esperada:
+{{comportamento esperado, não implementação inventada}}
+
+Regressão necessária:
+{{teste que deve provar a correção}}
+
+Review reply esperada:
+{{resposta de evidência esperada}}
+```
 
 ---
 

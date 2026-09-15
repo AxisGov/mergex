@@ -47,7 +47,7 @@ Para cada PR, junte **o que estiver disponível**. Fonte ausente vira "não disp
 | Arquivos tocados | `files` do PR | `git diff --name-only <base>...<head>` |
 | Aberto pela mergex nesta máquina | `pr_url` do `ENTREGA.md` local casa com a URL do PR | Assuma que não |
 | Reviews, requested changes, comentários e threads | API do serviço — ver "Operações de review por plataforma", abaixo | Trate como fonte ausente para o REVIEW EVIDENCE GATE — ver "Quando falha" |
-| HEAD autoritativo do PR | `headRefOid` do PR (GitHub); `sha` do merge request (GitLab) — ver "HEAD autoritativo", abaixo | R1 `NÃO VERIFICÁVEL`, R4 não pode ser `OK`; `REVIEW EVIDENCE: BLOQUEADO` |
+| HEAD autoritativo do PR | `headRefOid` do PR (GitHub); `sha` do merge request (GitLab) — ver "HEAD autoritativo", abaixo | R4 não pode ser `OK`. R1 segue a própria regra: sem CI configurado continua `n/a`; com CI configurado, o resultado do HEAD atual não é obtível e R1 é `NÃO VERIFICÁVEL` |
 
 ### Trabalho atual no E9
 
@@ -127,8 +127,12 @@ equivalente em outro serviço.
   ancestralidade, busque a cabeça do próprio PR (`git fetch origin pull/<n>/head` no GitHub;
   `git fetch origin merge-requests/<iid>/head` no GitLab) e confira que o SHA obtido é o
   autoritativo.
-- HEAD autoritativo não confirmado: R1 é `NÃO VERIFICÁVEL`, R4 não pode ser `OK`, e o gate fica
-  `BLOQUEADO` por bloqueio corrigível — não confirmável humanamente.
+- HEAD autoritativo não confirmado: **R4 nunca pode ser `OK`** (finding corrigido fica sem
+  evidência válida, e o gate fica `BLOQUEADO` por bloqueio corrigível — não confirmável
+  humanamente). **R1 não muda de regra por isso**, e a precedência é esta: sem CI configurado,
+  R1 é `n/a`, mesmo com o HEAD não confirmado; com CI configurado, o resultado do HEAD atual
+  não pode ser obtido e R1 é `NÃO VERIFICÁVEL`. A definição normativa de R1 está na tabela
+  "R1–R6"; esta seção não a redefine.
 
 ### Operações de review por plataforma
 
@@ -149,6 +153,17 @@ ferramenta oferece; operação que o serviço, o plano ou a permissão não exp�
 
 Regras:
 
+- **Leitura completa, página por página.** `reviewThreads`, `reviews` e `comments` (GitHub) e
+  `discussions` e `notes` (GitLab) são coleções paginadas — e, no GraphQL, os `comments` de
+  cada thread também. As leituras que alimentam R2, R3, R5 e R6 percorrem **todas** as páginas
+  até o fim: no GraphQL, pedindo `pageInfo { hasNextPage endCursor }` e repetindo com
+  `after: <endCursor>` até `hasNextPage` ser `false` (`gh api graphql --paginate` faz isso
+  quando a consulta declara `$endCursor` e `pageInfo`); na API REST, seguindo a paginação do
+  provider (`gh api --paginate`; `glab api --paginate`, ou os cabeçalhos de próxima página do
+  GitLab). A primeira página nunca é tratada como coleção completa, e o `--json` resumido do
+  `gh pr view` não é prova de completude. Se qualquer página necessária não puder ser obtida,
+  os critérios que dependem daquela coleção ficam `NÃO VERIFICÁVEL` e `REVIEW EVIDENCE`
+  permanece `BLOQUEADO`.
 - **Escrita só conta quando a plataforma confirma.** Resposta ou comentário é considerado
   publicado quando a chamada devolve o objeto criado (ID/URL); thread é considerada resolvida
   quando a releitura mostra `isResolved: true`/`resolved: true`. O ID/URL vai para o rastro.
@@ -181,17 +196,39 @@ origem: ID ou URL do review/comentário, mais o índice do item quando houver v�
 
 ### R5 e R6 — ordem temporal e identidade
 
-R5 afirma que a evidência veio **antes** da resolução; R6 depende de **quem** confirmou ou
-resolveu. Quando a plataforma fornecer, colete:
+R5 afirma que a evidência veio **antes** da resolução; R6 depende de **quem**, de fato,
+confirmou ou resolveu. Quando a plataforma fornecer, colete:
 
 - `createdAt`/`created_at` da resposta de evidência;
-- `resolvedBy` (GitHub) / `resolved_by` (GitLab) — a identidade de quem resolveu;
+- `resolvedBy` (GitHub) / `resolved_by` (GitLab) — a **conta de plataforma** que resolveu;
 - timestamp da resolução **só se o provider expuser** (`resolved_at` no GitLab, quando
   devolvido). O GitHub não expõe horário de resolução de review thread: não o invente;
 - reviews e comentários posteriores do reviewer, com seus timestamps.
 
-A identidade "da fábrica" é a conta autenticada desta execução e as contas dos executores de
-origem, quando identificáveis. Política:
+**Conta de plataforma não é proveniência da ação.** Em projeto de uma pessoa só, a mesma conta
+do GitHub/GitLab é usada à mão pelo operador e pelas execuções automatizadas da mergex e dos
+agentes. O login, sozinho, nunca decide se uma ação foi humana, da fábrica ou externa. A
+classificação é pela **proveniência da ação**:
+
+| Proveniência | O que é |
+|---|---|
+| **FÁBRICA** | Ação executada por agente ou automação da fábrica produtora (a mergex, os executores de origem), inclusive quando usa a mesma conta autenticada do operador humano |
+| **HUMANO OPERADOR** | Confirmação explícita dada pela pessoa no fluxo interativo, em resposta a uma pergunta específica, registrada como confirmação humana desta execução. O operador não é a fábrica |
+| **REVIEWER/BOT EXTERNO** | Reviewer ou bot cuja ação de review ou closure é externa à fábrica produtora |
+
+Como decidir a proveniência:
+
+- **Ação feita nesta execução pela mergex** — por exemplo `resolveReviewThread` com a conta do
+  operador — é **FÁBRICA**; o rastro desta execução registra a chamada.
+- **Ação com rastro de execução anterior da mergex** mostrando que ela a executou é **FÁBRICA**,
+  mesmo que `resolvedBy` seja a conta pessoal do operador.
+- **Resposta explícita do operador à pergunta específica da mergex**, nesta execução, é
+  **HUMANO OPERADOR**.
+- **Ação de conta que nem a fábrica nem o operador usam** é **REVIEWER/BOT EXTERNO**.
+- **Conta que pode ser tanto do operador quanto da automação, sem rastro que prove a origem**:
+  proveniência **indeterminável**. Nunca infira "humano" nem "fábrica" só pelo login.
+
+Política:
 
 - **A. A execução atual fez a sequência** resposta → validação/CI/re-review → resolução: a ordem
   registrada no rastro desta execução, com os IDs/URLs devolvidos pela plataforma em cada
@@ -200,10 +237,46 @@ origem, quando identificáveis. Política:
   antecedeu a resolução (timestamp de resolução posterior ao `createdAt` da evidência, ou rastro
   de uma execução anterior da mergex com a sequência registrada). Sem dado suficiente, R5 é
   `NÃO VERIFICÁVEL`.
-- **C. Quem encerrou:** `resolvedBy` do reviewer/bot conta para R6 caso A. `resolvedBy` da
-  fábrica só conta se houver confirmação anterior do reviewer/bot (resposta ou aprovação); sem
-  ela, o finding volta a `AWAITING_REREVIEW`. Identidade indeterminável (campo ausente, conta
-  compartilhada): R6 é `NÃO VERIFICÁVEL`, confirmável humanamente.
+- **C. Quem encerrou (R6), por proveniência:**
+  - **REVIEWER/BOT EXTERNO** confirmou, respondeu ou resolveu: confirmação externa normal (R6
+    caso A).
+  - **FÁBRICA** resolveu — inclusive com a conta pessoal do operador: não conta sozinha como
+    confirmação externa. Só vale se houver confirmação anterior de reviewer/bot externo
+    (resposta ou aprovação), ou closure histórico comprovado de confirmação humana específica
+    (ver "Closure histórico comprovado", abaixo); sem uma das duas, o finding volta a
+    `AWAITING_REREVIEW`.
+  - **HUMANO OPERADOR** confirmou, nesta execução, a pergunta específica da mergex (por exemplo,
+    uma rejeição sem resposta): pode satisfazer o caso C de R6 (`OK (confirmação humana)`), só
+    nesta execução e separado da confirmação final de merge.
+  - **Proveniência indeterminável** (thread já resolvida antes da execução, `resolvedBy` de conta
+    que pode ser operador ou automação, campo ausente, sem rastro que prove a origem): R6 é
+    `NÃO VERIFICÁVEL`, confirmável humanamente.
+
+**Closure histórico comprovado.** Confirmação humana **não persiste como autorização**: a
+próxima execução nunca a usa como override genérico, nem para outro finding. O **encerramento**
+que ela produziu, porém, é evidência histórica durável **daquele** finding. Numa execução
+futura, o finding continua `RESOLVED` e R6 é `OK` — sem perguntar de novo ao operador — quando
+**todas** estas condições valem:
+
+1. o rastro de uma execução anterior da mergex, em `docs/eventos/`, registra para aquele
+   finding (ID/URL da thread ou da origem) a confirmação humana específica e, **depois** dela, a
+   resolução feita pela fábrica, com o identificador devolvido pela plataforma;
+2. a thread continua resolvida na leitura atual — não foi reaberta;
+3. não surgiu finding equivalente novo, e nenhum review ou thread atual mantém a mesma
+   preocupação;
+4. o finding atual é inequivocamente o mesmo que foi encerrado (mesmo identificador de thread
+   ou de origem).
+
+Se qualquer condição falhar — thread reaberta, finding equivalente novo, review atual com a
+mesma preocupação, rastro que não comprova finding + confirmação + resolução, relação ambígua
+entre o finding atual e o encerrado, confirmação antiga de outro finding —, não reaproveite:
+avalie normalmente e bloqueie ou peça a confirmação de novo, quando cabível. Finding equivalente
+novo é avaliado de forma independente. Resolução da fábrica sem esse rastro segue as regras
+acima.
+
+Isto não muda a proveniência: quem resolveu continua sendo a **FÁBRICA**. O rastro só prova que
+ela resolveu **depois** de uma confirmação humana específica — é evidência de closure, não
+reutilização de autorização.
 
 A limitação aparece no próprio bloco, com o motivo — por exemplo
 `R5 review reply: NÃO VERIFICÁVEL — plataforma não expõe horário de resolução` — e no rastro.
@@ -247,7 +320,7 @@ Cada finding ou thread de review cai em exatamente uma:
 | `FIXED_AWAITING_EVIDENCE` | Houve alteração, mas falta commit, teste, resposta ao review, ou CI. |
 | `AWAITING_REREVIEW` | Correção e evidência já publicadas; aguardando confirmação ou re-review. |
 | `REJECTED_WITH_EVIDENCE` | Finding considerado falso positivo ou não aplicável, com justificativa verificável publicada. |
-| `RESOLVED` | O reviewer ou o bot confirmou ou resolveu, com identidade verificada (ver "R5 e R6 — ordem temporal e identidade"), ou a mergex resolveu depois dessa confirmação. |
+| `RESOLVED` | O reviewer ou o bot externo confirmou ou resolveu, com proveniência externa verificada (ver "R5 e R6 — ordem temporal e identidade"), ou a mergex resolveu depois dessa confirmação, ou há closure histórico comprovado de confirmação humana específica (ver "Closure histórico comprovado"). |
 | `OUTDATED_NON_BLOCKING` | Preso a trecho substituído, sem finding equivalente no código atual e sem revisão atual com a mesma preocupação (ver "Quando um comentário é finding"). |
 
 **Na dúvida entre duas situações, classifique como `ACTIONABLE_UNRESOLVED`.** É a mesma
@@ -266,7 +339,7 @@ outro ponto da skill que cite R1–R6 está referenciando esta tabela, não rede
 | R3 | Actionable threads | Zero findings válidos em `ACTIONABLE_UNRESOLVED`. |
 | R4 | Fix evidence | Todo finding corrigido tem evidência mínima: commit existente e ancestral do HEAD autoritativo atual, resumo preciso da correção, cobertura de regressão relevante, e a validação executada. |
 | R5 | Review reply | A evidência foi publicada no próprio thread — ou no comentário do PR, para finding sem thread — **antes** de ele ser resolvido, provado conforme "R5 e R6 — ordem temporal e identidade"; sem prova, `NÃO VERIFICÁVEL`. |
-| R6 | Closure | `OK` só em um destes casos: **(A)** o reviewer/bot confirmou a correção ou resolveu o finding; **(B)** o reviewer/bot aprovou estado posterior que efetivamente encerra o bloqueio; **(C)** caso confirmável humanamente nesta execução — rejeição sem resposta, ou critério `NÃO VERIFICÁVEL` permitido —, com a confirmação específica obtida e o gate recalculado (`OK (confirmação humana)`). CI verde, commit novo ou re-review sem confirmação de closure **não** bastam. |
+| R6 | Closure | `OK` só em um destes casos: **(A)** o reviewer/bot confirmou a correção ou resolveu o finding; **(B)** o reviewer/bot aprovou estado posterior que efetivamente encerra o bloqueio; **(C)** caso confirmável humanamente nesta execução — rejeição sem resposta, ou critério `NÃO VERIFICÁVEL` permitido —, com a confirmação específica obtida e o gate recalculado (`OK (confirmação humana)`); **(D)** closure histórico comprovado — execução anterior registrou no rastro a confirmação humana específica daquele finding seguida da resolução, e o finding não foi reaberto nem substituído por equivalente (ver "Closure histórico comprovado"). CI verde, commit novo ou re-review sem confirmação de closure **não** bastam. |
 
 O gate devolve **só** um destes dois vereditos — `SATISFEITO` ou `BLOQUEADO` —, **sempre** com
 R1–R6 individuais, inclusive quando `SATISFEITO`. `SATISFEITO` exige que todo critério seja
@@ -340,8 +413,9 @@ recalcular o gate:
 A confirmação humana:
 
 - é **específica** de um critério ou de um finding, de um PR;
-- **não persiste**: a próxima chamada de `/mergex-revisar` tenta de novo pela API e não herda
-  confirmação anterior;
+- **não persiste como override**: a próxima chamada de `/mergex-revisar` tenta de novo pela API
+  e não herda confirmação anterior como autorização. O que persiste é só o encerramento
+  comprovado daquele finding, como evidência histórica (ver "Closure histórico comprovado");
 - **não altera a fonte remota**: não dismissa review, não aprova, não comenta em nome da
   pessoa. A única escrita remota decorrente é, no caso de `REJECTED_WITH_EVIDENCE` confirmado, a
   resolução da thread pela ordem de sete passos (ver "A ordem de resolução de thread"), quando a
@@ -442,18 +516,20 @@ R4 nem R5.
 7. Resolver a thread.
 
 Se o bot ou o reviewer resolver a thread automaticamente depois da evidência publicada, aceite
-esse estado — é `RESOLVED` por confirmação externa, desde que a identidade de quem resolveu
-seja verificável (ver "R5 e R6 — ordem temporal e identidade"). Se a thread continuar aberta, ela continua
+esse estado — é `RESOLVED` por confirmação externa, desde que a proveniência externa da
+resolução seja verificável, e não só o login (ver "R5 e R6 — ordem temporal e identidade"). Se a thread continuar aberta, ela continua
 `AWAITING_REREVIEW` ou `FIXED_AWAITING_EVIDENCE`: **nunca esconda, nunca contorne, nunca
 resolva por conta própria fora desta ordem.**
 
 ### Falso positivo não é autoaprovação
 
 A mergex faz parte da mesma fábrica que produziu o código sendo revisado — ela não pode ser a
-única a decidir que a própria rejeição de um finding encerra o review.
+única a decidir que a própria rejeição de um finding encerra o review. O operador humano não é
+a fábrica, e ação automatizada não vira humana por usar a conta dele (ver "R5 e R6 — ordem
+temporal e identidade").
 
 - **Reviewer ou bot concordou** com a rejeição (respondeu concordando, aprovou estado posterior,
-  ou resolveu a thread com identidade verificada): o finding vai para `RESOLVED` normalmente, R6
+  ou resolveu a thread com proveniência externa verificada): o finding vai para `RESOLVED` normalmente, R6
   satisfeito. Reação isolada (emoji) não é confirmação.
 - **Reviewer não respondeu** à rejeição publicada: o finding fica em `AWAITING_REREVIEW` e R6
   **não** é satisfeito por conta própria. É bloqueio confirmável humanamente (ver "Dois tipos
@@ -811,7 +887,8 @@ Ao fim, um resumo: o que foi integrado, o que ficou pendente e por quê.
 ## O rastro do comando manual
 
 Grave em `docs/eventos/<trabalho_id>.jsonl`: **a lista de PRs avaliados, a ordem
-apresentada, as confirmações humanas do gate dadas nesta execução, as escritas de review feitas
+apresentada, as confirmações humanas do gate dadas nesta execução (cada uma com o identificador
+do finding e da thread), as escritas de review feitas
 (com o ID/URL devolvido pela plataforma), as revalidações pré-merge que barraram merge, o que
 foi mergeado e os merges recusados.**
 
@@ -865,9 +942,10 @@ lista teve confirmação explícita daquele PR específico.
 | Usuário pede merge em lote | Recusa: um por vez, com confirmação de cada (regra 17) |
 | Ferramenta lista o PR mas não expõe reviews/threads | Marca os critérios afetados (R2/R3/R5/R6, conforme o dado ausente) como `NÃO VERIFICÁVEL` — `REVIEW EVIDENCE: BLOQUEADO`, confirmável humanamente se não houver outro bloqueio. No passo 7, pede a confirmação específica de cada um e recalcula; sem confirmação, continua `BLOQUEADO` — mesmo critério conservador do `mergeable` desconhecido |
 | CI configurado, mas o resultado do HEAD atual não pode ser obtido | R1 `NÃO VERIFICÁVEL`; `REVIEW EVIDENCE: BLOQUEADO` corrigível (não confirmável humanamente) — o PR fica inelegível nesta execução |
-| HEAD autoritativo não confirmado (`headRefOid` ausente, fork sem cabeça buscável, fallback `origin/<head>` divergente) | R1 `NÃO VERIFICÁVEL`, R4 não pode ser `OK`; `BLOQUEADO` corrigível, inelegível nesta execução |
+| HEAD autoritativo não confirmado (`headRefOid` ausente, fork sem cabeça buscável, fallback `origin/<head>` divergente) | R4 não pode ser `OK`; com finding corrigido, `BLOQUEADO` corrigível, inelegível nesta execução. R1: `n/a` sem CI configurado; `NÃO VERIFICÁVEL` com CI configurado |
+| Leitura paginada incompleta (alguma página de `reviewThreads`, `reviews`, `comments`, `discussions` ou `notes` não obtida) | Critérios que dependem da coleção (R2/R3/R5/R6) ficam `NÃO VERIFICÁVEL`; `REVIEW EVIDENCE` permanece `BLOQUEADO`; nunca conclui a partir da primeira página |
 | Plataforma não expõe responder, resolver ou comentar no PR | Capacidade `NÃO VERIFICÁVEL`; nada é simulado; R5 não é produzido nesta execução e a thread fica aberta |
-| Plataforma não expõe quem resolveu ou quando | Thread resolvida antes da execução: R5 `NÃO VERIFICÁVEL`. Sem saber se quem encerrou foi reviewer/bot ou a fábrica: R6 `NÃO VERIFICÁVEL`. Ambos confirmáveis humanamente, com recálculo |
+| Plataforma não expõe quem resolveu ou quando | Thread resolvida antes da execução: R5 `NÃO VERIFICÁVEL`. Proveniência da resolução indeterminável (conta que pode ser operador ou automação, sem rastro que prove a origem): R6 `NÃO VERIFICÁVEL`, nunca inferido pelo login. Ambos confirmáveis humanamente, com recálculo |
 | Revalidação pré-merge detecta mudança ou não consegue reler | Não faz o merge nesta passagem; HEAD novo invalida as confirmações anteriores; diz o que mudou |
 | Nenhum canal de escrita para publicar `REVIEW REMEDIATION` | Handoff `NÃO VERIFICÁVEL`, PR segue `BLOQUEADO`; informa o motivo literal e mostra o pacote completo na saída; nunca diz que persistiu |
 | Plataforma não expõe estado resolved/outdated de uma thread | Trata como fonte ausente para aquele campo; o finding correspondente não passa de `FIXED_AWAITING_EVIDENCE` — nunca vira `RESOLVED` sem confirmação verificável |
