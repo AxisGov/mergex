@@ -111,13 +111,16 @@ CONFLITO — #{{n}} contra {{base | #n}}
 {{um bloco por finding válido devolvido à skill de origem — o pacote é o de "O pacote de
 remediação", em references/09-revisao.md; o template só o materializa}}
 
-- #{{n}} {{arquivo}}:{{linha}} — publicado em {{thread <url> | comentário no PR <url> | NÃO PERSISTIDO — <motivo literal>}}
+- #{{n}} {{arquivo}}:{{linha}} — origem {{ID ou URL estável do review/comentário de origem}} — publicado em {{thread <url> | comentário no PR <url> | NÃO PERSISTIDO — <motivo literal>}}
 
 ```
 REVIEW REMEDIATION
 
 Finding:
 {{texto normalizado}}
+
+Origem:
+{{ID ou URL estável do review/comentário de origem}}
 
 Arquivo:
 {{caminho/linha}}

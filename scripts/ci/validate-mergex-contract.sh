@@ -40,7 +40,7 @@ grep -Fq 'nunca invoca `mergex-revisar`' "$readme" \
 
 # R1-R6 are canonical and each criterion remains present exactly once in the normative table.
 for n in 1 2 3 4 5 6; do
-  count="$(grep -F "| R${n} |" "$review" | wc -l | tr -d ' ')"
+  count="$(grep -Fc "| R${n} |" "$review" || true)"
   [ "$count" = '1' ] || fail "R${n} normative definition count is $count, expected 1"
 done
 

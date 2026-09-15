@@ -238,8 +238,9 @@ Política:
   de uma execução anterior da mergex com a sequência registrada). Sem dado suficiente, R5 é
   `NÃO VERIFICÁVEL`.
 - **C. Quem encerrou (R6), por proveniência:**
-  - **REVIEWER/BOT EXTERNO** confirmou, respondeu ou resolveu: confirmação externa normal (R6
-    caso A).
+  - **REVIEWER/BOT EXTERNO** confirmou explicitamente a correção, ou resolveu o finding com
+    closure verificável: confirmação externa normal (R6 caso A). Resposta que só pede
+    esclarecimento, questiona ou rejeita a correção **não** satisfaz R6.
   - **FÁBRICA** resolveu — inclusive com a conta pessoal do operador: não conta sozinha como
     confirmação externa. Só vale se houver confirmação anterior de reviewer/bot externo
     (resposta ou aprovação), ou closure histórico comprovado de confirmação humana específica
@@ -563,6 +564,9 @@ REVIEW REMEDIATION
 
 Finding:
 <texto normalizado>
+
+Origem:
+<ID ou URL estável do review/comentário de origem>
 
 Arquivo:
 <caminho/linha>
@@ -950,7 +954,7 @@ lista teve confirmação explícita daquele PR específico.
 | HEAD autoritativo não confirmado (`headRefOid` ausente, fork sem cabeça buscável, fallback `origin/<head>` divergente) | R4 não pode ser `OK`; com finding corrigido, `BLOQUEADO` corrigível, inelegível nesta execução. R1: `n/a` sem CI configurado; `NÃO VERIFICÁVEL` com CI configurado |
 | Leitura paginada incompleta (alguma página de `reviewThreads`, `reviews`, `comments`, `discussions` ou `notes` não obtida) | Critérios que dependem da coleção (R2/R3/R5/R6) ficam `NÃO VERIFICÁVEL`; `REVIEW EVIDENCE` permanece `BLOQUEADO`; nunca conclui a partir da primeira página |
 | Plataforma não expõe responder, resolver ou comentar no PR | Capacidade `NÃO VERIFICÁVEL`; nada é simulado; R5 não é produzido nesta execução e a thread fica aberta |
-| Plataforma não expõe quem resolveu ou quando | Thread resolvida antes da execução: R5 `NÃO VERIFICÁVEL`. Proveniência da resolução indeterminável (conta que pode ser operador ou automação, sem rastro que prove a origem): R6 `NÃO VERIFICÁVEL`, nunca inferido pelo login. Ambos confirmáveis humanamente, com recálculo |
+| Plataforma não expõe quem resolveu ou quando | Thread resolvida antes da execução: R5 continua podendo ser `OK` se um rastro anterior da mergex comprovar evidência publicada e, depois, a resolução; R5 só é `NÃO VERIFICÁVEL` quando não há timestamp suficiente da plataforma nem rastro histórico suficiente. Proveniência da resolução indeterminável (conta que pode ser operador ou automação, sem rastro que prove a origem): R6 `NÃO VERIFICÁVEL`, nunca inferido pelo login. Ambos confirmáveis humanamente, com recálculo |
 | Revalidação pré-merge detecta mudança ou não consegue reler | Não faz o merge nesta passagem; HEAD novo invalida as confirmações anteriores; diz o que mudou |
 | Nenhum canal de escrita para publicar `REVIEW REMEDIATION` | Handoff `NÃO VERIFICÁVEL`, PR segue `BLOQUEADO`; informa o motivo literal e mostra o pacote completo na saída; nunca diz que persistiu |
 | Plataforma não expõe estado resolved/outdated de uma thread | Trata como fonte ausente para aquele campo; o finding correspondente não passa de `FIXED_AWAITING_EVIDENCE` — nunca vira `RESOLVED` sem confirmação verificável |
