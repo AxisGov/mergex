@@ -243,7 +243,7 @@ Ele **nunca resolve conflito**. Relata onde está, quais arquivos e trechos, e o
 
 Um finding de review pode ter gerado uma correção no código; isso sozinho não prova que o reviewer aceitou, que há evidência publicada, que o CI voltou a passar, ou que a thread foi resolvida. **Mudança de código não encerra review. Evidência encerra review.**
 
-Por isso, dentro de cada chamada do `/mergex-revisar`, o E9 classifica cada finding de review numa de seis situações e só libera o PR para merge quando seis critérios (CI, reviews bloqueantes, threads acionáveis, evidência de correção, resposta publicada antes da resolução, encerramento confirmado) estiverem satisfeitos. Bot e humano são reviewers equivalentes — nada é específico de uma ferramenta de review.
+Por isso, dentro de cada chamada do `/mergex-revisar`, o E9 classifica cada finding de review numa de seis situações e só libera o PR para merge quando todos os critérios aplicáveis, entre os seis (CI, reviews bloqueantes, threads acionáveis, evidência de correção, resposta publicada antes da resolução, encerramento confirmado), estiverem satisfeitos — critério que não se aplica ao PR vai como `n/a`, que é estado válido. Bot e humano são reviewers equivalentes — nada é específico de uma ferramenta de review.
 
 Finding válido que exige mudança **não é corrigido pela mergex**: ela valida, monta um pacote de remediação e devolve à skill que executou o trabalho (`sprintx`, `runx` ou `buildx`), deixando o PR marcado como pendente até o novo commit. Detalhe completo: [`references/09-revisao.md`](.claude/skills/mergex/references/09-revisao.md).
 

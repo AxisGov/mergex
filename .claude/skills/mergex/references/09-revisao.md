@@ -26,7 +26,7 @@ A revisão e o merge precisam ser feitos pela interface do serviço de hospedage
 ## Passo 1 — Listar os pull requests abertos
 
 ```
-gh pr list --state open --json number,title,author,headRefName,baseRefName,isDraft,mergeable,url,files,statusCheckRollup
+gh pr list --state open --json number,title,author,headRefName,headRefOid,baseRefName,isDraft,mergeable,url,files,statusCheckRollup
 ```
 
 Inclui rascunhos: eles aparecem na lista, marcados, mas **nunca são oferecidos para merge**.
@@ -42,12 +42,12 @@ Para cada PR, junte **o que estiver disponível**. Fonte ausente vira "não disp
 | Registro de entrega da mergex | `docs/entregas/<trabalho_id>/ENTREGA.md` na branch do PR | "sem registro da mergex" — PR aberto por fora do método |
 | Faixa de raio da legadox | `raio` do `ENTREGA.md` | "raio não calculado" |
 | Classificação de atenção | `atencao` do `ENTREGA.md`, ou `ATENCAO.md` na branch | "não classificado" |
-| Resultado da integração contínua | `statusCheckRollup` | "sem integração contínua configurada" |
+| Resultado da integração contínua | `statusCheckRollup` do HEAD autoritativo (GitHub); `head_pipeline` do merge request (GitLab) | "sem integração contínua configurada" |
 | Conflito com a base | `mergeable` do PR | Verifique localmente (passo 5) |
 | Arquivos tocados | `files` do PR | `git diff --name-only <base>...<head>` |
 | Aberto pela mergex nesta máquina | `pr_url` do `ENTREGA.md` local casa com a URL do PR | Assuma que não |
-| Reviews, requested changes, comentários e threads | API do serviço — `gh pr view <n> --json reviews,latestReviews,comments`, mais GraphQL de `reviewThreads` (`isResolved`, `isOutdated`) quando o serviço suportar; `glab api projects/:id/merge_requests/:iid/discussions` no GitLab | Trate como fonte ausente para o REVIEW EVIDENCE GATE — ver "Quando falha" |
-| SHA do HEAD atual | `headRefOid` do PR, ou `git rev-parse origin/<head>` | — |
+| Reviews, requested changes, comentários e threads | API do serviço — ver "Operações de review por plataforma", abaixo | Trate como fonte ausente para o REVIEW EVIDENCE GATE — ver "Quando falha" |
+| HEAD autoritativo do PR | `headRefOid` do PR (GitHub); `sha` do merge request (GitLab) — ver "HEAD autoritativo", abaixo | R1 `NÃO VERIFICÁVEL`, R4 não pode ser `OK`; `REVIEW EVIDENCE: BLOQUEADO` |
 
 ### A marcação de trabalho próprio
 
@@ -88,13 +88,125 @@ formas de sinal, pela plataforma que existir:
 Plataforma que não expõe uma dessas formas: trate como fonte ausente, do mesmo jeito que o
 passo 2 trata qualquer dado que a ferramenta não devolve — nunca suposição.
 
-**R2 usa o estado atual de cada reviewer, nunca o histórico completo.** `latestReviews` (ou o
-equivalente do serviço) é a fonte de R2 — o review mais recente de cada pessoa ou bot, não a
-lista de todos os reviews que ela já deu. Um `CHANGES_REQUESTED` que o próprio reviewer
-substituiu depois por `APPROVED`, ou por um novo review, deixa de contar: é o estado atual
-dele que decide, não o que ele disse antes. A lista completa (`reviews`) serve só para
-reconstruir contexto — nunca para contar um `CHANGES_REQUESTED` antigo como ativo depois que o
-mesmo reviewer já se manifestou de novo.
+### HEAD autoritativo
+
+R1 e R4 são avaliados contra o **HEAD autoritativo atual do PR**: o SHA que a plataforma
+informa como cabeça do PR — `headRefOid` no GitHub, `sha` do merge request no GitLab, o
+equivalente em outro serviço.
+
+- `origin/<head>` é só fallback local, e só vale se `git rev-parse origin/<head>` for **igual**
+  ao HEAD autoritativo. Divergiu (push posterior não buscado, ref velha, branch homônima em
+  outro repositório): descarte o fallback.
+- PR vindo de fork normalmente não tem `origin/<head>`, e o gate nunca depende dele. Para testar
+  ancestralidade, busque a cabeça do próprio PR (`git fetch origin pull/<n>/head` no GitHub;
+  `git fetch origin merge-requests/<iid>/head` no GitLab) e confira que o SHA obtido é o
+  autoritativo.
+- HEAD autoritativo não confirmado: R1 é `NÃO VERIFICÁVEL`, R4 não pode ser `OK`, e o gate fica
+  `BLOQUEADO` por bloqueio corrigível — não confirmável humanamente.
+
+### Operações de review por plataforma
+
+O gate precisa de quatro capacidades: **ler** (identificar PR, reviews, threads e comentários
+com identificador estável), **responder** a um finding, **resolver** uma thread, e **comentar no
+PR** (fallback para finding sem thread). Os exemplos abaixo usam só campos e operações que cada
+ferramenta oferece; operação que o serviço, o plano ou a permissão não expõe é capacidade
+`NÃO VERIFICÁVEL` — nunca simulada, nunca substituída por endpoint inventado.
+
+| Capacidade | GitHub (`gh`) | GitLab (`glab`) |
+|---|---|---|
+| Estado do PR | `gh pr view <n> --json headRefOid,isDraft,statusCheckRollup,reviewDecision,reviews,latestReviews` | `glab api projects/:id/merge_requests/:iid` (`sha`, `draft`, `head_pipeline`); aprovações em `projects/:id/merge_requests/:iid/approvals`; estado de pedido de mudança dos reviewers em `projects/:id/merge_requests/:iid/reviewers`, quando a instância expuser — sem isso, R2 `NÃO VERIFICÁVEL` |
+| Identificar threads | `gh api graphql` em `pullRequest.reviewThreads`: `id`, `isResolved`, `isOutdated`, `resolvedBy { login }`, `path`, `line`, `comments { id url createdAt author { login } body }` | `glab api projects/:id/merge_requests/:iid/discussions`: `id` da discussion; em cada note, `id`, `author`, `created_at`, `resolvable`, `resolved`, `resolved_by`, e `resolved_at` quando a instância devolver |
+| Identificar review/comentário geral | `gh api graphql` em `pullRequest.reviews { id url state submittedAt author { login } body }` e `pullRequest.comments { id url createdAt author { login } body }` | notes sem discussion resolvível em `projects/:id/merge_requests/:iid/notes` (`id`, `author`, `created_at`, `body`) |
+| Responder thread | mutation `addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId, body})` | `glab api -X POST projects/:id/merge_requests/:iid/discussions/:discussion_id/notes -f body=...` |
+| Resolver thread | mutation `resolveReviewThread(input: {threadId})` | `glab api -X PUT projects/:id/merge_requests/:iid/discussions/:discussion_id -f resolved=true` |
+| Comentar no PR | `gh pr comment <n> --body-file <arquivo>` | `glab api -X POST projects/:id/merge_requests/:iid/notes -f body=...` |
+
+Regras:
+
+- **Escrita só conta quando a plataforma confirma.** Resposta ou comentário é considerado
+  publicado quando a chamada devolve o objeto criado (ID/URL); thread é considerada resolvida
+  quando a releitura mostra `isResolved: true`/`resolved: true`. O ID/URL vai para o rastro.
+- **Capacidade técnica não é autorização.** Resolver thread continua sujeito à ordem de sete
+  passos e a R6 (ver abaixo); poder chamar `resolveReviewThread` não encerra finding nenhum.
+- **Serviço sem ferramenta que exponha a operação** (outro provider, plano sem API, token sem
+  escopo): a capacidade é `NÃO VERIFICÁVEL`. Sem leitura, os critérios que dependem dela ficam
+  `NÃO VERIFICÁVEL`; sem resposta, R5 não pode ser produzido nesta execução; sem resolução, a
+  thread fica aberta; sem nenhum canal de escrita, vale "Nenhum canal de escrita" em "Quando
+  falha".
+
+### Quando um comentário é finding
+
+Um comentário ou review é **finding** quando contém pedido verificável de mudança ou afirma um
+risco/defeito concreto no código, configuração, teste, contrato ou comportamento da entrega.
+Antes das seis situações, todo comentário é classificado:
+
+| Classe | Quando | Efeito |
+|---|---|---|
+| `ACTIONABLE` | Pede mudança; aponta possível defeito; aponta violação de contrato ou regra; exige investigação cuja resposta pode alterar a elegibilidade do PR | É finding e entra nas seis situações |
+| `NON_ACTIONABLE` | Elogio; informação; resumo automático; comentário puramente editorial sem pedido de mudança; status de bot ("review em andamento", notas de release, walkthrough) | Não é finding; não conta em R3 |
+| `OUTDATED_NON_BLOCKING` | Está preso a trecho substituído **e** não existe finding equivalente no código atual **e** nenhuma revisão ou thread atual mantém a mesma preocupação | Situação final, não bloqueia. `isOutdated` sozinho não basta |
+
+**Na dúvida, `ACTIONABLE` — e o finding começa em `ACTIONABLE_UNRESOLVED`.**
+
+Comentário com vários pedidos gera um finding por pedido. Resumo de bot que só repete findings
+inline já existentes não gera finding duplicado; item que só existe no resumo é finding
+próprio. Finding sem arquivo/linha (corpo de review, comentário geral) é identificado pela
+origem: ID ou URL do review/comentário, mais o índice do item quando houver vários.
+
+### R5 e R6 — ordem temporal e identidade
+
+R5 afirma que a evidência veio **antes** da resolução; R6 depende de **quem** confirmou ou
+resolveu. Quando a plataforma fornecer, colete:
+
+- `createdAt`/`created_at` da resposta de evidência;
+- `resolvedBy` (GitHub) / `resolved_by` (GitLab) — a identidade de quem resolveu;
+- timestamp da resolução **só se o provider expuser** (`resolved_at` no GitLab, quando
+  devolvido). O GitHub não expõe horário de resolução de review thread: não o invente;
+- reviews e comentários posteriores do reviewer, com seus timestamps.
+
+A identidade "da fábrica" é a conta autenticada desta execução e as contas dos executores de
+origem, quando identificáveis. Política:
+
+- **A. A execução atual fez a sequência** resposta → validação/CI/re-review → resolução: a ordem
+  registrada no rastro desta execução, com os IDs/URLs devolvidos pela plataforma em cada
+  escrita, prova R5.
+- **B. Thread já resolvida antes desta execução:** R5 só é `OK` com prova de que a evidência
+  antecedeu a resolução (timestamp de resolução posterior ao `createdAt` da evidência, ou rastro
+  de uma execução anterior da mergex com a sequência registrada). Sem dado suficiente, R5 é
+  `NÃO VERIFICÁVEL`.
+- **C. Quem encerrou:** `resolvedBy` do reviewer/bot conta para R6 caso A. `resolvedBy` da
+  fábrica só conta se houver confirmação anterior do reviewer/bot (resposta ou aprovação); sem
+  ela, o finding volta a `AWAITING_REREVIEW`. Identidade indeterminável (campo ausente, conta
+  compartilhada): R6 é `NÃO VERIFICÁVEL`, confirmável humanamente.
+
+A limitação aparece no próprio bloco, com o motivo — por exemplo
+`R5 review reply: NÃO VERIFICÁVEL — plataforma não expõe horário de resolução` — e no rastro.
+
+**R2 usa o ESTADO BLOQUEANTE EFETIVO informado pela plataforma, nunca o histórico completo
+nem "o último review de qualquer tipo".** Semanticamente, em qualquer serviço: um pedido de
+mudança (`CHANGES_REQUESTED` no GitHub, ou o equivalente — "request changes", "needs work",
+aprovação revogada, bloqueio de merge por reviewer) permanece ativo **até a plataforma indicar
+que ele foi substituído por aprovação, dismissado, retirado pelo próprio reviewer, ou
+equivalente**. Um review posterior meramente de comentário (`COMMENTED` no GitHub, ou nota sem
+decisão em outro serviço) **não** retira, por si só, um pedido de mudança anterior ainda
+ativo.
+
+Ordem de fonte:
+
+1. **Decisão efetiva do PR, quando o serviço expõe** — no GitHub, `reviewDecision`
+   (`CHANGES_REQUESTED` bloqueia; `APPROVED`/`REVIEW_REQUIRED`/vazio não é bloqueio de R2 por
+   si só); em outro serviço, o campo que diz se há pedido de mudança ativo no merge request.
+2. **Reconstrução por reviewer**, quando a decisão efetiva não existir ou não cobrir o caso
+   (por exemplo, repositório sem regra de review obrigatório): a partir de `latestReviews` e
+   `reviews` (ou equivalente), para cada reviewer, o último review **com decisão**
+   (aprovação, pedido de mudança, dismiss) é o que vale; reviews só de comentário depois dele
+   são ignorados para R2. Um `CHANGES_REQUESTED` com estado `DISMISSED`, ou seguido de
+   `APPROVED` do mesmo reviewer, deixa de bloquear.
+3. Nenhuma das duas obtível: R2 é `NÃO VERIFICÁVEL`.
+
+Isto mantém a regra de que histórico antigo **realmente superado** não bloqueia para sempre —
+aprovação ou dismiss posterior encerram o bloqueio —, sem tratar um comentário qualquer como
+retirada de um pedido de mudança.
 
 **PR sem nenhum review, comentário ou thread** satisfaz R2 e R3 por ausência de matéria — o
 gate não exige que exista review, só que o review que existir não fique pendente.
@@ -109,8 +221,8 @@ Cada finding ou thread de review cai em exatamente uma:
 | `FIXED_AWAITING_EVIDENCE` | Houve alteração, mas falta commit, teste, resposta ao review, ou CI. |
 | `AWAITING_REREVIEW` | Correção e evidência já publicadas; aguardando confirmação ou re-review. |
 | `REJECTED_WITH_EVIDENCE` | Finding considerado falso positivo ou não aplicável, com justificativa verificável publicada. |
-| `RESOLVED` | O reviewer ou o bot confirmou, ou a thread foi corretamente encerrada. |
-| `OUTDATED_NON_BLOCKING` | O comentário ficou obsoleto e não existe finding atual equivalente. |
+| `RESOLVED` | O reviewer ou o bot confirmou ou resolveu, com identidade verificada (ver "R5 e R6 — ordem temporal e identidade"), ou a mergex resolveu depois dessa confirmação. |
+| `OUTDATED_NON_BLOCKING` | Preso a trecho substituído, sem finding equivalente no código atual e sem revisão atual com a mesma preocupação (ver "Quando um comentário é finding"). |
 
 **Na dúvida entre duas situações, classifique como `ACTIONABLE_UNRESOLVED`.** É a mesma
 disciplina da classificação de atenção humana (E3, regra 8): ausência de prova não é prova de
@@ -123,20 +235,25 @@ outro ponto da skill que cite R1–R6 está referenciando esta tabela, não rede
 
 | # | Critério | Satisfeito quando |
 |---|---|---|
-| R1 | CI | O HEAD atual do PR está com CI verde, quando existir integração contínua configurada. |
-| R2 | Blocking reviews | Nenhum review ativo em estado equivalente a `CHANGES_REQUESTED` ficou sem tratamento posterior. |
+| R1 | CI | O HEAD autoritativo atual do PR (ver "HEAD autoritativo") está com CI verde. Valores: `OK` (CI configurado, HEAD atual verde), `FALHOU` (CI configurado, HEAD atual não verde), `n/a` (sem CI configurado), `NÃO VERIFICÁVEL` (CI configurado, mas o resultado do HEAD atual não pôde ser obtido). |
+| R2 | Blocking reviews | Nenhum pedido de mudança está ativo no estado bloqueante efetivo da plataforma (ver "R2 usa o ESTADO BLOQUEANTE EFETIVO", acima). |
 | R3 | Actionable threads | Zero findings válidos em `ACTIONABLE_UNRESOLVED`. |
-| R4 | Fix evidence | Todo finding corrigido tem evidência mínima: commit/SHA, resumo preciso da correção, cobertura de regressão relevante, e a validação executada. |
-| R5 | Review reply | A evidência foi publicada no próprio thread **antes** de ele ser resolvido. |
-| R6 | Closure | O finding foi confirmado/resolvido pelo reviewer ou pelo bot, ou — pela política conservadora da mergex — encerrado com evidência verificável depois de novo CI/re-review. |
+| R4 | Fix evidence | Todo finding corrigido tem evidência mínima: commit existente e ancestral do HEAD autoritativo atual, resumo preciso da correção, cobertura de regressão relevante, e a validação executada. |
+| R5 | Review reply | A evidência foi publicada no próprio thread — ou no comentário do PR, para finding sem thread — **antes** de ele ser resolvido, provado conforme "R5 e R6 — ordem temporal e identidade"; sem prova, `NÃO VERIFICÁVEL`. |
+| R6 | Closure | `OK` só em um destes casos: **(A)** o reviewer/bot confirmou a correção ou resolveu o finding; **(B)** o reviewer/bot aprovou estado posterior que efetivamente encerra o bloqueio; **(C)** caso confirmável humanamente nesta execução — rejeição sem resposta, ou critério `NÃO VERIFICÁVEL` permitido —, com a confirmação específica obtida e o gate recalculado (`OK (confirmação humana)`). CI verde, commit novo ou re-review sem confirmação de closure **não** bastam. |
 
-O gate devolve **só** um destes dois vereditos, sempre com R1–R6 individuais. Critério que não
+O gate devolve **só** um destes dois vereditos — `SATISFEITO` ou `BLOQUEADO` —, **sempre** com
+R1–R6 individuais, inclusive quando `SATISFEITO`. `SATISFEITO` exige que todo critério seja
+`OK`, `OK (confirmação humana)` ou `n/a`; qualquer `FALHOU` ou `NÃO VERIFICÁVEL` dá `BLOQUEADO`.
+Critério que não
 se aplica ao estado atual do PR (por exemplo R4–R6 quando não há nenhum finding corrigido
 ainda) vai como `n/a`, nunca omitido — mesma disciplina do `n/a` do portão de prontidão
 (`references/02-prontidao.md`).
 
-**O commit de R4 precisa pertencer ao HEAD atual.** `Fixed in <commit>` só é evidência válida
-quando esse commit existe no repositório e é ancestral do HEAD atual do PR — não precisa ser o
+**O commit de R4 precisa pertencer ao HEAD autoritativo.** `Fixed in <commit>` só é evidência
+válida quando esse commit existe no repositório e é ancestral do HEAD autoritativo atual do PR
+(`git merge-base --is-ancestor <commit> <headRefOid>`, depois de buscar esse SHA — ver "HEAD
+autoritativo") — não precisa ser o
 próprio HEAD, mas um commit de um push que foi descartado (force-push, branch errada, PR
 fechado) não serve como prova de nada no PR aberto. Sem ancestralidade confirmável, o finding
 fica em `FIXED_AWAITING_EVIDENCE`.
@@ -152,16 +269,62 @@ que aparecer como um terceiro valor, nunca como `OK` nem como `FALHOU` por omiss
 R2 blocking reviews: NÃO VERIFICÁVEL
 ```
 
-Um critério `NÃO VERIFICÁVEL` bloqueia o merge, do mesmo jeito que `FALHOU` — mas pede, no
-passo 7, confirmação humana **específica daquele critério**, distinta da pergunta sobre o
-merge em si: "a API não expõe {{o que falta}}; você confirma que não há {{review
-pendente/thread aberta/etc.}} para este PR?". Sem essa confirmação, o merge não é oferecido.
-Com ela, a condução segue — mas a confirmação vale só para esta execução: a próxima chamada de
-`/mergex-revisar` tenta de novo pela API e não herda a confirmação anterior.
+Um critério `NÃO VERIFICÁVEL` bloqueia o merge, do mesmo jeito que `FALHOU`.
 
-R1 nunca vira `NÃO VERIFICÁVEL`: ausência de integração contínua configurada é `n/a` (o
-critério simplesmente não se aplica), o que é diferente de "existe CI mas não consigo ler o
-resultado" — este último caso é, de fato, `NÃO VERIFICÁVEL`.
+R1 segue a mesma política, sem exceção: sem integração contínua configurada é `n/a` (o
+critério não se aplica); CI configurado com HEAD atual verde é `OK`; CI configurado com HEAD
+atual não verde é `FALHOU`; CI configurado cujo resultado do HEAD atual não pôde ser obtido é
+`NÃO VERIFICÁVEL`.
+
+### Dois tipos de bloqueio
+
+Todo `REVIEW EVIDENCE: BLOQUEADO` é de um destes dois tipos — a distinção é derivada dos
+valores de R1–R6 e das situações dos findings, não é um veredito novo nem um enum persistido:
+
+| Tipo | Quando | Consequência |
+|---|---|---|
+| **BLOQUEIO CORRIGÍVEL POR REMEDIAÇÃO** | Existe qualquer `FALHOU` em R1–R6 (exceto R6 não satisfeito unicamente por `REJECTED_WITH_EVIDENCE` sem resposta do reviewer); ou R1 `NÃO VERIFICÁVEL`; ou finding `ACTIONABLE_UNRESOLVED`, `FIXED_AWAITING_EVIDENCE`, ou `AWAITING_REREVIEW` que não seja rejeição sem resposta; ou evidência faltante; ou `REVIEW PENDENTE` | Inelegível. Não entra no passo 7 de forma nenhuma. Só sai por ação fora desta execução (novo commit, novo CI, resposta do reviewer) e uma nova chamada de `/mergex-revisar` |
+| **BLOQUEIO CONFIRMÁVEL HUMANAMENTE NESTA EXECUÇÃO** | **Todos** os critérios não `OK`/`n/a` são apenas: R2, R3, R5 ou R6 `NÃO VERIFICÁVEL` por limitação da plataforma; e/ou R6 não satisfeito unicamente por finding `REJECTED_WITH_EVIDENCE` sem resposta do reviewer | Entra no passo 7 em **condução limitada**: pede cada confirmação específica, recalcula o gate, e só segue se o novo resultado for `SATISFEITO` |
+| Mistura dos dois | Qualquer item do primeiro tipo presente | Vale o primeiro tipo: inelegível. Confirmação humana não compensa CI vermelho, rascunho, finding acionável ou evidência faltante |
+
+R1 `NÃO VERIFICÁVEL` **não** é confirmável humanamente: CI é prova de máquina, e a recusa dura
+nº 1 não aceita "a pessoa disse que está verde" no lugar do resultado.
+
+### Confirmação humana — transição e recálculo
+
+A confirmação humana **não** leva direto ao merge. Ela só troca o valor de um critério e manda
+recalcular o gate:
+
+1. **Pedido específico.** Uma pergunta por critério ou por finding, nunca uma confirmação única
+   para vários:
+   - R2/R3/R5/R6 `NÃO VERIFICÁVEL`: "a API não expõe {{o que falta}}; você confirma que não há
+     {{pedido de mudança ativo | thread acionável | resposta faltando | thread sem
+     encerramento}} neste PR?"
+   - `REJECTED_WITH_EVIDENCE` sem resposta: "o finding {{arquivo:linha — texto}} foi rejeitado
+     com a evidência {{link}}, sem resposta do reviewer; você concorda com a rejeição?"
+2. **Transição.** Confirmado, aquele critério passa a `OK (confirmação humana)` **somente nesta
+   execução**. Recusa, silêncio ou resposta que revela pendência real ("na verdade tem uma
+   thread aberta") mantêm o critério bloqueando — e, no último caso, o PR passa a bloqueio
+   corrigível por remediação.
+3. **Recálculo.** Com todas as confirmações respondidas, o gate é recalculado. Só
+   `REVIEW EVIDENCE: SATISFEITO` segue para as próximas perguntas do passo 7 (OLHO OBRIGATÓRIO,
+   confirmação do merge daquele PR). Qualquer outro resultado: não oferece o merge (recusa dura
+   nº 6) e segue para o próximo PR.
+
+A confirmação humana:
+
+- é **específica** de um critério ou de um finding, de um PR;
+- **não persiste**: a próxima chamada de `/mergex-revisar` tenta de novo pela API e não herda
+  confirmação anterior;
+- **não altera a fonte remota**: não dismissa review, não aprova, não comenta em nome da
+  pessoa. A única escrita remota decorrente é, no caso de `REJECTED_WITH_EVIDENCE` confirmado, a
+  resolução da thread pela ordem de sete passos (ver "A ordem de resolução de thread"), quando a
+  plataforma permitir;
+- **aparece na saída e no rastro** desta execução — o bloco R1–R6 recalculado mostra
+  `OK (confirmação humana)` no critério, e o evento do rastro (ver "O rastro do comando manual")
+  nomeia cada confirmação dada;
+- **não fura a recusa dura nº 6**: ela não faz merge de nada; só permite recalcular o gate, e
+  merge continua exigindo `SATISFEITO` e a confirmação final específica do PR.
 
 ```
 REVIEW EVIDENCE: SATISFEITO
@@ -187,6 +350,23 @@ R6 closure: n/a
 Findings pendentes:
   src/foo.ts:84 — possível perda de configuração
   src/bar.ts:120 — cleanup não garantido
+```
+
+Recalculado depois de confirmação humana, na mesma execução:
+
+```
+REVIEW EVIDENCE — SATISFEITO (recalculado nesta execução)
+
+R1 CI: n/a
+R2 blocking reviews: OK (confirmação humana)
+R3 actionable threads: OK
+R4 fix evidence: OK
+R5 review reply: OK
+R6 closure: OK (confirmação humana)
+
+Confirmações humanas nesta execução:
+  R2 — não há pedido de mudança ativo (API não expõe decisão de review)
+  R6 — src/baz.ts:12 — concorda com a rejeição publicada
 ```
 
 ### A resposta ao review — o padrão que prova a correção
@@ -230,11 +410,14 @@ R4 nem R5.
 3. Commit e push.
 4. Publicar a evidência no review, no formato acima.
 5. Esperar o CI.
-6. Esperar re-review ou confirmação, quando a plataforma expuser.
+6. Esperar a confirmação de closure do reviewer/bot (R6 caso A ou B) — ou, só nos casos
+   confirmáveis, a confirmação humana específica desta execução (R6 caso C). Plataforma que não
+   expõe confirmação não pula este passo: R6 fica `NÃO VERIFICÁVEL`.
 7. Resolver a thread.
 
 Se o bot ou o reviewer resolver a thread automaticamente depois da evidência publicada, aceite
-esse estado — é `RESOLVED` por confirmação externa. Se a thread continuar aberta, ela continua
+esse estado — é `RESOLVED` por confirmação externa, desde que a identidade de quem resolveu
+seja verificável (ver "R5 e R6 — ordem temporal e identidade"). Se a thread continuar aberta, ela continua
 `AWAITING_REREVIEW` ou `FIXED_AWAITING_EVIDENCE`: **nunca esconda, nunca contorne, nunca
 resolva por conta própria fora desta ordem.**
 
@@ -243,13 +426,16 @@ resolva por conta própria fora desta ordem.**
 A mergex faz parte da mesma fábrica que produziu o código sendo revisado — ela não pode ser a
 única a decidir que a própria rejeição de um finding encerra o review.
 
-- **Reviewer ou bot concordou** com a rejeição (reagiu, respondeu, resolveu a thread): o
-  finding vai para `RESOLVED` normalmente, R6 satisfeito.
+- **Reviewer ou bot concordou** com a rejeição (respondeu concordando, aprovou estado posterior,
+  ou resolveu a thread com identidade verificada): o finding vai para `RESOLVED` normalmente, R6
+  satisfeito. Reação isolada (emoji) não é confirmação.
 - **Reviewer não respondeu** à rejeição publicada: o finding fica em `AWAITING_REREVIEW` e R6
-  **não** é satisfeito por conta própria. O passo 7 do E9 pergunta, especificamente para aquele
-  finding, se o desenvolvedor concorda com a rejeição antes de contar como fechado — a mesma
-  disciplina da confirmação de OLHO OBRIGATÓRIO, aplicada aqui ao próprio veredito da mergex,
-  não ao merge.
+  **não** é satisfeito por conta própria. É bloqueio confirmável humanamente (ver "Dois tipos
+  de bloqueio"): o passo 7 do E9 pergunta, especificamente para aquele finding, se o
+  desenvolvedor concorda com a rejeição. Confirmado, R6 conta como `OK (confirmação humana)`
+  nesta execução, o gate é recalculado e, quando a plataforma permitir, a thread é resolvida
+  seguindo a ordem de sete passos — a mesma disciplina da confirmação de OLHO OBRIGATÓRIO,
+  aplicada aqui ao próprio veredito da mergex, não ao merge.
 
 Isto mantém a intervenção humana baixa: a pessoa só entra quando existe desacordo — ou
 silêncio — entre o reviewer e a fábrica, nunca em todo finding rejeitado.
@@ -292,15 +478,30 @@ Review reply esperada:
 <template de evidência>
 ```
 
-**A entrega do pacote precisa sobreviver à sessão atual.** A mergex publica o pacote `REVIEW
-REMEDIATION` como resposta na própria thread do finding — a mesma capacidade que já usa para
-publicar `Fixed in <commit>`/`Not applicable` (ver "A resposta ao review", acima) — e não só
-como texto de saída desta execução do E9. É o que garante que qualquer sessão futura, do
-executor ou de uma pessoa, encontre o pacote completo no lugar onde o finding apareceu, sem
-precisar reconstruir contexto.
+**A entrega do pacote precisa sobreviver à sessão atual.** Nem todo finding tem thread
+respondível — o gate aceita findings de review thread, comentário inline, review submetido e
+comentário geral. A persistência segue esta ordem, obrigatória:
 
-Isto reaproveita um mecanismo que a mergex já tem (responder thread) em vez de criar um
-artefato novo. A mergex **não** grava o pacote em `BLOQUEIOS.md`/`00-BLOQUEIOS.md` da
+1. **Existe thread respondível** (review thread, discussão inline): publique o pacote
+   `REVIEW REMEDIATION` completo como resposta nela — a mesma capacidade que já publica
+   `Fixed in <commit>`/`Not applicable` (ver "A resposta ao review", acima).
+2. **Não existe thread** (review submetido só com corpo, comentário geral, finding sem canal
+   de resposta): publique um **comentário durável no próprio PR** contendo:
+   - o ID ou a URL do review/comentário de origem, quando houver;
+   - arquivo e linha, quando houver;
+   - o finding normalizado;
+   - o pacote `REVIEW REMEDIATION` completo.
+3. **A plataforma não permite nenhum canal de escrita** (sem permissão, API ausente, falha na
+   publicação): o handoff é `NÃO VERIFICÁVEL` e o PR segue `BLOQUEADO`. Diga isso na saída,
+   com o motivo literal, e mostre o pacote completo no texto desta execução para quem for
+   repassar à mão. **Nunca** diga que o pacote foi persistido sem a publicação ter sido
+   confirmada pela plataforma.
+
+É o que garante que qualquer sessão futura, do executor ou de uma pessoa, encontre o pacote
+completo no próprio PR, sem precisar reconstruir contexto.
+
+Isto reaproveita um mecanismo que a mergex já tem (responder thread, comentar no PR) em vez de
+criar um artefato novo — nem arquivo local, nem escrita em artefato de outra skill. A mergex **não** grava o pacote em `BLOQUEIOS.md`/`00-BLOQUEIOS.md` da
 sprintx/runx: a única escrita dela em artefato de outra skill continua sendo a linha do
 `ORQUESTRADOR.md` no E0 (ver `references/integracao/runx.md` e
 `references/integracao/sprintx.md`) — inventar uma segunda escrita ali romperia essa fronteira
@@ -356,7 +557,9 @@ Some, em ordem lexicográfica de prioridade (o primeiro critério que difere dec
 
 **Declare o critério na saída**, sempre. A ordem sem o critério é opinião; com o critério, é auditável.
 
-PRs **inelegíveis para merge** — rascunho, integração contínua vermelha, ou `REVIEW EVIDENCE: BLOQUEADO` (ver "O REVIEW EVIDENCE GATE", acima) — aparecem na lista, **no fim**, marcados com o motivo, e **não entram na condução do passo 7**.
+PRs **inelegíveis para merge** — rascunho, integração contínua vermelha, ou `REVIEW EVIDENCE: BLOQUEADO` por **bloqueio corrigível por remediação** (ver "Dois tipos de bloqueio", acima) — aparecem na lista, **no fim**, marcados com o motivo, e **não entram na condução do passo 7**.
+
+PRs com `REVIEW EVIDENCE: BLOQUEADO` **apenas** por **bloqueio confirmável humanamente nesta execução**, e sem nenhum outro impedimento (não rascunho, CI não vermelha), ficam na fila pela mesma ordem de impacto, marcados `confirmação humana necessária`, e entram no passo 7 **só** na condução limitada: pedir as confirmações específicas, recalcular o gate, e seguir apenas se o resultado for `SATISFEITO`.
 
 ## Passo 5 — Analisar conflitos (relatar, nunca resolver)
 
@@ -450,7 +653,7 @@ Por PR, exatamente estes campos:
   Integração contínua: verde
   Conflito: não
   Review Evidence: SATISFEITO
-  Reviews: 0 actionable, 0 aguardando evidência, 0 aguardando re-review, 1 rejeitado com evidência, 4 resolvidos
+  Reviews: 0 actionable, 0 aguardando evidência, 0 aguardando re-review, 1 rejeitado com evidência, 4 resolvidos, 2 obsoletos
   [aberto por esta instalação da mergex — a skill não aprova o próprio trabalho]
   Recomendação: revisar os 3 arquivos de olho obrigatório antes de integrar;
                 é o de maior impacto da fila.
@@ -458,23 +661,39 @@ Por PR, exatamente estes campos:
 
 A **recomendação é uma linha** e é derivada do estado, não de opinião. Ela nunca diz "pode integrar sem olhar".
 
-PR com `REVIEW EVIDENCE: BLOQUEADO` não recebe recomendação de merge: mostra, no lugar, o
-bloco de bloqueio inteiro do REVIEW EVIDENCE GATE (R1–R6 e os findings pendentes) e entra nos
-inelegíveis do passo 4, com o motivo `REVIEW EVIDENCE: BLOQUEADO`.
+**Todo PR** — `SATISFEITO` ou `BLOQUEADO` — mostra o bloco do REVIEW EVIDENCE GATE com R1–R6
+individuais. PR `BLOQUEADO` acrescenta os findings pendentes e o tipo de bloqueio, e não recebe
+recomendação de merge. Bloqueio corrigível por remediação entra nos inelegíveis do passo 4, com o
+motivo `REVIEW EVIDENCE: BLOQUEADO`; bloqueio confirmável humanamente fica na fila marcado
+`confirmação humana necessária`, com as confirmações que serão pedidas nomeadas.
 
 ## Passo 7 — Conduzir, um PR por vez
 
 Na ordem apresentada, **um de cada vez**. Nunca em lote, nunca uma confirmação única para vários (regra 17).
 
-Para cada PR elegível:
+Para cada PR elegível **e cada PR bloqueado apenas por critério confirmável humanamente** (ver
+"Dois tipos de bloqueio" e o passo 4). PR com bloqueio corrigível por remediação nunca chega
+aqui.
 
-1. Apresente o bloco do PR de novo, resumido. Se, entre a apresentação (passo 6) e este
-   momento, uma revisão nova mudou o veredito do REVIEW EVIDENCE GATE para `BLOQUEADO` —
-   comentário novo, CI que voltou a falhar —, **pare e não ofereça o merge** (recusa dura 6):
-   diga o que mudou e passe para o próximo PR.
-2. **Peça confirmação explícita daquele PR específico.** "Confirma o merge do #482?" — nunca "posso seguir com os três?".
-3. Se algum critério do REVIEW EVIDENCE GATE estiver `NÃO VERIFICÁVEL`, pergunte, para **aquele critério especificamente**, se o desenvolvedor confirma o que a API não conseguiu expor (ver "NÃO VERIFICÁVEL não é SATISFEITO", acima). Sem essa confirmação específica, não ofereça o merge. Se algum finding estiver `REJECTED_WITH_EVIDENCE` sem resposta do reviewer, pergunte, também especificamente para aquele finding, se o desenvolvedor concorda com a rejeição (ver "Falso positivo não é autoaprovação", acima).
-4. Se houver arquivo em **OLHO OBRIGATÓRIO** ou o raio for **ALTO**, a confirmação é dupla: antes de perguntar sobre o merge, pergunte se o desenvolvedor **revisou os arquivos daquela faixa**, listando-os por nome:
+1. Apresente o bloco do PR de novo, resumido, com R1–R6. Se, entre a apresentação (passo 6) e
+   este momento, uma revisão nova mudou o veredito do REVIEW EVIDENCE GATE para bloqueio
+   corrigível por remediação — comentário novo, CI que voltou a falhar —, **pare e não ofereça
+   o merge** (recusa dura 6): diga o que mudou e passe para o próximo PR.
+2. **Condução limitada — só se o gate estiver `BLOQUEADO` por critério confirmável
+   humanamente.** Antes de qualquer pergunta sobre merge:
+   - **A.** Peça **cada** confirmação específica necessária, uma por critério `NÃO VERIFICÁVEL`
+     (R2/R3/R5/R6) e uma por finding `REJECTED_WITH_EVIDENCE` sem resposta do reviewer (ver
+     "Confirmação humana — transição e recálculo" e "Falso positivo não é autoaprovação").
+   - **B.** Recalcule o REVIEW EVIDENCE GATE com os critérios confirmados como
+     `OK (confirmação humana)` e mostre o bloco R1–R6 recalculado, com as confirmações listadas.
+   - **C.** Só continue se o novo resultado for `REVIEW EVIDENCE: SATISFEITO`. Qualquer
+     confirmação recusada, sem resposta, ou que revele pendência real: não ofereça o merge
+     (recusa dura 6), registre o motivo e passe para o próximo PR.
+
+   Com `SATISFEITO` recalculado, se houver `REJECTED_WITH_EVIDENCE` confirmado e a plataforma
+   permitir, resolva a thread seguindo a ordem de sete passos. PR que já chegou `SATISFEITO`
+   pula este item.
+3. Se houver arquivo em **OLHO OBRIGATÓRIO** ou o raio for **ALTO**, a confirmação é dupla: antes de perguntar sobre o merge, pergunte se o desenvolvedor **revisou os arquivos daquela faixa**, listando-os por nome:
 
 ```
 Este PR tem 3 arquivos em OLHO OBRIGATÓRIO:
@@ -487,8 +706,27 @@ Você revisou esses três arquivos? (o merge não segue sem esta confirmação)
 
 Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próximo.
 
-5. Confirmado, faça o merge com a estratégia que o repositório usa (detecte em `CONVENCOES.md` da stackx ou nos merges anteriores; na ausência, use o padrão do serviço). Nunca force, nunca reescreva histórico já enviado.
-6. Atualize `pr_estado: merged` no `ENTREGA.md` correspondente, quando ele existir localmente.
+4. **Peça confirmação explícita daquele PR específico.** "Confirma o merge do #482?" — nunca "posso seguir com os três?". Esta pergunta só existe com `REVIEW EVIDENCE: SATISFEITO` (original ou recalculado no item 2); confirmação de critério do gate não substitui esta confirmação final.
+5. **Revalidação obrigatória imediatamente antes do merge.** Depois das confirmações de Review
+   Evidence (item 2), de OLHO OBRIGATÓRIO (item 3) e da confirmação final daquele PR (item 4), e
+   **antes** da operação de merge, releia da plataforma: HEAD autoritativo (`headRefOid` ou
+   equivalente); estado de rascunho; CI/status checks desse HEAD; decisão de review e pedidos de
+   mudança ativos (`reviewDecision` ou equivalente); threads e findings relevantes. A
+   confirmação humana final **não congela** o estado do PR.
+   - **HEAD mudou** desde a confirmação: invalide todas as confirmações associadas ao estado
+     anterior (Review Evidence, OLHO OBRIGATÓRIO e merge), recalcule o gate, e **não faça o
+     merge nesta passagem**. Diga o SHA anterior e o novo, registre no rastro e siga para o
+     próximo PR.
+   - **HEAD igual, mas algum critério passou a bloquear** (virou rascunho, CI deixou de estar
+     verde, pedido de mudança novo, finding novo ou reaberto): não faça o merge; diga
+     exatamente o que mudou.
+   - **Releitura impossível**: trate como mudança; não faça o merge.
+
+   Quando o serviço oferecer, amarre o merge ao HEAD revalidado (`gh pr merge <n>
+   --match-head-commit <headRefOid>`; parâmetro `sha` no merge do GitLab), para que um push
+   entre a releitura e o merge faça a operação falhar em vez de integrar código não revalidado.
+6. Revalidado sem mudança, faça o merge com a estratégia que o repositório usa (detecte em `CONVENCOES.md` da stackx ou nos merges anteriores; na ausência, use o padrão do serviço). Nunca force, nunca reescreva histórico já enviado.
+7. Atualize `pr_estado: merged` no `ENTREGA.md` correspondente, quando ele existir localmente.
 
    **E, somente se o PR mergeado for o do trabalho atual**, grave `pr_estado: merged`
    também em `.expx/estado.json`. O E9 percorre PRs de vários trabalhos e de outras
@@ -502,7 +740,7 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
 
    Não toque em `branch`. O procedimento é o de `10-estado.md`, e falha de gravação vai
    para o rastro sem interromper a condução dos PRs seguintes.
-7. Recusa ou silêncio: **não faça o merge**, siga para o próximo, e registre que ele ficou pendente.
+8. Recusa ou silêncio: **não faça o merge**, siga para o próximo, e registre que ele ficou pendente.
 
 ### As seis recusas duras
 
@@ -517,16 +755,24 @@ Não faça merge, em nenhuma hipótese:
 | 5 | Resolvendo conflito | A resolução é humana |
 | 6 | Com `REVIEW EVIDENCE` diferente de `SATISFEITO` | Mudança de código não encerra review — evidência encerra review (ver "O REVIEW EVIDENCE GATE") |
 
+A confirmação humana específica do gate não é exceção à recusa 6: ela só permite **recalcular**
+o gate nesta execução. Merge exige o resultado recalculado `SATISFEITO`, a confirmação final
+daquele PR **e** a revalidação do item 5 imediatamente antes da operação. Nenhuma confirmação
+humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIFICÁVEL`).
+
 ## Critério de saída
 
 - [ ] Todos os PRs abertos foram listados, inclusive rascunhos e inelegíveis.
 - [ ] Sobreposições estão no topo, com os PRs identificados e os arquivos em comum.
 - [ ] O critério de ordenação está declarado.
 - [ ] A ordem vai do menor para o maior impacto.
-- [ ] PRs com integração vermelha, rascunhos e `REVIEW EVIDENCE: BLOQUEADO` não foram oferecidos para merge.
-- [ ] Todo PR mostrou `Review Evidence: SATISFEITO | BLOQUEADO` e o bloco `Reviews` com as cinco contagens.
-- [ ] PR bloqueado mostrou R1–R6 individuais e os findings pendentes nomeados.
-- [ ] Finding válido virou pacote `REVIEW REMEDIATION` devolvido à skill de origem, nunca corrigido pela mergex.
+- [ ] PRs com integração vermelha, rascunhos e `REVIEW EVIDENCE` diferente de `SATISFEITO` não foram oferecidos para merge.
+- [ ] Todo PR mostrou `Review Evidence: SATISFEITO | BLOQUEADO`, R1–R6 individuais e o bloco `Reviews` com as seis contagens.
+- [ ] Todo merge feito passou pela revalidação imediatamente anterior (HEAD, rascunho, CI, decisão de review, threads); HEAD alterado invalidou as confirmações e barrou o merge nesta passagem.
+- [ ] Toda escrita de review (resposta, resolução, comentário) foi contada só com ID/URL ou releitura devolvidos pela plataforma.
+- [ ] PR bloqueado mostrou os findings pendentes nomeados e o tipo de bloqueio.
+- [ ] PR com bloqueio confirmável só chegou à pergunta de merge depois das confirmações específicas e do gate recalculado `SATISFEITO`; as confirmações aparecem na saída e no rastro.
+- [ ] Finding válido virou pacote `REVIEW REMEDIATION` devolvido à skill de origem, nunca corrigido pela mergex, persistido na thread ou em comentário do PR — ou informado como não persistido.
 - [ ] Conflitos foram relatados com as duas intenções, sem resolução.
 - [ ] Cada merge feito teve confirmação específica; os de OLHO OBRIGATÓRIO tiveram a confirmação dupla.
 - [ ] PRs abertos por esta instalação da mergex estão marcados.
@@ -537,10 +783,12 @@ Ao fim, um resumo: o que foi integrado, o que ficou pendente e por quê.
 ## O rastro do comando manual
 
 Grave em `docs/eventos/<trabalho_id>.jsonl`: **a lista de PRs avaliados, a ordem
-apresentada e o que foi mergeado.**
+apresentada, as confirmações humanas do gate dadas nesta execução, as escritas de review feitas
+(com o ID/URL devolvido pela plataforma), as revalidações pré-merge que barraram merge, e o que
+foi mergeado.**
 
 ```json
-{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"veredito_emitido","fase":"e9","task":null,"agente":"analista-de-conflito","resultado":"ok","detalhe":"PRs avaliados: #479, #482; ordem: #479 < #482; mergeado: #479","arquivos":[]}
+{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"veredito_emitido","fase":"e9","task":null,"agente":"analista-de-conflito","resultado":"ok","detalhe":"PRs avaliados: #479, #482; ordem: #479 < #482; confirmações humanas: #482 R2 (API não expõe decisão de review); mergeado: #479","arquivos":[]}
 ```
 
 O registro é do que **uma pessoa decidiu**, não do que a skill decidiu: a
@@ -559,6 +807,12 @@ lista teve confirmação explícita daquele PR específico.
 | Merge falha no serviço | Relata o erro literal e segue para o próximo PR; nunca tenta contornar |
 | Usuário pede para resolver o conflito | Recusa: a mergex relata as duas intenções; a resolução é humana (regra 17) |
 | Usuário pede merge em lote | Recusa: um por vez, com confirmação de cada (regra 17) |
-| Ferramenta lista o PR mas não expõe reviews/threads | Marca os critérios afetados (R2/R3/R5/R6, conforme o dado ausente) como `NÃO VERIFICÁVEL` e pede a confirmação humana específica do passo 7; sem ela, trata como `REVIEW EVIDENCE: BLOQUEADO` — mesmo critério conservador do `mergeable` desconhecido |
+| Ferramenta lista o PR mas não expõe reviews/threads | Marca os critérios afetados (R2/R3/R5/R6, conforme o dado ausente) como `NÃO VERIFICÁVEL` — `REVIEW EVIDENCE: BLOQUEADO`, confirmável humanamente se não houver outro bloqueio. No passo 7, pede a confirmação específica de cada um e recalcula; sem confirmação, continua `BLOQUEADO` — mesmo critério conservador do `mergeable` desconhecido |
+| CI configurado, mas o resultado do HEAD atual não pode ser obtido | R1 `NÃO VERIFICÁVEL`; `REVIEW EVIDENCE: BLOQUEADO` corrigível (não confirmável humanamente) — o PR fica inelegível nesta execução |
+| HEAD autoritativo não confirmado (`headRefOid` ausente, fork sem cabeça buscável, fallback `origin/<head>` divergente) | R1 `NÃO VERIFICÁVEL`, R4 não pode ser `OK`; `BLOQUEADO` corrigível, inelegível nesta execução |
+| Plataforma não expõe responder, resolver ou comentar no PR | Capacidade `NÃO VERIFICÁVEL`; nada é simulado; R5 não é produzido nesta execução e a thread fica aberta |
+| Plataforma não expõe quem resolveu ou quando | Thread resolvida antes da execução: R5 `NÃO VERIFICÁVEL`. Sem saber se quem encerrou foi reviewer/bot ou a fábrica: R6 `NÃO VERIFICÁVEL`. Ambos confirmáveis humanamente, com recálculo |
+| Revalidação pré-merge detecta mudança ou não consegue reler | Não faz o merge nesta passagem; HEAD novo invalida as confirmações anteriores; diz o que mudou |
+| Nenhum canal de escrita para publicar `REVIEW REMEDIATION` | Handoff `NÃO VERIFICÁVEL`, PR segue `BLOQUEADO`; informa o motivo literal e mostra o pacote completo na saída; nunca diz que persistiu |
 | Plataforma não expõe estado resolved/outdated de uma thread | Trata como fonte ausente para aquele campo; o finding correspondente não passa de `FIXED_AWAITING_EVIDENCE` — nunca vira `RESOLVED` sem confirmação verificável |
 | Usuário pede para resolver thread ou marcar finding sem evidência publicada | Recusa: sem R4/R5, o finding fica onde está; a mergex não maquia review encerrado |
