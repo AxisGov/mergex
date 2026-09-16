@@ -377,6 +377,13 @@ git add -f src/fora/surpresa3.ts
 caso "fechamento final nao carrega produto fora do plano" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
 git reset -q; rm -f src/fora/surpresa3.ts
 
+# 2b — fechamento BLOQUEADO: o registro do bloqueio tambem precisa ser persistido
+git reset -q
+printf 'portao: bloqueado\nestado: bloqueado\n' >> docs/entregas/ft-02/ENTREGA.md
+git add -f docs/entregas/ft-02/ENTREGA.md
+caso "fechamento bloqueado: registro do bloqueio entra" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+git reset -q; git checkout -q -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null
+
 # 3 — a varredura de segredo vale igual no artefato de metodo
 caso "fechamento final: segredo no artefato barra" comum/sem-segredo.sh "$(write_json "token: \"$SK\"")" 2
 

@@ -222,6 +222,16 @@ git rev-parse --short HEAD
 
 Acrescente à lista `commits` do `ENTREGA.md`, com `task` e `commit`, e reescreva `atualizado_em`. Um item por task, na ordem em que fecharam.
 
+### `commits` é histórico de execução, não índice de plano
+
+A regra é **um commit por fechamento de task em cada execução** — não "um `task` id único para sempre". A diferença aparece no replanejamento: o portão barra, a feature volta para o planejamento, o plano é refeito e a F6 roda de novo. Se o plano refeito reaproveitar o mesmo `id` de uma task que já fechou antes, o `ENTREGA.md` que o E0 **retomou** (`00-abertura.md`) ainda tem o item antigo.
+
+- **Nunca apague item antigo** para "corrigir" a lista: ele registra um commit que existe no histórico.
+- **Um `task` id pode reaparecer**, desde que o `commit` seja **outro SHA** e a ordem preserve a sequência real dos fechamentos.
+- Dois itens com o **mesmo id e o mesmo SHA** são duplicata: não acrescente o segundo.
+
+Isto não muda o schema e não cria campo: `references/00-schema.md` descreve `commits` como "um item por task commitada, na ordem em que fecharam" — uma lista ordenada, sem exigência de id único. Quem lê a lista lê história de execução; quem quer o plano lê `tasks.md`, que é a fonte dele.
+
 Não faça push aqui. Push é E6, e só depois do portão (E2) aprovar.
 
 ### Grave o evento no rastro

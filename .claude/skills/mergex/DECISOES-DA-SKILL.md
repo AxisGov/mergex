@@ -150,3 +150,22 @@ registro final que só existe na árvore não chega à integração e some com o
 do histórico (nenhuma das skills faz isso), ou se o `ENTREGA.md` deixasse de ser versionado e
 virasse artefato derivado, reconstruível a partir de outra fonte. Enquanto ele for o registro da
 entrega e a integração for por commit, o fechamento final é obrigatório.
+
+## P0 final — bloqueio persistido e E0 idempotente no replanejamento
+
+A auditoria cruzada, depois da persistência final do E8, achou três contradições que só aparecem
+no fluxo integrado: o portão que "encerrava tudo" enquanto o E8 prometia persistir o bloqueio, o
+`push_feito` com duas definições, e o E0 sendo chamado de novo a cada F6 — inclusive depois de um
+replanejamento — sobre um `ENTREGA.md` que já existia.
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-96 | `02-prontidao.md` mandava "encerrar o fluxo da mergex" no `BLOQUEADO`, e `08-registro.md` já previa `estado: bloqueado` persistido — as duas coisas não podiam ser verdade | `BLOQUEADO` **encerra as etapas de entrega** (E3 a E7 não executam) e segue **apenas ao E8**, em fechamento bloqueado: grava `estado: bloqueado`, preserva `portao: bloqueado`, persiste por commit e **não publica a branch** | Ir ao E8 não é continuar a entrega: é finalizar e persistir o bloqueio. Sem isso, o motivo da parada morre com o worktree e a próxima sessão não sabe por que o trabalho parou. O portão continua barrando a entrega, que é o que ele existe para fazer |
+| DM-97 | `push_feito` tinha duas definições: "o E6 confirmou o remoto" na tabela campo a campo, e "o commit do registro final está no remoto" no fechamento | Um significado **por estágio**: no E6, `true` afirma a sincronia daquele estágio; **ao encerrar o E8**, afirma que o HEAD final está em `origin/<branch>`. O E8 **revalida** e grava `false` se a publicação final não aconteceu | Nenhum enum novo e nenhuma mudança de schema; o campo continua booleano. A alternativa — manter `true` depois de uma publicação final falha — faria o registro mentir exatamente para quem confia nele para achar a entrega |
+| DM-98 | O E0 roda no início de **toda** F6, inclusive depois de replanejamento, e o contrato mandava "criar" o `ENTREGA.md` | O E0 é **idempotente**: CASO 1 cria; CASO 2 (mesmo trabalho, mesma branch) **retoma** — `estado: aberto`, `portao: null`, `push_feito: false`, preservando `commits`, `criado_em`, desvios ainda verdadeiros e a prosa válida; CASO 3 (arquivo declara outra branch) para e relata | Recriar apagaria o histórico de execução de um trabalho que voltou ao começo da entrega, não ao começo do mundo. O caso 3 é conservador porque reaproveitamento de `trabalho_id` e troca de branch por fora são decisão humana |
+| DM-99 | Preservar `commits` na retomada levanta a dúvida do `task` id reaproveitado pelo plano refeito | `commits` é **histórico de execução**: um commit por fechamento de task **em cada execução**, nunca "id único para sempre". Item antigo nunca é apagado; um id pode reaparecer com **outro SHA**; mesmo id e mesmo SHA é duplicata e não entra | Compatível com o schema, que descreve `commits` como lista ordenada, sem exigir unicidade (`00-schema.md`), e nenhum consumidor deste repositório indexa por `task` id. Não foi preciso campo novo. Se algum leitor externo exigir unicidade, a decisão precisa ser revista antes de valer para ele |
+| DM-100 | O fechamento prometia "árvore limpa", mas desvio de produto **não pode** ser commitado | A garantia passa a ser precisa: **ao sair do E8, nenhum artefato de método legítimo deste trabalho fica sem persistir**. Arquivo de produto fora do plano não entra, não é apagado, e continua aparecendo em `git status` | Prometer árvore inteira limpa obrigaria a varrer o desvio para dentro do commit — exatamente a invasão de escopo que a regra 4 existe para impedir. O desvio continua pertencendo a quem precisa resolvê-lo |
+
+**O que invalidaria estas decisões:** um leitor do `kind: entrega` que trate `commits[].task` como
+chave única (DM-99), ou um fluxo em que o portão bloqueado precise publicar a branch — hoje
+proibido pelo próprio E6.

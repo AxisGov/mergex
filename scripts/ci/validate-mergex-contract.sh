@@ -239,4 +239,54 @@ fi
 grep -Fq 'Sem remoto, sem versionador, sem PR' "$registro" \
   || fail 'E8 does not define the closing behaviour without a remote'
 
+# ---------------------------------------------------------------------------
+# P0 final — push_feito por estágio, bloqueio persistido, E0 idempotente
+# ---------------------------------------------------------------------------
+# A definição antiga de push_feito não pode conviver com o fechamento final.
+if grep -Fq '`true` só quando o E6 confirmou que o remoto tem o mesmo commit' "$registro"; then
+  fail 'E8 field table still defines push_feito only by the E6 push'
+fi
+grep -Fq 'Ao encerrar o E8' "$registro" \
+  || fail 'push_feito has no end-of-E8 meaning'
+grep -Fq 'O E8 revalida a verdade final' "$registro" \
+  || fail 'E8 does not revalidate push_feito at the end'
+grep -Fq 'A palavra final é do E8' "$push" \
+  || fail 'E6 does not defer the final push_feito truth to E8'
+
+# E2 BLOQUEADO: encerra a ENTREGA, mas o bloqueio é persistido pelo E8.
+if grep -Fq 'encerre o fluxo da mergex' "$prontidao"; then
+  fail 'E2 still ends the whole flow instead of going to E8 for the blocked closing'
+fi
+grep -Fq 'encerra as etapas de entrega e segue apenas ao E8' "$prontidao" \
+  || fail 'E2 does not route a blocked gate to E8'
+grep -Fq 'encerra as etapas de entrega' "$skill" \
+  || fail 'SKILL.md does not describe the blocked route to E8'
+grep -Fq '### Fechamento bloqueado' "$registro" \
+  || fail 'E8 has no blocked closing section'
+grep -Fq '**O passo 4 não roda**' "$registro" \
+  || fail 'blocked closing does not forbid publishing the branch'
+grep -Fq 'E2 → E8 (fechamento bloqueado)' "$integ_sprintx" \
+  || fail 'sprintx integration does not describe the blocked closing'
+
+# A garantia do fechamento é sobre artefato de método, não sobre a árvore inteira.
+if grep -Fq 'árvore fica limpa' "$registro"; then
+  fail 'E8 promises a fully clean tree again'
+fi
+grep -Fq 'não é "árvore inteira limpa"' "$registro" \
+  || fail 'E8 lost the precise clean-tree guarantee'
+
+# E0 idempotente: retomada não recria e não apaga histórico.
+grep -Fq 'CASO 2 — o arquivo existe' "$abertura" \
+  || fail 'E0 has no resume case for an existing ENTREGA.md'
+grep -Fq 'Nunca zere' "$abertura" \
+  || fail 'E0 resume does not preserve the commit history'
+grep -Fq 'Nunca abra um segundo PR e nunca recrie a branch' "$abertura" \
+  || fail 'E0 resume may open a second PR or recreate the branch'
+
+# commits é histórico de execução, não índice de plano.
+grep -Fq 'um commit por fechamento de task em cada execução' "$commits" \
+  || fail 'E1 does not define commits as per-execution history'
+grep -Fq 'Nunca apague item antigo' "$commits" \
+  || fail 'E1 allows deleting past commit entries on replanning'
+
 printf 'contract checks passed\n'

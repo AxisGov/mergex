@@ -60,7 +60,7 @@ O fluxo não é uma máquina de estados sequencial como a da sprintx ou da runx:
 
 **E1 COMMIT POR TASK** — durante a execução. Cada task com os dois testes escritos, `suite: parcial` ou `verde` e `status: concluida` vira um commit próprio, no momento em que fecha. Os artefatos de método do próprio trabalho vão junto; arquivo de produto fora do plano, nunca. Varredura de segredo antes de cada commit.
 
-**E2 PORTÃO DE PRONTIDÃO** — ao fim da execução, antes de qualquer preparação de entrega. Devolve `PRONTO` ou `BLOQUEADO` com o que falta e onde corrigir. `BLOQUEADO` encerra: a mergex não segue e não maquia.
+**E2 PORTÃO DE PRONTIDÃO** — ao fim da execução, antes de qualquer preparação de entrega. Devolve `PRONTO` ou `BLOQUEADO` com o que falta e onde corrigir. `PRONTO` segue para o E3. **`BLOQUEADO` encerra as etapas de entrega — E3 a E7 não executam — e segue apenas ao E8 para registrar e persistir o bloqueio.** A mergex não maquia: ir ao E8 não é continuar a entrega.
 
 **E3 CLASSIFICAÇÃO DA ATENÇÃO HUMANA** — divide o diff em três faixas e explica cada arquivo. É o coração da skill.
 
@@ -72,7 +72,7 @@ O fluxo não é uma máquina de estados sequencial como a da sprintx ou da runx:
 
 **E7 ABERTURA DO PULL REQUEST** — abre o PR pela ferramenta de linha de comando do serviço de hospedagem, quando existir e estiver autenticada. Ausente, grava a descrição em `PR.md` e informa — nunca falha, nunca pede credencial.
 
-**E8 REGISTRO DA ENTREGA** — grava `ENTREGA.md` com frontmatter `expx-schema v1`, `kind: entrega`. É o que o expx-panel lê para mostrar o que aguarda revisão. Fecha commitando esse registro final e publicando o commit pelo mesmo princípio do E6: a entrega precisa estar no histórico da branch, não só na árvore de trabalho — quem integra, integra commits.
+**E8 REGISTRO DA ENTREGA** — grava `ENTREGA.md` com frontmatter `expx-schema v1`, `kind: entrega`. É o que o expx-panel lê para mostrar o que aguarda revisão. Fecha **os dois desfechos**: `entregue`, commitando o registro final e publicando o commit pelo mesmo princípio do E6; e `bloqueado`, commitando o bloqueio **sem publicar a branch**. A entrega — ou o bloqueio — precisa estar no histórico da branch, não só na árvore de trabalho: quem integra, integra commits.
 
 **E9 REVISÃO E MERGE — MANUAL.** Lista os pull requests abertos, ordena do menor para o maior impacto, apresenta o estado de cada um e conduz um PR por vez com confirmação explícita. Nunca resolve conflito. **Só roda por chamada explícita do desenvolvedor.**
 

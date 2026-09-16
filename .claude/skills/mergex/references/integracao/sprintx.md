@@ -31,8 +31,15 @@ A mergex procura **o canônico primeiro e o antigo como fallback**, em todas as 
 | Início da F6, **antes da primeira task** | **E0 ABERTURA** | Adota `feature/<slug>` e o worktree da F1 (ou cria a branch, se ela não existir), registra no `ORQUESTRADOR.md` e cria `docs/entregas/<slug>/ENTREGA.md` |
 | Ao fechar **cada** task (status `concluida`, `suite: parcial` ou `verde`) | **E1 COMMIT** | Um commit por task, com a mensagem no formato da mergex |
 | Fim da F6, com todas as tasks executadas | **E2 → E8** | Portão, classificação, descrição do PR, pacote de QA, push, abertura do PR, registro |
+| Fim da F6, com o portão **bloqueado** | **E2 → E8 (fechamento bloqueado)** | E3 a E7 **não executam**. O E8 grava `estado: bloqueado`, persiste o registro por commit e **não publica a branch**; o controle volta à sprintx com o que falta |
 
 Depois do E8, a mergex devolve o controle. **Ela não sugere o E9** (regra 16).
+
+**Portão bloqueado não pula o E8.** `F6 → E2 BLOQUEADO` não significa E3 a E7: significa E8 em
+fechamento bloqueado — registro persistido por commit, branch **não** publicada — e retorno à
+sprintx com o que falta. Se a feature for replanejada e a F6 rodar de novo, o E0 **retoma** o
+`ENTREGA.md` que já existe em vez de recriá-lo, preservando `commits` e `criado_em`
+(`references/00-abertura.md`).
 
 ### E0 — no início da F6
 

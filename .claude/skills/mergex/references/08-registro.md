@@ -8,13 +8,14 @@ O `ENTREGA.md` **não substitui** o registro que a runx faz em `docs/relatorios/
 
 ## Quando o arquivo é escrito
 
-Três vezes ao longo do trabalho, sempre no mesmo arquivo:
+Ao longo do trabalho, sempre no mesmo arquivo — e **nunca recriado do zero**:
 
 | Momento | Etapa | Estado |
 |---|---|---|
 | Abertura da branch | E0 | `aberto` |
 | A cada task commitada | E1 | `aberto`, com a lista `commits` crescendo |
-| Fim do fluxo | E8 | `entregue` ou `bloqueado` |
+| Retomada depois de replanejamento | E0 | volta a `aberto`, **preservando** `commits` e `criado_em` (`00-abertura.md`) |
+| Fim do fluxo | E8 | `entregue` ou `bloqueado` — os dois são persistidos por commit |
 
 ## O contrato — `kind: entrega`
 
@@ -100,7 +101,7 @@ entregue_em: 2026-08-29
 | `estado` | `aberto` no E0; `entregue` quando o fluxo completou; `bloqueado` quando o portão barrou |
 | `versionado` | `false` em repositório sem versionador |
 | `branch`, `branch_base` | `null` quando `versionado: false`. `branch_base` é a **base efetiva** determinada no E0 — inclusive quando informada pelo chamador; é ela que os diffs do E2, do E3 e do E4 usam |
-| `commits` | Um item por **task** commitada, na ordem em que fecharam; `[]` sem versionador. O commit de artefatos de método (`01-commits.md`) não é task e **não entra aqui** — ele vai na prosa |
+| `commits` | Um item por **fechamento de task em cada execução**, na ordem em que fecharam; `[]` sem versionador. É histórico de execução: na retomada depois de replanejamento a lista é **preservada**, e um `task` id pode reaparecer com outro SHA (`01-commits.md`). O commit de artefatos de método não é task e **não entra aqui** — ele vai na prosa |
 | `modulo_afetado` | Os módulos que a entrega toca; copiado da skill de origem quando ela o declara |
 | `arquivos_alterados` | **O diff real** (`git diff --name-only <branch_base>...HEAD`), não a previsão do plano |
 | `faixa_atencao` | A faixa por arquivo do E3, no vocabulário do índice (`alta`/`media`/`baixa`); `[]` antes do E3 |
@@ -108,7 +109,7 @@ entregue_em: 2026-08-29
 | `atencao` | As três contagens do E3; zeros quando o E3 não rodou |
 | `portao` | O resultado do E2 |
 | `desvios` | Arquivos alterados fora da lista declarada, detectados no E1 e no E2; `[]` quando não houve |
-| `push_feito` | `true` só quando o E6 confirmou que o remoto tem o mesmo commit |
+| `push_feito` | Durante o E6, `true` afirma que a publicação executada até ali está sincronizada. **Ao encerrar o E8, `true` afirma que o HEAD final — o commit que carrega este registro — está em `origin/<branch>`**, e o E8 revalida isso; falhou a publicação final, vira `false` (ver "O que `push_feito` afirma") |
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
 | `pr_estado` | `rascunho` na abertura normal; `aberto` quando o QA já aprovou; `merged`/`fechado` quando o E9 ou uma pessoa atualizarem |
 | `entregue_em` | A data em que o fluxo completou; `null` enquanto `estado` não for `entregue` |
@@ -196,6 +197,13 @@ fechamento que cita a URL do PR, por exemplo), esse arquivo é deste trabalho e 
 Nada sujo deste trabalho: **não há commit a fazer.** Nunca force um commit vazio
 (`--allow-empty`) — o registro já está no histórico.
 
+**A garantia do fechamento não é "árvore inteira limpa".** É esta: **ao sair do E8, nenhum
+artefato de método legítimo deste trabalho fica sem persistir.** Arquivo de produto fora do
+plano é desvio: ele **não entra** no commit, **não é apagado**, e continua aparecendo em
+`git status` — de propósito. Quem decide o destino dele é a pessoa (regra 4), e varrê-lo para
+dentro do commit "para deixar a árvore limpa" seria exatamente a invasão de escopo que o método
+existe para impedir.
+
 ### Passo 2 — Varredura de segredo
 
 A mesma do `01-commits.md`, passo 2, sobre `git diff --cached`, com o mesmo desfecho: encontrou,
@@ -256,8 +264,19 @@ Os dois têm que ser iguais.
 
 ### O que `push_feito` afirma
 
-`push_feito: true` significa: **a publicação da entrega foi executada com sucesso neste fluxo, e
-o commit que carrega este registro está no remoto.**
+O campo tem **um significado por estágio**, e o E8 é quem dá a palavra final:
+
+| Estágio | `push_feito: true` afirma |
+|---|---|
+| Durante o E6 | A publicação executada até aquele estágio está sincronizada: `origin/<branch>` tem o commit que o E6 subiu |
+| **Ao encerrar o E8** | O **HEAD final**, que contém o registro final do E8, está sincronizado com `origin/<branch>` |
+
+**O E8 revalida a verdade final.** Falhou a publicação final, o campo vira `false` no registro
+local — nunca fica `true` afirmando um HEAD que o remoto não tem. Nenhum enum novo, nenhuma
+mudança de schema: o campo continua booleano.
+
+Em uma frase: `push_feito: true`, ao fim do fluxo, significa **a publicação da entrega foi
+executada com sucesso e o commit que carrega este registro está no remoto.**
 
 A circularidade é aparente — gravar `push_feito` num arquivo que ainda vai virar commit, e esse
 commit ainda vai ser publicado — e se resolve pela **ordem**, nunca por um estado intermediário:
@@ -278,7 +297,8 @@ maquie.**
 
 - Relate o erro **literal**, e deixe claro que a entrega **não está sincronizada com o remoto**.
 - Nunca force, nunca reconcilie, **nunca tente o push de novo em laço**.
-- A branch local fica com o registro final preservado, e a árvore fica limpa.
+- A branch local fica com o registro final preservado, e nenhum artefato de método deste
+  trabalho fica sem persistir.
 - Se `push_feito` está `true` mas o commit final não chegou ao remoto, o arquivo está mentindo:
   grave `push_feito: false`, ajuste a prosa e faça um **commit corretivo**, no mesmo formato do
   passo 3 — somente artefato de método, sem reescrever histórico, sem novo push automático.
@@ -291,9 +311,33 @@ quebra exatamente quem confia no registro para achar a entrega.
 | Situação | O fechamento final |
 |---|---|
 | `versionado: false` | Não roda: não há histórico onde persistir |
-| Versionado, sem remoto | **Acontece localmente.** `push_feito: false`, árvore limpa, estado final no histórico. Não é erro: o fast-forward local continua possível |
+| Versionado, sem remoto | **Acontece localmente.** `push_feito: false`, estado final no histórico. Não é erro: o fast-forward local continua possível |
 | E6 não publicou (remoto à frente, push rejeitado) | Commit final acontece; publicação não é tentada; o relatório diz que a entrega não está no remoto |
 | PR não aberto (ferramenta ausente) | Igual ao caso normal: `pr_url: null` já está gravado, e o commit final acontece do mesmo jeito |
+
+### Fechamento bloqueado — quando o portão barrou
+
+`BLOQUEADO` no E2 encerra as **etapas de entrega**: E3, E4, E5, E6 e E7 **não executam**. O fluxo
+segue **apenas ao E8**, e apenas para registrar e persistir o bloqueio. Ir ao E8 não é continuar
+a entrega — o portão continua barrando a entrega.
+
+| Campo | Valor no fechamento bloqueado |
+|---|---|
+| `portao` | `bloqueado` — preservado como o E2 gravou |
+| `estado` | `bloqueado` |
+| `push_feito` | `false` — o E6 não rodou |
+| `pr_url`, `pr_estado` | `null` quando nunca houve PR. Na retomada de um trabalho que já tinha PR, o valor anterior permanece como está — o E7 é quem confirma, e ele não roda aqui |
+| `entregue_em` | `null` — só recebe data quando `estado: entregue` |
+| `faixa_atencao`, `atencao` | `[]` e zeros: o E3 não rodou |
+| `arquivos_alterados` | O diff real, que continua existindo |
+| `desvios` | O que o E1 e o E2 registraram, preservado |
+
+O fechamento bloqueado faz **três coisas e nada mais**: escreve a prosa com o que falta (o mesmo
+que o relatório do E2 apontou), persiste os artefatos de método deste trabalho pelos passos 1 a 3
+acima, e informa o desenvolvedor. **O passo 4 não roda**: branch bloqueada não é publicada.
+
+Termina com o bloqueio preservado no HEAD local — é o que permite a uma sessão futura, ou a
+outra skill, ver que este trabalho parou no portão, e por quê, mesmo depois de o worktree sumir.
 
 ## Limpar o estado da barra
 

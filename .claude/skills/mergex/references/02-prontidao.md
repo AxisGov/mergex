@@ -177,7 +177,11 @@ Avisos vão numa seção própria no fim, sem alterar o resultado.
 
 **`PRONTO`** quando nenhuma verificação deu `FALHA`. Grave `portao: pronto` no `ENTREGA.md`, reescreva `atualizado_em`, e siga para o E3.
 
-**`BLOQUEADO`** quando qualquer verificação deu `FALHA`. Grave `portao: bloqueado` no `ENTREGA.md` e **encerre o fluxo da mergex**. Não classifique o diff, não monte a descrição do PR, não gere o pacote de QA, não faça push, não abra PR.
+**`BLOQUEADO`** quando qualquer verificação deu `FALHA`. Grave `portao: bloqueado` no `ENTREGA.md`.
+
+**`BLOQUEADO` encerra as etapas de entrega e segue apenas ao E8 para registrar e persistir o bloqueio.** Não classifique o diff (E3), não monte a descrição do PR (E4), não gere o pacote de QA (E5), não faça push (E6), não abra PR (E7): **nenhuma dessas etapas executa.**
+
+O E8 roda em **fechamento bloqueado** (`references/08-registro.md`): grava `estado: bloqueado`, preserva `portao: bloqueado`, e commita esse registro para que o bloqueio sobreviva ao worktree. Ele **não publica a branch** — o portão proibiu o E6, e o fechamento não fura essa proibição. Ir ao E8 **não é continuar a entrega**: é finalizar e persistir o bloqueio.
 
 O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito, nada é descartado, nada é maquiado.
 

@@ -194,7 +194,13 @@ Branch do trabalho: <nome-da-branch> (base: <branch-base>) — <aberta | retomad
 
 `adotada` é o caso A: a branch é da skill de origem, e a mergex só a registrou. Obtenha a data com `date +%Y-%m-%d` do sistema, nunca de memória. Não reescreva mais nada do `ORQUESTRADOR.md`: a mergex só acrescenta essa linha.
 
-**2. Crie `docs/entregas/<trabalho_id>/ENTREGA.md`** a partir de `assets/TEMPLATE-ENTREGA.md`, com estado **aberto**:
+**2. `docs/entregas/<trabalho_id>/ENTREGA.md` — criar ou retomar.**
+
+O E0 é chamado no **início de toda F6**, inclusive quando a mesma feature volta do
+replanejamento (portão bloqueado → replaneja → F3/F4/F5 → F6 de novo → E0 de novo). Por isso ele
+é **idempotente**: nunca recria do zero um registro que já existe, e nunca apaga história.
+
+**CASO 1 — o arquivo não existe.** Crie a partir de `assets/TEMPLATE-ENTREGA.md`, com estado **aberto**:
 
 - `estado: aberto`
 - `branch` e `branch_base` preenchidos — `branch_base` é a **base efetiva** determinada no passo 3
@@ -206,6 +212,30 @@ Branch do trabalho: <nome-da-branch> (base: <branch-base>) — <aberta | retomad
 Na prosa, a linha da branch diz como ela chegou até aqui — `aberta pela mergex`, `retomada` ou `adotada da skill de origem` — e de onde saiu a base (chamador, `CONVENCOES.md`, `origin/HEAD` ou principal atual). É o que permite, depois, entender um diff que não bate com `main`.
 
 Crie a pasta `docs/entregas/<trabalho_id>/` se não existir. Leia o contrato do frontmatter em `08-registro.md` antes de gravar.
+
+**CASO 2 — o arquivo existe, é do mesmo `trabalho_id` e declara a mesma branch: é RETOMADA.**
+Atualize **somente o necessário** para abrir uma nova tentativa de entrega:
+
+| Campo | Na retomada |
+|---|---|
+| `estado` | volta para `aberto` |
+| `portao` | volta para `null` — o veredito da tentativa anterior não vale para esta |
+| `push_feito` | volta para `false` |
+| `commits` | **preservado. Nunca zere** — é o histórico de execução (ver `01-commits.md`) |
+| `criado_em` | preservado |
+| `desvios` | preservado enquanto continuar verdadeiro |
+| `pr_url`, `pr_estado` | **preservados como estão.** O E0 não verifica e não afirma que aquele PR ainda vale; quem confirma é o E7, que já trata "PR já existe" como retomada. **Nunca abra um segundo PR e nunca recrie a branch** |
+| `branch`, `branch_base` | coerentes com a branch adotada e com a base efetiva do passo 3 |
+| `atualizado_em` | a data de hoje |
+| prosa | acrescente que **esta é uma retomada** — e, quando for o caso, que a tentativa anterior parou no portão |
+
+Nunca apague, na retomada: `commits`, `criado_em`, a prosa que ainda é válida, e os desvios que
+continuam verdadeiros. Recriar o arquivo do zero apagaria o histórico de execução de um trabalho
+que só voltou para o começo da entrega, não para o começo do mundo.
+
+**CASO 3 — o arquivo existe mas declara outra branch.** Não é retomada desta branch. **Pare e
+relate**, sem reescrever nada: ou o `trabalho_id` está sendo reaproveitado por outro trabalho, ou
+alguém trocou a branch por fora — as duas coisas são decisão humana.
 
 **3. Atualize `.expx/estado.json`**, o arquivo que a barra de status lê:
 

@@ -86,6 +86,10 @@ Os dois têm que ser iguais.
 
 Registre no `ENTREGA.md`: `push_feito: true` e `atualizado_em` reescrito.
 
+Aqui `push_feito: true` afirma a verdade **deste estágio**: o que o E6 subiu está sincronizado.
+A palavra final é do E8, que revalida o campo contra `origin/<branch>` depois de publicar o
+registro final — e o grava como `false` se esse commit não chegou ao remoto.
+
 Este não é o último push do fluxo. O E8 ainda grava o estado final da entrega e o fecha num
 commit próprio, publicado **pelo mesmo princípio conservador** deste passo.
 Ver "O fechamento final" em `references/08-registro.md`: é o que garante que a branch publicada
