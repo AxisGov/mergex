@@ -194,7 +194,7 @@ As nove primeiras são automáticas; a décima só roda quando você a chama.
 
 | Etapa | Quando | O que faz |
 |---|---|---|
-| **E0** Abertura | No início do trabalho | Cria a branch antes da primeira linha de código. Árvore suja: para e avisa. Branch que já existe: retoma nela |
+| **E0** Abertura | No início do trabalho | Garante a branch antes da primeira linha de código. Adota a branch e a árvore de trabalho que a skill de origem já abriu; só cria branch quando não existe nenhuma, e aí árvore suja: para e avisa |
 | **E1** Commit por task | A cada task que fecha | Um commit por task, com a intenção na mensagem. Varredura de segredo antes de cada um |
 | **E2** Portão de prontidão | Ao fim da execução | Dez verificações. `PRONTO` ou `BLOQUEADO` com o que falta. Nunca maquia |
 | **E3** Atenção humana | Depois do portão | Classifica o diff nas três faixas, arquivo por arquivo, com a evidência de cada um |

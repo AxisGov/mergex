@@ -99,8 +99,8 @@ entregue_em: 2026-08-29
 | `tipo_ocorrencia` | O tipo da runx; `null` quando `tipo_trabalho: feature` |
 | `estado` | `aberto` no E0; `entregue` quando o fluxo completou; `bloqueado` quando o portão barrou |
 | `versionado` | `false` em repositório sem versionador |
-| `branch`, `branch_base` | `null` quando `versionado: false` |
-| `commits` | Um item por task commitada, na ordem em que fecharam; `[]` sem versionador |
+| `branch`, `branch_base` | `null` quando `versionado: false`. `branch_base` é a **base efetiva** determinada no E0 — inclusive quando informada pelo chamador; é ela que os diffs do E2, do E3 e do E4 usam |
+| `commits` | Um item por **task** commitada, na ordem em que fecharam; `[]` sem versionador. O commit de artefatos de método (`01-commits.md`) não é task e **não entra aqui** — ele vai na prosa |
 | `modulo_afetado` | Os módulos que a entrega toca; copiado da skill de origem quando ela o declara |
 | `arquivos_alterados` | **O diff real** (`git diff --name-only <branch_base>...HEAD`), não a previsão do plano |
 | `faixa_atencao` | A faixa por arquivo do E3, no vocabulário do índice (`alta`/`media`/`baixa`); `[]` antes do E3 |
@@ -119,7 +119,7 @@ Abaixo do frontmatter, use `assets/TEMPLATE-ENTREGA.md`. A prosa é para quem ab
 
 1. **Resumo em uma linha** — o que foi entregue e onde está.
 2. **Onde está o quê** — links relativos para `PR.md`, `QA-PACOTE.md`, `ATENCAO.md` e para a pasta do trabalho de origem.
-3. **Estado da entrega** — portão, push, PR, e o que falta para o merge.
+3. **Estado da entrega** — a branch e **como ela chegou até aqui** (aberta pela mergex, retomada, ou adotada da skill de origem), a base efetiva e de onde ela veio, portão, push, PR, e o que falta para o merge.
 4. **Avisos** — insumos ausentes acumulados pelas etapas: sem raio, sem roteiro manual, sem `DIVIDA.md`, ferramenta de PR ausente. É a lista do que faltou, e é ela que a Parte de entrega apresenta ao usuário.
 5. **Desvios**, se houver — arquivos fora da lista declarada.
 

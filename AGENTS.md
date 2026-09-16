@@ -6,9 +6,9 @@ Este repositório usa a skill **mergex**, em `.claude/skills/mergex/`. Ela cuida
 
 ## Quando acionar a mergex
 
-**Ao começar a implementar um trabalho** — antes da primeira linha de código —, acione a mergex para **abrir a branch** (etapa E0). A branch nasce com o trabalho, não no fim. Sem ela, tudo acontece na branch em que o desenvolvedor estava, normalmente a principal.
+**Ao começar a implementar um trabalho** — antes da primeira linha de código —, acione a mergex para **garantir a branch** (etapa E0). A branch nasce com o trabalho, não no fim. Sem ela, tudo acontece na branch em que o desenvolvedor estava, normalmente a principal. Se a skill de origem já abriu a branch e a árvore de trabalho — a F1 da sprintx abre a feature em `git worktree` próprio —, o E0 **adota** o que existe: não troca de branch, não cria uma segunda e não exige árvore limpa para isso.
 
-**Ao concluir cada task** — com os dois testes escritos, a suíte inteira verde e a task marcada como concluída —, acione a mergex para **commitar aquela task** (etapa E1). Um commit por task, no momento em que ela fecha. Nada é montado no fim.
+**Ao concluir cada task** — com os dois testes escritos, os testes da task passando (`suite: parcial` ou `verde`) e a task marcada como concluída —, acione a mergex para **commitar aquela task** (etapa E1). Um commit por task, no momento em que ela fecha. Nada é montado no fim. A suíte inteira continua sendo cobrada no fechamento da sprint, e o portão (E2) a verifica.
 
 **Ao terminar a implementação**, acione o **fluxo de entrega** (etapas E2 a E8): portão de prontidão, classificação da atenção humana, descrição do pull request, pacote para o QA, push e abertura do PR.
 

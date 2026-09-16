@@ -46,7 +46,9 @@ A `mergex` entra no meio porque o portão dela precisa do veredito do QA — QA 
 
 > ### Abertura do trabalho no repositório
 >
-> Se `.claude/skills/mergex/SKILL.md` existir, acione a **etapa E0 da `mergex`** antes da primeira task, depois de ler o `ORQUESTRADOR.md`. Ela verifica se o repositório é versionado, exige árvore limpa, determina a branch base e cria a branch da ocorrência — `fix/<OC-ID>-<slug>` quando `tipo: bug`, `chore/<OC-ID>-<slug>` nos demais tipos —, retomando a branch se ela já existir.
+> Se `.claude/skills/mergex/SKILL.md` existir, acione a **etapa E0 da `mergex`** antes da primeira task, depois de ler o `ORQUESTRADOR.md`. Ela verifica se o repositório é versionado, determina a branch base e cria a branch da ocorrência — `fix/<OC-ID>-<slug>` quando `tipo: bug`, `chore/<OC-ID>-<slug>` nos demais tipos —, retomando a branch se ela já existir.
+>
+> A exigência de árvore limpa vale quando o E0 precisa **criar ou trocar** de branch, que é o caminho normal da runx. Se a sessão já estiver na branch da ocorrência, ele apenas a adota, sem trocar nada.
 >
 > Se a `mergex` avisar que há alteração não commitada pendente, **pare o E3** e repasse o aviso: não se começa a corrigir por cima de trabalho não salvo de alguém.
 >

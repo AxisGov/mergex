@@ -56,9 +56,9 @@ Como consequência direta dessa última linha, duas coisas são tratadas como pr
 
 O fluxo não é uma máquina de estados sequencial como a da sprintx ou da runx: E0 e E1 acontecem *durante* a execução do trabalho, E2–E8 acontecem no fim, e E9 é manual e avulsa.
 
-**E0 ABERTURA** — no início do trabalho (F6 da sprintx, E3 da runx). Detecta versionamento, exige árvore limpa, determina a branch base, cria a branch do trabalho e registra em `ORQUESTRADOR.md` e em `docs/entregas/<trabalho_id>/ENTREGA.md`. Branch que já existe é retomada, nunca duplicada.
+**E0 ABERTURA** — no início do trabalho (F6 da sprintx, E3 da runx). Detecta versionamento, localiza o trabalho (na sprintx, `docs/sprintx/features/<slug>/`, com `docs/<slug>/` como formato antigo) e determina a branch base — a informada pelo chamador vem antes de qualquer convenção. Quando a skill de origem já abriu a branch e a árvore de trabalho — como a F1 da sprintx faz, em `git worktree` próprio —, o E0 **adota a branch e o worktree** que encontra: não troca de branch e não exige árvore limpa para isso. Só cria branch quando não existe nenhuma, e aí a árvore precisa estar limpa. Registra em `ORQUESTRADOR.md` e em `docs/entregas/<trabalho_id>/ENTREGA.md`. **Nunca duplica a branch de um trabalho.**
 
-**E1 COMMIT POR TASK** — durante a execução. Cada task com os dois testes escritos, suíte inteira verde e `status: concluida` vira um commit próprio, no momento em que fecha. Varredura de segredo antes de cada commit.
+**E1 COMMIT POR TASK** — durante a execução. Cada task com os dois testes escritos, `suite: parcial` ou `verde` e `status: concluida` vira um commit próprio, no momento em que fecha. Os artefatos de método do próprio trabalho vão junto; arquivo de produto fora do plano, nunca. Varredura de segredo antes de cada commit.
 
 **E2 PORTÃO DE PRONTIDÃO** — ao fim da execução, antes de qualquer preparação de entrega. Devolve `PRONTO` ou `BLOQUEADO` com o que falta e onde corrigir. `BLOQUEADO` encerra: a mergex não segue e não maquia.
 
@@ -192,9 +192,11 @@ Regra transversal: use sempre caminhos relativos; nunca escreva caminhos absolut
 
 ## Onde ficam os artefatos da entrega
 
-`docs/entregas/<trabalho_id>/` é sempre ancorado na raiz do repositório mais próxima do diretório de trabalho atual (o diretório que contém `.git/`). Em monorepo sem `.git` visível, suba diretórios até encontrar a raiz; se não houver `.git` em nenhum ancestral, use a raiz do diretório de trabalho. Antes de criar `docs/`, verifique se já existe um na raiz — se existir, use-o.
+`docs/entregas/<trabalho_id>/` é sempre ancorado na raiz que o próprio versionador informa (`git rev-parse --show-toplevel`) — que, dentro de um `git worktree`, é a raiz **daquele worktree**, não a do checkout principal. É lá que o trabalho está acontecendo, e é lá que a entrega é registrada.
 
-O `<trabalho_id>` é o mesmo da skill de origem: o `<slug-da-feature>` da sprintx (`docs/<slug>/`) ou o `<OC-ID>-<slug>` da runx (`docs/manutencao/<OC-ID>-<slug>/`).
+Sem git no caminho, suba diretórios procurando `.git` — **que num worktree é `arquivo`, não diretório**, e uma busca que só aceita diretório passa longe da raiz certa. Se não houver `.git` em nenhum ancestral, use a raiz do diretório de trabalho. Antes de criar `docs/`, verifique se já existe um na raiz — se existir, use-o.
+
+O `<trabalho_id>` é o mesmo da skill de origem: o `<slug-da-feature>` da sprintx (`docs/sprintx/features/<slug>/`, e `docs/<slug>/` nas pastas em formato antigo) ou o `<OC-ID>-<slug>` da runx (`docs/manutencao/<OC-ID>-<slug>/`). A mergex procura o canônico primeiro, usa o antigo como fallback e **nunca move pasta de trabalho**.
 
 ```
 docs/entregas/

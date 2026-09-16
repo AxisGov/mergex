@@ -1,5 +1,5 @@
 ---
-description: Verifica se o trabalho está realmente pronto para entregar — etapa E2 da mergex, o portão de prontidão, isolada. Roda as dez verificações (tasks concluídas, suíte verde, dois testes por task, teste de regressão, QA, auditoria, bloqueios, modo legado, arquivos fora do escopo, segredos no diff) e devolve PRONTO ou BLOQUEADO com o que falta. Use antes de entregar, ao perguntar se está pronto para PR, ou para conferir a entrega.
+description: Verifica se o trabalho está realmente pronto para entregar — etapa E2 da mergex, o portão de prontidão, isolada. Roda as dez verificações (tasks concluídas, registro de suíte por task e suíte inteira no fechamento da sprint, dois testes por task, teste de regressão, QA, auditoria, bloqueios, modo legado, arquivos fora do escopo, segredos no diff) e devolve PRONTO ou BLOQUEADO com o que falta. Use antes de entregar, ao perguntar se está pronto para PR, ou para conferir a entrega.
 ---
 
 Acione a skill `mergex` e execute **apenas a etapa E2 (portão de prontidão)**, seguindo `references/02-prontidao.md`.
@@ -13,7 +13,7 @@ Rode **todas as dez verificações**, mesmo depois de a primeira falhar — o us
 | # | Verificação |
 |---|---|
 | V1 | Task com status diferente de `concluida` |
-| V2 | Task concluída com suíte diferente de verde |
+| V2 | Task concluída sem registro de suíte que a sustente (`parcial` e `verde` valem; `vermelha` e `nao_executada` barram), e a evidência da suíte inteira no fechamento de cada sprint |
 | V3 | Task sem teste de integração ou sem teste funcional |
 | V4 | Bug da runx cuja primeira task não tem teste de regressão |
 | V5 | QA da runx reprovado, ou ausente quando exigido |

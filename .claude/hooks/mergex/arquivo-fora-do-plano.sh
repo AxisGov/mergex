@@ -64,14 +64,49 @@ DECLARADOS="$(
 )"
 [ -n "$DECLARADOS" ] || exit 0
 
-# Artefatos que a própria mergex grava não precisam estar no plano das tasks:
-# eles são a saída da entrega, não o trabalho planejado.
+# Artefatos de MÉTODO não precisam estar no plano das tasks: eles não são
+# produto, são o registro do trabalho. Dois grupos, e nada além deles:
+#
+#   1. o que a própria mergex grava (docs/entregas/, docs/eventos/);
+#   2. a pasta do TRABALHO CORRENTE. Nunca `docs/` inteiro: a pasta de outro
+#      trabalho continua sendo desvio, porque commitá-la aqui esconderia
+#      invasão de escopo.
+#
+# Qual é o trabalho corrente sai de `expx_trabalho_atual_por_branch`: a branch
+# ativa casada com o `branch:` de EXATAMENTE UM `docs/entregas/*/ENTREGA.md`.
+# Não usa `expx_trabalho_id` (o ENTREGA.md mais recente, que é o helper do
+# rastro): numa árvore que acumula entregas de várias features, recência não
+# diz qual trabalho é o de agora, e errar aqui isentaria a pasta errada.
+# Sem trabalho determinado — zero matches, ambiguidade ou HEAD destacado —
+# não há isenção nenhuma: o hook volta a tratar tudo pelo plano das tasks.
+TRABALHO="$(expx_trabalho_atual_por_branch "$RAIZ")" || TRABALHO=""
+
+eh_artefato_de_metodo() {
+  case "$1" in
+    docs/entregas/*|docs/eventos/*) return 0 ;;
+  esac
+  [ -n "$TRABALHO" ] || return 1
+
+  # Uma pasta só por trabalho: a canônica vence, e a legada só vale quando a
+  # canônica não existe — o mesmo desempate do E0 ao localizar o trabalho.
+  if [ -d "$RAIZ/docs/sprintx/features/$TRABALHO" ]; then
+    case "$1" in "docs/sprintx/features/$TRABALHO"/*) return 0 ;; esac
+    return 1
+  fi
+  if [ -d "$RAIZ/docs/manutencao/$TRABALHO" ]; then        # runx
+    case "$1" in "docs/manutencao/$TRABALHO"/*) return 0 ;; esac
+    return 1
+  fi
+  if [ -d "$RAIZ/docs/$TRABALHO" ]; then                   # sprintx, formato antigo
+    case "$1" in "docs/$TRABALHO"/*) return 0 ;; esac
+  fi
+  return 1
+}
+
 FORA=""
 while IFS= read -r arquivo; do
   [ -n "$arquivo" ] || continue
-  case "$arquivo" in
-    docs/entregas/*|docs/eventos/*) continue ;;
-  esac
+  eh_artefato_de_metodo "$arquivo" && continue
   printf '%s\n' "$DECLARADOS" | grep -Fxq "$arquivo" || FORA="$FORA  - $arquivo
 "
 done <<< "$PREP"

@@ -14,11 +14,24 @@ set -uo pipefail   # sem -e: hook de método não pode morrer no meio e travar o
 # Raiz do projeto
 # --------------------------------------------------------------------------
 # O harness entrega o diretório de trabalho no evento; o fallback é o cwd.
-# Sobe até achar .git, como o resto da skill faz para ancorar docs/entregas/.
+#
+# Quem responde primeiro é o próprio versionador: `rev-parse --show-toplevel`
+# acerta em checkout normal, em `git worktree` e em qualquer subdiretório dos
+# dois. É a fonte de verdade, e não custa rede.
+#
+# O fallback (sem git no PATH, ou fora de repositório) sobe procurando `.git`
+# com `[ -e ]`, não `[ -d ]`: num worktree, `.git` é ARQUIVO (contém
+# "gitdir: <principal>/.git/worktrees/<nome>"). Com `[ -d ]`, a busca pulava a
+# raiz do worktree e continuava subindo — de um subdiretório dele, isso
+# devolvia o subdiretório errado. Mesmo achado que a sprintx registrou na
+# DS-106 do repositório dela.
 expx_raiz() {
   local dir="${1:-$PWD}"
-  while [ "$dir" != "/" ]; do
-    if [ -d "$dir/.git" ]; then printf '%s\n' "$dir"; return 0; fi
+  local topo
+  topo="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || topo=""
+  if [ -n "$topo" ]; then printf '%s\n' "$topo"; return 0; fi
+  while [ "$dir" != "/" ] && [ -n "$dir" ]; do
+    if [ -e "$dir/.git" ]; then printf '%s\n' "$dir"; return 0; fi
     dir="$(dirname "$dir")"
   done
   printf '%s\n' "${1:-$PWD}"
@@ -62,6 +75,73 @@ expx_trabalho_id() {
   else
     printf 'sem-trabalho\n'
   fi
+}
+
+# --------------------------------------------------------------------------
+# Trabalho CORRENTE — pela branch ativa
+# --------------------------------------------------------------------------
+# Diferente de expx_trabalho_id (acima), que escolhe o ENTREGA.md mais recente
+# e existe para dar destino ao rastro. Recência não prova nada sobre qual é o
+# trabalho de agora: numa árvore que acumula entregas — docs/entregas/ft-01,
+# ft-02, ft-03 no mesmo checkout —, o arquivo tocado por último pode ser de uma
+# feature encerrada semanas atrás.
+#
+# Aqui a pergunta é outra, e a resposta precisa ser determinística: qual
+# trabalho pertence à ÁRVORE em que este comando está rodando. A única fonte
+# que sabe isso é o versionador, casado com o que a própria entrega declarou.
+#
+# Regra, sem exceção:
+#   1. branch corrente (`git branch --show-current`); vazia ou HEAD destacado
+#      => não determinado;
+#   2. dos `docs/entregas/*/ENTREGA.md`, considera só os que declaram
+#      `branch: <branch corrente>` no frontmatter;
+#   3. trabalho existe SOMENTE com EXATAMENTE UM match;
+#   4. zero, dois ou mais, arquivo ilegível ou qualquer dúvida => não
+#      determinado, e quem chama trata isso de forma conservadora.
+#
+# Nunca por mtime, nunca pelo ENTREGA mais recente, nunca por estado.json,
+# nunca pela pasta da sprintx mais recente, nunca por heurística de slug.
+#
+# Devolve o <trabalho_id> na saída padrão e 0; ou nada e 1.
+expx_frontmatter_valor() {
+  # <arquivo> <chave> — valor da chave no frontmatter YAML de topo, ou vazio.
+  [ -r "$1" ] || return 0
+  awk -v chave="$2" '
+    NR == 1 { if ($0 !~ /^---[[:space:]]*\r?$/) exit; next }
+    /^---[[:space:]]*\r?$/ { exit }
+    {
+      linha = $0
+      gsub(/\r/, "", linha)
+      if (index(linha, chave ":") == 1) {
+        sub(/^[^:]*:[[:space:]]*/, "", linha)
+        gsub(/^["'"'"']|["'"'"']$/, "", linha)
+        gsub(/[[:space:]]+$/, "", linha)
+        print linha
+        exit
+      }
+    }
+  ' "$1" 2>/dev/null
+}
+
+expx_trabalho_atual_por_branch() {
+  local raiz="$1"
+  local branch arq id valor achados=""
+
+  branch="$(git -C "$raiz" branch --show-current 2>/dev/null)" || return 1
+  [ -n "$branch" ] || return 1
+
+  for arq in "$raiz"/docs/entregas/*/ENTREGA.md; do
+    [ -r "$arq" ] || continue
+    valor="$(expx_frontmatter_valor "$arq" branch)"
+    [ -n "$valor" ] && [ "$valor" = "$branch" ] || continue
+    id="$(basename "$(dirname "$arq")")"
+    achados="$achados $id"
+  done
+
+  # Exatamente um. Zero ou vários: não determinado.
+  set -- $achados
+  [ "$#" -eq 1 ] || return 1
+  printf '%s\n' "$1"
 }
 
 expx_rastro() {

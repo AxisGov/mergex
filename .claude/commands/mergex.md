@@ -6,7 +6,7 @@ Acione a skill `mergex` e execute o **fluxo automático completo** a partir do e
 
 Trabalho: $ARGUMENTS
 
-Se nenhum trabalho for informado, descubra qual é inspecionando o disco: a branch ativa, `docs/entregas/`, e as pastas de trabalho da sprintx (`docs/<slug>/`) e da runx (`docs/manutencao/<OC-ID>-<slug>/`). Se houver mais de um trabalho em aberto e não for possível determinar qual, liste os candidatos com o estado de cada um e peça que o usuário escolha.
+Se nenhum trabalho for informado, descubra qual é inspecionando o disco: a branch ativa, `docs/entregas/`, e as pastas de trabalho da sprintx (`docs/sprintx/features/<slug>/`, e `docs/<slug>/` no formato antigo) e da runx (`docs/manutencao/<OC-ID>-<slug>/`). Se houver mais de um trabalho em aberto e não for possível determinar qual, liste os candidatos com o estado de cada um e peça que o usuário escolha. **Nunca mova uma pasta em formato antigo.**
 
 ## O que executar
 
@@ -14,7 +14,7 @@ Descubra em que ponto o trabalho está e siga daí:
 
 | Estado | Rode |
 |---|---|
-| O trabalho vai começar, sem branch própria | **E0** (`references/00-abertura.md`) e devolva o controle para a skill de origem executar as tasks |
+| O trabalho vai começar | **E0** (`references/00-abertura.md`) — adota a branch e o worktree que a skill de origem já abriu, ou cria a branch quando não existe nenhuma — e devolva o controle para a skill de origem executar as tasks |
 | Há task concluída sem commit | **E1** (`references/01-commits.md`) para cada uma, na ordem em que fecharam |
 | A execução terminou | **E2 → E8**, nesta ordem |
 

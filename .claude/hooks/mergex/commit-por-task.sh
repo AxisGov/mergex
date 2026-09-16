@@ -2,7 +2,13 @@
 # commit-por-task — PreToolUse em execução de comando.
 #
 # Verifica que o que está sendo commitado corresponde aos arquivos de UMA
-# task, e que essa task está `concluida` com `suite: verde`.
+# task, e que essa task está `concluida` com registro de suíte válido.
+#
+# `suite` da task: `parcial` (o subconjunto afetado pela task passou) e `verde`
+# (a suíte inteira passou) são os dois registros válidos do expx-schema; a
+# sprintx cobra a suíte INTEIRA no fechamento da sprint, não em cada task.
+# `vermelha` e `nao_executada` continuam barrando: commit sobre teste que não
+# passa põe no histórico um ponto em que quem bisecar depois cai.
 #
 # É a regra que sustenta a qualidade do histórico — que, como a mergex não
 # previne colisão, é o principal ativo de quem for resolver um conflito depois.
@@ -152,7 +158,7 @@ O que fazer:
 fi
 
 # --------------------------------------------------------------------------
-# 2. Task não concluída ou com suíte não verde
+# 2. Task não concluída, ou com registro de suíte que não sustenta um commit
 # --------------------------------------------------------------------------
 for id in $TASKS_TOCADAS; do
   linha="$(grep -F "$id	" "$TMP" | head -1)" || continue
@@ -166,28 +172,37 @@ for id in $TASKS_TOCADAS; do
 Task:   $id
 Status: $status
 
-O commit acontece quando a task fecha: os dois testes escritos, a suíte inteira
-verde, e a task marcada 'concluida' em tasks.md. Antes disso, não commita.
+O commit acontece quando a task fecha: os dois testes escritos, os testes
+afetados pela task passando, e a task marcada 'concluida' em tasks.md. Antes
+disso, não commita.
 
 O que fazer:
-  - Termine a task, rode a suíte inteira, marque 'status: concluida' e
-    'suite: verde' no tasks.md — no frontmatter e na prosa — e commite então."
+  - Termine a task, rode os testes afetados, marque 'status: concluida' e
+    'suite: parcial' (ou 'verde') no tasks.md — no frontmatter e na prosa — e
+    commite então."
   fi
 
-  if [ -n "$suite" ] && [ "$suite" != "verde" ]; then
+  case "${suite:-}" in
+    ''|parcial|verde) ;;
+    *)
     expx_barra "$MODO" "$RAIZ" "$HOOK" "task $id com suite $suite" \
-"mergex/commit-por-task — suíte não está verde
+"mergex/commit-por-task — a task fechou sem teste passando
 
 Task:  $id
 Suíte: $suite
 
-Commit com suíte vermelha põe no histórico um ponto que não compila ou não
-passa. Quem bisecar esse histórico depois cai justamente aí.
+Commit com suíte vermelha, ou sem teste executado, põe no histórico um ponto
+que não passa. Quem bisecar esse histórico depois cai justamente aí.
+
+Registros válidos numa task concluída:
+  parcial — os testes afetados pela task passaram (a suíte inteira é cobrada
+            no fechamento da sprint)
+  verde   — a suíte inteira passou
 
 O que fazer:
-  - Faça a suíte inteira passar — não só os testes novos.
-  - Atualize 'suite: verde' no tasks.md e commite."
-  fi
+  - Faça os testes da task passarem e atualize 'suite' no tasks.md."
+    ;;
+  esac
 done
 
 # --------------------------------------------------------------------------
@@ -199,4 +214,4 @@ if [ "${QTD_TASKS:-0}" = "0" ] && [ -n "$SEM_TASK" ]; then
   exit 0
 fi
 
-expx_permite "$RAIZ" "$HOOK" "commit de uma task concluida com suite verde"
+expx_permite "$RAIZ" "$HOOK" "commit de uma task concluida com suite valida"

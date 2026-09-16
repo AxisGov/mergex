@@ -9,10 +9,28 @@
 
 set -uo pipefail
 H="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OK=0; FALHOU=0
+OK=0; FALHOU=0; PULADOS=0
+
+# Os hooks leem o evento do harness com jq. Sem jq, todo hook sai cedo e por
+# 0 — o que faria a suite reportar "passou" onde nao verificou nada. Entao os
+# casos que dependem de jq sao PULADOS, e ficam visiveis como tal.
+# Em CI isso nunca vale: la a ausencia de jq e falha de ambiente, e a suite
+# inteira precisa rodar (o workflow instala jq antes).
+SEM_JQ=0
+if ! command -v jq >/dev/null 2>&1; then
+  if [ -n "${CI:-}" ]; then
+    printf 'jq ausente no ambiente de CI: os hooks dependem dele. Abortando.\n' >&2
+    exit 1
+  fi
+  SEM_JQ=1
+  printf 'AVISO: jq ausente nesta maquina. Casos que dependem de jq serao PULADOS.\n'
+  printf '       Rode em Linux/CI (ou em container) para cobri-los.\n\n'
+fi
 
 RAIZ_T="$(mktemp -d)"
-trap 'rm -rf "$RAIZ_T"' EXIT
+WT_T="${RAIZ_T}--wt"        # worktree derivado: .git e ARQUIVO, nao diretorio
+SEMGIT_T="$(mktemp -d)"
+trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T"' EXIT
 
 cd "$RAIZ_T" || exit 1
 git init -q -b main . 2>/dev/null
@@ -53,6 +71,9 @@ git add -A && git commit -qm "plano e fontes"
 caso() {
   local desc="$1" script="$2" json="$3" esperado="$4"
   local obtido
+  if [ "$SEM_JQ" = "1" ]; then
+    PULADOS=$((PULADOS+1)); printf '  pulado %s (sem jq)\n' "$desc"; return 0
+  fi
   printf '%s' "$json" | bash "$H/$script" >/dev/null 2>&1
   obtido=$?
   if [ "$obtido" = "$esperado" ]; then
@@ -168,6 +189,174 @@ caso "build nao e push"         mergex/pr-so-com-portao.sh "$(bash_json 'npm run
 rm -f .expx/hooks.json
 
 echo
+echo "expx_raiz — raiz do repositorio, inclusive em worktree"
+# A raiz ancora docs/entregas/ e docs/eventos/. Num `git worktree`, `.git` e
+# ARQUIVO ("gitdir: ..."), nao diretorio: uma busca por [ -d ] sobe demais e
+# devolve a raiz errada — o mesmo achado que a sprintx registrou na DS-106.
+# shellcheck source=comum/base.sh
+. "$H/comum/base.sh"
+git -C "$RAIZ_T" worktree add -q -b wt-teste "$WT_T" main >/dev/null 2>&1
+mkdir -p "$WT_T/sub" "$RAIZ_T/src/sub"
+
+# Normaliza os dois lados: em Git Bash, `git rev-parse --show-toplevel` devolve
+# caminho no estilo do sistema, e a comparacao crua daria falso negativo.
+norm() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
+valor() {
+  local desc="$1" obtido="$2" esperado="$3"
+  if [ "$obtido" = "$esperado" ]; then
+    OK=$((OK+1)); printf '  ok    %s\n' "$desc"
+  else
+    FALHOU=$((FALHOU+1)); printf '  FALHA %s (esperava %s, obteve %s)\n' "$desc" "$esperado" "$obtido"
+  fi
+}
+
+valor "checkout normal"            "$(norm "$(expx_raiz "$RAIZ_T")")"         "$(norm "$RAIZ_T")"
+valor "subdiretorio do checkout"   "$(norm "$(expx_raiz "$RAIZ_T/src/sub")")" "$(norm "$RAIZ_T")"
+valor "worktree (.git arquivo)"    "$(norm "$(expx_raiz "$WT_T")")"           "$(norm "$WT_T")"
+valor "subdiretorio do worktree"   "$(norm "$(expx_raiz "$WT_T/sub")")"       "$(norm "$WT_T")"
+valor "fora de repositorio"        "$(norm "$(expx_raiz "$SEMGIT_T")")"       "$(norm "$SEMGIT_T")"
+
+echo
+echo "semantica de suite por task (sprintx: parcial na task, inteira ao fechar a sprint)"
+mkdir -p docs/sprintx/features/exportacao-csv/sprint-01 docs/entregas/exportacao-csv
+cat > docs/sprintx/features/exportacao-csv/sprint-01/tasks.md <<'YAML'
+---
+expx_schema: 1
+kind: tasks
+tasks:
+  - id: T-02.01
+    titulo: Task fechada com o subconjunto afetado
+    status: concluida
+    arquivos:
+      cria: [src/p.ts]
+      altera: []
+    suite: parcial
+  - id: T-02.02
+    titulo: Task fechada com suite vermelha
+    status: concluida
+    arquivos:
+      cria: [src/v.ts]
+      altera: []
+    suite: vermelha
+  - id: T-02.03
+    titulo: Task fechada sem rodar teste
+    status: concluida
+    arquivos:
+      cria: [src/n.ts]
+      altera: []
+    suite: nao_executada
+---
+YAML
+# O ENTREGA.md mais recente e o que identifica o trabalho corrente (expx_trabalho_id).
+printf 'portao: null\n' > docs/entregas/exportacao-csv/ENTREGA.md
+touch src/p.ts src/v.ts src/n.ts
+git add -A >/dev/null 2>&1 && git commit -qm "plano da segunda feature"
+
+mkdir -p .expx
+echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"bloqueio"},"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
+
+git reset -q; echo p >> src/p.ts; git add src/p.ts
+caso "suite parcial e registro valido" mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 0
+git reset -q; echo v >> src/v.ts; git add src/v.ts
+caso "suite vermelha barra"            mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 2
+git reset -q; echo n >> src/n.ts; git add src/n.ts
+caso "suite nao_executada barra"       mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 2
+
+echo
+echo "artefato de metodo: o trabalho corrente sai da BRANCH, nunca da recencia"
+# Numa arvore integrada (varias features ja entregues no mesmo checkout),
+# docs/entregas/ tem uma pasta por trabalho. Qual delas e o trabalho de AGORA
+# nao se decide por mtime: decide-se pela branch ativa casada com o `branch:`
+# do frontmatter de EXATAMENTE UM ENTREGA.md. Zero, dois ou mais, ou HEAD
+# destacado: nenhuma isencao (conservador).
+entrega() { # entrega <trabalho_id> <branch>
+  mkdir -p "docs/entregas/$1"
+  printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: %s\nentregue_por: mergex\nbranch: %s\nbranch_base: main\n---\n\n# Entrega\n' \
+    "$1" "$2" > "docs/entregas/$1/ENTREGA.md"
+}
+
+mkdir -p docs/sprintx/features/ft-01 docs/sprintx/features/ft-02 docs/ft-legado
+printf 'b\n' > docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+printf 'b\n' > docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+printf 'b\n' > docs/ft-legado/00-BLOQUEIOS.md
+git add -A >/dev/null 2>&1 && git commit -qm "features ja integradas na arvore"
+
+git switch -q -c feature/ft-02
+mkdir -p .expx
+echo '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
+
+# A — uma ENTREGA, declarando a branch atual
+entrega ft-02 feature/ft-02
+git reset -q; printf 'novo\n' >> docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+git add -f docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+caso "A: ENTREGA da branch atual isenta a pasta dela" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+
+# B — FT-01 passa a ser a ENTREGA mais recente; a branch atual continua sendo FT-02
+entrega ft-01 feature/ft-01
+caso "B: ENTREGA mais recente nao rouba o trabalho atual" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+
+# C — a pasta da ENTREGA mais recente NAO e isenta: recencia nao decide nada
+git reset -q; printf 'novo\n' >> docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+git add -f docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+caso "C: pasta da ENTREGA mais recente nao e isenta" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+
+# D — duas ENTREGA declarando a MESMA branch atual: ambiguo
+entrega ft-03 feature/ft-02
+git reset -q; printf 'novo\n' >> docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+git add -f docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+caso "D: duas ENTREGA na mesma branch => sem isencao" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+rm -rf docs/entregas/ft-03
+
+# E — nenhuma ENTREGA declara a branch atual
+git switch -q -c feature/sem-entrega
+caso "E: nenhuma ENTREGA para a branch => sem isencao" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+
+# F — HEAD destacado: nao ha branch para casar
+git switch -q feature/ft-02
+git checkout -q --detach
+caso "F: detached HEAD => sem isencao" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+git switch -q feature/ft-02
+
+# I — pasta legada do trabalho certo, quando nao existe a canonica
+entrega ft-legado feature/ft-legado
+git switch -q -c feature/ft-legado
+git reset -q; printf 'novo\n' >> docs/ft-legado/00-BLOQUEIOS.md
+git add -f docs/ft-legado/00-BLOQUEIOS.md
+caso "I: pasta legada do trabalho certo e isenta" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+
+# G — pasta de OUTRO trabalho continua sendo desvio
+git reset -q; printf 'novo\n' >> docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+git add -f docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+caso "G: pasta de outro trabalho e desvio" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+
+# H — arquivo de produto fora do plano continua sendo desvio
+git switch -q feature/ft-02
+git reset -q; printf 'produto nao planejado\n' > src/fora/surpresa2.ts
+git add -f src/fora/surpresa2.ts
+caso "H: produto fora do plano e desvio" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+
+git reset -q; rm -f .expx/hooks.json; git switch -q main
+
+echo
+echo "runx — a estrutura da runx nao regride"
+# Mesma regra de trabalho corrente, outro formato de caminho: a pasta da
+# ocorrencia em curso e isenta; a de outro trabalho continua sendo desvio.
+mkdir -p docs/manutencao/OC-2026-0001-erro
+printf 'b\n' > docs/manutencao/OC-2026-0001-erro/BLOQUEIOS.md
+git add -A >/dev/null 2>&1 && git commit -qm "ocorrencia da runx"
+git switch -q -c fix/OC-2026-0001-erro
+mkdir -p .expx
+echo '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
+entrega OC-2026-0001-erro fix/OC-2026-0001-erro
+git reset -q; printf 'novo\n' >> docs/manutencao/OC-2026-0001-erro/BLOQUEIOS.md
+git add -f docs/manutencao/OC-2026-0001-erro/BLOQUEIOS.md
+caso "runx: pasta da ocorrencia corrente e isenta" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+git reset -q; printf 'novo\n' >> docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+git add -f docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+caso "runx: pasta de outro trabalho e desvio"     mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+git reset -q; rm -f .expx/hooks.json; git switch -q main
+
+echo
 echo "falha aberta — hook de metodo com insumo corrompido nao pode travar"
 printf 'lixo \x00 nao-yaml' > docs/trab/tasks.md
 git add src/a.ts
@@ -176,5 +365,6 @@ caso "tasks.md corrompido (escopo)" mergex/arquivo-fora-do-plano.sh "$(bash_json
 
 echo
 echo "---------------------------------------------"
-printf '%d ok, %d falha(s)\n' "$OK" "$FALHOU"
+printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADOS"
+[ "$PULADOS" = "0" ] || printf 'ATENCAO: %d caso(s) nao foram verificados nesta maquina.\n' "$PULADOS"
 [ "$FALHOU" = "0" ]

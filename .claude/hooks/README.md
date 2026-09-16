@@ -20,8 +20,8 @@ importam mais, e onde um hook mal escrito faz mais estrago.
 | `sem-segredo` | `PreToolUse` | **bloqueio** | Barra commit e escrita com segredo, credencial ou dado real de cliente |
 | `git-perigoso` | `PreToolUse` | **bloqueio** | Barra push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva |
 | `branch-limpa` | `PreToolUse` | **bloqueio** | Barra criação ou troca de branch com alteração não commitada pendente |
-| `commit-por-task` | `PreToolUse` | aviso | Verifica que o commit corresponde a **uma** task, `concluida` e com `suite: verde` |
-| `arquivo-fora-do-plano` | `PreToolUse` | aviso | Compara o que está em preparação com a lista declarada na task |
+| `commit-por-task` | `PreToolUse` | aviso | Verifica que o commit corresponde a **uma** task, `concluida` e com registro de suíte válido (`parcial` ou `verde`) |
+| `arquivo-fora-do-plano` | `PreToolUse` | aviso | Compara o que está em preparação com a lista declarada na task. Artefato de método do **próprio** trabalho é isento; o de outro trabalho, não |
 | `pr-so-com-portao` | `PreToolUse` | aviso | Barra push e abertura de PR sem `PRONTO` registrado no rastro |
 
 Os três de segurança nascem em bloqueio: segredo commitado não tem volta, e o

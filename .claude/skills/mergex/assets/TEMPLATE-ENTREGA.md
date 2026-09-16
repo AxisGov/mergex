@@ -65,8 +65,11 @@ entregue_em: {{AAAA-MM-DD | null}}
 
 ## Estado da entrega
 
+- Branch: {{nome}} — {{aberta pela mergex | retomada | adotada da skill de origem}}
+- Base: {{branch_base}} — {{informada pelo chamador | CONVENCOES.md | origin/HEAD | principal atual}}
 - Portão de prontidão: {{PRONTO | BLOQUEADO}}
 - Commits: {{n}}, um por task
+- Commit de artefatos de método: {{identificador curto | não feito}}
 - Atenção humana: {{x}} olho obrigatório, {{y}} leitura rápida, {{z}} dispensável
 - Push: {{feito | não feito — motivo}}
 - Pull request: {{estado}}

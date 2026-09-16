@@ -15,10 +15,12 @@ A mensagem de commit é o **principal ativo de quem for resolver um conflito dep
 Commite **exatamente quando** as três condições forem verdade ao mesmo tempo:
 
 1. Os **dois testes da task** estão escritos (`teste_integracao` e `teste_funcional`) — mais o `teste_regressao`, quando é a primeira task de um `bug` da runx.
-2. A **suíte inteira** rodou e está **verde** — não um subconjunto, não só os testes novos.
+2. **Suíte da task: `parcial` ou `verde`.** São os dois registros que sustentam um commit. `parcial` é o subconjunto afetado pela task passando — é assim que a sprintx fecha task, e a suíte inteira é cobrada uma vez, ao fechar a sprint. `verde` é a suíte inteira passando.
 3. A task foi marcada `status: concluida` em `tasks.md`, no frontmatter e na prosa.
 
-**Antes disso, não commita.** Suíte vermelha, task `em_andamento`, task `bloqueada`, teste faltando: nenhum commit. Essa é a mesma disciplina que o portão de prontidão (E2) vai cobrar depois — só que aqui ela impede o problema de entrar no histórico.
+**Antes disso, não commita.** `suite: vermelha`, `suite: nao_executada`, task `em_andamento`, task `bloqueada`, teste faltando: nenhum commit. Essa é a mesma disciplina que o portão de prontidão (E2) vai cobrar depois — só que aqui ela impede o problema de entrar no histórico.
+
+**O que não muda:** os **dois testes da task continuam obrigatórios**, e `parcial` significa "o que era desta task passou", nunca "passou mais ou menos". A mergex não afrouxa TDD: ela apenas para de exigir, a cada task, uma execução de suíte inteira que a skill de origem cobra no fechamento da sprint — e que o portão (E2, V2) continua verificando.
 
 Um commit por task. **Nunca amontoar tasks distintas** no mesmo commit (regra 3), nem dividir uma task em vários commits temáticos.
 
@@ -40,7 +42,50 @@ git status --porcelain
 | Arquivo declarado não mudou | Não entra; não é erro (pode ter sido feito em task anterior) |
 | Arquivo mudou e **não** está declarado | **Não entra.** Registre o desvio e siga |
 
-Arquivo alterado fora da lista é um desvio de escopo. Não o commite e não o apague: deixe-o na árvore, registre a ocorrência em `docs/entregas/<trabalho_id>/ENTREGA.md` na lista `desvios`, e siga para a próxima task. O E2 vai barrar a entrega por isso, com o arquivo nomeado — e é assim que tem que ser: quem decide o que fazer com aquele arquivo é a pessoa.
+Arquivo de **produto** alterado fora da lista declarada **continua sendo desvio** de escopo. Não o commite e não o apague: deixe-o na árvore, registre a ocorrência em `docs/entregas/<trabalho_id>/ENTREGA.md` na lista `desvios`, e siga para a próxima task. O E2 vai barrar a entrega por isso, com o arquivo nomeado — e é assim que tem que ser: quem decide o que fazer com aquele arquivo é a pessoa.
+
+### Artefatos de método do próprio trabalho
+
+Nem tudo que muda durante o trabalho é produto. A skill de origem grava o plano, as decisões, os bloqueios e o fechamento; a mergex grava a entrega. Esses **artefatos de método do próprio trabalho** não estão na lista de nenhuma task porque não são trabalho planejado — são o registro dele:
+
+| Pasta | De quem |
+|---|---|
+| `docs/sprintx/features/<trabalho_id>/` | sprintx (canônico) |
+| `docs/<trabalho_id>/` | sprintx (formato antigo) |
+| `docs/manutencao/<trabalho_id>/` | runx |
+| `docs/entregas/<trabalho_id>/` | mergex |
+
+**Qual é o trabalho deste commit.** O da **branch ativa**: vale a pasta do trabalho cujo `docs/entregas/<trabalho_id>/ENTREGA.md` declara `branch:` igual à branch corrente, e **exatamente um** `ENTREGA.md` pode declará-la. Zero, dois ou mais, ou HEAD destacado: **nenhuma isenção** — o que não estiver declarado em task volta a ser desvio, que é o comportamento conservador.
+
+A identificação é pela branch e **nunca por recência**. Numa árvore que acumula entregas — `docs/entregas/ft-01/`, `ft-02/`, `ft-03/` no mesmo checkout —, o `ENTREGA.md` tocado por último pode ser de uma feature encerrada semanas atrás; isentar a pasta dele deixaria passar exatamente a invasão de escopo que esta verificação existe para pegar.
+
+Entre a pasta canônica e a legada do mesmo trabalho, **a canônica vence**: quando `docs/sprintx/features/<trabalho_id>/` existe, é ela a pasta do trabalho, e a legada não é isenta. É o mesmo desempate que o E0 usa para localizar o trabalho.
+
+Eles **entram no commit** e **nunca contam como desvio**. Três limites, e nenhum é flexível:
+
+- **Só a pasta deste trabalho.** `docs/` inteiro não é isento: a pasta de **outro** trabalho continua sendo desvio — é assim que se percebe uma feature que invadiu o território de outra.
+- **A varredura de segredo (passo 2) roda sobre eles igual.** Plano e decisão também carregam credencial por acidente.
+- **Continuam entrando por caminho explícito**, nunca com `git add .`.
+
+### Quando os artefatos de método entram
+
+Dois momentos, e só esses dois:
+
+**1. No commit da task que fechou.** Junto dos arquivos de produto declarados entram os artefatos de método deste trabalho que estiverem sujos naquele momento — a começar pelo `tasks.md` que acabou de marcar a task como `concluida`. No **primeiro** commit do trabalho, é isso que leva ao histórico o que a F1 a F5 produziram (base, decisões, plano, orquestrador, auditoria) e que até ali existia só na árvore — inclusive quando a árvore é um `git worktree` que será removido depois.
+
+**2. Num commit de artefatos de método, imediatamente antes do push (E6).** O fim do trabalho produz o que nenhuma task fecha: o `FECHAMENTO.md` da sprintx e os artefatos da entrega (`ENTREGA.md`, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md`). Um commit só, no formato do passo 3:
+
+```
+chore(entrega): registrar artefatos do trabalho <trabalho_id>
+
+Artefatos de metodo do trabalho; nenhuma alteracao de produto.
+
+Trabalho: <trabalho_id>
+```
+
+**Commit de artefatos de método não é task**: ele **não entra na lista `commits`** do `ENTREGA.md` — ela é de task, uma por task —, e é registrado na prosa do `ENTREGA.md`.
+
+Isto **não é uma etapa nova**: é o E1, no formato que ele já usa, chamado num segundo momento. O E8 reescreve o `ENTREGA.md` depois do push (E6) e da abertura do PR (E7); essa última atualização fica no disco e entra no próximo commit de artefatos. É uma defasagem declarada, não uma falha: ela nunca impede o portão, o push nem o PR.
 
 Adicione **por caminho explícito**, nunca em bloco:
 
@@ -192,7 +237,7 @@ Por task:
 
 | Situação | O que fazer |
 |---|---|
-| Suíte vermelha | Não commita. A task não está concluída — o E2 vai barrá-la nomeando-a |
+| `suite: vermelha` ou `nao_executada` | Não commita. A task não fechou de verdade — o E2 vai barrá-la nomeando-a |
 | Task sem os dois testes | Não commita. O E2 vai barrá-la |
 | Arquivo fora da lista declarada | Não entra no commit; registra em `desvios`; o E2 barra |
 | Segredo detectado | Aborta o commit, desfaz o staging, avisa com o valor mascarado |

@@ -10,6 +10,7 @@ A saída é binária: `PRONTO` ou `BLOQUEADO`.
 
 - `docs/entregas/<trabalho_id>/ENTREGA.md` existe (o E0 rodou). Se não existir, rode o E0 primeiro (`references/00-abertura.md`) — a branch pode não ter nascido, e o portão precisa saber o que foi commitado.
 - O `ORQUESTRADOR.md` e o `tasks.md` do trabalho existem. Sem eles não há o que verificar: relate que o trabalho não está planejado e encerre `BLOQUEADO`.
+- A pasta do trabalho é a **mesma** que o E0 encontrou: na sprintx, `docs/sprintx/features/<slug>/` (canônico) e, só quando ele não existe, `docs/<slug>/` (formato antigo); na runx, `docs/manutencao/<OC-ID>-<slug>/`. Nunca misture as duas pastas da sprintx na mesma verificação.
 
 ## As dez verificações
 
@@ -21,11 +22,30 @@ Leia o frontmatter de todo `tasks.md` do trabalho. Toda task tem que estar `conc
 
 Falha: qualquer task em `pendente`, `em_andamento` ou `bloqueada`. Nomeie cada uma (id e título) e o status atual. Task `bloqueada` aponta o `B-NN` correspondente em `BLOQUEIOS.md`.
 
-### V2 — Task concluída com suíte diferente de verde
+### V2 — Task concluída sem registro de suíte que a sustente
 
-Para cada task `concluida`, o campo `suite` tem que ser `verde`.
+Para cada task `concluida`, leia o campo `suite`:
 
-Falha: `vermelha` ou `nao_executada`. Nomeie a task. `nao_executada` com status `concluida` é uma inconsistência do registro e barra igual.
+| Valor | Resultado |
+|---|---|
+| `parcial` | OK — os testes afetados pela task passaram |
+| `verde` | OK — a suíte inteira passou |
+| `vermelha` | **FALHA** |
+| `nao_executada` | **FALHA** — `concluida` sem teste executado é inconsistência do registro |
+
+`parcial` e `verde` são registros válidos, e é assim que a skill de origem trabalha: na task roda o subconjunto afetado, e a suíte inteira é cobrada uma vez, ao fechar a sprint. Reprovar `parcial` aqui obrigaria a skill de origem a escrever `verde` onde ela não rodou a suíte inteira — o portão passaria a premiar registro falso, que é o oposto do que ele existe para fazer.
+
+`vermelha` e `nao_executada` são FALHA. Nomeie a task.
+
+**O trabalho inteiro continua precisando da suíte inteira.** Além do registro por task, procure a **evidência da suíte inteira no fechamento de cada sprint**, onde a skill de origem a registra — na sprintx, o fechamento da sprint (`sprint-NN/sprint.md` e o relatório da F6), com a saída da execução colada.
+
+| Estado | Resultado |
+|---|---|
+| Sprint concluída com a execução registrada e verde | OK |
+| Sprint concluída com execução registrada vermelha | **FALHA** — nomeie a sprint |
+| Sprint concluída sem nenhum registro de execução | **AVISO**, nomeando a sprint e onde ele deveria estar |
+
+**Nunca reescreva tasks `parcial` para `verde`** para satisfazer esta verificação, e nunca invente a evidência: o que falta nesses casos é a execução, não o registro.
 
 ### V3 — Task sem teste de integração ou sem teste funcional
 
@@ -55,7 +75,7 @@ Trabalho da sprintx: `n/a` — a sprintx não tem estágio de QA equivalente; o 
 
 ### V6 — Auditoria da sprintx reprovada
 
-Aplica-se só a trabalhos da sprintx. Leia `docs/<slug>/00-AUDITORIA.md`.
+Aplica-se só a trabalhos da sprintx. Leia o `00-AUDITORIA.md` na pasta do trabalho, na mesma ordem do E0: `docs/sprintx/features/<slug>/00-AUDITORIA.md` (canônico) e, só se ele não existir, `docs/<slug>/00-AUDITORIA.md` (formato antigo).
 
 Falha: o arquivo existe e **não** contém `VEREDITO: SIM`, ou existe achado de severidade ALTA em aberto. Auditoria reprovada na F5 faz o portão barrar.
 
@@ -63,7 +83,7 @@ Arquivo ausente: aviso, não bloqueio — a execução pode ter vindo de um flux
 
 ### V7 — Bloqueio aberto que afeta o escopo entregue
 
-Leia `BLOQUEIOS.md` (runx) ou `00-BLOQUEIOS.md` (sprintx).
+Leia os bloqueios na pasta do trabalho: `docs/sprintx/features/<slug>/00-BLOQUEIOS.md` (canônico) ou `docs/<slug>/00-BLOQUEIOS.md` (formato antigo) na sprintx; `BLOQUEIOS.md` na runx.
 
 Falha: bloqueio com `resolvido_em: null` cuja `task` está dentro do escopo entregue. Nomeie o `B-NN`, a task e a descrição.
 
@@ -91,9 +111,11 @@ Compare o conjunto de arquivos tocados pelos commits do trabalho com a união do
 git diff --name-only <branch-base>...HEAD
 ```
 
-Falha: arquivo no diff que não está declarado em nenhuma task. Nomeie cada um. Some a isso os `desvios` já registrados pelo E1.
+Falha: arquivo de produto no diff que não está declarado em nenhuma task. Nomeie cada um. Some a isso os `desvios` já registrados pelo E1.
 
 Arquivo declarado que não aparece no diff **não** é falha: pode ter sido criado e revertido dentro do escopo, ou já existir como estava.
+
+**Os artefatos de método do próprio trabalho não são desvio** e não entram nesta conta: a pasta do trabalho (`docs/sprintx/features/<trabalho_id>/`, `docs/<trabalho_id>/` no formato antigo, `docs/manutencao/<trabalho_id>/` na runx) e `docs/entregas/<trabalho_id>/`. Eles são o registro do trabalho, não produto, e é o E1 que os commita (`01-commits.md`). A pasta de **outro** trabalho continua sendo desvio, e nomeá-la aqui é justamente como se percebe escopo invadido.
 
 ### V10 — Segredo, credencial ou dado real de cliente no diff
 
@@ -134,7 +156,7 @@ Depois, a tabela das dez verificações, todas as linhas, sempre:
 | # | Verificação | Resultado |
 |---|---|---|
 | V1 | Tasks concluídas | OK |
-| V2 | Suíte verde por task | FALHA |
+| V2 | Registro de suíte por task | FALHA |
 ...
 ```
 
@@ -143,7 +165,7 @@ Resultado por verificação: `OK`, `FALHA`, `AVISO` ou `n/a`.
 E, para cada `FALHA`, um bloco com **o que falta e onde corrigir**:
 
 ```
-V2 — FALHA: suíte não verde
+V2 — FALHA: task fechada sem teste passando
   T-01.03 "Recalcular o rateio por item" — suite: vermelha
   Onde corrigir: docs/manutencao/<OC-ID>-<slug>/sprint-01/tasks.md
   O que fazer: voltar ao E3 da runx, fazer a suíte passar, remarcar a task
