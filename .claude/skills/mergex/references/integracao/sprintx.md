@@ -59,6 +59,8 @@ Task marcada `bloqueada` não gera commit. O E2 vai barrá-la depois — o que e
 
 Os **artefatos de método do próprio trabalho** — a pasta `docs/sprintx/features/<slug>/` (ou a legada `docs/<slug>/`) e `docs/entregas/<slug>/` — entram nos commits do E1 e nunca contam como desvio de escopo. É o que leva ao histórico o plano, as decisões e o `FECHAMENTO.md`, inclusive quando o worktree da feature for removido depois. O contrato está em `references/01-commits.md`.
 
+**E o E8 fecha commitando o registro final da entrega**, com o estado que só existe depois do push e do PR. É o que permite remover o worktree da feature — ou integrar a branch por fast-forward — sem perder o estado final: quem integra, integra commits (`references/08-registro.md`).
+
 ### E2 a E8 — ao fim da F6
 
 Rodam quando a F6 termina: todas as tasks executadas, ou nada mais executável.

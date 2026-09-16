@@ -99,6 +99,10 @@ Como `null` é o valor que o campo já tem desde o E0, na prática **não há o 
 
 Sucesso: grave no `ENTREGA.md` a `pr_url` devolvida pelo comando e `pr_estado` (`rascunho` ou `aberto`). Reescreva `atualizado_em`.
 
+Essa gravação fica na árvore de trabalho: quem a leva ao histórico, junto com o estado final da
+entrega, é o fechamento final do E8 (`references/08-registro.md`). O E7 não commita e não faz
+push.
+
 ### Atualize `.expx/estado.json`
 
 Só quando o PR foi de fato aberto (passo 2). Grave **um campo**:

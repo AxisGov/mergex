@@ -164,6 +164,137 @@ sessão. Disparar aqui não é duplicação inútil: a reconstrução é idempot
 milissegundos, e a entrega pode fechar muito antes de a sessão acabar — inclusive numa sessão
 que nunca chega ao `Stop`.
 
+## O fechamento final — a entrega precisa sobreviver ao worktree
+
+O `ENTREGA.md` que você acabou de gravar só serve a quem vem depois se estiver **no histórico**.
+Quem integra a branch — a buildx num fast-forward, o E9, uma pessoa — integra **commits**, nunca
+a árvore de trabalho. Registro final que fica só no disco não chega à integração e desaparece
+junto com o `git worktree` quando a skill de origem o remove.
+
+Por isso o E8 fecha com um passo explícito de persistência. Ele é o **segundo e último** commit
+de artefatos de método do trabalho — o primeiro é o de antes do push (`01-commits.md`) — e
+**não é task**.
+
+### Passo 1 — Separar o que ainda está sujo
+
+```
+git status --porcelain
+```
+
+| O que é | O que fazer |
+|---|---|
+| Artefato de método **deste** trabalho: `docs/entregas/<trabalho_id>/` e a pasta do trabalho na skill de origem | **Entra** no commit final |
+| Arquivo de **produto** fora da lista declarada | **Não entra.** Continua sendo desvio (regra 4, `01-commits.md`); nomeie no relatório |
+| Artefato de **outro** trabalho | **Não entra.** É desvio pelo mesmo critério |
+| Derivado e não versionado: `docs/eventos/<trabalho_id>.jsonl`, `.expx/estado.json`, índice do memox | **Não entra.** Não é artefato da entrega |
+
+Depois do E6 e do E7, o que costuma estar sujo é **um arquivo só**: o próprio `ENTREGA.md` — o
+E7 gravou `pr_url` e `pr_estado`, e o E8 acabou de gravar `estado`, `portao`, `push_feito`,
+`entregue_em`, `atualizado_em` e a prosa. Quando a skill de origem grava algo depois do push (um
+fechamento que cita a URL do PR, por exemplo), esse arquivo é deste trabalho e entra também.
+
+Nada sujo deste trabalho: **não há commit a fazer.** Nunca force um commit vazio
+(`--allow-empty`) — o registro já está no histórico.
+
+### Passo 2 — Varredura de segredo
+
+A mesma do `01-commits.md`, passo 2, sobre `git diff --cached`, com o mesmo desfecho: encontrou,
+**aborta o commit**, não commita parcialmente, não remove o trecho por conta própria e **nunca
+ecoa o valor**. Artefato de método carrega credencial por acidente como qualquer outro arquivo.
+
+### Passo 3 — Commitar
+
+Adicione **por caminho explícito**. Nunca `git add .`, `git add -A` nem `git add -u`:
+
+```
+git add docs/entregas/<trabalho_id>/ENTREGA.md <outros caminhos deste trabalho>
+git commit -F <arquivo-de-mensagem>
+```
+
+```
+chore(entrega): finalizar registro do trabalho <trabalho_id>
+
+Artefatos finais da entrega; nenhuma alteracao de produto.
+
+Trabalho: <trabalho_id>
+```
+
+Este commit **não entra na lista `commits`** do `ENTREGA.md` — ela é de task, uma por task — e é
+registrado na prosa. Nenhum arquivo de produto entra nele. Nunca `--amend`, nunca reescrita de
+histórico (regra 11).
+
+### Passo 4 — Publicar o commit final
+
+Só quando **todas** valerem: `versionado: true`, há remoto configurado, e o E6 publicou a branch
+(`push_feito: true`). Fora disso, pule este passo — não é erro.
+
+O princípio é o mesmo do E6, e é conservador:
+
+```
+git fetch origin <branch>
+git rev-list --count HEAD..origin/<branch>
+```
+
+| Resultado | O que fazer |
+|---|---|
+| A branch não existe no remoto | Push normal, com `--set-upstream` quando aplicável |
+| Contagem `0` | O remoto está contido no local: `git push origin <branch>` |
+| Contagem maior que `0` | **PARE.** Não publique |
+
+**Nunca `pull`, nunca `merge`, nunca `rebase`, nunca `--force`, nunca `--force-with-lease`.**
+A mergex não reconcilia histórico — aqui menos ainda, porque o que está em jogo é só o registro
+da entrega.
+
+Confirme:
+
+```
+git rev-parse HEAD
+git rev-parse origin/<branch>
+```
+
+Os dois têm que ser iguais.
+
+### O que `push_feito` afirma
+
+`push_feito: true` significa: **a publicação da entrega foi executada com sucesso neste fluxo, e
+o commit que carrega este registro está no remoto.**
+
+A circularidade é aparente — gravar `push_feito` num arquivo que ainda vai virar commit, e esse
+commit ainda vai ser publicado — e se resolve pela **ordem**, nunca por um estado intermediário:
+
+1. O E8 grava `push_feito` com o resultado do E6.
+2. O fechamento final commita o registro.
+3. O push final publica esse commit.
+4. Deu certo: **nada muda depois.** `true` continua verdadeiro, agora inclusive sobre o commit
+   que o contém.
+
+Não existe valor `pending` e nenhum enum novo: o campo continua booleano, como no
+`references/00-schema.md`.
+
+### Quando a publicação final falha
+
+Remoto à frente, push rejeitado por permissão, por hook ou por proteção de branch: **não
+maquie.**
+
+- Relate o erro **literal**, e deixe claro que a entrega **não está sincronizada com o remoto**.
+- Nunca force, nunca reconcilie, **nunca tente o push de novo em laço**.
+- A branch local fica com o registro final preservado, e a árvore fica limpa.
+- Se `push_feito` está `true` mas o commit final não chegou ao remoto, o arquivo está mentindo:
+  grave `push_feito: false`, ajuste a prosa e faça um **commit corretivo**, no mesmo formato do
+  passo 3 — somente artefato de método, sem reescrever histórico, sem novo push automático.
+
+Prefira a verdade no artefato à simplicidade: um `push_feito: true` que não corresponde ao remoto
+quebra exatamente quem confia no registro para achar a entrega.
+
+### Sem remoto, sem versionador, sem PR
+
+| Situação | O fechamento final |
+|---|---|
+| `versionado: false` | Não roda: não há histórico onde persistir |
+| Versionado, sem remoto | **Acontece localmente.** `push_feito: false`, árvore limpa, estado final no histórico. Não é erro: o fast-forward local continua possível |
+| E6 não publicou (remoto à frente, push rejeitado) | Commit final acontece; publicação não é tentada; o relatório diz que a entrega não está no remoto |
+| PR não aberto (ferramenta ausente) | Igual ao caso normal: `pr_url: null` já está gravado, e o commit final acontece do mesmo jeito |
+
 ## Limpar o estado da barra
 
 Terminado o registro, o trabalho está entregue: não há mais um trabalho em andamento nesta
@@ -197,6 +328,7 @@ Commits: <n> (um por task)
 Portão: PRONTO
 Atenção humana: <x> olho obrigatório, <y> leitura rápida, <z> dispensável
 Push: feito
+Fechamento: <sha curto> — publicado em origin/<branch> | só local, não sincronizado
 PR: <url> (rascunho) | não aberto — descrição em docs/entregas/<trabalho_id>/PR.md
 Pacote de QA: docs/entregas/<trabalho_id>/QA-PACOTE.md
 
@@ -218,6 +350,11 @@ Avisos: <lista, ou "nenhum">
 - [ ] Com o memox instalado, a reindexação foi disparada **depois** de gravar o `ENTREGA.md`.
 - [ ] Sem o memox instalado, nenhuma menção a ele — nem na saída, nem nos avisos.
 - [ ] `branch` e `pr_estado` voltaram a `null` no `.expx/estado.json`, e os campos das outras skills sobreviveram intactos. Este item nunca reprova o E8.
+- [ ] O fechamento final commitou os artefatos de método deste trabalho que ainda estavam sujos; `git status --porcelain` não lista nenhum artefato deste trabalho.
+- [ ] `git show <branch>:docs/entregas/<trabalho_id>/ENTREGA.md` mostra o estado final — o mesmo que está na árvore.
+- [ ] O commit de fechamento não entrou na lista `commits` e não levou arquivo de produto.
+- [ ] Havendo remoto e push do E6, `git rev-parse HEAD` e `git rev-parse origin/<branch>` são iguais; não havendo, a saída diz que a entrega está só local.
+- [ ] `push_feito` corresponde ao que o remoto tem de verdade.
 
 ## Quando falha
 
@@ -233,3 +370,8 @@ Avisos: <lista, ou "nenhum">
 | E3 não rodou (portão barrou) | `faixa_atencao: []` e `atencao` zerado; `arquivos_alterados` continua sendo o diff real |
 | `.expx/` não existe | Segue sem limpar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
 | Gravação do `estado.json` falhou | Registra no rastro e segue; a entrega continua concluída |
+| Nada deste trabalho está sujo no fechamento | Não há commit a fazer; nunca `--allow-empty` |
+| Segredo no artefato do fechamento | Aborta o commit final, mascara o trecho, e a entrega fica sem o registro publicado até a pessoa resolver |
+| Remoto à frente na publicação final | Não publica, não reconcilia, não força; relata literal; branch local guarda o registro final |
+| Push final rejeitado (permissão, hook, proteção) | Erro literal no relatório; sem novo push automático; `push_feito: false` por commit corretivo quando ele estava `true` |
+| Sem remoto | Commit final local, `push_feito: false`; não é erro |

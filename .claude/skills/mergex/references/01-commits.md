@@ -69,7 +69,7 @@ Eles **entram no commit** e **nunca contam como desvio**. Três limites, e nenhu
 
 ### Quando os artefatos de método entram
 
-Dois momentos, e só esses dois:
+Três momentos, e só esses três:
 
 **1. No commit da task que fechou.** Junto dos arquivos de produto declarados entram os artefatos de método deste trabalho que estiverem sujos naquele momento — a começar pelo `tasks.md` que acabou de marcar a task como `concluida`. No **primeiro** commit do trabalho, é isso que leva ao histórico o que a F1 a F5 produziram (base, decisões, plano, orquestrador, auditoria) e que até ali existia só na árvore — inclusive quando a árvore é um `git worktree` que será removido depois.
 
@@ -83,9 +83,26 @@ Artefatos de metodo do trabalho; nenhuma alteracao de produto.
 Trabalho: <trabalho_id>
 ```
 
+**3. No fechamento final do E8, depois do push e do PR.** O E6 e o E7 produzem estado que só existe depois deles — `push_feito`, `pr_url`, `pr_estado` —, e o E8 fecha o registro com `estado: entregue`, `entregue_em` e a prosa correspondente. Esse último registro **não pode ficar só na árvore**: quem integra a branch integra commits, nunca arquivo sujo de worktree. O E8 tem um commit próprio para ele, no mesmo formato; o procedimento completo — o que entra, o que nunca entra, a publicação e o que fazer quando ela falha — está em `references/08-registro.md`:
+
+```
+chore(entrega): finalizar registro do trabalho <trabalho_id>
+
+Artefatos finais da entrega; nenhuma alteracao de produto.
+
+Trabalho: <trabalho_id>
+```
+
 **Commit de artefatos de método não é task**: ele **não entra na lista `commits`** do `ENTREGA.md` — ela é de task, uma por task —, e é registrado na prosa do `ENTREGA.md`.
 
-Isto **não é uma etapa nova**: é o E1, no formato que ele já usa, chamado num segundo momento. O E8 reescreve o `ENTREGA.md` depois do push (E6) e da abertura do PR (E7); essa última atualização fica no disco e entra no próximo commit de artefatos. É uma defasagem declarada, não uma falha: ela nunca impede o portão, o push nem o PR.
+Isto **não é uma etapa nova**: é o E1, no formato que ele já usa, chamado em outro momento.
+
+**Por que dois commits de método, e não um.** Não é duplicação: eles carregam estados diferentes do mesmo trabalho.
+
+1. **Pré-E6** — leva ao histórico o que precisa existir **antes** da publicação: o `FECHAMENTO.md` da skill de origem e os artefatos da entrega (`ENTREGA.md` como está até ali, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md`). Sem ele, a branch subiria sem a descrição do PR e sem o pacote de QA.
+2. **Fechamento final do E8** — leva o estado que só é conhecido **depois** do push e do PR. Adiá-lo para "o próximo commit de artefatos" deixaria a branch publicada apontando para uma versão anterior do registro, e o estado final morreria junto com o worktree que a skill de origem remove.
+
+Nenhum dos dois é task e nenhum dos dois entra na lista `commits`. **Ao retornar do E8, nenhuma atualização final da entrega fica dependendo de um trabalho futuro**: o que a entrega afirma está no commit para o qual a branch aponta.
 
 Adicione **por caminho explícito**, nunca em bloco:
 

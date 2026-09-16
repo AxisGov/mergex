@@ -180,4 +180,63 @@ $(grep -RIn -- 'mergex-revisar' \
 EOF
 [ "$encontrou" = '0' ] || fail 'mergex-revisar mentioned without an explicit prohibition'
 
+# ---------------------------------------------------------------------------
+# P0 — o estado final do E8 é persistido: commit de fechamento + publicação
+# ---------------------------------------------------------------------------
+registro='.claude/skills/mergex/references/08-registro.md'
+push='.claude/skills/mergex/references/06-push.md'
+schema='.claude/skills/mergex/references/00-schema.md'
+for f in "$registro" "$push" "$schema"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# A regra antiga — deixar a gravação do E8 no disco — não pode voltar.
+if grep -Fq 'entra no próximo commit de artefatos' "$commits"; then
+  fail 'E1 still defers the E8 final update to a future artifact commit'
+fi
+
+grep -Fq '## O fechamento final' "$registro" \
+  || fail 'E8 has no final closing step'
+grep -Fq 'git status --porcelain' "$registro" \
+  || fail 'E8 closing step does not inspect the dirty tree'
+grep -Fq 'chore(entrega): finalizar registro do trabalho' "$registro" \
+  || fail 'E8 closing commit message missing'
+grep -Fq 'chore(entrega): finalizar registro do trabalho' "$commits" \
+  || fail 'E1 does not describe the E8 closing commit'
+grep -Fq 'Três momentos, e só esses três' "$commits" \
+  || fail 'E1 no longer lists the three moments for method artifacts'
+
+# O commit de fechamento é artefato de método, nunca task nem produto.
+grep -Fq 'não entra na lista `commits`' "$registro" \
+  || fail 'E8 closing commit is not excluded from the task commit list'
+grep -Fq 'Nenhum arquivo de produto entra nele' "$registro" \
+  || fail 'E8 closing commit does not exclude product files'
+grep -Fq 'Nunca `git add .`' "$registro" \
+  || fail 'E8 closing commit no longer forbids bulk staging'
+grep -Fq 'Varredura de segredo' "$registro" \
+  || fail 'E8 closing commit skips the secret sweep'
+grep -Fq 'Nunca `--amend`' "$registro" \
+  || fail 'E8 closing commit no longer forbids history rewriting'
+
+# Publicação final: mesmo princípio conservador do E6, sem reconciliar nem forçar.
+grep -Fq 'git rev-list --count HEAD..origin/<branch>' "$registro" \
+  || fail 'E8 final push does not check whether the remote is ahead'
+grep -Fq 'nunca `--force-with-lease`' "$registro" \
+  || fail 'E8 final push no longer forbids forced publication'
+grep -Fq 'O fechamento final' "$push" \
+  || fail 'E6 does not point to the E8 final closing'
+
+# push_feito diz a verdade sobre o remoto, e nenhum enum novo foi criado.
+grep -Fq 'o commit que carrega este registro está no remoto' "$registro" \
+  || fail 'push_feito semantics do not cover the closing commit'
+grep -Fq 'commit corretivo' "$registro" \
+  || fail 'E8 has no corrective commit when the final push fails'
+if grep -Fq 'pending' "$schema"; then
+  fail 'expx-schema gained a pending value'
+fi
+
+# Sem remoto o fechamento continua acontecendo: a evidência não depende de hospedagem.
+grep -Fq 'Sem remoto, sem versionador, sem PR' "$registro" \
+  || fail 'E8 does not define the closing behaviour without a remote'
+
 printf 'contract checks passed\n'

@@ -357,6 +357,43 @@ caso "runx: pasta de outro trabalho e desvio"     mergex/arquivo-fora-do-plano.s
 git reset -q; rm -f .expx/hooks.json; git switch -q main
 
 echo
+echo "E8 — fechamento final (o registro da entrega vai para o historico)"
+# O E8 fecha commitando o ENTREGA.md final: sem isso, a branch integrada leva um
+# registro defasado e o estado final morre com o worktree. Os hooks precisam
+# deixar esse commit passar, SEM afrouxar nada do resto.
+git switch -q feature/ft-02
+mkdir -p .expx
+echo '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
+
+# 1 — so o artefato final da entrega deste trabalho
+git reset -q
+printf 'estado: entregue\n' >> docs/entregas/ft-02/ENTREGA.md
+git add -f docs/entregas/ft-02/ENTREGA.md
+caso "fechamento final: ENTREGA.md deste trabalho entra" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+
+# 2 — produto fora do plano NAO pega carona no fechamento
+printf 'produto nao planejado\n' > src/fora/surpresa3.ts
+git add -f src/fora/surpresa3.ts
+caso "fechamento final nao carrega produto fora do plano" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+git reset -q; rm -f src/fora/surpresa3.ts
+
+# 3 — a varredura de segredo vale igual no artefato de metodo
+caso "fechamento final: segredo no artefato barra" comum/sem-segredo.sh "$(write_json "token: \"$SK\"")" 2
+
+# 4 — publicar o fechamento e push: o portao continua mandando
+printf 'portao: pronto\n' >> docs/entregas/ft-02/ENTREGA.md
+caso "publicacao do fechamento com portao pronto" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 0
+printf 'portao: bloqueado\n' > docs/entregas/ft-02/ENTREGA.md
+echo '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"bloqueio"}}}' > .expx/hooks.json
+caso "publicacao do fechamento com portao bloqueado barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 2
+
+# 5 — forcar a publicacao do fechamento continua proibido
+caso "fechamento final: push --force barra"            comum/git-perigoso.sh "$(bash_json 'git push --force origin feature/ft-02')" 2
+caso "fechamento final: push --force-with-lease barra" comum/git-perigoso.sh "$(bash_json 'git push --force-with-lease origin feature/ft-02')" 2
+
+git reset -q; rm -f .expx/hooks.json; git checkout -q -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null; git switch -q main
+
+echo
 echo "falha aberta — hook de metodo com insumo corrompido nao pode travar"
 printf 'lixo \x00 nao-yaml' > docs/trab/tasks.md
 git add src/a.ts

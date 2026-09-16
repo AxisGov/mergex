@@ -86,6 +86,11 @@ Os dois têm que ser iguais.
 
 Registre no `ENTREGA.md`: `push_feito: true` e `atualizado_em` reescrito.
 
+Este não é o último push do fluxo. O E8 ainda grava o estado final da entrega e o fecha num
+commit próprio, publicado **pelo mesmo princípio conservador** deste passo.
+Ver "O fechamento final" em `references/08-registro.md`: é o que garante que a branch publicada
+aponte para o commit que contém o registro final da entrega.
+
 ## Critério de saída
 
 - [ ] `origin/<branch>` aponta para o mesmo commit que `HEAD`.

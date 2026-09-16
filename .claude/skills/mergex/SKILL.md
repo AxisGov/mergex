@@ -72,7 +72,7 @@ O fluxo não é uma máquina de estados sequencial como a da sprintx ou da runx:
 
 **E7 ABERTURA DO PULL REQUEST** — abre o PR pela ferramenta de linha de comando do serviço de hospedagem, quando existir e estiver autenticada. Ausente, grava a descrição em `PR.md` e informa — nunca falha, nunca pede credencial.
 
-**E8 REGISTRO DA ENTREGA** — grava `ENTREGA.md` com frontmatter `expx-schema v1`, `kind: entrega`. É o que o expx-panel lê para mostrar o que aguarda revisão.
+**E8 REGISTRO DA ENTREGA** — grava `ENTREGA.md` com frontmatter `expx-schema v1`, `kind: entrega`. É o que o expx-panel lê para mostrar o que aguarda revisão. Fecha commitando esse registro final e publicando o commit pelo mesmo princípio do E6: a entrega precisa estar no histórico da branch, não só na árvore de trabalho — quem integra, integra commits.
 
 **E9 REVISÃO E MERGE — MANUAL.** Lista os pull requests abertos, ordena do menor para o maior impacto, apresenta o estado de cada um e conduz um PR por vez com confirmação explícita. Nunca resolve conflito. **Só roda por chamada explícita do desenvolvedor.**
 
