@@ -35,6 +35,54 @@ A mergex procura **o canônico primeiro e o antigo como fallback**, em todas as 
 
 Depois do E8, a mergex devolve o controle. **Ela não sugere o E9** (regra 16).
 
+## Como ler uma sprint da sprintx
+
+Uma sprint existe em **um dos dois formatos**, e nenhum deles é plano incompleto. Esta é a
+**única descrição da regra** na mergex; E1, E2, E4 e E5 apontam para cá em vez de repeti-la:
+
+1. Leia `sprint-NN/tasks.md`. Ele existe **sempre**, nos dois formatos.
+2. O frontmatter declara `kind: plano`? A sprint é **condensada**: dados da sprint na chave
+   `sprint`, fases na chave `fases`, tasks na chave `tasks`. **Não exija `sprint.md` nem
+   `fases.md`** — a ausência dos dois é o formato funcionando, não arquivo faltando, e não vira
+   aviso.
+3. Qualquer outro kind (`tasks`): a sprint está nos **três arquivos** (`sprint.md`, `fases.md`,
+   `tasks.md`), lidos como sempre.
+
+**As tasks vêm sempre da chave `tasks`**, nos dois formatos, com os mesmos campos obrigatórios
+(`id`, `status`, `suite`, `arquivos.cria`, `arquivos.altera`, `teste_integracao`,
+`teste_funcional`, `criterio_aceite`). O formato muda **onde a informação mora**, nunca quais
+campos existem nem quanto rigor se cobra:
+
+| Informação | Condensado (`kind: plano`) | Três arquivos |
+|---|---|---|
+| Status e critério de saída da sprint | `tasks.md` → `sprint` | `sprint.md` |
+| Fases | `tasks.md` → `fases` | `fases.md` |
+| Tasks | `tasks.md` → `tasks` | `tasks.md` |
+
+O contrato de origem é o `references/00-schema.md` da sprintx, "Como resolver o formato de uma
+sprint". A mergex **consome** os dois formatos e não migra nenhum.
+
+## O `HISTORICO.md` — artefato global de método da sprintx
+
+`docs/sprintx/estimativas/HISTORICO.md` é o **artefato global de método da sprintx**: memória de
+calibração que atravessa trabalhos, lida por features futuras. Ele não é produto, não pertence a
+nenhuma task e **não é feature-local** — mora fora de `features/` de propósito. A sprintx declara
+o dono no `references/06-execucao.md` dela: **a sprintx escreve, a mergex versiona.**
+
+Na mergex, isso significa:
+
+- é **artefato de método** no E1, nunca desvio de escopo;
+- entra no **commit de artefatos de método que antecede o push (E6)**, por caminho explícito;
+- **não** precisa entrar no commit de uma task, e não vira desvio se estiver sujo durante o E1;
+- **não** entra na lista `commits` do `ENTREGA.md` — não é task; é citado na prosa;
+- é excluído da conta de "arquivo de produto fora do plano" na V9;
+- continua sujeito à **varredura de segredo**, como qualquer arquivo do commit.
+
+**A exceção é exata, nunca um curinga.** Vale para esse caminho literal e **somente quando a
+origem do trabalho é a sprintx**. Nada mais sob `docs/sprintx/estimativas/`, nada sob
+`docs/sprintx/**`, e nada equivalente na runx: fora da pasta do trabalho, o resto continua
+podendo ser invasão real de escopo — que é o que a V9 existe para pegar.
+
 **Portão bloqueado não pula o E8.** `F6 → E2 BLOQUEADO` não significa E3 a E7: significa E8 em
 fechamento bloqueado — registro persistido por commit, branch **não** publicada — e retorno à
 sprintx com o que falta. Se a feature for replanejada e a F6 rodar de novo, o E0 **retoma** o
@@ -81,8 +129,8 @@ A coluna "Onde" vale para as duas formas: `docs/sprintx/features/<slug>/` (canô
 | Artefato | Onde | Usado em |
 |---|---|---|
 | `ORQUESTRADOR.md` | pasta do trabalho | E0 (registro da branch e do worktree), E4 (título e objetivo), E2 (comando de teste) |
-| `sprint-NN/tasks.md` | pasta do trabalho | E1 (objetivo, arquivos, testes), E2 (status, suíte, testes), E3 (cobertura por task) |
-| `sprint-NN/fases.md`, `sprint.md` | pasta do trabalho | E2 (critérios de saída e evidência da suíte inteira) |
+| `sprint-NN/tasks.md` | pasta do trabalho | E1 (objetivo, arquivos, testes), E2 (status, suíte, testes), E3 (cobertura por task) — existe **sempre**, nos dois formatos |
+| `sprint-NN/fases.md`, `sprint.md` | pasta do trabalho | E2 (critérios de saída e evidência da suíte inteira) — **só no formato de três arquivos**; na sprint condensada eles não existem, e isso não é arquivo faltando |
 | `00-BLOQUEIOS.md` | pasta do trabalho | E2 (V7 — bloqueio aberto no escopo) |
 | `00-AUDITORIA.md` | pasta do trabalho | E2 (V6 — auditoria reprovada) |
 | `00-DECISOES.md` | pasta do trabalho | E4 (contexto da seção "o que muda e por quê") |

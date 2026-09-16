@@ -63,7 +63,7 @@ Se o caso exige um cenário difícil de montar, diga como chegar a ele pela inte
 
 ### 6. Critério objetivo de aprovação e de reprovação
 
-Fonte: `criterio_aceite` das tasks, traduzido.
+Fonte: `criterio_aceite` das tasks, traduzido. As tasks vêm da chave `tasks` do `sprint-NN/tasks.md` **nos dois formatos** da sprintx — condensado (`kind: plano`) e três arquivos —, sem exigir `sprint.md` nem `fases.md` (`references/integracao/sprintx.md`).
 
 Objetivo e binário. Sem adjetivo, sem "funcionando bem", sem "aparentemente correto".
 

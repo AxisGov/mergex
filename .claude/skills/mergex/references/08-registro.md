@@ -185,9 +185,15 @@ git status --porcelain
 | O que é | O que fazer |
 |---|---|
 | Artefato de método **deste** trabalho: `docs/entregas/<trabalho_id>/` e a pasta do trabalho na skill de origem | **Entra** no commit final |
+| `docs/sprintx/estimativas/HISTORICO.md`, quando a origem é a **sprintx** e ele está sujo | **Entra** — é o artefato global de método da sprintx (`references/integracao/sprintx.md`). A exceção é exata: nada mais sob `docs/sprintx/estimativas/`, e nada equivalente na runx |
 | Arquivo de **produto** fora da lista declarada | **Não entra.** Continua sendo desvio (regra 4, `01-commits.md`); nomeie no relatório |
 | Artefato de **outro** trabalho | **Não entra.** É desvio pelo mesmo critério |
 | Derivado e não versionado: `docs/eventos/<trabalho_id>.jsonl`, `.expx/estado.json`, índice do memox | **Não entra.** Não é artefato da entrega |
+
+**O `HISTORICO.md` normalmente já está limpo aqui**, porque entrou no commit pré-E6
+(`01-commits.md`). Se, por alguma inconsistência, ele ainda estiver sujo no caminho `PRONTO`,
+**não o perca**: inclua-o no fechamento final como artefato global de método e registre um aviso
+de que ele não entrou no momento pré-E6 esperado.
 
 Depois do E6 e do E7, o que costuma estar sujo é **um arquivo só**: o próprio `ENTREGA.md` — o
 E7 gravou `pr_url` e `pr_estado`, e o E8 acabou de gravar `estado`, `portao`, `push_feito`,
@@ -335,6 +341,13 @@ a entrega — o portão continua barrando a entrega.
 O fechamento bloqueado faz **três coisas e nada mais**: escreve a prosa com o que falta (o mesmo
 que o relatório do E2 apontou), persiste os artefatos de método deste trabalho pelos passos 1 a 3
 acima, e informa o desenvolvedor. **O passo 4 não roda**: branch bloqueada não é publicada.
+
+**Inclusive o `HISTORICO.md`.** No caminho bloqueado não existe commit pré-E6 — E3 a E7 não
+rodaram —, mas a sprintx já gravou `docs/sprintx/estimativas/HISTORICO.md` antes do
+`FECHAMENTO.md` e do portão. Quando a origem é a sprintx e ele está sujo, ele **entra no commit
+final do bloqueio**: por caminho explícito, com a mesma varredura de segredo, fora da lista
+`commits`, sem inventar task e sem publicar nada. É o que evita que uma retomada perca a memória
+que a sprintx já havia registrado.
 
 Termina com o bloqueio preservado no HEAD local — é o que permite a uma sessão futura, ou a
 outra skill, ver que este trabalho parou no portão, e por quê, mesmo depois de o worktree sumir.

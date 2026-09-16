@@ -169,3 +169,25 @@ replanejamento — sobre um `ENTREGA.md` que já existia.
 **O que invalidaria estas decisões:** um leitor do `kind: entrega` que trate `commits[].task` como
 chave única (DM-99), ou um fluxo em que o portão bloqueado precise publicar a branch — hoje
 proibido pelo próprio E6.
+
+## P0 E2E — HISTORICO global da sprintx e os dois formatos de plano
+
+O primeiro E2E real (buildx → sprintx → mergex) parou na FT-01, no E2/V9. Uma das causas era da
+sprintx e já foi corrigida lá. A outra é desta skill: `docs/sprintx/estimativas/HISTORICO.md`
+aparecia como arquivo de produto fora do plano. A sprintx (0dddbfa) declarou formalmente o dono
+do arquivo; o que faltava aqui era consumir essa declaração — e, junto dela, o formato de sprint
+condensada que a skill irmã formalizou.
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-101 | `HISTORICO.md` é método, mas mora **fora** da pasta da feature — e a isenção de método da mergex era por pasta do trabalho | Exceção **exata**: o caminho literal `docs/sprintx/estimativas/HISTORICO.md`, e **somente quando a origem é a sprintx**. Nada sob `docs/sprintx/estimativas/**`, nada sob `docs/sprintx/**`, nada equivalente na runx. Vale no E1, na V9, no hook de escopo e no E8 | Um curinga isentaria o que a V9 existe para pegar: invasão real de escopo fora da pasta do trabalho. A exceção exata resolve o caso declarado sem abrir a porta para o resto |
+| DM-102 | Em que commit o `HISTORICO.md` entra | No caminho `PRONTO`, no **commit de artefatos pré-E6** — é o ponto normal de versionamento. **Nunca no commit de uma task**: se estiver sujo durante um E1, não é desvio e fica para o pré-E6. No caminho **bloqueado**, onde não existe commit pré-E6, ele entra no **commit final do E8**, que persiste localmente e não publica | Um commit de task contém a task e o método daquele trabalho, não a memória global acumulada. E no bloqueio, sem o fechamento do E8, a retomada perderia a memória que a sprintx já havia gravado |
+| DM-103 | Na retomada depois de bloqueio, o `HISTORICO.md` já commitado aparece em `git diff <base>...HEAD` e voltaria a reprovar a V9 | A exclusão da V9 **não depende de ele estar sujo agora**: vale também para o que já está no histórico da branch | A regra é sobre a natureza do arquivo (método global declarado), não sobre o momento em que ele foi escrito. Amarrá-la ao estado sujo faria o segundo ciclo de replanejamento falhar onde o primeiro passou |
+| DM-104 | A sprintx passou a ter dois formatos de sprint (condensado `kind: plano` e três arquivos), e cada etapa da mergex poderia resolver isso do seu jeito | **Uma regra única**, escrita em `references/integracao/sprintx.md` ("Como ler uma sprint da sprintx"); E1, E2, E4 e E5 apontam para ela. As tasks vêm sempre da chave `tasks`, com os mesmos campos e o mesmo rigor; `sprint.md` e `fases.md` **não são exigidos** no condensado, e a ausência deles não vira aviso | Descrever a regra em cada etapa criaria quatro descrições que divergem na primeira manutenção — foi exatamente o bug que a sprintx encontrou entre F3 e F4. Nenhum schema novo: o contrato de origem já define os dois formatos |
+| DM-105 | A V2 procurava a evidência da suíte inteira em `sprint-NN/sprint.md`, que não existe no condensado | A busca virou **format-aware**: três arquivos → `sprint.md` e o relatório da F6; condensado → a chave `sprint` do próprio `tasks.md` e o relatório. Ausência de `sprint.md` no condensado **não** é aviso nem falha; a ausência de **evidência de execução** continua valendo o que já valia | Exigir um arquivo que o formato não tem barraria plano válido. O que o portão cobra é a execução registrada, não o nome do arquivo onde ela mora |
+
+**O que invalidaria estas decisões:** a sprintx deixar de declarar o `HISTORICO.md` como artefato
+global versionado (se ele virar estado local, a exceção sai daqui junto); um terceiro formato de
+sprint (a regra única passaria a ter três ramos, e o lugar de mudá-la continua sendo um só); ou a
+runx declarar um artefato global equivalente — que precisaria de contrato próprio, porque esta
+isenção é da sprintx e não se estende por analogia.

@@ -18,7 +18,9 @@ Rode **todas**, sempre, mesmo depois de a primeira falhar. O usuário precisa da
 
 ### V1 — Task com status diferente de `concluida`
 
-Leia o frontmatter de todo `tasks.md` do trabalho. Toda task tem que estar `concluida`.
+Leia o frontmatter de todo `sprint-NN/tasks.md` do trabalho. Toda task tem que estar `concluida`.
+
+**Os dois formatos de sprint da sprintx valem em V1, V2, V3 e V9.** As tasks vêm sempre da chave `tasks`, no `kind: plano` (condensado) e no `kind: tasks` (três arquivos) — regra única em `references/integracao/sprintx.md`, "Como ler uma sprint da sprintx". O formato nunca muda quais campos existem nem quanto rigor se cobra.
 
 Falha: qualquer task em `pendente`, `em_andamento` ou `bloqueada`. Nomeie cada uma (id e título) e o status atual. Task `bloqueada` aponta o `B-NN` correspondente em `BLOQUEIOS.md`.
 
@@ -37,7 +39,14 @@ Para cada task `concluida`, leia o campo `suite`:
 
 `vermelha` e `nao_executada` são FALHA. Nomeie a task.
 
-**O trabalho inteiro continua precisando da suíte inteira.** Além do registro por task, procure a **evidência da suíte inteira no fechamento de cada sprint**, onde a skill de origem a registra — na sprintx, o fechamento da sprint (`sprint-NN/sprint.md` e o relatório da F6), com a saída da execução colada.
+**O trabalho inteiro continua precisando da suíte inteira.** Além do registro por task, procure a **evidência da suíte inteira no fechamento de cada sprint**, onde a skill de origem a registra, com a saída da execução colada. **Onde procurar depende do formato da sprint:**
+
+| Formato | Onde está o fechamento da sprint |
+|---|---|
+| Três arquivos (`kind: tasks`) | `sprint-NN/sprint.md` e o relatório da F6 |
+| Condensado (`kind: plano`) | a chave `sprint` do próprio `sprint-NN/tasks.md` (status e `criterio_saida`) e o relatório da F6 |
+
+**Na sprint condensada, `sprint.md` não existe — e a ausência dele não é aviso nem falha.** Exigir um arquivo que o formato não tem seria barrar plano válido. O que continua sendo cobrado é a evidência da execução, no lugar onde a skill de origem deveria tê-la registrado; ausente, vale a tabela abaixo, sem inventar evidência.
 
 | Estado | Resultado |
 |---|---|
@@ -115,7 +124,13 @@ Falha: arquivo de produto no diff que não está declarado em nenhuma task. Nome
 
 Arquivo declarado que não aparece no diff **não** é falha: pode ter sido criado e revertido dentro do escopo, ou já existir como estava.
 
-**Os artefatos de método do próprio trabalho não são desvio** e não entram nesta conta: a pasta do trabalho (`docs/sprintx/features/<trabalho_id>/`, `docs/<trabalho_id>/` no formato antigo, `docs/manutencao/<trabalho_id>/` na runx) e `docs/entregas/<trabalho_id>/`. Eles são o registro do trabalho, não produto, e é o E1 que os commita (`01-commits.md`). A pasta de **outro** trabalho continua sendo desvio, e nomeá-la aqui é justamente como se percebe escopo invadido.
+A união dos `arquivos` sai da chave `tasks`, **nos dois formatos de sprint** (`kind: plano` e `kind: tasks`): o formato do plano nunca muda o que é produto declarado.
+
+**Os artefatos de método do próprio trabalho não são desvio** e não entram nesta conta: a pasta do trabalho (`docs/sprintx/features/<trabalho_id>/`, `docs/<trabalho_id>/` no formato antigo, `docs/manutencao/<trabalho_id>/` na runx) e `docs/entregas/<trabalho_id>/`.
+
+**E, quando a origem é a sprintx, `docs/sprintx/estimativas/HISTORICO.md` também fica fora da conta.** Ele é o artefato global de método da sprintx (`references/integracao/sprintx.md`): não reprova a V9, não entra em `desvios` e não precisa estar declarado em nenhuma task. A exclusão é **exata e cirúrgica** — só esse caminho literal, só na origem sprintx. Nenhum outro arquivo sob `docs/sprintx/estimativas/` é isento, e a runx não ganha isenção equivalente.
+
+**Vale também quando ele já está no histórico da branch.** Numa retomada depois de bloqueio, o `HISTORICO.md` commitado na tentativa anterior aparece em `git diff <branch-base>...HEAD`: continua sendo método, e continua não barrando a V9. A regra não depende de ele estar sujo agora. Eles são o registro do trabalho, não produto, e é o E1 que os commita (`01-commits.md`). A pasta de **outro** trabalho continua sendo desvio, e nomeá-la aqui é justamente como se percebe escopo invadido.
 
 ### V10 — Segredo, credencial ou dado real de cliente no diff
 

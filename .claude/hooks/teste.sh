@@ -354,6 +354,10 @@ caso "runx: pasta da ocorrencia corrente e isenta" mergex/arquivo-fora-do-plano.
 git reset -q; printf 'novo\n' >> docs/sprintx/features/ft-01/00-BLOQUEIOS.md
 git add -f docs/sprintx/features/ft-01/00-BLOQUEIOS.md
 caso "runx: pasta de outro trabalho e desvio"     mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+# A isencao do HISTORICO e da sprintx: a runx nao a herda.
+git reset -q; mkdir -p docs/sprintx/estimativas; printf 'h\n' >> docs/sprintx/estimativas/HISTORICO.md
+git add -f docs/sprintx/estimativas/HISTORICO.md
+caso "runx NAO ganha a isencao do HISTORICO"      mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
 git reset -q; rm -f .expx/hooks.json; git switch -q main
 
 echo
@@ -383,6 +387,18 @@ printf 'portao: bloqueado\nestado: bloqueado\n' >> docs/entregas/ft-02/ENTREGA.m
 git add -f docs/entregas/ft-02/ENTREGA.md
 caso "fechamento bloqueado: registro do bloqueio entra" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
 git reset -q; git checkout -q -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null
+
+# 2c — HISTORICO global da sprintx: excecao EXATA, so na origem sprintx
+git reset -q
+mkdir -p docs/sprintx/estimativas
+printf 'historico\n' >> docs/sprintx/estimativas/HISTORICO.md
+git add -f docs/sprintx/estimativas/HISTORICO.md
+caso "HISTORICO global da sprintx nao e desvio" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+git reset -q
+printf 'outro\n' > docs/sprintx/estimativas/CALIBRAGEM.md
+git add -f docs/sprintx/estimativas/CALIBRAGEM.md
+caso "outro arquivo em estimativas/ NAO e isento" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+git reset -q; rm -f docs/sprintx/estimativas/CALIBRAGEM.md
 
 # 3 — a varredura de segredo vale igual no artefato de metodo
 caso "fechamento final: segredo no artefato barra" comum/sem-segredo.sh "$(write_json "token: \"$SK\"")" 2

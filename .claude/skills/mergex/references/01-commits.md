@@ -26,7 +26,9 @@ Um commit por task. **Nunca amontoar tasks distintas** no mesmo commit (regra 3)
 
 ## Passo 1 — Selecionar o que entra
 
-Leia em `tasks.md` o campo `arquivos` da task: `cria` e `altera`. Essa é a **lista declarada**.
+Leia em `sprint-NN/tasks.md` o campo `arquivos` da task: `cria` e `altera`. Essa é a **lista declarada**.
+
+**Os dois formatos de sprint da sprintx valem aqui.** As tasks vêm sempre da chave `tasks` — no `kind: plano` (sprint condensada) e no `kind: tasks` (três arquivos) —, com os mesmos campos obrigatórios e o mesmo rigor. O E1 **não exige `sprint.md` nem `fases.md`**: a regra única de leitura está em `references/integracao/sprintx.md`, "Como ler uma sprint da sprintx".
 
 Compare com o que mudou de verdade:
 
@@ -48,12 +50,28 @@ Arquivo de **produto** alterado fora da lista declarada **continua sendo desvio*
 
 Nem tudo que muda durante o trabalho é produto. A skill de origem grava o plano, as decisões, os bloqueios e o fechamento; a mergex grava a entrega. Esses **artefatos de método do próprio trabalho** não estão na lista de nenhuma task porque não são trabalho planejado — são o registro dele:
 
-| Pasta | De quem |
-|---|---|
-| `docs/sprintx/features/<trabalho_id>/` | sprintx (canônico) |
-| `docs/<trabalho_id>/` | sprintx (formato antigo) |
-| `docs/manutencao/<trabalho_id>/` | runx |
-| `docs/entregas/<trabalho_id>/` | mergex |
+| Caminho | De quem | Alcance |
+|---|---|---|
+| `docs/sprintx/features/<trabalho_id>/` | sprintx (canônico) | feature-local |
+| `docs/<trabalho_id>/` | sprintx (formato antigo) | feature-local |
+| `docs/manutencao/<trabalho_id>/` | runx | trabalho |
+| `docs/entregas/<trabalho_id>/` | mergex | entrega |
+| `docs/sprintx/estimativas/HISTORICO.md` | sprintx | **global** — só quando a origem é a sprintx |
+
+### O artefato global de método da sprintx
+
+`docs/sprintx/estimativas/HISTORICO.md` é a memória de calibração da sprintx: atravessa
+trabalhos, é lida por features futuras e **é deliberadamente versionada**. A sprintx **escreve**;
+a mergex **versiona** (contrato de origem em `references/06-execucao.md` da sprintx; resumo em
+`references/integracao/sprintx.md`).
+
+Ele **não é produto, não pertence a task e não é desvio** — e não deixa de ser método só por
+ficar fora da pasta da feature.
+
+**A exceção é exata.** Vale para esse caminho literal, e **somente quando o trabalho é da
+sprintx**. Não existe isenção para `docs/sprintx/estimativas/**`, nem para `docs/sprintx/**`, nem
+equivalente na runx: qualquer outro arquivo fora da pasta do trabalho continua podendo ser
+invasão real de escopo.
 
 **Qual é o trabalho deste commit.** O da **branch ativa**: vale a pasta do trabalho cujo `docs/entregas/<trabalho_id>/ENTREGA.md` declara `branch:` igual à branch corrente, e **exatamente um** `ENTREGA.md` pode declará-la. Zero, dois ou mais, ou HEAD destacado: **nenhuma isenção** — o que não estiver declarado em task volta a ser desvio, que é o comportamento conservador.
 
@@ -71,9 +89,17 @@ Eles **entram no commit** e **nunca contam como desvio**. Três limites, e nenhu
 
 Três momentos, e só esses três:
 
+**O `HISTORICO.md` não entra no commit de uma task.** A sprintx só o atualiza ao fim do trabalho, e o lugar dele é o commit de artefatos que antecede o push. Se, por uma retomada anormal, ele já estiver sujo durante o E1 de uma task: **não registre como desvio** e **não o inclua no commit da task** — deixe-o para o commit pré-E6. Um commit de task contém a task e o método **daquele** trabalho, não a memória global acumulada.
+
 **1. No commit da task que fechou.** Junto dos arquivos de produto declarados entram os artefatos de método deste trabalho que estiverem sujos naquele momento — a começar pelo `tasks.md` que acabou de marcar a task como `concluida`. No **primeiro** commit do trabalho, é isso que leva ao histórico o que a F1 a F5 produziram (base, decisões, plano, orquestrador, auditoria) e que até ali existia só na árvore — inclusive quando a árvore é um `git worktree` que será removido depois.
 
-**2. Num commit de artefatos de método, imediatamente antes do push (E6).** O fim do trabalho produz o que nenhuma task fecha: o `FECHAMENTO.md` da sprintx e os artefatos da entrega (`ENTREGA.md`, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md`). Um commit só, no formato do passo 3:
+**2. Num commit de artefatos de método, imediatamente antes do push (E6).** O fim do trabalho produz o que nenhuma task fecha. Entram, por **caminho explícito**, os que estiverem sujos:
+
+- `FECHAMENTO.md` e os demais artefatos feature-local ainda sujos deste trabalho;
+- `docs/entregas/<trabalho_id>/` — `ENTREGA.md`, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md`;
+- `docs/sprintx/estimativas/HISTORICO.md`, **quando a origem é a sprintx** e ele está sujo. É o ponto normal de versionamento dele.
+
+Um commit só, no formato do passo 3:
 
 ```
 chore(entrega): registrar artefatos do trabalho <trabalho_id>

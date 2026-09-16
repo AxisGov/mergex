@@ -289,4 +289,80 @@ grep -Fq 'um commit por fechamento de task em cada execução' "$commits" \
 grep -Fq 'Nunca apague item antigo' "$commits" \
   || fail 'E1 allows deleting past commit entries on replanning'
 
+# ---------------------------------------------------------------------------
+# P0 E2E — HISTORICO global da sprintx (exceção exata) e os dois formatos de sprint
+# ---------------------------------------------------------------------------
+historico='docs/sprintx/estimativas/HISTORICO.md'
+readme='README.md'
+[ -f "$readme" ] || fail "missing required file: $readme"
+
+# A exceção existe, é do E1 ao E8, e é EXATA: nunca curinga.
+for f in "$commits" "$prontidao" "$registro" "$integ_sprintx"; do
+  grep -Fq "$historico" "$f" \
+    || fail "$f does not declare the sprintx global method artifact"
+done
+# No código do hook, curinga nenhum. Nos contratos, o curinga só pode aparecer
+# quando a frase o está PROIBINDO — é assim que a regra fica escrita, não só obedecida.
+if grep -Fq 'docs/sprintx/estimativas/**' "$hook_escopo" || grep -Fq 'docs/sprintx/**' "$hook_escopo"; then
+  fail 'scope hook turned the HISTORICO exception into a wildcard'
+fi
+for f in "$commits" "$prontidao" "$registro" "$integ_sprintx"; do
+  if grep -F -e 'docs/sprintx/estimativas/**' -e 'docs/sprintx/**' "$f" \
+     | grep -qv -e 'Não existe isenção' -e 'Nada mais sob' -e 'nada sob' \
+                -e 'nada equivalente na runx' -e 'nem para'; then
+    fail "$f turned the HISTORICO exception into a wildcard"
+  fi
+done
+grep -Fq 'A exceção é exata' "$commits" \
+  || fail 'E1 does not state that the HISTORICO exception is exact'
+grep -Fq 'nada equivalente na runx' "$registro" \
+  || fail 'E8 does not keep the HISTORICO exception out of runx'
+grep -Fq 'a runx não ganha isenção equivalente' "$prontidao" \
+  || fail 'V9 does not keep the HISTORICO exception out of runx'
+
+# E1: não entra no commit de task; entra no commit pré-E6.
+grep -Fq 'não entra no commit de uma task' "$commits" \
+  || fail 'E1 lets the HISTORICO into a task commit'
+grep -Fq 'quando a origem é a sprintx** e ele está sujo. É o ponto normal de versionamento' "$commits" \
+  || fail 'E1 does not put the HISTORICO in the pre-E6 artifact commit'
+
+# V9: exclusão cirúrgica e válida também para o que já está no histórico da branch.
+grep -Fq 'exata e cirúrgica' "$prontidao" \
+  || fail 'V9 HISTORICO exclusion is not surgical'
+grep -Fq 'já está no histórico da branch' "$prontidao" \
+  || fail 'V9 does not cover a HISTORICO committed in a previous attempt'
+
+# E8: bloqueado persiste o HISTORICO; pronto não o perde.
+grep -Fq 'Inclusive o `HISTORICO.md`' "$registro" \
+  || fail 'blocked closing does not persist the HISTORICO'
+grep -Fq 'não entrou no momento pré-E6 esperado' "$registro" \
+  || fail 'final closing may lose a still-dirty HISTORICO'
+
+# O hook de escopo implementa a mesma exceção exata, e só para a sprintx.
+grep -Fq 'eh_historico_global_sprintx' "$hook_escopo" \
+  || fail 'scope hook does not implement the HISTORICO exception'
+grep -Fq 'runx nao ganha a isencao' "$hook_escopo" \
+  || fail 'scope hook may exempt the HISTORICO for runx work'
+
+# Regra única de leitura de sprint: os dois formatos, num lugar só.
+grep -Fq '## Como ler uma sprint da sprintx' "$integ_sprintx" \
+  || fail 'sprintx integration has no single sprint-format rule'
+grep -Fq 'kind: plano' "$integ_sprintx" \
+  || fail 'sprintx integration does not cover the condensed plan'
+grep -Fq 'Não exija `sprint.md` nem' "$integ_sprintx" \
+  || fail 'sprintx integration still demands sprint.md on condensed plans'
+grep -Fq 'a sprintx escreve, a mergex versiona' "$integ_sprintx" \
+  || fail 'sprintx integration does not declare HISTORICO ownership'
+for f in "$commits" "$prontidao"; do
+  grep -Fq 'Como ler uma sprint da sprintx' "$f" \
+    || fail "$f does not point to the single sprint-format rule"
+done
+grep -Fq '`sprint.md` não existe' "$prontidao" \
+  || fail 'V2 does not accept a condensed sprint without sprint.md'
+
+# A documentação não pode voltar a dizer que a buildx chama a mergex direto.
+if grep -Fq 'invoca `mergex-abrir`, `mergex-check`' "$readme"; then
+  fail 'README still says buildx invokes mergex commands directly'
+fi
+
 printf 'contract checks passed\n'

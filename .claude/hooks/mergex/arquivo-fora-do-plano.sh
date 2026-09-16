@@ -103,10 +103,28 @@ eh_artefato_de_metodo() {
   return 1
 }
 
+# O HISTORICO da sprintx e o unico artefato de metodo GLOBAL: memoria de
+# calibragem que atravessa trabalhos, escrita pela sprintx e versionada pela
+# mergex. A excecao e EXATA — este caminho literal, e so quando o trabalho
+# corrente e da sprintx. Nada mais sob docs/sprintx/estimativas/, nada sob
+# docs/sprintx/, e nada equivalente na runx: fora da pasta do trabalho, o resto
+# continua podendo ser invasao real de escopo.
+HISTORICO_SPRINTX='docs/sprintx/estimativas/HISTORICO.md'
+
+eh_historico_global_sprintx() {
+  [ "$1" = "$HISTORICO_SPRINTX" ] || return 1
+  [ -n "$TRABALHO" ] || return 1
+  [ -d "$RAIZ/docs/sprintx/features/$TRABALHO" ] && return 0
+  [ -d "$RAIZ/docs/manutencao/$TRABALHO" ] && return 1   # runx nao ganha a isencao
+  [ -d "$RAIZ/docs/$TRABALHO" ] && return 0              # sprintx, formato antigo
+  return 1
+}
+
 FORA=""
 while IFS= read -r arquivo; do
   [ -n "$arquivo" ] || continue
   eh_artefato_de_metodo "$arquivo" && continue
+  eh_historico_global_sprintx "$arquivo" && continue
   printf '%s\n' "$DECLARADOS" | grep -Fxq "$arquivo" || FORA="$FORA  - $arquivo
 "
 done <<< "$PREP"
