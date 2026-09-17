@@ -358,7 +358,11 @@ caso "runx: pasta de outro trabalho e desvio"     mergex/arquivo-fora-do-plano.s
 git reset -q; mkdir -p docs/sprintx/estimativas; printf 'h\n' >> docs/sprintx/estimativas/HISTORICO.md
 git add -f docs/sprintx/estimativas/HISTORICO.md
 caso "runx NAO ganha a isencao do HISTORICO"      mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
-git reset -q; rm -f .expx/hooks.json; git switch -q main
+# `git reset` so tira do stage: sem devolver a arvore, as edicoes acima impedem
+# o `git switch feature/ft-02` do E8, que entao roda silenciosamente em main.
+git reset -q; rm -f .expx/hooks.json; rm -rf docs/sprintx/estimativas
+git checkout -q -- docs/manutencao/OC-2026-0001-erro/BLOQUEIOS.md docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+git switch -q main
 
 echo
 echo "E8 — fechamento final (o registro da entrega vai para o historico)"
@@ -366,6 +370,13 @@ echo "E8 — fechamento final (o registro da entrega vai para o historico)"
 # registro defasado e o estado final morre com o worktree. Os hooks precisam
 # deixar esse commit passar, SEM afrouxar nada do resto.
 git switch -q feature/ft-02
+if [ "$SEM_JQ" != "1" ] && [ "$(git branch --show-current)" != "feature/ft-02" ]; then
+  FALHOU=$((FALHOU+1)); printf '  FALHA preparo do E8: nao entrou em feature/ft-02\n'
+fi
+# O registro da entrega ja versionado NESTA branch: e ele que diz qual e o
+# trabalho corrente, e e para ele que os `git checkout --` abaixo voltam.
+entrega ft-02 feature/ft-02
+git add -f docs/entregas/ft-02/ENTREGA.md && git commit -qm "registro da entrega ft-02"
 mkdir -p .expx
 echo '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
 
@@ -399,6 +410,10 @@ printf 'outro\n' > docs/sprintx/estimativas/CALIBRAGEM.md
 git add -f docs/sprintx/estimativas/CALIBRAGEM.md
 caso "outro arquivo em estimativas/ NAO e isento" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
 git reset -q; rm -f docs/sprintx/estimativas/CALIBRAGEM.md
+printf 'solto\n' > docs/sprintx/NOTAS.md
+git add -f docs/sprintx/NOTAS.md
+caso "outro arquivo em docs/sprintx/ NAO e isento" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+git reset -q; rm -f docs/sprintx/NOTAS.md
 
 # 3 — a varredura de segredo vale igual no artefato de metodo
 caso "fechamento final: segredo no artefato barra" comum/sem-segredo.sh "$(write_json "token: \"$SK\"")" 2
