@@ -69,6 +69,12 @@ Isso aparece em três etapas da mergex:
 
 O `trabalho_id` da mergex é o **mesmo `<OC-ID>-<slug>`** da runx.
 
+No **E3**, os artefatos da pasta da ocorrência (`00-OCORRENCIA.md`, `01-CAUSA-RAIZ.md`,
+`ORQUESTRADOR.md`, `QA.md`, `BLOQUEIOS.md`, `sprint-NN/`, `base/`) são classificados pelo
+**catálogo de artefatos de método da runx** (`references/03-atencao-humana.md`). Ele não herda nomes
+da sprintx: `00-DECISOES.md`, `FECHAMENTO.md` ou o `HISTORICO.md` da sprintx num trabalho da runx não
+são reconhecidos. `docs/relatorios/` fica de fora: só existe depois do E5 da runx.
+
 ## O relatório de uso, no pacote de QA
 
 O pacote de QA (E5 da mergex) termina apontando o relatório de uso: o texto que o suporte devolve ao cliente **depois** da aprovação.

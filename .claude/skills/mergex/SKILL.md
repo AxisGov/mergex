@@ -91,10 +91,18 @@ aplica e a classificação é a mesma de sempre.
 | Faixa | O que o revisor faz | Critérios — basta um |
 |---|---|---|
 | **OLHO OBRIGATÓRIO** | Lê linha a linha | Arquivo em zona de risco declarada no `PERFIL.md`; mudança de regra de negócio ou de cálculo; migração de banco, qualquer uma; autenticação, autorização ou dado pessoal; alteração de contrato público (rota, payload, evento, retorno); código sem cobertura de teste antes e depois; efeito irreversível declarado no plano de reversão; tudo que veio de raio ALTO; **arquivo com histórico de regressão registrado no memox, ou com reprovação anterior em QA no mesmo arquivo** |
-| **LEITURA RÁPIDA** | Confere intenção, não implementação | Mudança coberta por teste de caracterização que continua passando; alteração em camada isolada com cobertura existente; código novo em arquivo novo, com os dois testes verdes |
-| **DISPENSÁVEL** | A máquina já provou | Arquivo de teste que só acrescenta caso; alteração mecânica coberta por teste de regressão verde; arquivo gerado automaticamente, quando declarado como tal |
+| **LEITURA RÁPIDA** | Confere intenção, não implementação | Mudança coberta por teste de caracterização que continua passando; alteração em camada isolada com cobertura existente; código novo em arquivo novo, com os dois testes verdes; **artefato de método reconhecido, de decisão, plano ou registro** |
+| **DISPENSÁVEL** | A máquina já provou | Arquivo de teste que só acrescenta caso; alteração mecânica coberta por teste de regressão verde; arquivo gerado automaticamente, quando declarado como tal; **artefato de método reconhecido, mecânico, com a prova mecânica aprovada** |
 
-Todo arquivo do diff cai em exatamente uma faixa, e cada um leva a evidência que o classificou. Detalhe operacional, exemplos de classificação correta e incorreta: `references/03-atencao-humana.md`.
+Todo arquivo do diff cai em exatamente uma faixa, e cada um leva a evidência que o classificou.
+
+**Artefato de método nunca anula critério O.** Decisão, plano, base e registro escritos pela
+sprintx, pela runx ou pela própria mergex não são automaticamente de baixo risco, nem
+automaticamente OLHO OBRIGATÓRIO: os critérios O vêm primeiro, e a decisão de risco é lida linha a
+linha onde nasce. Sem O, o artefato só vai para LEITURA RÁPIDA (L4) ou DISPENSÁVEL (D4) quando o
+classificador da skill (`scripts/classificar-atencao.sh`) o reconhece num **catálogo fechado** —
+caminho exato na pasta deste trabalho, `kind` conferido. Nunca pela pasta, nunca pelo `expx_tool`
+do frontmatter. O que não é reconhecido segue a classificação de sempre. Detalhe operacional, exemplos de classificação correta e incorreta: `references/03-atencao-humana.md`.
 
 ## Segurança de versionamento
 

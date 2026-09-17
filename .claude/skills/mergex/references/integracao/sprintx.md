@@ -76,7 +76,10 @@ Na mergex, isso significa:
 - **não** precisa entrar no commit de uma task, e não vira desvio se estiver sujo durante o E1;
 - **não** entra na lista `commits` do `ENTREGA.md` — não é task; é citado na prosa;
 - é excluído da conta de "arquivo de produto fora do plano" na V9;
-- continua sujeito à **varredura de segredo**, como qualquer arquivo do commit.
+- continua sujeito à **varredura de segredo**, como qualquer arquivo do commit;
+- no **E3**, é classificado pelo catálogo de artefatos de método: DISPENSÁVEL (D4) só quando, contra a
+  base, apenas acrescenta entradas deste trabalho; qualquer reescrita vai para LEITURA RÁPIDA (L4)
+  (`references/03-atencao-humana.md`, "Artefatos de método").
 
 **A exceção é exata, nunca um curinga.** Vale para esse caminho literal e **somente quando a
 origem do trabalho é a sprintx**. Nada mais sob `docs/sprintx/estimativas/`, nada sob
@@ -137,6 +140,11 @@ A coluna "Onde" vale para as duas formas: `docs/sprintx/features/<slug>/` (canô
 | `FECHAMENTO.md` | pasta do trabalho | E1 (commit de artefatos de método, antes do push) |
 
 O `trabalho_id` da mergex é o **mesmo `<slug>`** da sprintx. Não gere outro.
+
+No **E3**, estes arquivos, e os demais que a sprintx e a buildx escrevem na pasta do trabalho
+(`00-ESTIMATIVA.md`, `BUILDX-PREMISSAS.md`, `base/`), são classificados pelo **catálogo fechado de
+artefatos de método** (`references/03-atencao-humana.md`). Estar na pasta da feature não basta:
+arquivo fora do catálogo segue a classificação normal.
 
 ## O que a mergex NÃO faz com a sprintx
 

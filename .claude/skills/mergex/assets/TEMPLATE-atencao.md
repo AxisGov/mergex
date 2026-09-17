@@ -36,13 +36,13 @@ aprende a ignorá-la}}
 
 | Arquivo | Mudança | Tamanho | Por quê |
 |---|---|---|---|
-| `{{caminho}}` | {{A/M/D/R}} | {{+n/-n}} | {{critério (L1..L3) e a evidência}} |
+| `{{caminho}}` | {{A/M/D/R}} | {{+n/-n}} | {{critério (L1..L4) e a evidência}} |
 
 ## DISPENSÁVEL — a máquina já provou
 
 | Arquivo | Mudança | Tamanho | Por quê |
 |---|---|---|---|
-| `{{caminho}}` | {{A/M/D/R}} | {{+n/-n}} | {{critério (D1..D3) e a evidência}} |
+| `{{caminho}}` | {{A/M/D/R}} | {{+n/-n}} | {{critério (D1..D4) e a evidência}} |
 
 ## Fontes consultadas
 

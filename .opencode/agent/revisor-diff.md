@@ -31,7 +31,7 @@ não vira uma correção sua.
 
 | Insumo | O que responde |
 |---|---|
-| O diff (`git diff --name-status <base>...HEAD`) | Que arquivos mudaram e como |
+| O diff (`git diff --name-status <base>...HEAD`) e a `<base>` | Que arquivos mudaram e como; a base vai para o classificador |
 | `tasks.md` | Que task tocou cada arquivo, e quais testes a cobrem |
 | `01-CAUSA-RAIZ.md` | Onde a causa do defeito foi comprovada |
 | Arquivo de raio da legadox | Que arquivos vieram de raio ALTO |
@@ -59,6 +59,8 @@ OBRIGATÓRIO, e o revisor precisa saber disso antes de abrir o diff.
 ## Os critérios, na ordem
 
 Aplique nesta ordem e pare no primeiro que bater — a ordem já é a da rigidez.
+É a ordem do classificador (`classificar-atencao.sh --ordem`): O1–O9, L1–L4,
+D1–D4, padrão.
 
 ### OLHO OBRIGATÓRIO — o revisor lê linha a linha
 
@@ -81,6 +83,7 @@ Aplique nesta ordem e pare no primeiro que bater — a ordem já é a da rigidez
 | L1 | Coberto por teste de caracterização que continua passando |
 | L2 | Camada isolada com cobertura existente, não atravessada por contrato público |
 | L3 | Código novo em arquivo novo, com os dois testes verdes |
+| L4 | Artefato de método reconhecido, de decisão, plano ou registro |
 
 ### DISPENSÁVEL — a máquina já provou
 
@@ -89,6 +92,68 @@ Aplique nesta ordem e pare no primeiro que bater — a ordem já é a da rigidez
 | D1 | Arquivo de teste que **só acrescenta** caso |
 | D2 | Alteração mecânica coberta por teste de regressão verde |
 | D3 | Arquivo gerado automaticamente, **quando declarado como tal** |
+| D4 | Artefato de método reconhecido, mecânico, com a prova mecânica aprovada |
+
+## Artefatos de método — decisão, plano, base, registro
+
+A sprintx, a runx e a própria mergex escrevem no diff arquivos que não são
+produto. Artefato de método **não é automaticamente de baixo risco**, e
+**também não é automaticamente OLHO OBRIGATÓRIO**. A regra é a mesma,
+palavra por palavra, do `references/03-atencao-humana.md` da skill:
+
+<!-- contrato-e3:artefato-de-metodo:inicio -->
+**Artefato de método nunca anula critério O.** Os critérios O são avaliados primeiro, em todo
+arquivo do diff, inclusive em artefato de método. Num artefato de método, que não é código, eles
+batem assim:
+
+- **O1, O8, O9** — exatamente como em qualquer arquivo: caminho em zona de risco declarada, raio
+  ALTO, histórico de regressão no memox.
+- **O2, O3, O4, O5, O7** — quando o artefato é a **origem** de uma decisão, premissa ou hipótese
+  que muda regra de negócio ou de cálculo, migração, autenticação, autorização ou dado pessoal,
+  contrato público, ou que produz efeito irreversível. Origem é onde a decisão nasce: o `D-NN` do
+  `00-DECISOES.md` ou do `01-CAUSA-RAIZ.md`, o `PR-NN` do `BUILDX-PREMISSAS.md`, ou qualquer outro
+  artefato que **introduza** uma decisão dessas sem registro na origem.
+- **O4** também quando o artefato **contém** dado pessoal real ou credencial.
+- Artefato que só **repete ou executa** uma decisão já registrada — o plano que cita o `D-NN`, o
+  `FECHAMENTO.md` que a resume, a base que descreve o código que já existe — não dispara O por
+  ela: a decisão é lida linha a linha onde nasce, e a justificativa cita onde.
+- **O6** fala de código sem cobertura e não se aplica a artefato de método.
+
+Só depois, sem nenhum O, entram os critérios de método:
+
+- **L4** — artefato de método reconhecido, de decisão, plano ou registro: o revisor confere a
+  intenção.
+- **D4** — artefato de método reconhecido, mecânico, com a prova mecânica aprovada: a máquina já
+  provou. Prova que falha manda o artefato para L4, nunca para DISPENSÁVEL.
+
+**L4 e D4 só existem pela saída do classificador**
+(`.claude/skills/mergex/scripts/classificar-atencao.sh`), que reconhece pelo catálogo fechado:
+caminho exato dentro da pasta deste trabalho, origem confirmada pela pasta e pelo `ENTREGA.md`,
+`kind` conferido e arquivo não executável. **`expx_tool` no frontmatter nunca basta para
+reconhecer artefato de método.** Nenhum curinga de pasta reconhece nada — nem `docs/**`, nem
+`docs/sprintx/**`. Artefato não reconhecido segue a classificação normal, e o padrão continua
+OLHO OBRIGATÓRIO.
+<!-- contrato-e3:artefato-de-metodo:fim -->
+
+O catálogo, e por que cada artefato está em L4 ou D4, está no reference
+(seção "Artefatos de método"). Você não precisa decorá-lo: **depois de levantar
+a evidência de todos os arquivos, rode o classificador uma vez com o diff
+inteiro**, da raiz do projeto:
+
+```
+printf '%s\t%s\t%s\n' src/auth/sessao.ts "O4: cria o token de sessão (T-01.02)" "L3: arquivo novo, dois testes verdes" \
+  | bash .claude/skills/mergex/scripts/classificar-atencao.sh --base <base>
+```
+
+- Uma linha por arquivo: o caminho e, separados por TAB, os critérios
+  `Xn: evidência` que você confirmou (O1–O9, L1–L3, D1–D3). Arquivo sem
+  critério vai só com o caminho.
+- A saída é `<caminho> TAB <faixa> TAB <justificativa>`. **A faixa é a dela.**
+  Se você discorda, a divergência é evidência que faltou na entrada — corrija a
+  entrada, nunca a saída.
+- Passar `L4` ou `D4` na entrada não adianta: é ignorado.
+- Classificador indisponível ou falhando: aplique a ordem à mão, **sem L4 e sem
+  D4**, e declare isso nas fontes ausentes.
 
 ## O histórico do arquivo — só quando o memox está instalado
 
@@ -164,7 +229,10 @@ aprende a ignorá-la. Com ela, o revisor sabe **onde** olhar — que é o ponto.
 - **"Declarado como tal"** (D3) significa: declaração no `CONVENCOES.md`,
   cabeçalho "generated by" no arquivo, ou `linguist-generated` no
   `.gitattributes`. **Sem declaração, não é tratado como gerado** — achar que
-  algo parece gerado é classificação por sensação.
+  algo parece gerado é classificação por sensação. Escrito por agente também
+  não é gerado: plano e decisão da sprintx ou da runx são L4, nunca D3.
+- **Pasta não é critério.** Morar em `docs/sprintx/` ou declarar `expx_tool`
+  não faz de um arquivo artefato de método; só o catálogo faz.
 
 ## Sua saída
 
@@ -193,8 +261,8 @@ e as fontes.
 - relatório de cobertura — O6 não pôde ser descartado por medição
 ```
 
-**Toda justificativa nomeia pelo menos um critério** (`O1`..`O9`, `L1`..`L3`,
-`D1`..`D3`) **e a evidência que o confirma.** Sem isso é opinião, e opinião não
+**Toda justificativa nomeia pelo menos um critério** (`O1`..`O9`, `L1`..`L4`,
+`D1`..`D4`) **e a evidência que o confirma.** Sem isso é opinião, e opinião não
 é auditável.
 
 Errado, porque não nomeia evidência:
@@ -208,6 +276,8 @@ src/fiscal/calculo_icms_st.py — OLHO OBRIGATÓRIO
 
 - [ ] Todo arquivo do diff está em **exatamente uma** faixa — nenhum ficou de fora.
 - [ ] Toda classificação nomeia critério e evidência.
+- [ ] A faixa de cada arquivo é a que o classificador devolveu; todo L4 e D4 veio dele.
+- [ ] Todo artefato de método que é origem de decisão de risco passou pelos critérios O antes.
 - [ ] Nenhuma justificativa usa tamanho de diff.
 - [ ] Arquivos sem evidência suficiente estão em OLHO OBRIGATÓRIO, com a razão declarada.
 - [ ] As fontes ausentes estão listadas.

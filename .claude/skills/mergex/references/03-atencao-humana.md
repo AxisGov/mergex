@@ -20,7 +20,7 @@ evidência.
 
 Passe a ele:
 
-- o diff (`git diff --name-status <branch-base>...HEAD`)
+- o diff (`git diff --name-status <branch-base>...HEAD`) e a `<branch-base>`, que o classificador usa
 - o `tasks.md` do trabalho
 - o `01-CAUSA-RAIZ.md`, quando é da runx
 - o arquivo de raio da legadox
@@ -66,6 +66,7 @@ Antes de classificar qualquer coisa, carregue as fontes. Cada uma responde a uma
 | `01-CAUSA-RAIZ.md` | Este arquivo é onde a causa foi comprovada? | runx |
 | Relatório de cobertura | Este arquivo tinha e tem cobertura de teste? | ferramenta do repositório |
 | `CONVENCOES.md` da stackx | Que arquivos este repositório gera automaticamente? | `docs/stack/CONVENCOES.md` |
+| Catálogo de artefatos de método | Este arquivo é artefato de método conhecido **deste** trabalho? | `scripts/classificar-atencao.sh` (seção "Artefatos de método") |
 
 **Fonte ausente não vira suposição.** Se não existe `PERFIL.md`, você não sabe se o arquivo está em zona de risco — e então os outros critérios decidem. Registre a fonte ausente como aviso na saída: o revisor precisa saber que aquela dimensão não foi avaliada.
 
@@ -144,7 +145,7 @@ olhar, que é o ponto inteiro. O formato está no Passo 4.
 
 ## Passo 3 — Classificar, arquivo por arquivo
 
-Aplique **nesta ordem**. Pare no primeiro critério que bater: a ordem já é a da rigidez.
+Aplique **nesta ordem**. Pare no primeiro critério que bater: a ordem já é a da rigidez. É a mesma ordem que o classificador aplica (`classificar-atencao.sh --ordem`): O1–O9, L1–L4, D1–D4, padrão.
 
 ### OLHO OBRIGATÓRIO — o revisor lê linha a linha
 
@@ -171,6 +172,7 @@ Nenhum critério de OLHO OBRIGATÓRIO bateu, e **um** destes bate:
 | L1 | Mudança coberta por teste de caracterização que continua passando | A caracterização existe, cobre estas linhas, e a suíte está verde |
 | L2 | Alteração em camada isolada com cobertura existente | O arquivo já tinha cobertura antes, e a camada não é atravessada por contrato público |
 | L3 | Código novo em arquivo novo, com os dois testes verdes | `A` no diff, a task declara `teste_integracao` e `teste_funcional`, suíte verde |
+| L4 | Artefato de método reconhecido, de decisão, plano ou registro | O classificador devolve `L4`, com a linha do catálogo que o reconheceu (seção "Artefatos de método") |
 
 ### DISPENSÁVEL — a máquina já provou
 
@@ -181,12 +183,151 @@ Nenhum critério acima bateu, e **um** destes bate:
 | D1 | Arquivo de teste que só acrescenta caso | O arquivo é de teste, e o diff só adiciona casos — não altera nem remove asserção existente |
 | D2 | Alteração mecânica coberta por teste de regressão verde | Renomeação, movimentação, formatação, troca de import — com o teste de regressão do trabalho verde sobre ela |
 | D3 | Arquivo gerado automaticamente, **quando declarado como tal** | O `CONVENCOES.md` da stackx ou o próprio arquivo o declara gerado (lockfile, snapshot, cliente de API gerado, migração gerada por ORM que só reflete o modelo) |
+| D4 | Artefato de método reconhecido, mecânico, com a prova mecânica aprovada | O classificador devolve `D4`, com a prova que passou (seção "Artefatos de método") |
+
+D3 continua significando **gerado de forma determinística** pelo processo ou pela ferramenta, e
+declarado. "Escrito por um agente" não é "gerado": plano, decisão e fechamento escritos pela
+sprintx ou pela runx são artefatos de método (L4), nunca D3.
+
+### Artefatos de método
+
+A sprintx, a runx e a própria mergex escrevem, dentro do diff, arquivos que não são produto:
+decisões, plano, base da investigação, auditoria, fechamento, registro da entrega. Sem critério
+próprio, eles caíam no padrão e iam todos para OLHO OBRIGATÓRIO — não por risco, mas porque
+nenhuma regra os descrevia. Quando quase tudo pede leitura linha a linha, a classificação para de
+dizer onde olhar.
+
+Artefato de método **não é automaticamente de baixo risco**, e **também não é automaticamente
+OLHO OBRIGATÓRIO**. A regra abaixo é a mesma, palavra por palavra, no prompt do `revisor-diff`:
+
+<!-- contrato-e3:artefato-de-metodo:inicio -->
+**Artefato de método nunca anula critério O.** Os critérios O são avaliados primeiro, em todo
+arquivo do diff, inclusive em artefato de método. Num artefato de método, que não é código, eles
+batem assim:
+
+- **O1, O8, O9** — exatamente como em qualquer arquivo: caminho em zona de risco declarada, raio
+  ALTO, histórico de regressão no memox.
+- **O2, O3, O4, O5, O7** — quando o artefato é a **origem** de uma decisão, premissa ou hipótese
+  que muda regra de negócio ou de cálculo, migração, autenticação, autorização ou dado pessoal,
+  contrato público, ou que produz efeito irreversível. Origem é onde a decisão nasce: o `D-NN` do
+  `00-DECISOES.md` ou do `01-CAUSA-RAIZ.md`, o `PR-NN` do `BUILDX-PREMISSAS.md`, ou qualquer outro
+  artefato que **introduza** uma decisão dessas sem registro na origem.
+- **O4** também quando o artefato **contém** dado pessoal real ou credencial.
+- Artefato que só **repete ou executa** uma decisão já registrada — o plano que cita o `D-NN`, o
+  `FECHAMENTO.md` que a resume, a base que descreve o código que já existe — não dispara O por
+  ela: a decisão é lida linha a linha onde nasce, e a justificativa cita onde.
+- **O6** fala de código sem cobertura e não se aplica a artefato de método.
+
+Só depois, sem nenhum O, entram os critérios de método:
+
+- **L4** — artefato de método reconhecido, de decisão, plano ou registro: o revisor confere a
+  intenção.
+- **D4** — artefato de método reconhecido, mecânico, com a prova mecânica aprovada: a máquina já
+  provou. Prova que falha manda o artefato para L4, nunca para DISPENSÁVEL.
+
+**L4 e D4 só existem pela saída do classificador**
+(`.claude/skills/mergex/scripts/classificar-atencao.sh`), que reconhece pelo catálogo fechado:
+caminho exato dentro da pasta deste trabalho, origem confirmada pela pasta e pelo `ENTREGA.md`,
+`kind` conferido e arquivo não executável. **`expx_tool` no frontmatter nunca basta para
+reconhecer artefato de método.** Nenhum curinga de pasta reconhece nada — nem `docs/**`, nem
+`docs/sprintx/**`. Artefato não reconhecido segue a classificação normal, e o padrão continua
+OLHO OBRIGATÓRIO.
+<!-- contrato-e3:artefato-de-metodo:fim -->
+
+#### O catálogo
+
+A lista é **fechada**. Arquivo fora dela não é artefato de método para o E3, mesmo morando em
+`docs/sprintx/` ou declarando `expx_tool: sprintx`. Caminho sem `docs/` na frente é relativo à
+pasta **deste** trabalho: `docs/sprintx/features/<slug>/` (ou `docs/<slug>/` no formato antigo)
+na sprintx, `docs/manutencao/<OC-ID>-<slug>/` na runx. O único segmento variável é `sprint-NN`
+(`sprint-` e dígitos). `base/<area>.md` só vale para arquivo listado no `base/00-INDICE.md` do
+mesmo trabalho. Kind `-` quer dizer que o contrato de origem não define frontmatter, e o arquivo
+**não pode** declarar um.
+
+| origem | caminho | kind | critério | função |
+|---|---|---|---|---|
+| sprintx | `00-DECISOES.md` | `decisoes` | L4 | decisões e hipóteses do trabalho |
+| sprintx | `BUILDX-PREMISSAS.md` | - | L4 | premissas assumidas pela buildx no lugar do humano |
+| sprintx | `00-ESTIMATIVA.md` | `estimativa` | L4 | estimativa com premissas e invalidadores |
+| sprintx | `ORQUESTRADOR.md` | `orquestrador` | L4 | objetivo, mapa e rota do trabalho |
+| sprintx | `00-AUDITORIA.md` | - | L4 | veredito e achados da auditoria do plano |
+| sprintx | `FECHAMENTO.md` | `fechamento` | L4 | resumo, decisão principal e risco residual |
+| sprintx | `sprint-NN/tasks.md` | `tasks,plano` | L4 | plano: tasks, testes e critérios de aceite |
+| sprintx | `sprint-NN/sprint.md` | `sprint` | L4 | plano: objetivo e critério de saída da sprint |
+| sprintx | `sprint-NN/fases.md` | `fases` | L4 | plano: fases e critérios de saída |
+| sprintx | `base/00-LACUNAS.md` | - | L4 | lacunas da investigação |
+| sprintx | `base/<area>.md` | - | L4 | base da investigação, listada no índice |
+| sprintx | `base/00-INDICE.md` | `base_indice` | D4:indice-consistente | índice da base |
+| sprintx | `00-BLOQUEIOS.md` | `bloqueios` | D4:bloqueios-vazio | registro de bloqueios |
+| sprintx | `docs/sprintx/estimativas/HISTORICO.md` | `estimativa_historico` | D4:historico-so-acrescenta | histórico quantitativo global de estimativas |
+| runx | `00-OCORRENCIA.md` | `ocorrencia` | L4 | relato e tipo da ocorrência |
+| runx | `01-CAUSA-RAIZ.md` | `causa_raiz` | L4 | causa raiz, hipóteses e decisões |
+| runx | `ORQUESTRADOR.md` | `orquestrador` | L4 | objetivo, mapa e rota da ocorrência |
+| runx | `QA.md` | `qa` | L4 | veredito e roteiro do QA |
+| runx | `sprint-NN/tasks.md` | `tasks,plano` | L4 | plano: tasks, testes e critérios de aceite |
+| runx | `sprint-NN/sprint.md` | `sprint` | L4 | plano: objetivo e critério de saída da sprint |
+| runx | `sprint-NN/fases.md` | `fases` | L4 | plano: fases e critérios de saída |
+| runx | `base/00-LACUNAS.md` | - | L4 | lacunas da investigação |
+| runx | `base/<area>.md` | - | L4 | base da investigação, listada no índice |
+| runx | `base/00-INDICE.md` | `base_indice` | D4:indice-consistente | índice da base |
+| runx | `BLOQUEIOS.md` | `bloqueios` | D4:bloqueios-vazio | registro de bloqueios |
+| mergex | `docs/entregas/<trabalho_id>/ENTREGA.md` | `entrega` | D4 | registro da entrega, gravado pela própria mergex |
+| mergex | `docs/entregas/<trabalho_id>/PR.md` | - | D4 | descrição do PR, regravada pelo E4 desta entrega |
+| mergex | `docs/entregas/<trabalho_id>/QA-PACOTE.md` | - | D4 | pacote de QA, regravado pelo E5 desta entrega |
+| mergex | `docs/entregas/<trabalho_id>/ATENCAO.md` | - | D4 | classificação, regravada pelo E3 desta entrega |
+
+Por que cada um está onde está:
+
+- **L4 — decisão, premissa, plano, base, auditoria, fechamento.** Carregam escolha, tradução de
+  requisito ou leitura humana do trabalho, mesmo quando feitas por agente em modo autônomo. Não
+  são implementação, então não pedem leitura linha a linha — **salvo** quando são a origem de uma
+  decisão de risco (critério O, acima). Nada aqui é "gerado": escrito por agente não é D3.
+- **D4 — só o que não contém decisão nova e cuja consistência a máquina prova:**
+  - `00-BLOQUEIOS.md` / `BLOQUEIOS.md`: `bloqueios: []` e nenhum `B-NN` no arquivo — o portão (V7)
+    já provou que não há bloqueio aberto. Com bloqueio registrado, é L4.
+  - `base/00-INDICE.md`: toda área listada é um `.md` que existe na mesma `base/`. Índice que
+    aponta para o que não existe é L4.
+  - `HISTORICO.md` (só sprintx): contra a base, **nenhuma linha existente removida ou reescrita**
+    (fora `atualizado_em`), e todo acréscimo é entrada ou linha de tabela **deste** trabalho.
+    Prosa nova ou reescrita, calibração recalculada, entrada de outro trabalho, arquivo novo com o
+    corpo do template, ou falta de `<branch-base>`: L4.
+  - `ENTREGA.md`, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md` deste trabalho: a própria saída da
+    mergex. O `ENTREGA.md` só com `kind: entrega`, este `trabalho_id` e a `branch:` atual; os
+    outros três só aparecem no diff numa retomada, e são regravados nesta entrega.
+- **Fora do catálogo, de propósito:** `docs/relatorios/**` da runx (só existe depois do E5 da
+  runx), `docs/projeto/**` da buildx (vive na branch de controle, nunca no diff da feature),
+  qualquer arquivo novo que alguém criar na pasta do trabalho. Todos seguem a classificação normal.
+
+A runx **não** herda nomes da sprintx: `00-DECISOES.md`, `FECHAMENTO.md`, `00-BLOQUEIOS.md` ou o
+`HISTORICO.md` num trabalho da runx não são reconhecidos, e a recíproca vale.
+
+#### O classificador
+
+A ordem inteira do Passo 3 e o reconhecimento moram num script, para que nenhum dos dois dependa
+de releitura de prosa. **O agente continua sendo quem levanta a evidência**; o script não avalia
+critério O, L1–L3 ou D1–D3 — recebe o que o agente confirmou e aplica a ordem.
+
+```
+printf '%s\t%s\t%s\n' src/auth/sessao.ts "O4: cria o token de sessão (T-01.02)" "L3: arquivo novo, dois testes verdes" \
+  | bash .claude/skills/mergex/scripts/classificar-atencao.sh --base <branch-base>
+```
+
+- Entrada: uma linha por arquivo do diff — o caminho e, separados por TAB, os critérios
+  `Xn: evidência` confirmados (O1–O9, L1–L3, D1–D3). Arquivo sem critério vai só com o caminho.
+- Saída: `<caminho> TAB <faixa> TAB <justificativa>`. A justificativa já nomeia o critério; copie
+  para o `ATENCAO.md` e acrescente o que o revisor precisa saber.
+- `L4` ou `D4` passados na entrada são **ignorados**, e a saída diz isso.
+- `--catalogo` imprime o catálogo; `--ordem`, a ordem. O validador de contrato confere que as
+  duas batem com este reference e com o prompt do agente.
+- O resultado vem do trabalho corrente resolvido pela branch (exatamente um `ENTREGA.md` com
+  `branch:` igual à branch ativa) — o mesmo resolvedor do hook de escopo. Sem ele, nada é
+  reconhecido e a ordem continua valendo.
 
 ### A regra do desempate
 
 **Na dúvida entre duas faixas, sobe para a mais rigorosa e diz por quê.** Escreva a dúvida na justificativa: "subiu para OLHO OBRIGATÓRIO porque a cobertura destas linhas não pôde ser confirmada".
 
-Um arquivo que não bate em nenhum critério de nenhuma faixa vai para **OLHO OBRIGATÓRIO** por padrão. Ausência de evidência é ausência de prova, e o padrão é o rigor.
+Um arquivo que não bate em nenhum critério de nenhuma faixa vai para **OLHO OBRIGATÓRIO** por padrão. Ausência de evidência é ausência de prova, e o padrão é o rigor. Isso vale igual para artefato de método que o classificador não reconheceu: a justificativa diz por que não foi reconhecido.
 
 ### O que NÃO é critério
 
@@ -195,6 +336,8 @@ Um arquivo que não bate em nenhum critério de nenhuma faixa vai para **OLHO OB
 - **Pressa da entrega.**
 - **Coincidência de arquivo no memox.** Dois trabalhos que tocaram o mesmo caminho sem vínculo causal comprovado não sobem faixa nenhuma (`Passo 2.b`, regra 2).
 - **Quantidade de arquivos já em OLHO OBRIGATÓRIO.** A faixa não tem cota. Se o trabalho inteiro é de risco, o trabalho inteiro é OLHO OBRIGATÓRIO — e o revisor precisa saber disso antes de abrir o diff.
+- **A distribuição das faixas.** Não existe meta de percentual para nenhuma faixa, nem obrigação de haver arquivo dispensável. L4 e D4 existem para dar critério a quem não tinha, não para baixar contagem.
+- **Morar em `docs/`, em `docs/sprintx/` ou em `docs/manutencao/`, ou declarar `expx_tool` no frontmatter.** Só o catálogo reconhece artefato de método.
 
 ## Passo 4 — Escrever a justificativa
 
@@ -255,6 +398,15 @@ Arquivo de teste, o diff só acrescenta casos, nenhuma asserção existente foi 
 **`src/relatorios/exportador.py` — 120 linhas refatoradas → LEITURA RÁPIDA**
 Refatoração coberta por teste de caracterização que continua passando (L1). O revisor confere a intenção — "extraíram o formatador para uma classe" — sem ler linha a linha, porque o comportamento está congelado por teste.
 
+**`docs/sprintx/features/<slug>/sprint-02/tasks.md` — 164 linhas → LEITURA RÁPIDA**
+Plano condensado deste trabalho (`kind: plano`), reconhecido pelo catálogo (L4). As tasks citam as decisões `D-05` a `D-07`, mas não as criam: o revisor confere se o plano executa o que foi decidido, e lê as decisões onde elas nascem.
+
+**`docs/sprintx/features/<slug>/00-DECISOES.md` — 161 linhas → OLHO OBRIGATÓRIO**
+É a origem de `D-04` (a função passa a ser exportada pelo ponto de entrada — contrato público, O5) e de `D-05` a `D-07` (o formato do código — regra de negócio, O2), todas `(HIPOTESE)` tomadas em modo autônomo. Ser artefato de método não rebaixa: O vem antes de L4.
+
+**`docs/sprintx/features/<slug>/00-BLOQUEIOS.md` — `bloqueios: []` → DISPENSÁVEL**
+Reconhecido pelo catálogo, com a prova mecânica aprovada: lista vazia e nenhum `B-NN` no arquivo (D4). O portão já provou que não há bloqueio aberto.
+
 ### Incorreto
 
 **Rebaixar por tamanho.** "`calculo_icms_st.py` mudou só uma linha, então LEITURA RÁPIDA." Viola a regra 8 e a 9. O critério é a zona e a natureza da mudança.
@@ -266,6 +418,14 @@ Refatoração coberta por teste de caracterização que continua passando (L1). 
 **Deixar arquivo sem faixa.** Todo arquivo do diff é classificado. Um arquivo esquecido é um arquivo que ninguém revisou.
 
 **Confundir migração gerada com migração.** Uma migração de banco é sempre O3, **mesmo gerada por ORM**, quando cria, altera ou remove estrutura ou dado. D3 só vale para arquivo gerado que **reflete** algo já revisado em outro lugar e não tem efeito próprio no banco.
+
+**Rebaixar pela pasta.** "Está em `docs/sprintx/`, então é LEITURA RÁPIDA." Um `NOTAS.md` ou um `regra.js` criado na pasta da feature não é artefato de método: está fora do catálogo e segue a classificação normal — sem evidência, OLHO OBRIGATÓRIO.
+
+**Rebaixar pelo frontmatter.** "Declara `expx_tool: sprintx` e `kind: decisoes`, então é L4." Qualquer arquivo pode escrever isso. Sem caminho de catálogo, na pasta deste trabalho, o frontmatter não reconhece nada.
+
+**Usar L4 para esconder decisão de risco.** "`00-DECISOES.md` é artefato de método, então L4." Se ele é a origem de uma decisão sobre autenticação, contrato público ou regra de negócio, o critério O bate primeiro.
+
+**Chamar de gerado o que um agente escreveu.** "O plano foi escrito pela sprintx, então D3." D3 é geração determinística declarada; plano escrito por agente é L4.
 
 ## Passo 5 — Gravar a saída
 
@@ -305,7 +465,9 @@ Esta saída vai inteira para a seção **"Onde eu quero seu olho"** da descriç�
 ## Critério de saída
 
 - [ ] Todo arquivo do diff está em exatamente uma faixa.
-- [ ] Toda classificação nomeia pelo menos um critério (`O1`..`O9`, `L1`..`L3`, `D1`..`D3`).
+- [ ] Toda classificação nomeia pelo menos um critério (`O1`..`O9`, `L1`..`L4`, `D1`..`D4`).
+- [ ] Todo L4 e D4 veio da saída do classificador, com a linha do catálogo ou a prova.
+- [ ] Todo artefato de método que é origem de decisão de risco foi avaliado pelos critérios O antes.
 - [ ] Nenhuma justificativa é baseada em tamanho de diff.
 - [ ] Arquivos sem evidência suficiente estão em OLHO OBRIGATÓRIO, com a razão declarada.
 - [ ] As fontes ausentes estão listadas.
@@ -330,3 +492,6 @@ Esta saída vai inteira para a seção **"Onde eu quero seu olho"** da descriç�
 | Índice do memox desatualizado | Use o que ele devolve; não reconstrua o índice no E3 — a reindexação é do E8 |
 | Arquivo só em `coincidencias_arquivo` | **Não sobe.** Coincidência não é evidência causal; registre nada e siga |
 | Arquivo com regressão já em OLHO OBRIGATÓRIO | Continua na mesma faixa (é o teto); acrescente O9 à justificativa |
+| Classificador indisponível ou falhando | Aplique a ordem à mão, **sem L4 e sem D4**: artefato de método volta ao padrão, com a razão declarada. Nunca reconheça de cabeça |
+| Artefato de método não reconhecido | Segue a classificação normal; a justificativa cita o motivo que o classificador devolveu (fora do catálogo, kind divergente, trabalho não determinado) |
+| Prova do D4 falhou | L4, com o motivo da prova na justificativa. Nunca DISPENSÁVEL |
