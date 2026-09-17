@@ -1,0 +1,18 @@
+src/proximo-codigo.js	O2: cria a regra do código — literal SEQ-, zeros à esquerda até 6 dígitos, sem truncar (T-02.02, T-02.03; D-05..D-07)	O5: função pública nova com formato de retorno fixado (D-04, D-14)
+src/index.js	O5: contrato público do ponto de entrada passa a exportar proximoCodigo (T-01.01, D-04)
+test/proximo-codigo.test.js	D1: teste novo que só acrescenta casos; nenhum teste existente alterado
+docs/sprintx/features/codigo-sequencial/00-DECISOES.md	O2: origem do formato do código — prefixo, largura, não truncar, faixa segura (D-05, D-06, D-07, D-09)	O5: origem da função pública e do reexport pelo index (D-01, D-04)
+docs/sprintx/features/codigo-sequencial/BUILDX-PREMISSAS.md	O2: origem do limite do formato decimal à faixa segura (PR-15)	O5: fixa o que o contrato de formato garante (PR-15)
+docs/entregas/codigo-sequencial/ENTREGA.md
+docs/sprintx/estimativas/HISTORICO.md
+docs/sprintx/features/codigo-sequencial/00-AUDITORIA.md
+docs/sprintx/features/codigo-sequencial/00-BLOQUEIOS.md
+docs/sprintx/features/codigo-sequencial/FECHAMENTO.md
+docs/sprintx/features/codigo-sequencial/ORQUESTRADOR.md
+docs/sprintx/features/codigo-sequencial/base/00-INDICE.md
+docs/sprintx/features/codigo-sequencial/base/00-LACUNAS.md
+docs/sprintx/features/codigo-sequencial/base/convencoes.md
+docs/sprintx/features/codigo-sequencial/base/modulo-principal-e-harness.md
+docs/sprintx/features/codigo-sequencial/base/proximo-numero.md
+docs/sprintx/features/codigo-sequencial/sprint-01/tasks.md
+docs/sprintx/features/codigo-sequencial/sprint-02/tasks.md

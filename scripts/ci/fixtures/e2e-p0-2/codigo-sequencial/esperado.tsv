@@ -1,0 +1,18 @@
+src/proximo-codigo.js	OLHO OBRIGATÓRIO	O2	cria a regra do código
+src/index.js	OLHO OBRIGATÓRIO	O5	contrato público do ponto de entrada
+test/proximo-codigo.test.js	DISPENSÁVEL	D1	só acrescenta casos
+docs/sprintx/features/codigo-sequencial/00-DECISOES.md	OLHO OBRIGATÓRIO	O2	origem do formato do código
+docs/sprintx/features/codigo-sequencial/BUILDX-PREMISSAS.md	OLHO OBRIGATÓRIO	O2	PR-15
+docs/entregas/codigo-sequencial/ENTREGA.md	DISPENSÁVEL	D4	registro da entrega, gravado pela própria mergex
+docs/sprintx/estimativas/HISTORICO.md	LEITURA RÁPIDA	L4	D4 não provado: remove ou reescreve linha existente
+docs/sprintx/features/codigo-sequencial/00-AUDITORIA.md	LEITURA RÁPIDA	L4	veredito e achados da auditoria
+docs/sprintx/features/codigo-sequencial/00-BLOQUEIOS.md	DISPENSÁVEL	D4	bloqueios: [] e nenhum B-NN
+docs/sprintx/features/codigo-sequencial/FECHAMENTO.md	LEITURA RÁPIDA	L4	resumo, decisão principal e risco residual
+docs/sprintx/features/codigo-sequencial/ORQUESTRADOR.md	LEITURA RÁPIDA	L4	objetivo, mapa e rota do trabalho
+docs/sprintx/features/codigo-sequencial/base/00-INDICE.md	DISPENSÁVEL	D4	as 3 área(s) listadas existem na base
+docs/sprintx/features/codigo-sequencial/base/00-LACUNAS.md	LEITURA RÁPIDA	L4	lacunas da investigação
+docs/sprintx/features/codigo-sequencial/base/convencoes.md	LEITURA RÁPIDA	L4	listada no índice
+docs/sprintx/features/codigo-sequencial/base/modulo-principal-e-harness.md	LEITURA RÁPIDA	L4	listada no índice
+docs/sprintx/features/codigo-sequencial/base/proximo-numero.md	LEITURA RÁPIDA	L4	listada no índice
+docs/sprintx/features/codigo-sequencial/sprint-01/tasks.md	LEITURA RÁPIDA	L4	plano: tasks, testes e critérios de aceite
+docs/sprintx/features/codigo-sequencial/sprint-02/tasks.md	LEITURA RÁPIDA	L4	plano: tasks, testes e critérios de aceite

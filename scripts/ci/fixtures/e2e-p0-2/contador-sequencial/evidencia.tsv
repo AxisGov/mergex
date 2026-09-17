@@ -1,0 +1,18 @@
+src/proximo-numero.js	O2: cria a regra de proximoNumero — typeof number, Number.isInteger, >= 0 e valor + 1 (T-02.01..T-02.03; D-06..D-08)	O5: função pública nova da biblioteca (D-01)
+src/index.js	O5: module.exports passa de {} para { proximoNumero } (T-01.01, D-04)
+test/proximo-numero.test.js	D1: arquivo de teste novo; só acrescenta casos, nenhuma asserção existente alterada
+docs/sprintx/features/contador-sequencial/00-DECISOES.md	O2: origem das regras de entrada e incremento (D-06, D-07, D-08, D-09)	O5: origem da função pública e do reexport pelo index (D-01, D-04)
+docs/sprintx/features/contador-sequencial/BUILDX-PREMISSAS.md	O5: origem da forma da API pública — um módulo por função, reexportado por src/index.js (PR-14)
+docs/entregas/contador-sequencial/ENTREGA.md
+docs/sprintx/estimativas/HISTORICO.md
+docs/sprintx/features/contador-sequencial/00-AUDITORIA.md
+docs/sprintx/features/contador-sequencial/00-BLOQUEIOS.md
+docs/sprintx/features/contador-sequencial/FECHAMENTO.md
+docs/sprintx/features/contador-sequencial/ORQUESTRADOR.md
+docs/sprintx/features/contador-sequencial/base/00-INDICE.md
+docs/sprintx/features/contador-sequencial/base/00-LACUNAS.md
+docs/sprintx/features/contador-sequencial/base/convencoes.md
+docs/sprintx/features/contador-sequencial/base/harness-de-teste.md
+docs/sprintx/features/contador-sequencial/base/modulo-principal.md
+docs/sprintx/features/contador-sequencial/sprint-01/tasks.md
+docs/sprintx/features/contador-sequencial/sprint-02/tasks.md

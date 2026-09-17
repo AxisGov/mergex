@@ -365,4 +365,112 @@ if grep -Fq 'invoca `mergex-abrir`, `mergex-check`' "$readme"; then
   fail 'README still says buildx invokes mergex commands directly'
 fi
 
+# ---------------------------------------------------------------------------
+# P1 — E3: artefatos de método (L4/D4). Reference, agente nos dois harnesses e
+# classificador carregam o MESMO contrato efetivo.
+# ---------------------------------------------------------------------------
+atencao='.claude/skills/mergex/references/03-atencao-humana.md'
+agente_cl='.claude/agents/revisor-diff.md'
+agente_oc='.opencode/agent/revisor-diff.md'
+classificador='.claude/skills/mergex/scripts/classificar-atencao.sh'
+atencao_cmd='.claude/commands/mergex-atencao.md'
+atencao_oc='.opencode/commands/mergex-atencao.md'
+for f in "$atencao" "$agente_cl" "$agente_oc" "$classificador" "$atencao_cmd" "$atencao_oc"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# O espelho OpenCode do agente só pode diferir no frontmatter.
+corpo_agente() { awk 'f { print } /^---[[:space:]]*$/ && NR > 1 && !f { f = 1 }' "$1" | sed '/./,$!d'; }
+[ "$(corpo_agente "$agente_cl")" = "$(corpo_agente "$agente_oc")" ] \
+  || fail 'OpenCode revisor-diff body diverges from the Claude Code agent'
+cmp -s "$atencao_cmd" "$atencao_oc" || fail 'OpenCode mergex-atencao command diverges from Claude Code'
+
+# A ordem dos critérios: a do classificador é a das tabelas do reference e do agente.
+ordem_script="$(bash "$classificador" --ordem)"
+[ "$ordem_script" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ] \
+  || fail "classifier order changed: $ordem_script"
+ordem_tabelas() { grep -oE '^\| [OLD][0-9] \|' "$1" | tr -d '| ' | tr '\n' ' ' | sed 's/ $//'; }
+for f in "$atencao" "$agente_cl"; do
+  [ "$(ordem_tabelas "$f") PADRAO" = "$ordem_script" ] \
+    || fail "$f criteria tables are not in the classifier order ($(ordem_tabelas "$f"))"
+done
+
+# L4 e D4: o critério é o mesmo texto no reference e no agente.
+criterio_de() { grep -E "^\| $2 \|" "$1" | head -1 | awk -F'|' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3 }'; }
+for c in L4 D4; do
+  [ -n "$(criterio_de "$atencao" "$c")" ] || fail "reference has no $c criterion"
+  [ "$(criterio_de "$atencao" "$c")" = "$(criterio_de "$agente_cl" "$c")" ] \
+    || fail "$c criterion text diverges between reference and agent"
+done
+
+# O bloco da regra — precedência de O, O em artefato de método, L4, D4, reconhecimento —
+# é idêntico, byte a byte, no reference e no agente.
+bloco_metodo() { awk '/<!-- contrato-e3:artefato-de-metodo:inicio -->/ { f = 1 } f { print } /<!-- contrato-e3:artefato-de-metodo:fim -->/ { f = 0 }' "$1" | tr -d '\r'; }
+[ -n "$(bloco_metodo "$atencao")" ] || fail 'reference lost the method-artifact contract block'
+[ "$(bloco_metodo "$atencao")" = "$(bloco_metodo "$agente_cl")" ] \
+  || fail 'method-artifact contract block diverges between reference and agent'
+for frase in 'Artefato de método nunca anula critério O.' \
+             'L4 e D4 só existem pela saída do classificador' \
+             '`expx_tool` no frontmatter nunca basta' \
+             'O6** fala de código sem cobertura'; do
+  bloco_metodo "$atencao" | tr '\n' ' ' | sed 's/  */ /g' | grep -Fq "$frase" \
+    || fail "method-artifact block lost: $frase"
+done
+
+# O padrão conservador continua escrito nos dois.
+grep -Fq 'Um arquivo que não bate em nenhum critério de nenhuma faixa vai para **OLHO OBRIGATÓRIO** por padrão' "$atencao" \
+  || fail 'reference lost the conservative default'
+grep -Fq '**Arquivo que não bate em nenhum critério vai para OLHO OBRIGATÓRIO**' "$agente_cl" \
+  || fail 'agent lost the conservative default'
+
+# D1–D3 não foram afrouxados.
+grep -Fq '| D1 | Arquivo de teste que só acrescenta caso |' "$atencao" || fail 'D1 changed in the reference'
+grep -Fq '| D2 | Alteração mecânica coberta por teste de regressão verde |' "$atencao" || fail 'D2 changed in the reference'
+grep -Fq '| D3 | Arquivo gerado automaticamente, **quando declarado como tal** |' "$atencao" || fail 'D3 changed in the reference'
+grep -Fq '"Escrito por um agente" não é "gerado"' "$atencao" || fail 'reference no longer forbids D3 for agent-written files'
+
+# O catálogo do reference é o catálogo do classificador — linha a linha.
+catalogo_ref="$(grep -E '^\| (sprintx|runx|mergex) \|' "$atencao" \
+  | sed 's/`//g' | awk -F'|' '{ l = ""; for (i = 2; i < NF; i++) { c = $i; gsub(/^[[:space:]]+|[[:space:]]+$/, "", c); l = l (i > 2 ? "|" : "") c }; print l }' | sort)"
+catalogo_script="$(bash "$classificador" --catalogo | sort)"
+[ "$catalogo_ref" = "$catalogo_script" ] || {
+  diff <(printf '%s\n' "$catalogo_ref") <(printf '%s\n' "$catalogo_script") >&2 || true
+  fail 'method-artifact catalog diverges between reference and classifier'
+}
+
+# Nenhum curinga no catálogo: caminhos exatos, só `sprint-NN` e `base/<area>.md` como variáveis.
+if bash "$classificador" --catalogo | cut -d'|' -f2 | grep -Eq '\*|\?|\[|^docs/?$|^docs/sprintx/?$|^docs/manutencao/?$'; then
+  fail 'method-artifact catalog contains a wildcard'
+fi
+if grep -v '^[[:space:]]*#' "$classificador" | grep -Eq '"?docs/sprintx/"?\*|docs/sprintx/\*\*|"?docs/"?\*\)'; then
+  fail 'classifier recognizes by directory wildcard'
+fi
+# Nos contratos, o curinga só aparece na frase que o proíbe.
+for f in "$atencao" "$agente_cl" "$atencao_cmd" "$skill"; do
+  # A frase proibitiva do bloco quebra em duas linhas; as duas são aceitas literalmente.
+  if grep -F -e 'docs/sprintx/**' -e 'docs/**' "$f" \
+       | grep -Fv -e 'Nenhum curinga de pasta reconhece nada — nem `docs/**`, nem' \
+                  -e '`docs/sprintx/**`. Artefato não reconhecido segue a classificação normal' \
+       | grep -qv -e 'docs/relatorios/\*\*` da runx' -e 'docs/projeto/\*\*` da buildx'; then
+    fail "$f uses a directory wildcard for method artifacts"
+  fi
+done
+
+# O frontmatter não reconhece nada sozinho: o classificador lê expx_tool só do ENTREGA.md.
+if grep -v '^[[:space:]]*#' "$classificador" | grep -F 'expx_tool' | grep -vq 'ENTREGA.md'; then
+  fail 'classifier reads expx_tool from something other than the ENTREGA.md'
+fi
+
+# A runx tem catálogo próprio e não herda nomes da sprintx.
+for nome in 00-DECISOES.md FECHAMENTO.md 00-BLOQUEIOS.md docs/sprintx/estimativas/HISTORICO.md BUILDX-PREMISSAS.md; do
+  if bash "$classificador" --catalogo | grep -Eq "^runx\|$nome\|"; then
+    fail "runx catalog inherited the sprintx artifact $nome"
+  fi
+done
+
+# Os comandos do E3 apontam para L1–L4, D1–D4 e para o classificador.
+grep -Fq 'LEITURA RÁPIDA (L1–L4), DISPENSÁVEL (D1–D4)' "$atencao_cmd" || fail 'E3 command does not list L4/D4'
+grep -Fq 'classificar-atencao.sh' "$atencao_cmd" || fail 'E3 command does not call the classifier'
+grep -Fq 'classificar-atencao.sh' "$agente_cl" || fail 'agent does not call the classifier'
+
 printf 'contract checks passed\n'
