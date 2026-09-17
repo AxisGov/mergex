@@ -214,8 +214,10 @@ O revisor humano é recurso caro e finito. O trabalho da `mergex` é gastar esse
 | Faixa | O que o revisor faz | Quando um arquivo cai aqui |
 |---|---|---|
 | **OLHO OBRIGATÓRIO** | Lê linha a linha | Zona de risco declarada; regra de negócio ou cálculo; migração de banco, qualquer uma; autenticação, autorização, dado pessoal; contrato público (rota, payload, evento, retorno); código sem cobertura antes e depois; efeito irreversível; raio ALTO |
-| **LEITURA RÁPIDA** | Confere a intenção, não a implementação | Coberto por caracterização que continua passando; camada isolada com cobertura existente; código novo em arquivo novo com os dois testes verdes |
-| **DISPENSÁVEL** | Não abre — a máquina já provou | Teste que só acrescenta caso; alteração mecânica coberta por regressão verde; arquivo gerado automaticamente, quando declarado como tal |
+| **LEITURA RÁPIDA** | Confere a intenção, não a implementação | Coberto por caracterização que continua passando; camada isolada com cobertura existente; código novo em arquivo novo com os dois testes verdes; artefato de método reconhecido (decisão, plano, base, fechamento) |
+| **DISPENSÁVEL** | Não abre — a máquina já provou | Teste que só acrescenta caso; alteração mecânica coberta por regressão verde; arquivo gerado automaticamente, quando declarado como tal; artefato de método mecânico reconhecido, com prova mecânica (bloqueios vazios, índice consistente, histórico que só acrescenta) |
+
+**Artefato de método nunca anula critério O**, e só é reconhecido por um catálogo fechado — caminho exato na pasta do trabalho e `kind` conferido, nunca pela pasta nem pelo frontmatter. O que não é reconhecido segue a regra de sempre.
 
 A classificação é **derivada de evidência registrada** — zonas de risco, raio, cobertura, tipo de mudança. Nunca de sensação. Na dúvida entre duas faixas, sobe para a mais rigorosa e diz por quê.
 
