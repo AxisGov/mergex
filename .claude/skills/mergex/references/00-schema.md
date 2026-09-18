@@ -63,6 +63,8 @@ Valem para todo arquivo que leva frontmatter:
 | `tipo_trabalho` | `feature` \| `ocorrencia` |
 | `estado` | `aberto` \| `entregue` \| `bloqueado` |
 | `portao` | `pronto` \| `bloqueado` \| `null` (ainda não rodou) |
+| `falhas_portao` (por item) | `v1` … `v10` \| `v1_sem_prova` … `v10_sem_prova` |
+| `causa` | ver "A causa do bloqueio" \| `null` (não bloqueado) |
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
 | `faixa` (por arquivo) | `alta` \| `media` \| `baixa` |
@@ -123,6 +125,8 @@ atencao:
   leitura_rapida: 2
   dispensavel: 4
 portao: pronto
+falhas_portao: []
+causa: null
 desvios: []
 push_feito: true
 pr_url: https://github.com/<org>/<repo>/pull/482
@@ -150,6 +154,8 @@ entregue_em: 2026-08-29
 | `raio` | A faixa da legadox; `null` sem modo legado — **nunca invente uma faixa** |
 | `atencao` | As três contagens do E3; zeros quando o E3 não rodou |
 | `portao` | O resultado do E2 |
+| `falhas_portao` | As verificações que deram FALHA no E2, na numeração do portão; `[]` quando o portão não rodou ou deu PRONTO. Ver "A causa do bloqueio" |
+| `causa` | `null` salvo em `estado: bloqueado`, onde é **obrigatória e não nula**: derivada de `falhas_portao`, nunca escrita à mão. Ver "A causa do bloqueio" |
 | `desvios` | Arquivos alterados fora da lista declarada, detectados no E1 e no E2; `[]` quando não houve |
 | `push_feito` | `true` só quando o E6 confirmou que o remoto tem o mesmo commit |
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
@@ -251,6 +257,94 @@ A regra prática: a mergex grava o que **só ela** sabe (o diff real, a faixa po
 branch, os commits) e copia o que a origem já declarou (`modulo_afetado`). O que ela não sabe,
 ela não inventa.
 
+## A causa do bloqueio — `falhas_portao` e `causa`
+
+Quando o portão barra, quem vem depois (a buildx, uma sessão futura, uma pessoa) precisa saber
+**por que** — lendo o `ENTREGA.md` commitado (`git show <branch>:docs/entregas/<trabalho_id>/ENTREGA.md`),
+sem depender da memória da sessão nem da prosa. Duas chaves respondem isso, e as duas seguem a
+regra universal 6: **nunca são omitidas**.
+
+- **`falhas_portao`** é o que o portão **viu**: as verificações que deram `FALHA` no E2, como
+  lista de uma linha, na numeração do portão (`[v1, v7]`). Uma verificação que **não pôde rodar**
+  (o E2 marca `FALHA` porque ausência de prova não é prova) entra como `vN_sem_prova`, nunca como
+  `vN`. Gravada pelo E2 junto com `portao` (`references/02-prontidao.md`, "Registro das falhas").
+- **`causa`** é **uma** das causas abaixo, derivada **mecanicamente** de `falhas_portao` — e de
+  nada mais. Gravada pelo E8 no fechamento bloqueado, junto com `estado: bloqueado`, pelo script
+  `scripts/causa-do-portao.sh --derivar`.
+
+A mergex é dona **só da causa observável do portão**. Ela não lê a descrição do `B-NN`, não
+interpreta a narrativa de quem executou e não conhece as classes de pendência da buildx: traduzir
+`causa` para o que fazer com o trabalho é da buildx.
+
+### O enum — uma causa por verificação, e a ordem de precedência
+
+| Ordem | Verificação | `causa` |
+|---|---|---|
+| 1 | `v10` | `segredo_no_diff` |
+| 2 | `v6` | `auditoria_reprovada` |
+| 3 | `v7` | `bloqueio_aberto` |
+| 4 | `v8` | `legado_incompleto` |
+| 5 | `v9` | `arquivo_fora_do_plano` |
+| 6 | `v1` | `tarefa_nao_concluida` |
+| 7 | `v2` | `suite_reprovada` |
+| 8 | `v3` | `teste_nao_declarado` |
+| 9 | `v4` | `regressao_nao_declarada` |
+| 10 | `v5` | `qa_nao_aprovado` |
+
+E um valor a mais, que não é causa de trabalho nenhum: **`indeterminada`** — a mergex não
+conseguiu provar a causa. Nenhum outro valor existe. `falha_tecnica`, `decisao_humana` ou qualquer
+classificação pelo conteúdo do bloqueio **não** são valores deste enum.
+
+**A regra, inteira:** percorra a ordem acima; a primeira verificação presente em
+`falhas_portao` decide. Presente como `vN`, a causa é a da linha. Presente como `vN_sem_prova`,
+a causa é `indeterminada` — a verificação que decidiria não pôde rodar, e uma causa de ordem
+mais baixa, mesmo provada, não é a causa inequívoca.
+
+**Por que esta ordem.** Ela não é um juízo sobre qual falha é mais grave; é o que torna uma
+falha consequência da outra:
+
+- `v10` primeiro: é a única verificação que não pode ser pulada por nenhum motivo (regra 5).
+- `v6` a `v9` em seguida, na numeração: são **fatos que existem independentemente de a execução
+  ter terminado** — o veredito da auditoria (que devolve o plano à F3 e invalida as verificações
+  medidas contra ele), o `B-NN` registrado, as pré-condições do modo legado, o arquivo no diff.
+- `v1` a `v5` por último, na numeração: leem o **registro da execução**, que fica incompleto
+  justamente quando um daqueles fatos parou o trabalho. O próprio contrato do E2 diz isso: task
+  `bloqueada` aponta o `B-NN` (V1 é sintoma da V7), e o QA da runx ausente é o fluxo que não
+  chegou ao E4 da runx (V5 é sintoma da V1).
+
+Exemplo: `falhas_portao: [v1, v7]` → `causa: bloqueio_aberto`. `[v1, v2]` →
+`tarefa_nao_concluida`. `[v7, v10_sem_prova]` → `indeterminada`.
+
+### Por estado
+
+| `estado` | `portao` | `falhas_portao` | `causa` |
+|---|---|---|---|
+| `aberto` | `null` ou `pronto` | `[]` | `null` |
+| `aberto` (E2 barrou, E8 ainda não fechou) | `bloqueado` | não vazia | `null` |
+| `entregue` | `pronto` | `[]` | `null` |
+| `bloqueado` | `bloqueado` | não vazia | **não nula**, igual à derivada de `falhas_portao` |
+
+`bloqueado` sem falha registrada não tem causa a derivar: o registro está inconsistente e o E8
+não grava — roda o E2 de novo. **Nunca** se escreve uma causa sem as falhas que a sustentam.
+
+`scripts/causa-do-portao.sh --validar <ENTREGA.md>` confere tudo isto antes de o E8 commitar.
+
+### `ENTREGA.md` anterior a estas chaves
+
+Um `ENTREGA.md` gravado antes de `causa` e `falhas_portao` existirem, **sem as duas**:
+
+- **em leitura histórica é aceito** (`--validar-historico`): a causa dele é `ausente` — **não
+  commitada**. Quem lê trata assim; ninguém a infere da prosa;
+- **como gravação nova é inválido** (`--validar`): toda gravação da mergex a partir daqui leva as
+  duas chaves;
+- **não há migração em massa**: vale a regra de migração abaixo. A mergex acrescenta as chaves na
+  próxima vez que gravar aquele arquivo — e só grava onde o valor é `null`/`[]` por definição (E0
+  na retomada, E9 atualizando `pr_estado` de uma entrega `entregue`). **Um bloqueio legado nunca
+  ganha causa retroativa**: a causa só existe quando o portão roda de novo.
+
+Um arquivo com **uma** das duas chaves e sem a outra não é legado: é gravação incompleta, e
+reprova nos dois modos.
+
 ## Arquivos SEM frontmatter
 
 Não recebem frontmatter, porque o painel não os lê individualmente:
@@ -287,3 +381,5 @@ Ao abrir um `ENTREGA.md` que já existe e não tem os campos de indexação:
 - [ ] `faixa` usa `alta`/`media`/`baixa`, nunca o nome da faixa em prosa.
 - [ ] `modulo_afetado` em minúscula e sem acento.
 - [ ] Nenhum caminho absoluto em nenhum valor.
+- [ ] `falhas_portao` e `causa` presentes; `causa` não nula só em `estado: bloqueado`, e igual à
+      derivada de `falhas_portao` (`scripts/causa-do-portao.sh --validar` passa).

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Prova por mutação da classificação de artefatos de método (E3, L4/D4).
+# Prova por mutação da classificação de artefatos de método (E3, L4/D4) e,
+# desde a P0.2-A4, da causa do bloqueio (M10 em diante: causa-do-portao.sh).
 #
 # Cada mutação quebra a regra de um jeito dirigido, numa CÓPIA temporária da
 # árvore, e roda a verificação que tem que pegá-la. Mutação que sobrevive
@@ -14,6 +15,10 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLASS='.claude/skills/mergex/scripts/classificar-atencao.sh'
 REF='.claude/skills/mergex/references/03-atencao-humana.md'
+CAUSA_SH='.claude/skills/mergex/scripts/causa-do-portao.sh'
+SCHEMA='.claude/skills/mergex/references/00-schema.md'
+ABERTURA='.claude/skills/mergex/references/00-abertura.md'
+TEMPLATE_ENTREGA='.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md'
 AGENTE='.claude/agents/revisor-diff.md'
 AGENTE_OC='.opencode/agent/revisor-diff.md'
 
@@ -47,6 +52,7 @@ apaga() {
 
 teste()     { bash scripts/ci/test-atencao-metodo.sh > saida.log 2>&1; }
 validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
+teste_causa() { bash scripts/ci/test-causa-portao.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As mutações: id | descrição | verificação que TEM que falhar | função que muta
@@ -96,6 +102,20 @@ M9() { # a prova do HISTORICO passa a aceitar reescrita de linha existente
     '      -*) continue ;;'
 }
 
+# --- P0.2-A4: a causa do bloqueio (scripts/causa-do-portao.sh) ---
+M10() { troca "$CAUSA_SH" '      [ "$t" = "$v" ] && { causa_de "$v"; return 0; }' \
+  '      [ "$t" = "$v" ] && { printf '"'"'falha_tecnica\n'"'"'; return 0; }'; }
+M11() { troca "$CAUSA_SH" '      [ "$causa" != null ]      || { ERRO="estado bloqueado exige causa não nula"; return 1; }' \
+  '      [ "$causa" = null ] && { printf '"'"'causa=null\n'"'"'; return 0; }'; }
+M12() { troca "$CAUSA_SH" '    if [ "$historico" = 1 ]; then' '    if true; then'; }
+M13() { troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5'" "ORDEM='v1 v2 v3 v4 v5 v6 v7 v8 v9 v10'"; }
+M14() { troca "$CAUSA_SH" '      [ "$t" = "${v}_sem_prova" ] && { printf '"'"'%s\n'"'"' "$INDETERMINADA"; return 0; }' \
+  '      [ "$t" = "${v}_sem_prova" ] && { causa_de "$v"; return 0; }'; }
+M15() { troca "$CAUSA_SH" "      printf 'causa=ausente\n'; return 0" '      ERRO="legado"; return 1'; }
+M16() { troca "$SCHEMA" '| 3 | `v7` | `bloqueio_aberto` |' '| 3 | `v7` | `falha_tecnica` |'; }
+M17() { apaga "$ABERTURA" '| `falhas_portao`, `causa` |'; }
+M18() { apaga "$TEMPLATE_ENTREGA" 'causa: '; }
+
 LISTA='M1a|remove a regra L4 do classificador|teste
 M1b|remove a linha L4 do reference|validador
 M2a|remove a regra D4 do classificador|teste
@@ -107,7 +127,16 @@ M5a|aceita qualquer expx_tool: sprintx|teste
 M6|padrão deixa de ser OLHO OBRIGATÓRIO|teste
 M7|agente OpenCode diverge da regra|validador
 M8|catálogo do script diverge do reference|validador
-M9|prova do HISTORICO aceita reescrita|teste'
+M9|prova do HISTORICO aceita reescrita|teste
+M10|grava falha_tecnica para qualquer bloqueio|teste_causa
+M11|aceita causa null em estado bloqueado|teste_causa
+M12|gravação nova aceita ENTREGA sem a chave causa|teste_causa
+M13|precedência na numeração crua (V1 antes de V7)|teste_causa
+M14|verificação sem prova vira causa provada|teste_causa
+M15|leitura histórica recusa ENTREGA anterior às chaves|teste_causa
+M16|tabela de causas do schema diverge do script|validador
+M17|retomada do E0 preserva a causa anterior|validador
+M18|template da ENTREGA omite a chave causa|validador'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0

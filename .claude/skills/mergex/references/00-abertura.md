@@ -206,7 +206,7 @@ replanejamento (portão bloqueado → replaneja → F3/F4/F5 → F6 de novo → 
 - `branch` e `branch_base` preenchidos — `branch_base` é a **base efetiva** determinada no passo 3
 - `versionado: true` (ou `false`, se o passo 1 assim determinou)
 - `commits: []` — a lista cresce no E1
-- `portao: null`, `push_feito: false`, `pr_url: null`, `pr_estado: null`
+- `portao: null`, `falhas_portao: []`, `causa: null`, `push_feito: false`, `pr_url: null`, `pr_estado: null`
 - `criado_em` e `atualizado_em` com a data de hoje
 
 Na prosa, a linha da branch diz como ela chegou até aqui — `aberta pela mergex`, `retomada` ou `adotada da skill de origem` — e de onde saiu a base (chamador, `CONVENCOES.md`, `origin/HEAD` ou principal atual). É o que permite, depois, entender um diff que não bate com `main`.
@@ -220,6 +220,7 @@ Atualize **somente o necessário** para abrir uma nova tentativa de entrega:
 |---|---|
 | `estado` | volta para `aberto` |
 | `portao` | volta para `null` — o veredito da tentativa anterior não vale para esta |
+| `falhas_portao`, `causa` | voltam para `[]` e `null`, junto com o veredito. Arquivo anterior a estas chaves ganha as duas agora (`00-schema.md`, "A causa do bloqueio"); a causa da tentativa anterior continua no histórico da branch, nunca é copiada para esta |
 | `push_feito` | volta para `false` |
 | `commits` | **preservado. Nunca zere** — é o histórico de execução (ver `01-commits.md`) |
 | `criado_em` | preservado |

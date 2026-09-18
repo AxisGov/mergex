@@ -213,3 +213,30 @@ classificação deixava de dizer onde olhar.
 o `HISTORICO.md` deixar de ser append-only na sprintx (a prova do D4 precisaria ser refeita); ou a
 runx passar a usar `docs/runx/ocorrencias/`, layout que o leitor do expxdev já conhece mas o
 contrato da runx ainda não escreve — até lá, esse layout não é reconhecido e segue o padrão.
+
+## P0.2-A4 — o portão registra as falhas e o E8 deriva a causa
+
+O `ENTREGA.md` terminal dizia **que** o portão barrou (`estado: bloqueado`, `portao: bloqueado`),
+mas não **por quê**: o motivo ficava na prosa e na memória da sessão. No piloto, um bloqueio com
+V1 e V7 (o B-01 pedia alterar arquivo fora do ownership) foi chamado à mão de `falha_tecnica` —
+classificação que nenhum artefato sustentava. A buildx precisa ler a causa por `git show` no HEAD
+da feature, sem interpretar texto.
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-111 | Qual enum de `causa`, sem inventar por intuição | **Uma causa por verificação do portão** (V1–V10), e nenhuma outra. Cada valor passou as cinco perguntas: a mergex observa sozinha (é o resultado da própria verificação), é determinístico, duas execuções sobre a mesma evidência dão o mesmo valor, a evidência está commitada (`falhas_portao` no mesmo arquivo, e os artefatos lidos pelo E2 no histórico) e é causa do bloqueio **do ponto de vista do portão**. Classificações pelo conteúdo do bloqueio (`falha_tecnica`, `decisao_humana`, "fora do ownership") **não passam**: dependem de ler a narrativa do `B-NN`, que não tem campo tipado | A mergex é dona da causa observável do portão. Traduzir para classe de pendência é da buildx; classificar o `B-NN` pelo tipo exige que a sprintx o grave tipado |
+| DM-112 | Como registrar as falhas | Chave nova **`falhas_portao`**, gravada pelo E2 junto com `portao`: as verificações com FALHA, na numeração do portão. Verificação que não pôde rodar entra como **`vN_sem_prova`** — o contrato já a marcava FALHA ("ausência de prova não é prova"), mas sem distingui-la de defeito provado | A causa precisa de evidência no mesmo arquivo para ser recomputável e auditável (`--validar` recalcula e compara). Sem o sufixo, um "não consegui verificar" seria lido depois como defeito provado |
+| DM-113 | Várias falhas ao mesmo tempo | **Precedência fixa**: V10; depois V6–V9; depois V1–V5, cada grupo na numeração. A primeira presente decide. V10 primeiro pela regra 5. V6–V9 são fatos que existem independentemente de a execução ter terminado; V1–V5 leem o registro da execução, que fica incompleto justamente quando um daqueles fatos parou o trabalho (o contrato do E2 já diz que task `bloqueada` aponta o `B-NN`, e que QA ausente é fluxo que não chegou ao E4 da runx). Todas as falhas continuam em `falhas_portao` | Uma regra que qualquer leitor recalcula. A ordem não é juízo de gravidade; entre falhas independentes do mesmo grupo, a numeração é convenção declarada |
+| DM-114 | Bloqueado sem causa determinável | Valor **`indeterminada`**, nunca `null` e nunca uma causa escolhida: quando a primeira verificação da ordem presente em `falhas_portao` é `_sem_prova`. Bloqueado com `falhas_portao: []` é registro inconsistente: o script recusa e o E2 roda de novo | A decisão de desenho pede bloqueado com causa não nula. `indeterminada` é a representação mínima disso, e quem lê a trata como causa não commitada |
+| DM-115 | Quem grava `causa`, e quando | O **E8**, na mesma gravação de `estado: bloqueado` e antes do commit de fechamento, pelo script `scripts/causa-do-portao.sh --derivar`, validado com `--validar`. O E2 não grava causa: entre o E2 e o E8, `estado: aberto` tem `causa: null` | "Aberto → causa null" vale sempre. A causa entra no HEAD pelo mesmo commit que persiste estado, portão e push |
+| DM-116 | `ENTREGA.md` anterior às chaves | **Leitura histórica aceita** (`--validar-historico` → `causa=ausente`: não commitada, nunca inferida); **gravação nova inválida** (`--validar` exige as duas chaves); **sem migração em massa** — a regra de migração existente acrescenta as chaves na próxima gravação, que só ocorre onde o valor é `null`/`[]` por definição. Bloqueio legado nunca ganha causa retroativa. Uma chave sem a outra reprova nos dois modos | Inferir a causa de um bloqueio antigo seria ler a prosa — exatamente o que este contrato proíbe |
+
+**O caso do piloto.** `falhas_portao: [v1, v7]` → `causa: bloqueio_aberto`. O texto do B-01 não
+muda o valor, e a mergex não o transforma em `falha_tecnica`. Distinguir "fora do ownership" de
+outro tipo de bloqueio exige o `B-NN` tipado na sprintx (A5) e a tradução na buildx (A6); nenhuma
+das duas é pré-requisito desta causa.
+
+**O que invalidaria estas decisões:** uma verificação nova no portão (ganha linha na tabela e
+posição na ordem, no script e no schema juntos); a sprintx gravar o `B-NN` com tipo — o que
+permitiria, em outra entrega, refinar `bloqueio_aberto` a partir de campo tipado, nunca da prosa;
+ou um leitor que precise de todas as falhas, e não só da causa — ele já tem `falhas_portao`.

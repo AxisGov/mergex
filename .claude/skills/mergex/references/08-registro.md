@@ -42,6 +42,7 @@ o que segue é o que você precisa para gravar. As regras universais valem todas
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
 | `tipo_trabalho` | `feature` \| `ocorrencia` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
+| `causa` | as dez causas de `references/00-schema.md` \| `indeterminada` \| `null` |
 
 `expx_tool` fica como a skill de **origem** do trabalho (`sprintx` ou `runx`) — é ela que governa o trabalho. O campo `entregue_por: mergex` diz quem gravou este arquivo.
 
@@ -81,6 +82,8 @@ atencao:
   leitura_rapida: 2
   dispensavel: 4
 portao: pronto
+falhas_portao: []
+causa: null
 desvios: []
 push_feito: true
 pr_url: https://github.com/<org>/<repo>/pull/482
@@ -108,6 +111,8 @@ entregue_em: 2026-08-29
 | `raio` | A faixa da legadox; `null` sem modo legado — **nunca invente uma faixa** |
 | `atencao` | As três contagens do E3; zeros quando o E3 não rodou |
 | `portao` | O resultado do E2 |
+| `falhas_portao` | As verificações que deram FALHA no E2 (`vN`, ou `vN_sem_prova` quando não pôde rodar); `[]` sem portão ou com PRONTO |
+| `causa` | `null` fora de `estado: bloqueado`; nele, obrigatória e **derivada** de `falhas_portao` (`references/00-schema.md`, "A causa do bloqueio") |
 | `desvios` | Arquivos alterados fora da lista declarada, detectados no E1 e no E2; `[]` quando não houve |
 | `push_feito` | Durante o E6, `true` afirma que a publicação executada até ali está sincronizada. **Ao encerrar o E8, `true` afirma que o HEAD final — o commit que carrega este registro — está em `origin/<branch>`**, e o E8 revalida isso; falhou a publicação final, vira `false` (ver "O que `push_feito` afirma") |
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
@@ -330,6 +335,8 @@ a entrega — o portão continua barrando a entrega.
 | Campo | Valor no fechamento bloqueado |
 |---|---|
 | `portao` | `bloqueado` — preservado como o E2 gravou |
+| `falhas_portao` | Preservado como o E2 gravou — é a evidência da `causa` |
+| `causa` | **Derivada** de `falhas_portao` pelo script, nunca escrita à mão (ver abaixo) |
 | `estado` | `bloqueado` |
 | `push_feito` | `false` — o E6 não rodou |
 | `pr_url`, `pr_estado` | `null` quando nunca houve PR. Na retomada de um trabalho que já tinha PR, o valor anterior permanece como está — o E7 é quem confirma, e ele não roda aqui |
@@ -337,6 +344,26 @@ a entrega — o portão continua barrando a entrega.
 | `faixa_atencao`, `atencao` | `[]` e zeros: o E3 não rodou |
 | `arquivos_alterados` | O diff real, que continua existindo |
 | `desvios` | O que o E1 e o E2 registraram, preservado |
+
+**A causa do bloqueio.** Grave `causa` na **mesma gravação** que põe `estado: bloqueado`, e
+antes do commit do passo 3 — é o commit que a leva ao HEAD da branch, onde quem vem depois a lê
+por `git show`. O valor sai do script, a partir de `falhas_portao` e de nada mais:
+
+```
+bash .claude/skills/mergex/scripts/causa-do-portao.sh --derivar <itens de falhas_portao>
+bash .claude/skills/mergex/scripts/causa-do-portao.sh --validar docs/entregas/<trabalho_id>/ENTREGA.md
+```
+
+O enum, a precedência entre várias falhas e o valor `indeterminada` estão em
+`references/00-schema.md`, "A causa do bloqueio". Três proibições:
+
+- **nunca** uma causa pela narrativa: o texto do `B-NN`, a opinião de quem executou ou a
+  intenção de ninguém não mudam o valor — `falha_tecnica` não existe neste enum;
+- **nunca** `causa: null` com `estado: bloqueado`: sem causa provada, o valor é `indeterminada`;
+- **nunca** causa sem falha: `falhas_portao: []` com o portão bloqueado é registro inconsistente —
+  o script recusa, o E8 não grava o fechamento e o E2 roda de novo.
+
+`--validar` reprovado: o E8 não commita e relata o motivo literal.
 
 O fechamento bloqueado faz **três coisas e nada mais**: escreve a prosa com o que falta (o mesmo
 que o relatório do E2 apontou), persiste os artefatos de método deste trabalho pelos passos 1 a 3
@@ -398,6 +425,7 @@ Avisos: <lista, ou "nenhum">
 
 - [ ] `ENTREGA.md` tem frontmatter válido, com o cabeçalho comum e nenhuma chave omitida.
 - [ ] `estado` reflete o que aconteceu de verdade.
+- [ ] `causa` e `falhas_portao` presentes; `scripts/causa-do-portao.sh --validar` passa no `ENTREGA.md` final.
 - [ ] Datas em ISO, obtidas do sistema.
 - [ ] Nenhum caminho absoluto.
 - [ ] A prosa bate com o YAML.
@@ -417,7 +445,8 @@ Avisos: <lista, ou "nenhum">
 
 | Situação | O que fazer |
 |---|---|
-| Portão barrou (E2) | `estado: bloqueado`, `portao: bloqueado`, com o que falta na prosa; o resto fica `null`/`false` |
+| Portão barrou (E2) | `estado: bloqueado`, `portao: bloqueado`, `falhas_portao` preservado e `causa` derivada dele; o que falta na prosa; o resto fica `null`/`false` |
+| Causa não provada (a primeira falha na ordem é `_sem_prova`) | `causa: indeterminada` — nunca `null`, nunca uma causa escolhida |
 | Sem versionador | `versionado: false`, `branch`/`branch_base`/`pr_url` `null`, `commits: []`; `estado: entregue` mesmo assim |
 | PR não aberto | `pr_url: null`, `pr_estado: null`, aviso na prosa; `estado` continua `entregue` |
 | Valor não determinável | `null` ou `[]`, **nunca invente**, nunca omita a chave |

@@ -44,6 +44,7 @@ divergente, bloqueio fora do escopo entregue}}
 
 ---
 
-**PRONTO** → `portao: pronto` no ENTREGA.md, segue para o E3.
-**BLOQUEADO** → `portao: bloqueado`, o fluxo da mergex ENCERRA. Nada é
+**PRONTO** → `portao: pronto` e `falhas_portao: []` no ENTREGA.md, segue para o E3.
+**BLOQUEADO** → `portao: bloqueado` e `falhas_portao: [{{vN das linhas FALHA; vN_sem_prova
+quando não pôde rodar}}]`; as etapas de entrega encerram e o E8 fecha o bloqueio. Nada é
 desfeito, nada é descartado, nada é maquiado.

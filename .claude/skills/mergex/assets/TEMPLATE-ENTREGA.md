@@ -11,6 +11,10 @@ vocabulário do índice (`alta`/`media`/`baixa`), não o nome da faixa em prosa:
 OBRIGATÓRIO → `alta`, LEITURA RÁPIDA → `media`, DISPENSÁVEL → `baixa`. As duas listas são
 `[]` enquanto o E3 não rodou; nunca omita a chave.
 
+`falhas_portao` e `causa` nunca são omitidas (`references/00-schema.md`, "A causa do
+bloqueio"). `causa` é `null` salvo em `estado: bloqueado`, onde é obrigatória e sai do script,
+nunca da mão. Confira com `scripts/causa-do-portao.sh --validar` antes de commitar.
+
 ---
 
 ---
@@ -40,6 +44,8 @@ atencao:
   leitura_rapida: {{n}}
   dispensavel: {{n}}
 portao: {{pronto | bloqueado | null}}
+falhas_portao: [{{as verificacoes com FALHA no E2: v1..v10, ou vN_sem_prova; vazio sem portao ou com PRONTO}}]
+causa: {{null | a causa derivada por scripts/causa-do-portao.sh --derivar, so com estado bloqueado}}
 desvios: []
 push_feito: {{true | false}}
 pr_url: {{url | null}}

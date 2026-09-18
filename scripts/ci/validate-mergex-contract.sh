@@ -473,4 +473,51 @@ grep -Fq 'LEITURA RÁPIDA (L1–L4), DISPENSÁVEL (D1–D4)' "$atencao_cmd" || f
 grep -Fq 'classificar-atencao.sh' "$atencao_cmd" || fail 'E3 command does not call the classifier'
 grep -Fq 'classificar-atencao.sh' "$agente_cl" || fail 'agent does not call the classifier'
 
+# ---------------------------------------------------------------------------
+# P0.2-A4 — o portão registra as falhas e o E8 deriva a causa. Schema, E2, E8,
+# E0, template e script carregam o MESMO enum e a MESMA ordem.
+# ---------------------------------------------------------------------------
+causa_sh='.claude/skills/mergex/scripts/causa-do-portao.sh'
+template_entrega='.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md'
+for f in "$causa_sh" "$template_entrega" scripts/ci/test-causa-portao.sh; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# A tabela do schema é a tabela do script: ordem, verificação e causa, linha a linha.
+tabela_schema="$(grep -E '^\| [0-9]+ \| `v[0-9]+` \| `[a-z_]+` \|$' "$schema" | tr -d '`' \
+  | awk -F'|' '{ gsub(/ /, ""); print $3 "|" $4 }')"
+[ -n "$tabela_schema" ] || fail 'schema lost the causa table'
+ordem_schema="$(printf '%s\n' "$tabela_schema" | cut -d'|' -f1 | tr '\n' ' ' | sed 's/ $//')"
+[ "$ordem_schema" = "$(bash "$causa_sh" --ordem)" ] \
+  || fail "causa precedence diverges: schema '$ordem_schema' vs script '$(bash "$causa_sh" --ordem)'"
+[ "$(printf '%s\n' "$tabela_schema" | sort)" = "$(bash "$causa_sh" --causas | grep -v '^\*' | sort)" ] \
+  || fail 'causa enum diverges between schema and script'
+[ "$(bash "$causa_sh" --causas | grep -c .)" = 11 ] || fail 'causa enum gained or lost a value'
+bash "$causa_sh" --causas | grep -Fxq '*|indeterminada' || fail 'causa enum lost indeterminada'
+grep -Fq '**`indeterminada`**' "$schema" || fail 'schema does not define indeterminada'
+if bash "$causa_sh" --causas | grep -Eq 'falha_tecnica|decisao_humana|trabalho_novo|recurso_externo'; then
+  fail 'causa enum absorbed a classification that is not observable by the gate'
+fi
+
+# A chave nunca é omitida: exemplos, template, E0 e E2 carregam as duas.
+bloco_exemplo() { awk '/^```yaml$/ { n++; f = (n == ALVO) ; next } /^```$/ { f = 0 } f' ALVO="$2" "$1"; }
+for par in "$schema:2" "$registro:1"; do
+  arq="${par%:*}"; n="${par##*:}"
+  bloco_exemplo "$arq" "$n" | bash "$causa_sh" --validar - >/dev/null 2>&1 \
+    || fail "$arq example ENTREGA does not pass causa-do-portao --validar"
+done
+grep -Eq '^falhas_portao: ' "$template_entrega" || fail 'ENTREGA template omits falhas_portao'
+grep -Eq '^causa: ' "$template_entrega" || fail 'ENTREGA template omits causa'
+grep -Fq '`falhas_portao: []`, `causa: null`' "$abertura" || fail 'E0 does not create falhas_portao and causa'
+grep -Fq '| `falhas_portao`, `causa` | voltam para `[]` e `null`' "$abertura" || fail 'E0 resume keeps a stale causa'
+grep -Fq '## Registro das falhas' "$prontidao" || fail 'E2 does not register the failures'
+grep -Fq '`vN_sem_prova`' "$prontidao" || fail 'E2 does not register unverifiable checks apart'
+grep -Fq 'O portão **não grava `causa`**' "$prontidao" || fail 'E2 writes causa before the E8 closing'
+
+# O E8 deriva pelo script, na mesma gravação do estado bloqueado, e nunca deixa null.
+grep -Fq 'causa-do-portao.sh --derivar' "$registro" || fail 'E8 does not derive causa with the script'
+grep -Fq 'causa-do-portao.sh --validar' "$registro" || fail 'E8 does not validate causa before committing'
+grep -Fq '**nunca** `causa: null` com `estado: bloqueado`' "$registro" || fail 'E8 allows a null causa when blocked'
+grep -Fq 'Um bloqueio legado nunca' "$schema" || fail 'schema may backfill a causa for legacy blocks'
+
 printf 'contract checks passed\n'

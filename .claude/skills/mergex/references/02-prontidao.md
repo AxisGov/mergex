@@ -188,11 +188,27 @@ V2 — FALHA: task fechada sem teste passando
 
 Avisos vão numa seção própria no fim, sem alterar o resultado.
 
+## Registro das falhas
+
+O portão grava no `ENTREGA.md`, **junto com `portao`**, a lista das verificações que deram `FALHA` — a chave `falhas_portao` (`references/00-schema.md`, "A causa do bloqueio"). É dela, e só dela, que o E8 deriva a `causa` do bloqueio.
+
+- Um item por linha `FALHA` da tabela, com o número da verificação em minúscula: `v1` … `v10`.
+- Verificação que **não pôde rodar** — marcada `FALHA` porque ausência de prova não é prova — entra como `vN_sem_prova`, nunca como `vN`. É o que impede que um "não consegui verificar" seja lido depois como um defeito provado.
+- `AVISO` e `n/a` não entram. `PRONTO` grava `falhas_portao: []`.
+- Na numeração do portão, uma linha só. Monte a lista com o script, que também recusa item desconhecido ou repetido:
+
+```
+bash .claude/skills/mergex/scripts/causa-do-portao.sh --lista v7 v1
+[v1, v7]
+```
+
+O portão **não grava `causa`**: ela continua `null` até o E8 fechar o bloqueio (`references/08-registro.md`). E ele não classifica o motivo pelo conteúdo — o que diz o `B-NN`, de quem é o arquivo fora do escopo, por que a suíte ficou vermelha fica na saída para a pessoa, não no YAML.
+
 ## Critério de saída
 
-**`PRONTO`** quando nenhuma verificação deu `FALHA`. Grave `portao: pronto` no `ENTREGA.md`, reescreva `atualizado_em`, e siga para o E3.
+**`PRONTO`** quando nenhuma verificação deu `FALHA`. Grave `portao: pronto` e `falhas_portao: []` no `ENTREGA.md`, reescreva `atualizado_em`, e siga para o E3.
 
-**`BLOQUEADO`** quando qualquer verificação deu `FALHA`. Grave `portao: bloqueado` no `ENTREGA.md`.
+**`BLOQUEADO`** quando qualquer verificação deu `FALHA`. Grave `portao: bloqueado` e `falhas_portao` com as verificações que falharam no `ENTREGA.md`.
 
 **`BLOQUEADO` encerra as etapas de entrega e segue apenas ao E8 para registrar e persistir o bloqueio.** Não classifique o diff (E3), não monte a descrição do PR (E4), não gere o pacote de QA (E5), não faça push (E6), não abra PR (E7): **nenhuma dessas etapas executa.**
 
@@ -209,4 +225,5 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | `PERFIL.md` ausente | V8 inteira é `n/a`; não invente modo legado |
 | Sem versionador | V9 e V10 rodam sobre árvore e tasks; as demais não mudam |
 | Branch base indisponível para o diff | Use `git diff --name-only HEAD~<n>..HEAD` sobre os commits do trabalho registrados no `ENTREGA.md`; registre a imprecisão como aviso |
-| Verificação impossível de rodar | Marque `FALHA`, nunca `OK`. Ausência de prova não é prova |
+| Verificação impossível de rodar | Marque `FALHA`, nunca `OK`, e registre `vN_sem_prova` em `falhas_portao`. Ausência de prova não é prova |
+| `ORQUESTRADOR.md` ou `tasks.md` ausente | `BLOQUEADO`: V1 não tem como determinar status — `v1_sem_prova` —, e as demais que dependem do plano também entram `_sem_prova` |
