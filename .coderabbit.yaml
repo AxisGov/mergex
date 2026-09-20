@@ -23,8 +23,17 @@ reviews:
   # PR de documentação. O disparo manual continua valendo em qualquer PR.
   # Cota compartilhada do AxisGov: 1 revisão automática por hora para a organização
   # inteira. Se dois PRs abrirem na mesma hora, o segundo pode precisar do manual.
+  #
+  # DESLIGADO em 2026-09-20 — decisão do Flávio. Motivo medido no painel
+  # (app.coderabbit.ai/dashboard/review-capacity), últimos 7 dias, organização
+  # AxisGov inteira (14 repositórios na mesma fila, cota de 1 revisão/hora):
+  # 400 eventos de revisão, 318 BLOQUEADOS por limite, 0 continuados, 67
+  # entregues. Bloqueio é revisão perdida, não enfileirada. E a automática caía
+  # na abertura do PR, quando ele está mais vazio. Não religue sem medir de novo.
+  # A revisão agora é pedida à mão com `@coderabbitai review`, só quando o PR vale
+  # a cota. As chaves abaixo ficam como registro; só têm efeito com enabled: true.
   auto_review:
-    enabled: true
+    enabled: false
     auto_incremental_review: false
     drafts: false
     ignore_title_keywords:
