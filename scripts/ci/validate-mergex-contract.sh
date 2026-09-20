@@ -708,4 +708,115 @@ done
 grep -Fq 'não resolve corrida' "$schema" \
   || fail 'schema claims the order key solves concurrency'
 
+# ---------------------------------------------------------------------------
+# P0.2-C5 — o índice é do E1, e o E1 não é reentrante
+# ---------------------------------------------------------------------------
+trava_sh='.claude/skills/mergex/scripts/trava-do-e1.sh'
+fecha_sh='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
+for f in "$trava_sh" "$fecha_sh"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# A seção crítica é contrato do E1, não detalhe de implementação.
+grep -Fq '## A seção crítica do E1' "$commits" \
+  || fail 'E1 has no critical-section contract'
+grep -Fq '**O índice Git é recurso de DONO ÚNICO durante o E1.**' "$commits" \
+  || fail 'E1 does not declare the index a single-owner resource'
+grep -Fq 'o **fechamento** delas é serial' "$commits" \
+  || fail 'E1 no longer serializes task closing'
+grep -Fq 'Travar depois de montar o stage é não travar' "$commits" \
+  || fail 'E1 allows acquiring the lock after staging'
+grep -Fq 'A atribuição do `seq` acontece **dentro** da seção' "$commits" \
+  || fail 'E1 lets seq be assigned outside the critical section'
+grep -Fq '**Quem impede a corrida é o E1**' "$schema" \
+  || fail 'schema does not place the race fix in the E1 critical section'
+
+# O escopo é o índice DA WORKTREE. Trava global é proibida, e `.git` pode ser arquivo.
+grep -Fq '<git-path do index>.mergex-e1.lock' "$commits" \
+  || fail 'E1 does not say where the lock lives'
+grep -Fq '**Nunca use `[ -d .git ]`.**' "$commits" \
+  || fail 'E1 allows deciding the gitdir by testing a directory'
+grep -Fq 'git rev-parse --git-path index' "$commits" \
+  || fail 'E1 does not ask the versioner where the index is'
+grep -Fq 'Trava no **diretório Git comum** é proibida' "$commits" \
+  || fail 'E1 allows a repository-wide lock'
+grep -Fq 'git rev-parse --git-path index' "$trava_sh" \
+  || fail 'the E1 lock does not resolve the index through git'
+if grep -Fq 'git-common-dir' "$trava_sh"; then
+  fail 'the E1 lock reaches the common git dir'
+fi
+# Só o código conta: os comentários citam `.git/index` justamente para dizer
+# que o caminho vem do versionador, e não de uma suposição sobre o layout.
+# Só o CÓDIGO conta. Os comentários destes scripts citam `.git/index`, `flock`
+# e `rm -rf` justamente para dizer que nenhum deles é usado — uma varredura que
+# não descontasse comentário reprovaria a explicação junto com a violação.
+codigo() { grep -v '^[[:space:]]*#' "$1"; }
+
+if codigo "$trava_sh" | grep -Fq '.git'; then
+  fail 'the E1 lock hardcodes the gitdir layout'
+fi
+
+# O mecanismo é `mkdir` atômico; `flock` quebraria Windows/macOS/Git Bash.
+codigo "$trava_sh" | grep -Fq 'mkdir "$trava"' \
+  || fail 'the E1 lock is not an atomic mkdir'
+for f in "$trava_sh" "$fecha_sh"; do
+  if codigo "$f" | grep -Fq 'flock'; then fail "$f depends on flock"; fi
+done
+
+# Nada de recuperação automática, e nada de remover a trava de outro E1.
+grep -Fq '**Não remova a trava automaticamente.**' "$commits" \
+  || fail 'E1 allows removing an orphan lock automatically'
+grep -Fq 'decisão sobre uma trava órfã é humana' "$commits" \
+  || fail 'E1 does not leave the orphan-lock call to a person'
+if codigo "$trava_sh" | grep -Fq 'rm -rf'; then
+  fail 'the E1 lock wipes a directory tree'
+fi
+grep -Fq 'nenhuma execução remove a trava de outra' "$commits" \
+  || fail 'E1 lets one run release another run lock'
+
+# Stage de entrada: PARA, e nada é desfeito.
+grep -Fq '**Stage já não vazio antes de o E1 preparar qualquer coisa: PARE.**' "$commits" \
+  || fail 'E1 no longer stops on a dirty index'
+grep -Fq '**Deixe exatamente como estava**' "$commits" \
+  || fail 'E1 no longer preserves a preexisting stage'
+for g in 'git reset' 'git stash' 'git restore' 'git checkout' 'git clean'; do
+  if codigo "$fecha_sh" | grep -Fq "$g"; then
+    fail "the E1 critical section runs $g on state it does not own"
+  fi
+done
+
+# Commit feito e registro não concluído: PARA, sem segundo commit.
+grep -Fq '**NÃO crie um segundo commit.**' "$commits" \
+  || fail 'E1 allows a second commit when the append fails'
+for f in "$commits" "$fecha_sh"; do
+  grep -Fq 'commit Git existe; registro E1 não foi concluído' "$f" \
+    || fail "$f lost the commit-without-record outcome"
+done
+# Só chamada ao versionador: a mensagem do código 5 cita `--no-verify` para
+# PROIBI-LO, e proibir não é usar.
+for g in '--amend' '--no-verify' 'reset --hard'; do
+  if codigo "$fecha_sh" | grep -F 'git ' | grep -Fq -- "$g"; then
+    fail 'the E1 critical section rewrites or discards history'
+  fi
+done
+
+# O escritor da lista não ganhou trava própria, e leitura nunca trava.
+for t in mkdir flock; do
+  if codigo "$seq_sh" | grep -Fq "$t"; then
+    fail "the commits writer implements its own lock ($t)"
+  fi
+done
+grep -Fq '**Leitura não trava nada**' "$commits" \
+  || fail 'E1 turns reading the list into a locked operation'
+
+# Um segundo escritor REAL não escapa da regra: os call sites executáveis de
+# `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
+escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
+  | LC_ALL=C sort | tr '\n' ' ')"
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+[ "$escritores" = "$esperado" ] \
+  || fail "unexpected executable writer of ENTREGA.commits: $escritores"
+grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
+  || fail 'E1 does not fence new writes behind the critical section'
+
 printf 'contract checks passed\n'

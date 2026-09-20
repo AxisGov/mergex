@@ -285,6 +285,12 @@ mesmo tempo, o resultado é uma lista com `seq` duplicado — e o certo é parar
 número escolhido para caber esconderia o registro perdido. Este contrato **não resolve corrida**:
 ele garante que a corrida, quando acontece, fique visível.
 
+**Quem impede a corrida é o E1**, e não esta chave. O `seq` é atribuído **dentro da seção crítica
+do E1** — a trava do índice daquela worktree, descrita em `references/01-commits.md`, "A seção
+crítica do E1". A gravação nova de um item só acontece sob essa seção; a **leitura** da lista
+(`--ler`, `--validar`, `--proximo`) nunca exige trava nenhuma. A invariante acima continua sendo a
+rede de segurança: se um item duplicado chegar à lista por qualquer caminho, ela para.
+
 ## Os campos de indexação
 
 Três campos existem para que a entrega seja **indexável por arquivo e por módulo**. Eles são

@@ -24,6 +24,145 @@ Commite **exatamente quando** as três condições forem verdade ao mesmo tempo:
 
 Um commit por task. **Nunca amontoar tasks distintas** no mesmo commit (regra 3), nem dividir uma task em vários commits temáticos.
 
+## A seção crítica do E1
+
+O E1 escreve em quatro recursos: o **índice** Git, o **HEAD**, a lista `ENTREGA.commits` e o **próximo `seq`**. Nenhum deles é da task — todos são da **worktree**. Duas execuções do E1 na mesma worktree compartilham os quatro, e sem exclusão mútua esta sequência é possível, silenciosa e destrutiva:
+
+```
+E1-A faz git add dos arquivos dele
+E1-B enxerga o stage de A e acrescenta os arquivos dele
+E1-A commita a mistura
+E1-B lê o HEAD que A produziu
+A e B calculam o mesmo próximo seq
+```
+
+A C4 fez o **resultado** disso — lista com `seq` duplicado — parar como contrato inválido (`00-schema.md`, "A ordem de registro"). O que segue impede que o estado seja **criado**.
+
+**O índice Git é recurso de DONO ÚNICO durante o E1.** Na mesma worktree, dois E1 nunca executam ao mesmo tempo. A execução das tasks pode ser paralela; o **fechamento** delas é serial.
+
+### O recurso travado é o índice, nunca o repositório
+
+Worktrees diferentes têm **índices independentes** e fecham tasks em paralelo, sem se bloquear. A trava é do índice daquela worktree, e fica em área **não versionada**, colada nele:
+
+```
+<git-path do index>.mergex-e1.lock
+```
+
+`.git` **pode ser um ARQUIVO** — é o que a sprintx produz ao abrir a feature em `git worktree` próprio. **Nunca use `[ -d .git ]`.** Quem responde onde está o índice é o versionador:
+
+```
+git rev-parse --git-path index
+```
+
+Trava no **diretório Git comum** é proibida: ela serializaria o repositório inteiro, e duas worktrees nunca podem bloquear uma à outra.
+
+O mecanismo é o `mkdir` atômico de um diretório. Ele existe igual em Linux, macOS, Windows e Git Bash; `flock` não. O conteúdo da trava — task, pid, instante, raiz, índice — é **diagnóstico**: quem exclui é o diretório, e quem autoriza a liberação é o **token** que a aquisição imprimiu. A correção nunca depende da prosa lá dentro.
+
+### A ordem de aquisição
+
+1. Resolver a worktree e o índice.
+2. **Adquirir a trava do E1** — antes do primeiro `git add`.
+3. Conferir o stage de entrada.
+4. Só então: staging, verificações, commit, registro.
+
+**Travar depois de montar o stage é não travar**: a mistura já teria acontecido.
+
+### Trava já existente: PARE
+
+Outro E1 tem a seção crítica, ou sobrou uma trava órfã. Nos dois casos, o comportamento é o mesmo:
+
+- **Pare e falhe fechado.** Não espere indefinidamente.
+- **Não remova a trava automaticamente.** PID pode ter sido reutilizado, o ambiente pode ser outro, o stage pode estar preparado pela metade. "A trava parece velha" não é prova de nada.
+- **Não mate outro processo** e **não toque no índice**.
+
+Recuperação automática de queda não é requisito: o diagnóstico é `trava-do-e1.sh --status`, que **nunca remove nada**, e a decisão sobre uma trava órfã é humana.
+
+### O stage na entrada
+
+**Stage já não vazio antes de o E1 preparar qualquer coisa: PARE.** Não importa se o que está lá parece ser da task atual — não existe prova durável de que este E1 o preparou.
+
+Nada de `git reset`, `git restore --staged`, `git stash`, limpeza ou commit do que se encontrou. **Deixe exatamente como estava**, e mostre os caminhos staged no relatório.
+
+Working tree suja **não** é este caso: artefato e desvio são assunto do E1 (lista declarada) e do E2. Aqui o assunto é o **índice**.
+
+### O que a seção cobre
+
+A trava permanece adquirida durante o trecho inteiro:
+
+| | Passo |
+|---|---|
+| A | staging da task |
+| B | verificação do diff em stage |
+| C | verificações do E1 aplicáveis (a varredura de segredo do passo 2) |
+| D | `git commit` |
+| E | captura do identificador produzido |
+| F | `sequencia-de-commits.sh --acrescentar` |
+| G | validação da lista final |
+
+**Só depois de G a trava é liberada.** A atribuição do `seq` acontece **dentro** da seção — é isso, e só isso, que impede duas sessões de calcularem o mesmo próximo número.
+
+### O executável
+
+A seção crítica não é procedimento de prosa: é o `scripts/fechamento-do-e1.sh`, e o E1 passa por ele.
+
+```
+bash .claude/skills/mergex/scripts/fechamento-do-e1.sh --fechar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --task <id da task> \
+  --mensagem <arquivo com a mensagem do passo 3> \
+  -- <caminho-1> <caminho-2> ...
+```
+
+Ele recusa `.`, `-A` e `-u`: o staging continua sendo por caminho explícito.
+
+**A varredura de segredo (passo 2) é julgamento, e roda DENTRO da seção** — ela lê `git diff --cached`, que só existe depois do staging. Para isso a seção abre em dois tempos, com a mesma trava atravessando os dois:
+
+```
+bash .../fechamento-do-e1.sh --preparar --task <id> -- <caminho-1> ...
+# imprime token=<...>; a trava CONTINUA adquirida
+# → varredura de segredo sobre `git diff --cached`
+bash .../fechamento-do-e1.sh --concluir --entrega <ENTREGA.md> \
+  --task <id> --mensagem <arquivo> --token <token>
+```
+
+Achou segredo entre os dois tempos: **não conclua**. Aborte como manda o passo 2, e libere a seção (`trava-do-e1.sh --liberar <token>`) — a task fica sem commit e a V11 do E2 a nomeia.
+
+| Código | Desfecho |
+|---|---|
+| 0 | seção concluída: commit criado, item registrado, lista válida, trava liberada |
+| 2 | **E1 OCUPADO** — outro E1 tem a seção crítica deste índice; o índice não foi tocado |
+| 3 | o índice já tinha conteúdo em stage na entrada; nada foi limpo |
+| 4 | verificação reprovou **antes** do commit; nenhum commit foi criado |
+| 5 | `git commit` falhou; **nenhum** registro de E1 foi escrito |
+| 6 | **commit Git existe; registro E1 não foi concluído** |
+| 7 | o commit e o item existem e a lista final não valida |
+
+### Liberação
+
+Saída normal libera. Falha antes de qualquer staging libera. Falha depois de staging ou commit parcial **não faz limpeza destrutiva**: o stage e o commit ficam onde estão, para diagnóstico, e a trava sai porque quem protege o estado dali em diante é a regra do stage de entrada — o próximo E1 vai encontrá-lo e parar.
+
+**A trava nunca fica presa por uma saída normal conhecida**, e nenhuma execução remove a trava de outra: `--liberar` exige o token do dono.
+
+### Commit feito e registro não concluído
+
+Se o `git commit` aconteceu e o append em `ENTREGA.commits` falhou:
+
+**NÃO crie um segundo commit.** Não faça retry destrutivo, não reverta, não reescreva o histórico. Pare e relate exatamente isto:
+
+```
+commit Git existe; registro E1 não foi concluído
+```
+
+O commit é real e fica. A **V11** do portão (E2) existe justamente para detectar task concluída sem prova de E1 registrada, e vai nomear a task. O conserto é o **E1 tardio**, depois que a causa do append estiver resolvida.
+
+### Detecção no ato
+
+Ainda sob a trava, depois do `--acrescentar`, a lista é validada de novo. `seq` duplicado, buraco, regressão ou mistura legado/moderna inválida: **PARE**. Não renumere e não escolha outro número para caber — é a mesma regra do `00-schema.md`. Sob a seção crítica isso não deve acontecer; é guarda de integridade.
+
+### O rastro não é o mutex
+
+`docs/eventos/<trabalho_id>.jsonl` pode registrar `e1_iniciado`, `e1_concluido` e `e1_recusado_por_lock`, mas ele é local da máquina, append-only e não versionado. **A verdade da exclusão mútua é a trava do índice**, nunca o JSONL.
+
 ## Passo 1 — Selecionar o que entra
 
 Leia em `sprint-NN/tasks.md` o campo `arquivos` da task: `cria` e `altera`. Essa é a **lista declarada**.
@@ -137,6 +276,8 @@ git add <caminho-1> <caminho-2> ...
 ```
 
 Não use `git add .`, `git add -A` nem `git add -u`. Eles arrastam o que não foi declarado.
+
+**Este `git add` é o começo da seção crítica**, e não acontece fora dela: quem o executa é o `fechamento-do-e1.sh`, depois de adquirir a trava do índice e de conferir o stage de entrada.
 
 ### Nunca commite
 
@@ -270,6 +411,8 @@ bash .claude/skills/mergex/scripts/sequencia-de-commits.sh --acrescentar \
 
 Ele imprime `seq=<n>` e **só** mexe na lista `commits` — `atualizado_em` continua sendo desta etapa.
 
+**`--acrescentar` é gravação, e gravação nova do E1 só acontece sob a seção crítica** — é o `fechamento-do-e1.sh` que o chama, entre o commit e a validação final, com a trava do índice adquirida. Um segundo escritor real fora dela devolveria a corrida que a seção existe para impedir. **Leitura não trava nada**: `--ler`, `--validar` e `--proximo` continuam funcionando a qualquer momento, inclusive com a seção ocupada.
+
 | Situação | O que o escritor faz |
 |---|---|
 | `commits: []` (entrega nova) | grava o primeiro item com `seq: 1` |
@@ -341,6 +484,8 @@ executou). Ninguém o edita à mão.
 
 Por task:
 
+- [ ] A trava do índice foi adquirida **antes** do primeiro `git add` e liberada só depois da validação da lista.
+- [ ] O stage estava vazio na entrada (e, se não estava, o E1 parou sem tocá-lo).
 - [ ] Só arquivos declarados na task entraram no commit.
 - [ ] A varredura de segredo rodou sobre o diff em stage e não achou nada.
 - [ ] A mensagem tem tipo, escopo, título, objetivo e o rodapé com `Task`, `Trabalho` e `Testes`.
@@ -359,4 +504,9 @@ Por task:
 | `commits` com sequência quebrada | **Não grave.** Contrato inválido: relate o motivo do `sequencia-de-commits.sh --validar` e pare. Nunca escolha outro número para caber |
 | Branch errada ou principal | Não commita; relata a divergência e para |
 | `git commit` falha (hook, assinatura) | Relata o erro literal do versionador e para; nunca contorna com `--no-verify` |
+| Outro E1 tem a seção crítica deste índice | **PARA** (código 2). Não espera, não remove a trava, não toca no índice |
+| Trava existe e nenhum E1 conhecido está em curso | **PARA.** `trava-do-e1.sh --status` diagnostica; remover é decisão humana, nunca automática |
+| Stage já não vazio na entrada | **PARA** (código 3). Nada de reset, restore, stash ou commit do que se encontrou; o relatório nomeia os caminhos |
+| Commit criado e append em `ENTREGA.commits` falhou | **PARA** (código 6) e relata "commit Git existe; registro E1 não foi concluído". Nenhum segundo commit, nenhum rollback. A V11 do E2 nomeia a task |
+| Lista inválida depois do append | **PARA** (código 7). Não renumera e não reescreve item nenhum |
 | Repositório sem versionador | Nada a fazer; segue sem erro |
