@@ -11,6 +11,12 @@ vocabulário do índice (`alta`/`media`/`baixa`), não o nome da faixa em prosa:
 OBRIGATÓRIO → `alta`, LEITURA RÁPIDA → `media`, DISPENSÁVEL → `baixa`. As duas listas são
 `[]` enquanto o E3 não rodou; nunca omita a chave.
 
+Numa entrega nova, `commits` nasce `[]` e o primeiro E1 grava `seq: 1`. **Não escreva item de
+`commits` à mão**: o escritor é `scripts/sequencia-de-commits.sh --acrescentar`, que calcula o
+próximo `seq` e acrescenta no fim. Toda gravação nova leva `seq`; item legado (sem `seq`) só
+existe como **prefixo** de lista antiga, e não há backfill — ele nunca ganha a chave
+retroativamente (`references/00-schema.md`, "A ordem de registro").
+
 `falhas_portao` e `causa` nunca são omitidas (`references/00-schema.md`, "A causa do
 bloqueio"). `causa` é `null` salvo em `estado: bloqueado`, onde é obrigatória e sai do script,
 nunca da mão. Confira com `scripts/causa-do-portao.sh --validar` antes de commitar.
@@ -31,7 +37,8 @@ versionado: {{true | false}}
 branch: {{nome da branch | null}}
 branch_base: {{nome da base | null}}
 commits:
-  - task: {{T-NN.MM}}
+  - seq: {{ordem de registro do E1: 1, 2, 3...}}
+    task: {{T-NN.MM}}
     commit: {{identificador curto}}
 modulo_afetado: [{{modulos em minuscula sem acento, ou vazio}}]
 arquivos_alterados: [{{o diff real: git diff --name-only <base>...HEAD, sem repeticao, ou vazio}}]

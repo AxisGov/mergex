@@ -21,6 +21,7 @@ ABERTURA='.claude/skills/mergex/references/00-abertura.md'
 TEMPLATE_ENTREGA='.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md'
 PROVA_SH='.claude/skills/mergex/scripts/prova-de-commit.sh'
 PRONTIDAO='.claude/skills/mergex/references/02-prontidao.md'
+SEQ_SH='.claude/skills/mergex/scripts/sequencia-de-commits.sh'
 COMMITS='.claude/skills/mergex/references/01-commits.md'
 TEMPLATE_PRONTIDAO='.claude/skills/mergex/assets/TEMPLATE-prontidao.md'
 CHECK_CMD='.claude/commands/mergex-check.md'
@@ -52,13 +53,20 @@ troca() {
 apaga() {
   local arq="$1" prefixo="$2"
   grep -Fq -- "$prefixo" "$arq" || { printf 'mutação não aplicada: prefixo ausente em %s\n' "$arq" >&2; return 1; }
-  awk -v p="$prefixo" 'index($0, p) == 1 { next } { print }' "$arq" > "$arq.m" && mv "$arq.m" "$arq"
+  awk -v p="$prefixo" 'index($0, p) == 1 { next } { print }' "$arq" > "$arq.m" || return 1
+  # O grep acima acha o texto em QUALQUER posição; o awk só apaga quando ele é
+  # o começo da linha. Sem esta comparação, um prefixo errado (o texto existe,
+  # mas depois de um `**`) não apagaria nada e a mutação seria contada como
+  # VIVA — acusando de decorativa uma verificação que nunca foi exercitada.
+  cmp -s "$arq" "$arq.m" && { rm -f "$arq.m"; printf 'mutação não aplicada: nenhuma linha começa com o prefixo em %s\n' "$arq" >&2; return 1; }
+  mv "$arq.m" "$arq"
 }
 
 teste()     { bash scripts/ci/test-atencao-metodo.sh > saida.log 2>&1; }
 validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
 teste_causa() { bash scripts/ci/test-causa-portao.sh > saida.log 2>&1; }
 teste_v11()   { bash scripts/ci/test-portao-v11.sh > saida.log 2>&1; }
+teste_seq()   { bash scripts/ci/test-sequencia-commits.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As mutações: id | descrição | verificação que TEM que falhar | função que muta
@@ -161,6 +169,60 @@ M26b() { # a V11 passa a vencer até a V10, e o estado terminal deixa de refleti
 }
 M26c() { troca "$SCHEMA" '| 11 | `v11` | `commit_nao_registrado` |' '| 11 | `v11` | `falha_tecnica` |'; }
 
+# --- P0.2-C4: a ordem de registro de ENTREGA.commits (a chave `seq`) ---
+# Cada mutação quebra UMA afirmação da ordem explícita. Todas têm que morrer.
+M27() { # o seq passa a ser contado por task, e não global à ENTREGA
+  troca "$SEQ_SH" '  n="$(itens_de "$arq" | wc -l | tr -d '"'"'[:space:]'"'"')"' \
+    '  n="$(itens_de "$arq" | cut -f3 | grep -Fxc "${MERGEX_TASK:-}" || true)"'
+}
+M28() { # seq duplicado passa a ser aceito (o resto da invariante continua)
+  troca "$SEQ_SH" '      *" $seq "*) ERRO="seq duplicado: $seq"; return 1 ;;' \
+    '      *" $seq "*) continue ;;'
+}
+M29() { # buraco, regressão e reordenação passam: o seq deixa de bater com a posição
+  troca "$SEQ_SH" '    [ "$seq" = "$pos" ] \' '    [ -n "$seq" ] \'
+}
+M30() { # o prefixo legado deixa de ter fim: legado depois de moderno é aceito
+  troca "$SEQ_SH" '      if [ "$modernos" = 1 ]; then' '      if false; then'
+}
+M31() { # depois do prefixo legado, a contagem recomeça em 1
+  troca "$SEQ_SH" '  n="$(itens_de "$arq" | wc -l | tr -d '"'"'[:space:]'"'"')"' \
+    '  n="$(itens_de "$arq" | cut -f2 | grep -c "[0-9]" || true)"'
+}
+M32() { # ao gravar, o helper faz backfill: o item legado ganha seq retroativo
+  troca "$SEQ_SH" '  mv "$tmp" "$arq" || { rm -f "$tmp"; ERRO="falha ao substituir $arq"; return 1; }' \
+    '  mv "$tmp" "$arq" || { rm -f "$tmp"; ERRO="falha ao substituir $arq"; return 1; }
+  awk '"'"'/^  - task:/ { n++; printf "  - seq: %d\n   ", n } { print }'"'"' "$arq" > "$arq.bf" && mv "$arq.bf" "$arq"'
+}
+M33() { # a escrita nova volta a poder nascer sem seq
+  troca "$SEQ_SH" '      printf "  - seq: %s%s\n    task: %s%s\n    commit: %s%s\n", seq, cr, task, cr, commit, cr' \
+    '      printf "  - task: %s%s\n    commit: %s%s\n", task, cr, commit, cr'
+}
+M34() { # o item novo é inserido no COMEÇO da lista, e não no fim
+  troca "$SEQ_SH" '        if (inline == "[]") { novo(cr); feito = 1 } else { dentro = 1 }' \
+    '        novo(cr); feito = 1'
+}
+M35() { # lista inválida deixa de parar a gravação: o escritor grava assim mesmo
+  troca "$SEQ_SH" '  seq="$(proximo "$arq")" || return 1' \
+    '  seq="$(proximo "$arq" 2>/dev/null)"; [ -n "$seq" ] || seq=1'
+}
+M36() { # a V11 passa a rejeitar item legado válido
+  troca "$PROVA_SH" '    [ -n "$t" ] || continue' '    [ -n "$CAMPO2" ] || continue'
+}
+M37a() { apaga "$SCHEMA" '## A ordem de registro'; }
+M37b() { apaga "$SCHEMA" '### O prefixo legado'; }
+M37c() { apaga "$COMMITS" '**O E1 tardio recebe SEMPRE'; }
+M37d() { apaga "$TEMPLATE_ENTREGA" '  - seq: '; }
+M37e() { # a sequência quebrada vira causa de negócio do portão
+  troca "$SCHEMA" 'Duplicata, buraco, regressão e mistura inválida de legado com `seq` **não são causa de negócio do' \
+    'Duplicata, buraco, regressão e mistura inválida de legado com `seq` são causa de negócio do'
+}
+M37f() { # volta a existir um segundo parser de commits fora do leitor único
+  troca "$PROVA_SH" '. "$(dirname "${BASH_SOURCE[0]}")/sequencia-de-commits.sh"' \
+    '. "$(dirname "${BASH_SOURCE[0]}")/sequencia-de-commits.sh"
+bloco_proprio() { bloco "$arq" commits; }'
+}
+
 LISTA='M1a|remove a regra L4 do classificador|teste
 M1b|remove a linha L4 do reference|validador
 M2a|remove a regra D4 do classificador|teste
@@ -194,7 +256,23 @@ M25b|a V11 sai do template de prontidão|validador
 M25c|a V11 sai do comando do portão|validador
 M26a|a falha V11 deixa de ter causa própria|teste_v11
 M26b|a V11 passa a vencer a V10 na precedência|teste_v11
-M26c|tabela de causas do schema diverge no v11|validador'
+M26c|tabela de causas do schema diverge no v11|validador
+M27|seq calculado por task, nao global|teste_seq
+M28|seq duplicado aceito|teste_seq
+M29|buraco, regressao e reordenacao aceitos|teste_seq
+M30|ausencia de seq depois de item moderno aceita|teste_seq
+M31|primeiro seq apos o prefixo legado volta a 1|teste_seq
+M32|helper faz backfill dos itens legados|teste_seq
+M33|novo E1 escreve item sem seq|teste_seq
+M34|E1 tardio e inserido no meio da lista|teste_seq
+M35|lista invalida nao para a gravacao|teste_seq
+M36|V11 passa a rejeitar item legado valido|teste_seq
+M37a|o schema perde a secao da ordem de registro|validador
+M37b|o schema perde a regra do prefixo legado|validador
+M37c|o E1 tardio perde o proximo seq global|validador
+M37d|o template da ENTREGA perde a chave seq|validador
+M37e|sequencia quebrada vira causa do portao|validador
+M37f|volta a existir um segundo parser de commits|validador'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
@@ -207,7 +285,7 @@ controle() {
   local d rc
   d="$(copia)"
   echo "Controle — cópia SEM mutação: as verificações têm que passar"
-  for v in teste teste_causa teste_v11 validador; do
+  for v in teste teste_causa teste_v11 teste_seq validador; do
     rc=0; ( cd "$d" && "$v" ) || rc=$?
     if [ "$rc" = 0 ]; then printf '  ok     %s\n' "$v"
     else CONTROLE_OK=0; printf '  FALHA  %s — verde era esperado (rc=%s)\n' "$v" "$rc"

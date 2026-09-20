@@ -454,6 +454,59 @@ r="$(bash "$CAUSA" --validar "$ENT" 2>&1)"
 [ "$(bash "$PROVA" --commits "$ENT" | head -1 | cut -f2)" = "$SHA1" ] \
   && ok "E1 tardio — o commit antigo não foi reordenado" || falha "E1 tardio reordenou o histórico"
 
+# ---------------------------------------------------------------------------
+echo
+echo '20. A chave de ordem `seq` não muda nenhuma resposta da V11'
+# ---------------------------------------------------------------------------
+# Desde a P0.2-C4 todo item NOVO leva `seq` (`references/00-schema.md`, "A ordem
+# de registro"). A V11 continua com a mesma pergunta e os mesmos três tipos de
+# lista: totalmente legada, moderna e mista válida. Ordem, sequência e `seq`
+# não são assunto dela — quebra de sequência é contrato, não portão.
+
+# entrega_seq <arquivo> <item>... — item é `<seq|->:<task>:<sha>`; `-` é legado
+entrega_seq() {
+  local arq="$1" item s t c; shift
+  {
+    printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: ft-teste\n'
+    printf 'entregue_por: mergex\nestado: aberto\nversionado: true\n'
+    printf 'branch: feature/ft-teste\nbranch_base: main\ncommits:\n'
+    for item in "$@"; do
+      s="${item%%:*}"; t="${item#*:}"; c="${t#*:}"; t="${t%%:*}"
+      [ "$s" = - ] || printf -- '  - seq: %s\n    task: %s\n    commit: %s\n' "$s" "$t" "$c"
+      [ "$s" = - ] && printf -- '  - task: %s\n    commit: %s\n' "$t" "$c"
+    done
+    printf 'modulo_afetado: []\narquivos_alterados: []\nfaixa_atencao: []\nraio: null\n'
+    printf 'atencao:\n  olho_obrigatorio: 0\n  leitura_rapida: 0\n  dispensavel: 0\n'
+    printf 'portao: null\nfalhas_portao: []\ncausa: null\ndesvios: []\n'
+    printf 'push_feito: false\npr_url: null\npr_estado: null\n'
+    printf -- '---\n\n# Entrega\n'
+  } > "$arq"
+}
+
+plano "$T" plano T-01.01:concluida
+entrega_seq "$E" -:T-01.01:a3f19c2
+verifica OK "lista totalmente legada continua passando" "$E" "$T"
+entrega_seq "$E" 1:T-01.01:a3f19c2
+verifica OK "lista moderna (item começa por seq) passa" "$E" "$T"
+entrega_seq "$E" -:T-09.09:aaa1111 2:T-01.01:a3f19c2
+verifica OK "lista mista válida passa" "$E" "$T"
+entrega_seq "$E" 1:T-01.01:zzzzzzz
+verifica FALHA "task correta com commit inválido continua falhando" "$E" "$T"
+acusa "e nomeia a task" "T-01.01" "$E" "$T"
+entrega_seq "$E" 1:T-01.01:a3f19c2 3:T-01.02:7b2e401
+verifica OK "sequência com buraco não faz a V11 regredir (é contrato)" "$E" "$T"
+entrega_seq "$E" 2:T-01.02:7b2e401 1:T-01.01:a3f19c2
+verifica OK "ordem física trocada não é assunto da V11" "$E" "$T"
+entrega_seq "$E" 9:T-01.01:a3f19c2
+verifica OK "seq não é quantidade de commits esperada para a task" "$E" "$T"
+plano "$T" plano T-04.03:concluida
+entrega_seq "$E" 1:T-04.01:aaa1111 2:T-04.03:bbb2222 3:T-04.02:ccc3333 \
+  4:T-04.04:ddd4444 5:T-04.05:eee5555 6:T-04.06:fff6666 7:T-04.03:9f3c1aa
+verifica OK "a mesma task em seq 2 e seq 7 continua provada" "$E" "$T"
+[ "$(bash "$PROVA" --commits "$E" | grep -c '^T-04.03	')" = 2 ] \
+  && ok "os dois itens da mesma task são lidos, não só o primeiro" \
+  || falha "a leitura perdeu uma das duas passagens de T-04.03"
+
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"

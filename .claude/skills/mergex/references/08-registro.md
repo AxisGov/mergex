@@ -63,9 +63,11 @@ versionado: true
 branch: fix/OC-2026-0184-icms-st-base-desconto
 branch_base: main
 commits:
-  - task: T-01.01
+  - seq: 1
+    task: T-01.01
     commit: a3f19c2
-  - task: T-01.02
+  - seq: 2
+    task: T-01.02
     commit: 7b2e401
 modulo_afetado: [fiscal, relatorios]
 arquivos_alterados: [src/fiscal/base_calculo.py, src/fiscal/calculo_icms_st.py, tests/fiscal/test_icms_st_desconto.py]
@@ -104,7 +106,7 @@ entregue_em: 2026-08-29
 | `estado` | `aberto` no E0; `entregue` quando o fluxo completou; `bloqueado` quando o portão barrou |
 | `versionado` | `false` em repositório sem versionador |
 | `branch`, `branch_base` | `null` quando `versionado: false`. `branch_base` é a **base efetiva** determinada no E0 — inclusive quando informada pelo chamador; é ela que os diffs do E2, do E3 e do E4 usam |
-| `commits` | Um item por **fechamento de task em cada execução**, na ordem em que fecharam; `[]` sem versionador. É histórico de execução: na retomada depois de replanejamento a lista é **preservada**, e um `task` id pode reaparecer com outro SHA (`01-commits.md`). O commit de artefatos de método não é task e **não entra aqui** — ele vai na prosa |
+| `commits` | Um item por **fechamento de task em cada execução**, na ordem em que fecharam, cada um com a chave de ordem `seq` (`references/00-schema.md`, "A ordem de registro"); `[]` sem versionador. É histórico de execução: na retomada depois de replanejamento a lista é **preservada**, e um `task` id pode reaparecer com outro SHA (`01-commits.md`). O commit de artefatos de método não é task e **não entra aqui** — ele vai na prosa |
 | `modulo_afetado` | Os módulos que a entrega toca; copiado da skill de origem quando ela o declara |
 | `arquivos_alterados` | **O diff real** (`git diff --name-only <branch_base>...HEAD`), não a previsão do plano |
 | `faixa_atencao` | A faixa por arquivo do E3, no vocabulário do índice (`alta`/`media`/`baixa`); `[]` antes do E3 |

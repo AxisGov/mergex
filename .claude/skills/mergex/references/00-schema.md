@@ -106,9 +106,11 @@ versionado: true
 branch: fix/OC-2026-0184-icms-st-base-desconto
 branch_base: main
 commits:
-  - task: T-01.01
+  - seq: 1
+    task: T-01.01
     commit: a3f19c2
-  - task: T-01.02
+  - seq: 2
+    task: T-01.02
     commit: 7b2e401
 modulo_afetado: [fiscal, relatorios]
 arquivos_alterados: [src/fiscal/calculo_icms_st.py, src/fiscal/base_calculo.py, tests/fiscal/test_icms_st_desconto.py]
@@ -147,7 +149,7 @@ entregue_em: 2026-08-29
 | `estado` | `aberto` no E0; `entregue` quando o fluxo completou; `bloqueado` quando o portão barrou |
 | `versionado` | `false` em repositório sem versionador |
 | `branch`, `branch_base` | `null` quando `versionado: false` |
-| `commits` | Um item por task commitada, na ordem em que fecharam; `[]` sem versionador |
+| `commits` | Um item por task commitada, na ordem em que fecharam, cada um com a chave de ordem `seq`; `[]` sem versionador. Ver "A ordem de registro" |
 | `modulo_afetado` | Os módulos que a entrega toca (ver abaixo) |
 | `arquivos_alterados` | **O diff real** — ver abaixo. É o campo mais importante deste kind |
 | `faixa_atencao` | A faixa de atenção por arquivo (ver abaixo) |
@@ -161,6 +163,127 @@ entregue_em: 2026-08-29
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
 | `pr_estado` | `rascunho` na abertura normal; `aberto` quando o QA já aprovou; `merged`/`fechado` quando o E9 ou uma pessoa atualizarem |
 | `entregue_em` | A data em que o fluxo completou; `null` enquanto `estado` não for `entregue` |
+
+## A ordem de registro — a chave `seq`
+
+`commits` é uma lista **ordenada**: o contrato sempre disse "na ordem em que fecharam". Até aqui
+essa ordem existia só na **posição física** dos itens, e posição não tem identidade própria. Ela
+não sobrevive a uma reordenação (nada prova que houve uma), não distingue duas passagens da mesma
+task, não diz numa sessão nova qual foi o último registro, e não dá a um E1 tardio um lugar que
+signifique "aconteceu agora".
+
+Por isso **todo item novo leva `seq`**.
+
+```yaml
+commits:
+  - seq: 15
+    task: T-04.03
+    commit: 9f3c1aa
+```
+
+| Regra | |
+|---|---|
+| O que é | A **ordem de registro do E1**: a posição deste fechamento na série de fechamentos desta entrega |
+| Tipo | Inteiro **positivo** |
+| Alcance | **Global à ENTREGA** — um contador só, para todas as tasks e todas as sprints |
+| Progressão | O primeiro item é `seq: 1`; cada item novo é **o maior `seq` efetivo existente + 1** |
+| Obrigatoriedade | **Obrigatório em toda gravação nova.** A exceção é só de leitura: o prefixo legado, abaixo |
+| Nunca | Reutilizado, renumerado, reordenado, diminuído, nem escolhido por task |
+
+**`seq` não é** número da task, número do sprint, timestamp, rodada da F5, nem quantidade de
+commits que a branch tem no versionador. Ele conta **registros de E1**, e nada mais.
+
+**A mesma task pode aparecer mais de uma vez, com `seq` diferentes.** Isso é o que já valia para
+`commits` (é histórico de execução, não índice de plano — `references/01-commits.md`) e continua
+valendo: `seq: 15` e `seq: 22` para `T-04.03` é uma lista correta.
+
+### O prefixo legado — compatibilidade sem migração
+
+Uma `ENTREGA.md` gravada antes desta chave tem itens **sem** `seq`. Ela continua legível, e
+**não há migração em massa**: os itens antigos não são reescritos só para ganhar a chave.
+
+```yaml
+commits:
+  - task: T-01.01
+    commit: aaa1111
+  - task: T-01.02
+    commit: bbb2222
+  - seq: 3
+    task: T-01.03
+    commit: ccc3333
+  - seq: 4
+    task: T-01.04
+    commit: ddd4444
+```
+
+- Os itens sem `seq` do **início** da lista formam o **prefixo legado**. A ordem efetiva deles vem
+  da posição: o primeiro é 1, o segundo é 2, e assim por diante até N.
+- O **primeiro item moderno** acrescentado depois deles recebe **N+1**.
+- **Depois que aparece o primeiro `seq`, nenhum item posterior pode voltar a omiti-lo.** A exceção
+  é um prefixo, não um modo.
+
+| Lista | |
+|---|---|
+| `[legado, legado, seq 3, seq 4]` | válida |
+| `[seq 1, legado]` | **inválida** |
+| `[legado, seq 2, legado]` | **inválida** |
+
+### A invariante da sequência
+
+Considerado o prefixo legado como 1..N, os itens modernos continuam exatamente N+1, N+2, N+3…
+Como a ordem efetiva de um item **é** a posição dele na lista, isso se resume a uma igualdade só:
+
+> **todo `seq` explícito é igual à posição do seu item.**
+
+É essa mesma comparação que recusa as quatro formas de lista quebrada — e é por isso que `seq`
+também é **prova de integridade do histórico**:
+
+| Lista | Por quê |
+|---|---|
+| `seq 1`, `seq 1` | duplicata — o mesmo registro contado duas vezes |
+| `seq 1`, `seq 3` | buraco — um registro sumiu |
+| `seq 1`, `seq 3`, `seq 2` | regressão |
+| `seq 2`, `seq 1` | reordenação — a ordem física deixou de bater com a de registro |
+
+**Datas não resolvem isso.** `AAAA-MM-DD` não distingue dois fechamentos do mesmo dia, e o
+timestamp do rastro (`docs/eventos/<trabalho_id>.jsonl`) é local da máquina, append-only e não
+versionado — não é fonte canônica. A regra geral: **datas são registro; quando há ordem
+contratual, existe campo de ordem.**
+
+### Entrega nova
+
+O template continua podendo nascer com `commits: []`. **Não existe `seq` de topo**: o próximo
+número sai da própria lista, nunca de um contador guardado à parte. O primeiro E1 daquela entrega
+grava `seq: 1`.
+
+### Quem lê e quem escreve
+
+Uma interpretação mecânica só, num script só — `scripts/sequencia-de-commits.sh`:
+
+```
+sequencia-de-commits.sh --ler <ENTREGA.md>     # ordem_efetiva, seq, task, commit por item
+sequencia-de-commits.sh --validar <ENTREGA.md> # a invariante acima; PARA quando quebra
+sequencia-de-commits.sh --proximo <ENTREGA.md> # o maior seq efetivo + 1
+sequencia-de-commits.sh --acrescentar <ENTREGA.md> <task> <commit>
+```
+
+- **`--acrescentar` é o escritor do E1** (e do E1 tardio). Ele acrescenta no **fim**, com `seq`,
+  e **nunca** reescreve item existente, reordena ou faz backfill do prefixo legado.
+- **Gravação nova nunca cria item legado.** Leitura histórica aceita o prefixo; escrita, não.
+- A V11 usa a **leitura crua** desse mesmo script (`references/02-prontidao.md`). Ela pergunta se
+  existe prova de E1 para a task, e **não** depende de ordem, `seq` ou sequência.
+
+### Sequência inválida é contrato inválido — e PARA
+
+Duplicata, buraco, regressão e mistura inválida de legado com `seq` **não são causa de negócio do
+portão**. Não viram `indeterminada` e não entram em `falhas_portao`: são **violação de contrato do
+`ENTREGA.md`**, tratadas como as demais — a gravação para, e ninguém corrige o registro por conta
+própria.
+
+**Nunca "conserte" escolhendo outro número.** Se duas sessões calcularem o mesmo próximo `seq` ao
+mesmo tempo, o resultado é uma lista com `seq` duplicado — e o certo é parar e mostrar isso. Um
+número escolhido para caber esconderia o registro perdido. Este contrato **não resolve corrida**:
+ele garante que a corrida, quando acontece, fique visível.
 
 ## Os campos de indexação
 
@@ -379,6 +502,8 @@ Ao abrir um `ENTREGA.md` que já existe e não tem os campos de indexação:
 3. Se um valor não puder ser inferido com segurança, use `[]` e siga — nunca invente, nunca
    pergunte, nunca pare. A chave sempre existe.
 4. Migrar o frontmatter NÃO autoriza reescrever a prosa nem apagar o histórico de `commits`.
+5. Migrar o frontmatter NÃO autoriza **backfill de `seq`** nos itens que já estão na lista. O
+   prefixo legado fica como está, e a chave entra só nos itens novos (ver "O prefixo legado").
 
 ## Verificação antes de gravar
 
@@ -394,3 +519,5 @@ Ao abrir um `ENTREGA.md` que já existe e não tem os campos de indexação:
 - [ ] Nenhum caminho absoluto em nenhum valor.
 - [ ] `falhas_portao` e `causa` presentes; `causa` não nula só em `estado: bloqueado`, e igual à
       derivada de `falhas_portao` (`scripts/causa-do-portao.sh --validar` passa).
+- [ ] Todo item **novo** de `commits` tem `seq`; nenhum item legado ganhou `seq` retroativo
+      (`scripts/sequencia-de-commits.sh --validar` passa).

@@ -599,4 +599,113 @@ grep -Fq '`commit_nao_registrado` não é `tarefa_nao_concluida`' "$schema" \
 grep -Eq '^falhas_portao: .*v1\.\.v11' "$template_entrega" \
   || fail 'ENTREGA template does not reach v11 in falhas_portao'
 
+# ---------------------------------------------------------------------------
+# P0.2-C4 — a ordem de registro de ENTREGA.commits: a chave `seq`
+# ---------------------------------------------------------------------------
+seq_sh='.claude/skills/mergex/scripts/sequencia-de-commits.sh'
+[ -f "$seq_sh" ] || fail "missing required file: $seq_sh"
+
+# O contrato da chave vive no schema, e é um contrato só.
+grep -Fq '## A ordem de registro — a chave `seq`' "$schema" \
+  || fail 'schema has no section for the commits order key'
+grep -Fq 'Inteiro **positivo**' "$schema" || fail 'seq is not declared a positive integer'
+grep -Fq '**Global à ENTREGA**' "$schema" || fail 'seq is not declared global to the ENTREGA'
+grep -Fq 'o maior `seq` efetivo existente + 1' "$schema" \
+  || fail 'schema does not define how the next seq is computed'
+grep -Fq 'Reutilizado, renumerado, reordenado, diminuído, nem escolhido por task' "$schema" \
+  || fail 'schema dropped what seq must never be'
+grep -Fq 'Ele conta **registros de E1**, e nada mais' "$schema" \
+  || fail 'schema does not fence off what seq is not'
+
+# O prefixo legado é exceção de LEITURA, com fim declarado — e sem backfill.
+grep -Fq '### O prefixo legado' "$schema" || fail 'schema has no legacy-prefix rule'
+grep -Fq 'nenhum item posterior pode voltar a omiti-lo' "$schema" \
+  || fail 'the legacy prefix has no declared end'
+grep -Fq '| `[legado, legado, seq 3, seq 4]` | válida |' "$schema" \
+  || fail 'schema lost the valid legacy-prefix example'
+grep -Fq '| `[seq 1, legado]` | **inválida** |' "$schema" \
+  || fail 'schema lost the invalid legacy-after-modern example'
+for f in "$schema" "$commits" "$template_entrega"; do
+  grep -Fq 'backfill' "$f" || fail "$f does not forbid backfilling seq on legacy items"
+done
+grep -Fq 'NÃO autoriza **backfill de `seq`**' "$schema" \
+  || fail 'the migration rule does not forbid seq backfill'
+
+# A invariante, e as quatro listas que ela recusa.
+grep -Fq 'todo `seq` explícito é igual à posição do seu item' "$schema" \
+  || fail 'schema does not state the sequence invariant'
+for d in duplicata buraco 'regressão' 'reordenação'; do
+  grep -Fq "$d" "$schema" || fail "schema does not name $d as an invalid sequence"
+done
+
+# Sequência quebrada é contrato inválido, não causa de negócio do portão.
+grep -Fq 'não são causa de negócio do' "$schema" \
+  || fail 'schema turns a broken sequence into a gate cause'
+grep -Fq 'não entram em `falhas_portao`' "$schema" \
+  || fail 'schema lets a broken sequence enter falhas_portao'
+grep -Fq 'Nunca "conserte" escolhendo outro número' "$schema" \
+  || fail 'schema allows picking another number to fit'
+# `seq` como identificador, não como pedaço de "sequência"/"consequência": a
+# causa do bloqueio não conhece a chave de ordem, e nunca vai derivar dela.
+if grep -Eq '(^|[^a-zà-ú])seq($|[^a-zà-ú])' "$causa_sh"; then
+  fail 'the gate cause script learned about seq'
+fi
+
+# Data é registro; quando há ordem contratual, existe campo de ordem.
+grep -Fq 'datas são registro' "$schema" \
+  || fail 'schema does not state the date-vs-order rule'
+grep -Fq 'não é fonte canônica' "$schema" \
+  || fail 'schema does not rule out the local event trail as the order source'
+
+# Entrega nova: a lista nasce vazia e não há contador de topo.
+grep -Fq '**Não existe `seq` de topo**' "$schema" \
+  || fail 'schema does not forbid a top-level seq counter'
+grep -Fq '**Não existe `seq` de topo**' "$abertura" \
+  || fail 'E0 does not forbid a top-level seq counter'
+grep -Fq 'commits: []' "$abertura" || fail 'E0 no longer opens the list empty'
+
+# O escritor canônico: um só, e é ele que o E1 chama.
+grep -Fq 'sequencia-de-commits.sh --acrescentar' "$commits" \
+  || fail 'E1 does not call the canonical commits writer'
+grep -Fq 'Não escreva o item à mão' "$commits" \
+  || fail 'E1 still lets the item be written by hand'
+grep -Fq 'Gravação nova nunca cria item sem `seq`' "$commits" \
+  || fail 'E1 allows a new legacy item'
+grep -Fq 'Sequência quebrada PARA' "$commits" \
+  || fail 'E1 does not stop on a broken sequence'
+grep -Fq 'sequencia-de-commits.sh' "$template_entrega" \
+  || fail 'ENTREGA template does not point at the commits writer'
+grep -Fq '  - seq: ' "$template_entrega" \
+  || fail 'ENTREGA template item has no seq key'
+grep -Fq '  - seq: 1' "$schema" || fail 'schema example item has no seq key'
+grep -Fq '  - seq: 1' "$registro" || fail 'E8 example item has no seq key'
+
+# O E1 tardio recebe o próximo seq e nunca é inserido no meio.
+grep -Fq 'O E1 tardio recebe SEMPRE o próximo `seq` global' "$commits" \
+  || fail 'the late E1 does not take the next global seq'
+grep -Fq 'não a ordem numérica das tasks' "$commits" \
+  || fail 'the late E1 may be inserted at the task position'
+
+# A V11 não passa a depender da ordem.
+grep -Fq '**A V11 não lê `seq`.**' "$prontidao" \
+  || fail 'V11 no longer declares itself independent of seq'
+grep -Fq 'exige `seq` em leitura histórica' "$prontidao" \
+  || fail 'V11 may demand seq on historical reads'
+grep -Fq 'quantidade de commits esperada para a task' "$prontidao" \
+  || fail 'V11 does not rule out reading seq as a commit count'
+
+# Um leitor de `commits` só no repositório inteiro.
+grep -Fq 'sequencia-de-commits.sh' "$prova_sh" \
+  || fail 'the V11 script does not use the shared commits reader'
+if grep -Fq 'bloco "$arq" commits' "$prova_sh"; then
+  fail 'the V11 script still carries its own commits parser'
+fi
+
+# A C4 não implementa a seção crítica, que é da C5.
+for t in flock 'mkdir -p "$arq.lock' ownership; do
+  if grep -Fq "$t" "$seq_sh"; then fail "the commits writer implements $t (that is C5)"; fi
+done
+grep -Fq 'não resolve corrida' "$schema" \
+  || fail 'schema claims the order key solves concurrency'
+
 printf 'contract checks passed\n'

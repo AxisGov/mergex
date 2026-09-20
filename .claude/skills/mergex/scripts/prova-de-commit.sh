@@ -26,6 +26,11 @@
 #      já define `commits: []` nesse caso. A V11 é `n/a`, nunca FALHA.
 #   6. O que não pôde ser lido sai como SEM_PROVA (código 2), para o E2
 #      registrar `v11_sem_prova`. Ausência de prova não é prova.
+#   7. A ordem NÃO é assunto da V11. Desde a chave `seq`, quem lê a lista é o
+#      `sequencia-de-commits.sh` — a interpretação mecânica única de `commits`,
+#      carregada aqui para não existirem dois parsers. A V11 usa dele só a
+#      leitura crua: `seq` fora de sequência é contrato inválido, e quem para
+#      por isso é a validação de contrato, nunca o portão.
 #
 # Uso:
 #   prova-de-commit.sh --verificar <ENTREGA.md|-> <tasks.md>...
@@ -47,100 +52,15 @@ set -uo pipefail
 ERRO=""
 
 # ---------------------------------------------------------------------------
-# Leitura do frontmatter. Mesma disciplina do causa-do-portao.sh: o bloco é a
-# primeira coisa do arquivo, delimitado por `---`, e CR de fim de linha some.
-# O que muda aqui é o alvo: `commits` e `tasks` são listas de mapas, que aquele
-# leitor (chaves de topo escalares) não enxerga — não há parser a reutilizar.
+# O leitor de `commits` é compartilhado: `bloco`, `confere_bloco`, `escalar`,
+# `legivel`, `limpa`, `sha_valido` e `itens_de` vêm do sequencia-de-commits.sh,
+# que é a interpretação mecânica única da lista (`references/00-schema.md`,
+# "A ordem de registro"). Duplicar o parser aqui faria as duas leituras
+# divergirem na primeira manutenção — e foi exatamente isso que aconteceu
+# quando o item passou a poder começar por `seq:` em vez de `task:`.
 # ---------------------------------------------------------------------------
-
-# bloco <arquivo> <chave de topo> — as linhas indentadas sob a chave, dentro do
-# frontmatter. Imprime `\001<valor inline>` na primeira linha quando a chave
-# trouxe valor na mesma linha (`commits: []`).
-bloco() {
-  awk -v chave="$2" '
-    { sub(/\r$/, "") }
-    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) { print "\002sem-frontmatter"; exit }; fm = 1; next }
-    fm && /^---[[:space:]]*$/ { fechado = 1; exit }
-    !fm { next }
-    # Chave de topo (coluna 0). A indentada não abre nem fecha bloco nenhum.
-    /^[A-Za-z_][A-Za-z0-9_]*:/ {
-      nome = $0; sub(/:.*/, "", nome)
-      if (nome == chave) {
-        dentro = 1; visto = 1
-        inline = $0; sub(/^[^:]*:[[:space:]]*/, "", inline); sub(/[[:space:]]+$/, "", inline)
-        print "\001" inline
-        next
-      }
-      dentro = 0; next
-    }
-    dentro { print }
-    END {
-      if (fm && !fechado) print "\002aberto"
-      else if (!visto) print "\002sem-chave"
-    }
-  ' "$1"
-}
-
-# confere_bloco <saída de bloco> — traduz o marcador \002 em ERRO
-confere_bloco() {
-  case "$1" in
-    *$'\002'sem-frontmatter*) ERRO="o arquivo não começa com frontmatter"; return 1 ;;
-    *$'\002'aberto*)          ERRO="o frontmatter não foi fechado"; return 1 ;;
-    *$'\002'sem-chave*)       ERRO="chave ausente no frontmatter"; return 1 ;;
-  esac
-  return 0
-}
-
-# escalar <arquivo> <chave de topo> — o valor de uma chave escalar de topo
-escalar() {
-  awk -v chave="$2" '
-    { sub(/\r$/, "") }
-    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; fm = 1; next }
-    fm && /^---[[:space:]]*$/ { exit }
-    !fm { next }
-    /^[A-Za-z_][A-Za-z0-9_]*:/ {
-      nome = $0; sub(/:.*/, "", nome)
-      if (nome != chave) next
-      v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
-      print v; exit
-    }
-  ' "$1"
-}
-
-legivel() { # <arquivo>
-  if [ "$1" = - ]; then return 0; fi
-  [ -f "$1" ] && [ -r "$1" ] && return 0
-  ERRO="arquivo ilegível: $1"; return 1
-}
-
-# ---------------------------------------------------------------------------
-# A prova: um identificador de commit válido.
-#
-# O E1 registra o que `git rev-parse --short HEAD` devolveu — hexadecimal
-# minúsculo, do tamanho curto do versionador ao SHA-1 inteiro. Vazio, `null`,
-# marcador de template e qualquer coisa fora disso NÃO é prova: o item existe,
-# mas não prova o commit que a V11 foi criada para cobrar.
-# ---------------------------------------------------------------------------
-sha_valido() { # <valor>
-  case "$1" in
-    ''|null|'~') return 1 ;;
-    *[!0-9a-f]*) return 1 ;;
-  esac
-  case "${#1}" in
-    7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-limpa() { # <valor> — tira aspas e espaço das pontas
-  local v="$1"
-  v="${v%"${v##*[![:space:]]}"}"; v="${v#"${v%%[![:space:]]*}"}"
-  case "$v" in
-    \"*\") v="${v#\"}"; v="${v%\"}" ;;
-    \'*\') v="${v#\'}"; v="${v%\'}" ;;
-  esac
-  printf '%s\n' "$v"
-}
+# shellcheck source=sequencia-de-commits.sh
+. "$(dirname "${BASH_SOURCE[0]}")/sequencia-de-commits.sh"
 
 # ---------------------------------------------------------------------------
 # commits_validos <ENTREGA.md> — `task<TAB>commit` de cada item VÁLIDO de
@@ -148,31 +68,13 @@ limpa() { # <valor> — tira aspas e espaço das pontas
 # `commit` ou com `commit` malformado não sai: ele não é prova de nada.
 # ---------------------------------------------------------------------------
 commits_validos() {
-  local arq="$1" b par t c
-  legivel "$arq" || return 1
-  b="$(bloco "$arq" commits)"
-  confere_bloco "$b" || return 1
-  # `commits: []` (inline) é lista vazia declarada: legítimo, sem nenhuma prova.
-  case "$(printf '%s\n' "$b" | head -1)" in
-    $'\001'|$'\001'\[\]) ;;
-    $'\001'*) ERRO="commits não é lista de itens: ${b#?}"; return 1 ;;
-  esac
-  printf '%s\n' "$b" | awk '
-    /^\001/ { next }
-    { sub(/\r$/, "") }
-    /^[[:space:]]*-[[:space:]]*task:/ {
-      if (t != "") print t "\t" c
-      t = $0; sub(/^[[:space:]]*-[[:space:]]*task:[[:space:]]*/, "", t); sub(/[[:space:]]+$/, "", t)
-      c = ""; next
-    }
-    /^[[:space:]]*commit:/ {
-      if (t == "") next
-      c = $0; sub(/^[[:space:]]*commit:[[:space:]]*/, "", c); sub(/[[:space:]]+$/, "", c)
-      next
-    }
-    END { if (t != "") print t "\t" c }
-  ' | while IFS=$'\t' read -r par c; do
-    t="$(limpa "$par")"; c="$(limpa "${c:-}")"
+  local arq="$1" its linha t c
+  its="$(itens_de "$arq")" || return 1
+  [ -n "$its" ] || return 0
+  printf '%s\n' "$its" | while IFS= read -r linha; do
+    [ -n "$linha" ] || continue
+    campos "$linha"
+    t="$(limpa "$CAMPO3")"; c="$(limpa "$CAMPO4")"
     [ -n "$t" ] || continue
     sha_valido "$c" || continue
     printf '%s\t%s\n' "$t" "$c"

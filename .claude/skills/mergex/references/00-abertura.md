@@ -205,7 +205,7 @@ replanejamento (portão bloqueado → replaneja → F3/F4/F5 → F6 de novo → 
 - `estado: aberto`
 - `branch` e `branch_base` preenchidos — `branch_base` é a **base efetiva** determinada no passo 3
 - `versionado: true` (ou `false`, se o passo 1 assim determinou)
-- `commits: []` — a lista cresce no E1
+- `commits: []` — a lista cresce no E1, e o primeiro item dela recebe `seq: 1`. **Não existe `seq` de topo**: o próximo número sai da própria lista (`00-schema.md`, "A ordem de registro")
 - `portao: null`, `falhas_portao: []`, `causa: null`, `push_feito: false`, `pr_url: null`, `pr_estado: null`
 - `criado_em` e `atualizado_em` com a data de hoje
 
@@ -222,7 +222,7 @@ Atualize **somente o necessário** para abrir uma nova tentativa de entrega:
 | `portao` | volta para `null` — o veredito da tentativa anterior não vale para esta |
 | `falhas_portao`, `causa` | voltam para `[]` e `null`, junto com o veredito. Arquivo anterior a estas chaves ganha as duas agora (`00-schema.md`, "A causa do bloqueio"); a causa da tentativa anterior continua no histórico da branch, nunca é copiada para esta |
 | `push_feito` | volta para `false` |
-| `commits` | **preservado. Nunca zere** — é o histórico de execução (ver `01-commits.md`) |
+| `commits` | **preservado. Nunca zere** — é o histórico de execução (ver `01-commits.md`). A série de `seq` **continua de onde parou**: a retomada nunca reinicia em 1 nem renumera o que já está gravado |
 | `criado_em` | preservado |
 | `desvios` | preservado enquanto continuar verdadeiro |
 | `pr_url`, `pr_estado` | **preservados como estão.** O E0 não verifica e não afirma que aquele PR ainda vale; quem confirma é o E7, que já trata "PR já existe" como retomada. **Nunca abra um segundo PR e nunca recrie a branch** |

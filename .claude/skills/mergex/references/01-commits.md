@@ -246,7 +246,41 @@ Confirme o identificador:
 git rev-parse --short HEAD
 ```
 
-Acrescente à lista `commits` do `ENTREGA.md`, com `task` e `commit`, e reescreva `atualizado_em`. Um item por task, na ordem em que fecharam.
+Acrescente à lista `commits` do `ENTREGA.md` e reescreva `atualizado_em`. Um item por task, na ordem em que fecharam.
+
+### O item leva `seq` — a chave de ordem
+
+O item novo tem **três** chaves, e `seq` vem primeiro:
+
+```yaml
+commits:
+  - seq: 15
+    task: T-04.03
+    commit: 9f3c1aa
+```
+
+`seq` é a **ordem de registro do E1**: inteiro positivo, monotônico, **global à ENTREGA**. Não é número de task, de sprint, de rodada da F5, nem timestamp, nem quantidade de commits da branch. O contrato inteiro — progressão, prefixo legado, invariante — está em `references/00-schema.md`, "A ordem de registro".
+
+**Não escreva o item à mão.** O escritor canônico é o `scripts/sequencia-de-commits.sh`: ele lê a lista, valida a sequência, calcula o próximo número e acrescenta o item no fim.
+
+```
+bash .claude/skills/mergex/scripts/sequencia-de-commits.sh --acrescentar \
+  docs/entregas/<trabalho_id>/ENTREGA.md <id da task> <identificador curto>
+```
+
+Ele imprime `seq=<n>` e **só** mexe na lista `commits` — `atualizado_em` continua sendo desta etapa.
+
+| Situação | O que o escritor faz |
+|---|---|
+| `commits: []` (entrega nova) | grava o primeiro item com `seq: 1` |
+| Lista com N itens válidos | grava `seq: N+1`, no **fim** |
+| Prefixo legado com N itens sem `seq` | grava `seq: N+1`; **não** acrescenta `seq` aos legados |
+| Sequência quebrada (duplicata, buraco, regressão, legado depois de `seq`) | **não grava nada** e relata o motivo |
+| `commit` que não é identificador válido, ou task vazia | **não grava nada** |
+
+**Gravação nova nunca cria item sem `seq`.** Leitura histórica aceita o prefixo legado; escrita, não. E **nunca faça backfill**: item legado não ganha `seq` retroativo, nem "para deixar a lista uniforme".
+
+**Sequência quebrada PARA.** É violação de contrato do `ENTREGA.md`, não causa de negócio do portão: não vira `indeterminada`, não entra em `falhas_portao` e não se conserta escolhendo outro número. Relate e pare.
 
 ### `commits` é histórico de execução, não índice de plano
 
@@ -256,15 +290,32 @@ A regra é **um commit por fechamento de task em cada execução** — não "um 
 - **Um `task` id pode reaparecer**, desde que o `commit` seja **outro SHA** e a ordem preserve a sequência real dos fechamentos.
 - Dois itens com o **mesmo id e o mesmo SHA** são duplicata: não acrescente o segundo.
 
-Isto não muda o schema e não cria campo: `references/00-schema.md` descreve `commits` como "um item por task commitada, na ordem em que fecharam" — uma lista ordenada, sem exigência de id único. Quem lê a lista lê história de execução; quem quer o plano lê `tasks.md`, que é a fonte dele.
+Isto não muda o schema e não cria campo: `references/00-schema.md` descreve `commits` como "um item por task commitada, na ordem em que fecharam" — uma lista ordenada, sem exigência de id único. **A chave `seq` não muda isso**: ela dá identidade à ordem, e continua não exigindo que cada `task` apareça uma vez só (`00-schema.md`, "A ordem de registro"). Quem lê a lista lê história de execução; quem quer o plano lê `tasks.md`, que é a fonte dele.
 
 ### O E1 tardio
 
 Uma task pode ter fechado sem que o commit acontecesse: segredo detectado na varredura, branch errada, hook do versionador, falha operacional. O E2 barra isso na **V11** — task `concluida` sem item em `commits` —, e o conserto é rodar o **E1 tardio**: o mesmo E1, no mesmo formato, no momento em que a lacuna aparece.
 
 - Rode o E1 normalmente para aquela task: selecione o que entra, varra segredo, monte a mensagem, commite.
-- **Acrescente** o item `{task, commit}` ao fim de `commits`. **Não reordene** os itens antigos e não reescreva SHA nenhum: a lista é a sequência real dos fechamentos, e o commit tardio fechou agora.
+- **Acrescente** o item `{seq, task, commit}` ao fim de `commits`, pelo mesmo escritor. **Não reordene** os itens antigos e não reescreva SHA nenhum: a lista é a sequência real dos fechamentos, e o commit tardio fechou agora.
 - Rode a V11 de novo. Com a prova registrada, ela passa.
+
+**O E1 tardio recebe SEMPRE o próximo `seq` global** — nunca um número "reservado" na posição lógica da task. `seq` registra **quando o E1 aconteceu**, não a ordem numérica das tasks:
+
+```yaml
+commits:
+  - seq: 1
+    task: T-01.01
+    commit: aaa1111
+  - seq: 2
+    task: T-01.03
+    commit: bbb2222
+  - seq: 3          # E1 tardio: fechou agora, entra agora
+    task: T-01.02
+    commit: ccc3333
+```
+
+Inserir `T-01.02` "entre" os dois primeiros renumeraria itens já gravados e apagaria o fato de que aquele commit só existiu depois — exatamente o que a chave de ordem existe para preservar.
 
 O E1 tardio **continua sendo permitido** e não é exceção ao contrato: é o E1 rodando no momento em que deveria ter rodado. O que nunca é permitido é inventar o item sem o commit — um `commit` que não existe não é prova, e a V11 recusa identificador malformado justamente para isso.
 
@@ -293,7 +344,7 @@ Por task:
 - [ ] Só arquivos declarados na task entraram no commit.
 - [ ] A varredura de segredo rodou sobre o diff em stage e não achou nada.
 - [ ] A mensagem tem tipo, escopo, título, objetivo e o rodapé com `Task`, `Trabalho` e `Testes`.
-- [ ] O commit existe e seu identificador está no `ENTREGA.md`.
+- [ ] O commit existe e seu identificador está no `ENTREGA.md`, num item com `seq` (`sequencia-de-commits.sh --validar` passa).
 - [ ] A árvore ficou limpa dos arquivos daquela task.
 
 ## Quando falha
@@ -304,7 +355,8 @@ Por task:
 | Task sem os dois testes | Não commita. O E2 vai barrá-la |
 | Arquivo fora da lista declarada | Não entra no commit; registra em `desvios`; o E2 barra |
 | Segredo detectado | Aborta o commit, desfaz o staging, avisa com o valor mascarado. A task fica `concluida` sem prova: a **V11** do E2 a nomeia |
-| Task já `concluida` que ficou sem commit | Roda o **E1 tardio** (acima): commita agora e acrescenta o item ao fim de `commits`, sem reordenar o histórico |
+| Task já `concluida` que ficou sem commit | Roda o **E1 tardio** (acima): commita agora e acrescenta o item ao fim de `commits`, com o próximo `seq`, sem reordenar o histórico |
+| `commits` com sequência quebrada | **Não grave.** Contrato inválido: relate o motivo do `sequencia-de-commits.sh --validar` e pare. Nunca escolha outro número para caber |
 | Branch errada ou principal | Não commita; relata a divergência e para |
 | `git commit` falha (hook, assinatura) | Relata o erro literal do versionador e para; nunca contorna com `--no-verify` |
 | Repositório sem versionador | Nada a fazer; segue sem erro |
