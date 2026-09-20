@@ -38,13 +38,60 @@ git status --porcelain
 
 **Regra dura: nunca commitar arquivo fora da lista declarada na task** (regra 4).
 
+### O dono do arquivo é a task que está sendo fechada
+
+No E1 o ownership é **unitário**: dono é a task que fecha agora, e só ela. Um arquivo que mudou cai em **exatamente uma** de quatro situações — e são quatro, não três: a quarta é "mudou, não é da task atual, mas **outra task da feature a declara**", que este contrato não tinha e que apareceu no piloto.
+
+A classificação é **por conjuntos**, nunca por prosa. Título, objetivo, status da task e a ordem em que as tasks aparecem no plano **não entram na conta**:
+
+```
+mudou ∩ atual                     → na_task_atual         entra
+atual − mudou                     → declarado_nao_mudou   não entra, não é erro
+mudou − união(todas as tasks)     → desvio                não entra, é desvio
+mudou ∩ (união(outras) − atual)   → arquivo_de_task_irma  não entra, NÃO é desvio
+```
+
 | Situação | O que fazer |
 |---|---|
-| Arquivo mudou e está declarado | Entra no commit |
-| Arquivo declarado não mudou | Não entra; não é erro (pode ter sido feito em task anterior) |
-| Arquivo mudou e **não** está declarado | **Não entra.** Registre o desvio e siga |
+| `na_task_atual` — mudou e a task atual declara | **Entra no commit.** Vale **mesmo que outra task também o declare**: a interseção com a atual vence |
+| `declarado_nao_mudou` — a task atual declara, mas não mudou | Não entra; não é erro (pode ter sido feito em task anterior) |
+| `desvio` — mudou e **nenhuma** task declara | **Não entra.** Registre o desvio e siga — o comportamento de sempre |
+| `arquivo_de_task_irma` — mudou e **só outra task** declara | **Não entra, e não é desvio.** Pare o fechamento (ver abaixo) |
 
-Arquivo de **produto** alterado fora da lista declarada **continua sendo desvio** de escopo. Não o commite e não o apague: deixe-o na árvore, registre a ocorrência em `docs/entregas/<trabalho_id>/ENTREGA.md` na lista `desvios`, e siga para a próxima task. O E2 vai barrar a entrega por isso, com o arquivo nomeado — e é assim que tem que ser: quem decide o que fazer com aquele arquivo é a pessoa.
+Quem classifica é o script da skill, que é o único a conceder as quatro situações:
+
+```
+git diff --cached --name-only | \
+  bash .claude/skills/mergex/scripts/ownership-da-task.sh --classificar . <T-NN.MM>
+```
+
+Ele devolve `<situacao>\t<arquivo>\t<tasks que o declaram>` e sai `0` quando o fechamento pode seguir, `2` quando existe arquivo de task irmã e `1` quando **não deu para determinar o dono**. A task atual é **declarada por quem chama**, nunca adivinhada: sem ela, ou com uma que o plano não conhece, o script recusa responder. Escolher "a primeira task encontrada" inventaria o dono.
+
+Arquivo de **produto** alterado fora da lista declarada de **qualquer** task **continua sendo desvio** de escopo. Não o commite e não o apague: deixe-o na árvore, registre a ocorrência em `docs/entregas/<trabalho_id>/ENTREGA.md` na lista `desvios`, e siga para a próxima task. O E2 vai barrar a entrega por isso, com o arquivo nomeado — e é assim que tem que ser: quem decide o que fazer com aquele arquivo é a pessoa.
+
+### `arquivo_de_task_irma` — o arquivo foi planejado, só que em outra task
+
+Esta é a quarta situação, e ela **não é desvio**: o arquivo está no plano da feature. O que ela diz é outra coisa — que **a execução e o plano não batem**. Para cumprir a task atual foi preciso mudar um arquivo que pertence a uma task irmã, normalmente já fechada e congelada.
+
+O exemplo do piloto: `T-03.01` fechou declarando `tests/ui/cabecalho-topo.test.tsx`; a `T-04.03`, em andamento, não declara esse arquivo — mas, para cumpri-la, o arquivo mudou.
+
+**No caso `arquivo_de_task_irma`, pare o fechamento da task.** E, exatamente:
+
+- **não** dê `git add` no arquivo;
+- **não** crie o commit da task como se ela estivesse válida — um commit só com o resto seria um **commit parcial enganoso**, que afirma no histórico que a task fechou com o trabalho que ela tem;
+- **não** apague, **não** restaure o conteúdo, **não** faça `stash` e **não** limpe a árvore: a alteração é real e precisa continuar onde está;
+- **não** o mova para outra task e **não** o atribua em silêncio à task atual;
+- **não** o transforme em desvio.
+
+Se ele **já estiver no índice** quando você chegar aqui, tire-o de lá sem tocar na alteração — `git restore --staged <arquivo>` — e **falhe fechado**: não commite. O `commit-por-task` faz o mesmo mecanicamente, e é a única condição desse hook que barra **mesmo em modo `aviso`** (`.claude/hooks/README.md`).
+
+Depois de o planejamento passar a declarar o arquivo na task atual, o E1 **aceita normalmente** — e a task antiga permanece congelada, ainda declarando o arquivo.
+
+### O que a mergex faz com a condição, e o que ela não faz
+
+A mergex **detecta e nomeia** a condição pelo que ela observa: `arquivo_de_task_irma`. É evidência mecânica, produzida por conjuntos, sem interpretação textual.
+
+Ela **não** grava `00-BLOQUEIOS.md`, **não** cria `B-NN`, **não** replaneja e **não** altera estado nenhum da sprintx. Traduzir esta condição para uma classe de pendência — `defeito_de_plano` — é da **sprintx**, que é dona de bloqueio e de replanejamento. É o mesmo corte de dono que a `causa` do portão já usa: a mergex é dona da observação, a skill de origem é dona da classe (DM-111, DM-117).
 
 ### Artefatos de método do próprio trabalho
 
@@ -280,7 +327,8 @@ executou). Ninguém o edita à mão.
 
 Por task:
 
-- [ ] Só arquivos declarados na task entraram no commit.
+- [ ] Só arquivos declarados **na task que fechou** entraram no commit.
+- [ ] Nenhum arquivo `arquivo_de_task_irma` foi commitado, apagado ou restaurado.
 - [ ] A varredura de segredo rodou sobre o diff em stage e não achou nada.
 - [ ] A mensagem tem tipo, escopo, título, objetivo e o rodapé com `Task`, `Trabalho` e `Testes`.
 - [ ] O commit existe e seu identificador está no `ENTREGA.md`.
@@ -292,7 +340,9 @@ Por task:
 |---|---|
 | `suite: vermelha` ou `nao_executada` | Não commita. A task não fechou de verdade — o E2 vai barrá-la nomeando-a |
 | Task sem os dois testes | Não commita. O E2 vai barrá-la |
-| Arquivo fora da lista declarada | Não entra no commit; registra em `desvios`; o E2 barra |
+| Arquivo fora da lista declarada de toda task | Não entra no commit; registra em `desvios`; o E2 barra |
+| Arquivo declarado só em task irmã | Não entra e **não é desvio**. Para o fechamento da task, sem commit parcial, sem apagar e sem restaurar. A sprintx decide o replanejamento |
+| Dono da task não determinável | Não commita. O script sai `1` e nada é classificado — nunca se infere o dono pela prosa |
 | Segredo detectado | Aborta o commit, desfaz o staging, avisa com o valor mascarado |
 | Branch errada ou principal | Não commita; relata a divergência e para |
 | `git commit` falha (hook, assinatura) | Relata o erro literal do versionador e para; nunca contorna com `--no-verify` |

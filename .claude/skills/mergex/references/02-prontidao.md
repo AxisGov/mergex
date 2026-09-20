@@ -124,6 +124,15 @@ Falha: arquivo de produto no diff que não está declarado em nenhuma task. Nome
 
 Arquivo declarado que não aparece no diff **não** é falha: pode ter sido criado e revertido dentro do escopo, ou já existir como estava.
 
+**A V9 pergunta pela UNIÃO; o E1 pergunta pela task. As duas perguntas são diferentes, e ficam diferentes de propósito:**
+
+| Quem | Pergunta | Conjunto |
+|---|---|---|
+| **E1**, ao fechar uma task | *de quem é este arquivo?* | **unitário** — só a task que está sendo fechada |
+| **V9**, ao avaliar a entrega | *este arquivo foi planejado nesta feature?* | **união** — todas as tasks do trabalho |
+
+Um arquivo declarado **só em outra task** da feature é `arquivo_de_task_irma` no E1 (não entra naquele commit; `references/01-commits.md`) e **passa na V9**, porque ele está no plano do trabalho. Isso não é incoerência: a V9 existe para pegar arquivo que **ninguém** planejou, e transformá-la em escopo unitário faria toda task que toca arquivo de outra reprovar a entrega inteira — barrando trabalho legítimo já replanejado. **Não converta a V9 para o conjunto unitário.**
+
 A união dos `arquivos` sai da chave `tasks`, **nos dois formatos de sprint** (`kind: plano` e `kind: tasks`): o formato do plano nunca muda o que é produto declarado.
 
 **Os artefatos de método do próprio trabalho não são desvio** e não entram nesta conta: a pasta do trabalho (`docs/sprintx/features/<trabalho_id>/`, `docs/<trabalho_id>/` no formato antigo, `docs/manutencao/<trabalho_id>/` na runx) e `docs/entregas/<trabalho_id>/`.

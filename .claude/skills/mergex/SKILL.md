@@ -58,7 +58,7 @@ O fluxo não é uma máquina de estados sequencial como a da sprintx ou da runx:
 
 **E0 ABERTURA** — no início do trabalho (F6 da sprintx, E3 da runx). Detecta versionamento, localiza o trabalho (na sprintx, `docs/sprintx/features/<slug>/`, com `docs/<slug>/` como formato antigo) e determina a branch base — a informada pelo chamador vem antes de qualquer convenção. Quando a skill de origem já abriu a branch e a árvore de trabalho — como a F1 da sprintx faz, em `git worktree` próprio —, o E0 **adota a branch e o worktree** que encontra: não troca de branch e não exige árvore limpa para isso. Só cria branch quando não existe nenhuma, e aí a árvore precisa estar limpa. Registra em `ORQUESTRADOR.md` e em `docs/entregas/<trabalho_id>/ENTREGA.md`. **Nunca duplica a branch de um trabalho.**
 
-**E1 COMMIT POR TASK** — durante a execução. Cada task com os dois testes escritos, `suite: parcial` ou `verde` e `status: concluida` vira um commit próprio, no momento em que fecha. Os artefatos de método do próprio trabalho vão junto; arquivo de produto fora do plano, nunca. Varredura de segredo antes de cada commit.
+**E1 COMMIT POR TASK** — durante a execução. Cada task com os dois testes escritos, `suite: parcial` ou `verde` e `status: concluida` vira um commit próprio, no momento em que fecha. Os artefatos de método do próprio trabalho vão junto; arquivo de produto fora do plano, nunca. Varredura de segredo antes de cada commit. **O dono do arquivo é a task que está fechando**: arquivo que mudou e que **só outra task da feature declara** não entra e **não é desvio** — é evidência mecânica de que execução e plano não batem, e o fechamento para ali.
 
 **E2 PORTÃO DE PRONTIDÃO** — ao fim da execução, antes de qualquer preparação de entrega. Devolve `PRONTO` ou `BLOQUEADO` com o que falta e onde corrigir. `PRONTO` segue para o E3. **`BLOQUEADO` encerra as etapas de entrega — E3 a E7 não executam — e segue apenas ao E8 para registrar e persistir o bloqueio.** A mergex não maquia: ir ao E8 não é continuar a entrega.
 
@@ -145,7 +145,7 @@ O `analista-de-conflito` não tem ferramenta de escrita nem de execução: é
 | `sem-segredo` | **bloqueio** | Regra 5 — varredura a cada commit, não só no portão |
 | `git-perigoso` | **bloqueio** | Regra 11 — nunca forçado, nunca na principal, nunca reescrever o enviado |
 | `branch-limpa` | **bloqueio** | Regra 2 — nunca criar ou trocar branch com alteração pendente |
-| `commit-por-task` | aviso | Regra 3 — um commit por task, concluída e com suíte verde |
+| `commit-por-task` | aviso | Regra 3 — um commit por task, concluída e com suíte verde; e nenhum arquivo de **outra** task no commit desta — essa condição barra **mesmo em aviso** |
 | `arquivo-fora-do-plano` | aviso | Regra 4 — nunca commitar arquivo fora da lista declarada |
 | `pr-so-com-portao` | aviso | Regra 6 — sem `PRONTO` no portão, não sobe e não abre PR |
 

@@ -520,4 +520,97 @@ grep -Fq 'causa-do-portao.sh --validar' "$registro" || fail 'E8 does not validat
 grep -Fq '**nunca** `causa: null` com `estado: bloqueado`' "$registro" || fail 'E8 allows a null causa when blocked'
 grep -Fq 'Um bloqueio legado nunca' "$schema" || fail 'schema may backfill a causa for legacy blocks'
 
+# ---------------------------------------------------------------------------
+# P0.2-C1 — arquivo de task irmã: ownership unitário no E1, união na V9
+# ---------------------------------------------------------------------------
+own_sh='.claude/skills/mergex/scripts/ownership-da-task.sh'
+own_teste='scripts/ci/test-ownership-task.sh'
+hook_task='.claude/hooks/mergex/commit-por-task.sh'
+hooks_readme='.claude/hooks/README.md'
+
+for f in "$own_sh" "$own_teste" "$hook_task" "$hooks_readme"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# As quatro situações existem, são exatamente quatro, e o reference nomeia
+# cada uma delas com o mesmo termo do script. Prosa e script ficam amarrados:
+# renomear de um lado só quebra aqui.
+situacoes="$(bash "$own_sh" --situacoes | cut -d'|' -f1)"
+[ "$(printf '%s\n' "$situacoes" | grep -c .)" = 4 ] \
+  || fail 'ownership-da-task no longer declares exactly four situations'
+for s in na_task_atual declarado_nao_mudou desvio arquivo_de_task_irma; do
+  printf '%s\n' "$situacoes" | grep -Fxq "$s" \
+    || fail "ownership-da-task dropped the situation: $s"
+  grep -Fq "$s" "$commits" \
+    || fail "E1 reference does not name the situation: $s"
+done
+[ "$(bash "$own_sh" --condicao)" = arquivo_de_task_irma ] \
+  || fail 'the structured condition is no longer arquivo_de_task_irma'
+
+# A mergex nomeia o que OBSERVA; a classe é da sprintx (DM-117).
+if bash "$own_sh" --situacoes | grep -Fq 'defeito_de_plano'; then
+  fail 'mergex emits the sprintx class defeito_de_plano instead of what it observes'
+fi
+# Só em comentário, explicando de quem é a classe: nunca em código que a emita.
+if grep -v '^[[:space:]]*#' "$own_sh" | grep -Fq 'defeito_de_plano'; then
+  fail 'the ownership script emits the sprintx class defeito_de_plano'
+fi
+grep -Fq 'defeito_de_plano' "$own_sh" \
+  || fail 'the ownership script no longer says who owns the defeito_de_plano class'
+
+# O E1 é unitário e diz que arquivo de task irmã NÃO é desvio.
+grep -Fq 'O dono do arquivo é a task que está sendo fechada' "$commits" \
+  || fail 'E1 no longer states unitary ownership'
+grep -Fq 'ownership-da-task.sh --classificar' "$commits" \
+  || fail 'E1 does not call the ownership script'
+grep -Fq 'mudou e **só outra task** declara' "$commits" \
+  || fail 'E1 dropped the fourth situation from the table'
+grep -Fq 'não é desvio' "$commits" \
+  || fail 'E1 no longer separates arquivo_de_task_irma from desvio'
+grep -Fq 'commit parcial enganoso' "$commits" \
+  || fail 'E1 no longer forbids the misleading partial commit'
+for proibido in 'não** apague' 'não** faça `stash`' 'não** o mova para outra task'; do
+  grep -Fq "$proibido" "$commits" \
+    || fail "E1 dropped a forbidden recovery action: $proibido"
+done
+
+# A V9 continua com a UNIÃO, e o contrato proíbe convertê-la para unitário.
+grep -Fq 'união dos `arquivos.cria` + `arquivos.altera` de todas as tasks' "$prontidao" \
+  || fail 'V9 no longer compares against the union of all tasks'
+grep -Fq '**Não converta a V9 para o conjunto unitário.**' "$prontidao" \
+  || fail 'V9 lost the ban on switching to unitary scope'
+grep -Fq 'passa na V9' "$prontidao" \
+  || fail 'V9 no longer states that a sister-task file passes'
+
+# O hook delega ao script (uma implementação só) e FALHA FECHADO: o bloco da
+# condição não pode ser regido pelo modo do hook, senão em `aviso` — o padrão —
+# ele deixaria passar o commit parcial que a condição existe para impedir.
+grep -Fq 'ownership-da-task.sh' "$hook_task" \
+  || fail 'commit-por-task does not delegate to the ownership script'
+grep -Fq 'Task:[[:space:]]*T-[0-9]+\.[0-9]+' "$hook_task" \
+  || fail 'commit-por-task no longer reads the declared current task from the Task: footer'
+bloco_irma="$(awk '/^if \[ -n "\$TASK_ATUAL" \] && \[ -r "\$OWNERSHIP" \]; then$/, /^    exit 2$/' "$hook_task")"
+[ -n "$bloco_irma" ] || fail 'commit-por-task lost the sister-task block'
+if printf '%s\n' "$bloco_irma" | grep -Fq 'MODO'; then
+  fail 'the sister-task block is gated by the hook mode: it must fail closed even in aviso'
+fi
+printf '%s\n' "$bloco_irma" | grep -Fxq '    exit 2' \
+  || fail 'the sister-task block no longer blocks the commit'
+grep -Fq 'falha fechada mesmo em aviso' "$hooks_readme" \
+  || fail 'hooks README no longer documents the fail-closed exception'
+
+# Nenhum outro hook foi promovido por oportunidade neste bloco.
+grep -Fq '"commit-por-task": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'commit-por-task was promoted out of aviso'
+grep -Fq '"arquivo-fora-do-plano": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'arquivo-fora-do-plano was promoted out of aviso'
+grep -Fq '"pr-so-com-portao": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'pr-so-com-portao was promoted out of aviso'
+
+# As decisões ficaram registradas.
+for dm in DM-117 DM-118 DM-119 DM-120 DM-121 DM-122 DM-123; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+
 printf 'contract checks passed\n'

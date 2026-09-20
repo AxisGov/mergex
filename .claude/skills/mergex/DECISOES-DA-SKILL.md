@@ -240,3 +240,34 @@ das duas é pré-requisito desta causa.
 posição na ordem, no script e no schema juntos); a sprintx gravar o `B-NN` com tipo — o que
 permitiria, em outra entrega, refinar `bloqueio_aberto` a partir de campo tipado, nunca da prosa;
 ou um leitor que precise de todas as falhas, e não só da causa — ele já tem `falhas_portao`.
+
+## P0.2-C1 — arquivo de task irmã é defeito de plano, não desvio
+
+O contrato do E1 tinha três respostas para um arquivo que mudou: é da task, não mudou, ou é
+desvio. Faltava a quarta, e ela apareceu no piloto: **mudou, não é da task que está fechando,
+mas outra task da feature a declara**. Sem ela, o mesmo arquivo recebia três respostas
+diferentes na mesma máquina — o `escopo-da-task.sh` perguntava pelo escopo unitário, a V9
+perguntava pela união, e o `commit-por-task` chamava o caso de mistura de tasks, cujo conselho
+("commite uma de cada vez") fecharia de novo uma task congelada.
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-117 | Como a mergex nomeia a condição, sem invadir o vocabulário da sprintx | A mergex emite **`arquivo_de_task_irma`** — o que ela **observa**. Ela **não** emite `defeito_de_plano`, que é a **classe** que a sprintx deriva depois. A mergex não grava `00-BLOQUEIOS.md`, não cria `B-NN`, não replaneja e não altera estado da sprintx | É o mesmo corte de dono da DM-111: a mergex é dona da observação mecânica, a skill de origem é dona da classe de pendência. Emitir a classe aqui obrigaria a mergex a conhecer o fluxo `defeito_de_plano → replanejar_execucao → F3/F4/F5 → F6`, que é da sprintx |
+| DM-118 | Que interface usar para entregar a condição | A que o repositório **já tem**: um **script determinístico da skill** com **enum fechado**, saída **TSV** e **código de saída** — `scripts/ownership-da-task.sh`, no mesmo molde de `causa-do-portao.sh` e `classificar-atencao.sh`. `0` segue, `2` é a condição (a convenção de bloqueio dos hooks), `1` é "não determinei", `64` é uso. **Nenhum JSON novo, nenhum arquivo novo, nenhum protocolo novo** | O `ENTREGA.md` não serve: a condição acontece **durante** o E1, antes de existir portão, e acrescentar chave ao `kind: entrega` mexeria no schema que a buildx lê. O rastro `docs/eventos/` também não: ele é local da máquina e não versionado. O script é a única camada que já é lida por outra skill sem contrato novo |
+| DM-119 | Quem decide qual é a task atual | **Quem chama declara**; o script nunca adivinha. Sem `--task`, com task fora do formato, ou com task que o plano não conhece, ele **recusa responder** (`1`) e não classifica nada. No hook, a task atual sai do rodapé **`Task: T-NN.MM`** que o contrato do E1 já exige na mensagem de commit — do `-m` ou do arquivo do `-F`. Dois rodapes diferentes, ou nenhum, é "não determinada" | Mesmo princípio da DM-108: reconhecimento por prosa não é testável. E é o que mata a mutação "escolher owner pela primeira task encontrada" — sem dono declarado, não há classificação nenhuma |
+| DM-120 | Precedência quando o arquivo está na atual **e** numa irmã | É da **atual**, e entra: a interseção com a task que fecha vem antes de qualquer outra regra. As duas tasks ficam registradas na evidência, sem mudar a situação | Ownership unitário significa que a task que fecha é dona do que ela declarou. Mandar para a irmã um arquivo que a atual declarou barraria trabalho legítimo |
+| DM-121 | Onde a condição barra, sem promover hook nenhum | No **`commit-por-task`**, e ela é a **única** condição desse hook que **falha fechada mesmo em modo `aviso`**. As demais verificações dele (task não concluída, suíte, mistura) continuam exatamente no modo configurado, e `desligado` continua desligando o hook inteiro. **Nenhum outro hook foi promovido**; a promoção do `escopo-da-task.sh`, que pega na hora da edição, é da sprintx | Deixar passar em aviso produz o dano que o hook existe para impedir — o commit parcial enganoso da task —, e commit no histórico não tem volta. Promover o hook inteiro traria falso positivo nas outras verificações, e hook que atrapalha é desinstalado |
+| DM-122 | O que fazer com a V9 | **Nada.** A V9 continua perguntando "este arquivo foi planejado nesta feature?" e continua usando a **união** das tasks. Um `arquivo_de_task_irma` **passa na V9** e **não entra em `desvios`**. A diferença ficou escrita nos dois references | São perguntas diferentes: a V9 existe para pegar o que **ninguém** planejou. Convertê-la para o conjunto unitário faria toda task que toca arquivo de outra reprovar a entrega inteira, inclusive depois de um replanejamento legítimo |
+| DM-123 | Plano legado, em que o ownership unitário não é determinável | **Falha fechado no que a mergex controla, sem inventar**: o script recusa responder e não classifica; o E1 não commita. No hook, sem rodapé `Task:` determinável, **vale o comportamento anterior** (a verificação de mistura, no modo configurado) — nenhuma classificação nova é inferida e nenhum falso positivo é criado. **Nenhum plano histórico é migrado** | Inferir o dono pela prosa é exatamente o que este contrato proíbe. E endurecer o caso indeterminável transformaria todo commit sem rodapé — inclusive os `chore(entrega)` de artefato de método — em bloqueio, que é a promoção que o C1 não pode fazer |
+
+**O caso do piloto.** `T-03.01` fechada declarando `tests/ui/cabecalho-topo.test.tsx`; `T-04.03`
+em andamento, sem declarar o arquivo; para cumprir a `T-04.03`, o arquivo muda. A mergex
+classifica `arquivo_de_task_irma`, não chama de desvio, não o põe no commit da `T-04.03`, não o
+apaga nem o restaura, e para o fechamento. Depois de a sprintx replanejar e a `T-04.03` passar a
+declarar o arquivo como `altera`, o E1 aceita normalmente — e a `T-03.01` permanece congelada.
+
+**O que invalidaria estas decisões:** o contrato do E1 deixar de exigir o rodapé `Task:` na
+mensagem de commit (o hook perderia a única declaração mecânica do dono); a sprintx passar a
+gravar a task corrente em artefato tipado e versionado (seria uma fonte melhor que o rodapé, e a
+DM-119 mudaria); ou a V9 ganhar um conjunto unitário próprio — o que exigiria rever a DM-122 e a
+verificação inteira, e não cabe numa entrega que não abre verificação nova no portão.

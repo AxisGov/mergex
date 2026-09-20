@@ -58,6 +58,13 @@ Três nascem em **bloqueio**, porque o erro não tem volta:
 Três nascem em **aviso**, e só sobem a bloqueio depois de rodarem sem falso
 positivo: `commit-por-task`, `arquivo-fora-do-plano` e `pr-so-com-portao`.
 
+Uma única condição de método barra **mesmo em aviso**: commitar, no fechamento
+de uma task, um arquivo que **só outra task da feature declara**. Ele não é
+desvio — foi planejado, só que noutra task —, e deixá-lo passar criaria um
+commit parcial enganoso, que o histórico não desfaz. Tire-o do índice
+(`git restore --staged`), **não o apague e não o restaure**, e leve a condição
+ao planejamento: quem abre bloqueio e replaneja é a sprintx.
+
 Se um hook barrar sua ação, **a mensagem diz o que fazer** — leia e corrija, não
 contorne. O modo de cada hook vive em `.expx/hooks.json`.
 

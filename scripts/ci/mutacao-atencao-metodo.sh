@@ -21,6 +21,8 @@ ABERTURA='.claude/skills/mergex/references/00-abertura.md'
 TEMPLATE_ENTREGA='.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md'
 AGENTE='.claude/agents/revisor-diff.md'
 AGENTE_OC='.opencode/agent/revisor-diff.md'
+OWN_SH='.claude/skills/mergex/scripts/ownership-da-task.sh'
+HOOK_TASK='.claude/hooks/mergex/commit-por-task.sh'
 
 TMPS=""
 trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
@@ -53,6 +55,7 @@ apaga() {
 teste()     { bash scripts/ci/test-atencao-metodo.sh > saida.log 2>&1; }
 validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
 teste_causa() { bash scripts/ci/test-causa-portao.sh > saida.log 2>&1; }
+teste_own()   { bash scripts/ci/test-ownership-task.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As mutações: id | descrição | verificação que TEM que falhar | função que muta
@@ -116,6 +119,21 @@ M16() { troca "$SCHEMA" '| 3 | `v7` | `bloqueio_aberto` |' '| 3 | `v7` | `falha_
 M17() { apaga "$ABERTURA" '| `falhas_portao`, `causa` |'; }
 M18() { apaga "$TEMPLATE_ENTREGA" 'causa: '; }
 
+# --- P0.2-C1: o ownership da task no fechamento (ownership-da-task.sh) ---
+# As cinco tentações que o contrato do E1 proíbe, mais o hook que pararia de
+# falhar fechado. Todas têm que morrer.
+M19() { troca "$OWN_SH" '  else printf '"'"'4\t%s\n'"'"' "$S_IRMA"' \
+                        '  else printf '"'"'3\t%s\n'"'"' "$S_DESVIO"'; }
+M20() { troca "$OWN_SH" '  else printf '"'"'4\t%s\n'"'"' "$S_IRMA"' \
+                        '  else printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
+M21() { troca "$OWN_SH" '  elif declara "$1" "$2"; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"' \
+                        '  elif [ -n "$(tasks_de "$2")" ]; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
+M22() { troca "$OWN_SH" '  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '"'"'$atual'"'"' não declara arquivos em nenhum tasks.md"; return 1; }' \
+                        '  atual="$(printf '"'"'%s\n'"'"' "$PLANO" | head -1 | cut -f1)"'; }
+M23() { troca "$OWN_SH" '  printf '"'"'%s'"'"' "$saida" | grep -q "^4${TAB}" && return 2' '  :'; }
+M24() { troca "$HOOK_TASK" '    exit 2' \
+                           '    expx_barra "$MODO" "$RAIZ" "$HOOK" "arquivo de task irma" "$IRMA"'; }
+
 LISTA='M1a|remove a regra L4 do classificador|teste
 M1b|remove a linha L4 do reference|validador
 M2a|remove a regra D4 do classificador|teste
@@ -136,7 +154,13 @@ M14|verificação sem prova vira causa provada|teste_causa
 M15|leitura histórica recusa ENTREGA anterior às chaves|teste_causa
 M16|tabela de causas do schema diverge do script|validador
 M17|retomada do E0 preserva a causa anterior|validador
-M18|template da ENTREGA omite a chave causa|validador'
+M18|template da ENTREGA omite a chave causa|validador
+M19|trata arquivo da irma como desvio|teste_own
+M20|aceita arquivo da irma como se fosse da task atual|teste_own
+M21|usa a uniao das tasks como ownership do E1|teste_own
+M22|escolhe o owner pela primeira task encontrada|teste_own
+M23|nao sinaliza a condicao: deixa sair commit parcial|teste_own
+M24|hook para de falhar fechado e obedece ao modo aviso|validador'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0
@@ -184,6 +208,29 @@ done <<EOF
 $LISTA
 EOF
 
+# ---------------------------------------------------------------------------
+# Controle SEM mutação — a árvore intacta tem que passar em tudo
+# ---------------------------------------------------------------------------
+# Sem ele, uma verificação quebrada por qualquer outro motivo marcaria todas as
+# mutações como mortas, e a suíte diria "prova completa" sem provar nada.
+CONTROLE_FALHOU=0
+if [ "$#" -eq 0 ]; then
+  echo
+  echo "Controle sem mutação — a verificação TEM que passar"
+  for verif in teste validador teste_causa teste_own; do
+    d="$(copia)"
+    if ( cd "$d" && "$verif" ); then
+      printf '  ok     controle %s\n' "$verif"
+    else
+      CONTROLE_FALHOU=$((CONTROLE_FALHOU+1))
+      printf '  FALHA  controle %s — a árvore intacta já reprova\n' "$verif"
+      grep -E 'FALHA|contract check failed' "$d/saida.log" 2>/dev/null | head -4 \
+        | sed 's/^[[:space:]]*//' | cut -c1-140 | sed 's/^/           /'
+    fi
+  done
+fi
+
 echo "---------------------------------------------"
-printf '%d morta(s), %d viva(s), %d erro(s)\n' "$MORTAS" "$VIVAS" "$ERROS"
-[ "$VIVAS" = 0 ] && [ "$ERROS" = 0 ]
+printf '%d morta(s), %d viva(s), %d erro(s), %d controle(s) reprovado(s)\n' \
+  "$MORTAS" "$VIVAS" "$ERROS" "$CONTROLE_FALHOU"
+[ "$VIVAS" = 0 ] && [ "$ERROS" = 0 ] && [ "$CONTROLE_FALHOU" = 0 ]
