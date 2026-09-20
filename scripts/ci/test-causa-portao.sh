@@ -108,14 +108,15 @@ deriva bloqueio_aberto         "V7 sozinha"  v7
 deriva legado_incompleto       "V8 sozinha"  v8
 deriva arquivo_fora_do_plano   "V9 sozinha"  v9
 deriva segredo_no_diff         "V10 sozinha" v10
+deriva commit_nao_registrado   "V11 sozinha" v11
 entrega "$E" bloqueado bloqueado '[v9]' arquivo_fora_do_plano; aceita --validar "bloqueado por V9" "$E" 'causa=arquivo_fora_do_plano'
 entrega "$E" bloqueado bloqueado '[v9]' tarefa_nao_concluida;  reprova --validar "causa do enum, mas não a derivada" "$E" "não é a derivada"
 
 # ---------------------------------------------------------------------------
 echo
-echo "4. Várias falhas: precedência V10; V6..V9; V1..V5"
+echo "4. Várias falhas: precedência V10; V6..V9; V1..V5 e V11"
 # ---------------------------------------------------------------------------
-[ "$(bash "$CAUSA" --ordem)" = 'v10 v6 v7 v8 v9 v1 v2 v3 v4 v5' ] && ok "ordem declarada" || falha "ordem alterada: $(bash "$CAUSA" --ordem)"
+[ "$(bash "$CAUSA" --ordem)" = 'v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11' ] && ok "ordem declarada" || falha "ordem alterada: $(bash "$CAUSA" --ordem)"
 deriva bloqueio_aberto       "V1 + V7: task bloqueada é sintoma do B-NN" v1 v7
 deriva tarefa_nao_concluida  "V1 + V5: QA ausente é sintoma da execução" v1 v5
 deriva tarefa_nao_concluida  "V1 + V2 + V3" v1 v2 v3
@@ -124,6 +125,9 @@ deriva auditoria_reprovada   "V6 + V7: plano volta à F3" v6 v7
 deriva bloqueio_aberto       "V7 + V9" v7 v9
 deriva arquivo_fora_do_plano "V9 + V1" v1 v9
 deriva segredo_no_diff       "V10 vence tudo" v1 v6 v7 v9 v10
+deriva tarefa_nao_concluida  "V1 + V11: a execução nem terminou" v1 v11
+deriva bloqueio_aberto       "V7 + V11: o B-NN parou o trabalho" v7 v11
+deriva commit_nao_registrado "V11 sozinha entre as que leem a execução" v11
 entrega "$E" bloqueado bloqueado '[v1, v2, v9]' arquivo_fora_do_plano; aceita --validar "bloqueado com três falhas" "$E" 'causa=arquivo_fora_do_plano'
 entrega "$E" bloqueado bloqueado '[v7, v1]' bloqueio_aberto;           reprova --validar "lista fora da numeração do portão" "$E" 'fora da numeração'
 [ "$(bash "$CAUSA" --lista v9 v1 v10_sem_prova)" = '[v1, v9, v10_sem_prova]' ] && ok "--lista grava na numeração do portão" || falha "--lista: $(bash "$CAUSA" --lista v9 v1 v10_sem_prova)"
@@ -156,7 +160,8 @@ echo "7. Causa ou falha fora do enum reprova"
 entrega "$E" bloqueado bloqueado '[v1, v7]' falha_tecnica;  reprova --validar "falha_tecnica" "$E" "causa fora do enum: 'falha_tecnica'"
 entrega "$E" bloqueado bloqueado '[v7]' decisao_humana;     reprova --validar "classe da buildx como causa" "$E" 'causa fora do enum'
 entrega "$E" bloqueado bloqueado '[v7]' Bloqueio_Aberto;    reprova --validar "enum com maiúscula" "$E" 'causa fora do enum'
-entrega "$E" bloqueado bloqueado '[v11]' bloqueio_aberto;   reprova --validar "falha v11" "$E" 'falha desconhecida'
+entrega "$E" bloqueado bloqueado '[v12]' bloqueio_aberto;   reprova --validar "falha v12" "$E" 'falha desconhecida'
+entrega "$E" bloqueado bloqueado '[v11]' commit_nao_registrado; aceita --validar "bloqueado por V11" "$E" 'causa=commit_nao_registrado'
 entrega "$E" bloqueado bloqueado '[v7, v7_sem_prova]' bloqueio_aberto; reprova --validar "vN e vN_sem_prova juntos" "$E" 'registrada duas vezes'
 entrega "$E" bloqueado bloqueado 'v7' bloqueio_aberto;      reprova --validar "falhas_portao fora de lista" "$E" 'não é lista'
 recusa_derivar "derivar sem falha nenhuma"
@@ -186,6 +191,8 @@ deriva indeterminada   "só V1 sem prova (sem plano)"                v1_sem_prov
 deriva indeterminada   "V10 sem prova antes do B-NN provado"         v7 v10_sem_prova
 deriva indeterminada   "V9 sem prova antes da V1 provada"            v1 v9_sem_prova
 deriva bloqueio_aberto "V7 provada antes da V9 sem prova"            v7 v9_sem_prova
+deriva indeterminada   "V11 sem prova sozinha (sem ENTREGA legível)"  v11_sem_prova
+deriva tarefa_nao_concluida "V1 provada antes da V11 sem prova"       v1 v11_sem_prova
 entrega "$E" bloqueado bloqueado '[v1, v10_sem_prova]' indeterminada;   aceita  --validar "bloqueado indeterminado" "$E" 'causa=indeterminada'
 entrega "$E" bloqueado bloqueado '[v1, v10_sem_prova]' tarefa_nao_concluida; reprova --validar "escolher a causa provada mais baixa" "$E" 'não é a derivada'
 entrega "$E" bloqueado bloqueado '[v7]' indeterminada;                  reprova --validar "indeterminada com causa provada" "$E" 'não é a derivada'

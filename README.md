@@ -10,7 +10,7 @@
   <img alt="harness: Claude Code" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-claude.svg">
   <img alt="harness: OpenCode" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-opencode.svg">
   <img alt="atencao humana: 3 faixas" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-faixas.svg">
-  <img alt="portao: 10 verificacoes" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-portao.svg">
+  <img alt="portao: 11 verificacoes" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-portao.svg">
   <img alt="schema expx v1" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-schema.svg">
   <img alt="docs pt-BR" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-lang.svg">
   <img alt="licenca MIT" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-license.svg">
@@ -196,7 +196,7 @@ As nove primeiras são automáticas; a décima só roda quando você a chama.
 |---|---|---|
 | **E0** Abertura | No início do trabalho | Garante a branch antes da primeira linha de código. Adota a branch e a árvore de trabalho que a skill de origem já abriu; só cria branch quando não existe nenhuma, e aí árvore suja: para e avisa |
 | **E1** Commit por task | A cada task que fecha | Um commit por task, com a intenção na mensagem. Varredura de segredo antes de cada um |
-| **E2** Portão de prontidão | Ao fim da execução | Dez verificações. `PRONTO` ou `BLOQUEADO` com o que falta. Nunca maquia |
+| **E2** Portão de prontidão | Ao fim da execução | Onze verificações. `PRONTO` ou `BLOQUEADO` com o que falta. Nunca maquia |
 | **E3** Atenção humana | Depois do portão | Classifica o diff nas três faixas, arquivo por arquivo, com a evidência de cada um |
 | **E4** Descrição do PR | Depois da classificação | Monta a descrição a partir dos artefatos. Cabe em uma tela |
 | **E5** Pacote de QA | Antes do push | Documento executável por quem não programa |

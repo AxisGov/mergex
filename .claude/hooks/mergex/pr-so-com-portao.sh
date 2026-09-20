@@ -76,9 +76,9 @@ Portão:   ${PORTAO:-não registrado}
 
 $DETALHE
 
-O portão roda as dez verificações (V1..V10): tasks concluídas, suíte verde,
+O portão roda as onze verificações (V1..V11): tasks concluídas, suíte verde,
 dois testes por task, teste de regressão, QA, auditoria, bloqueios, modo legado,
-arquivos fora do escopo e segredo no diff.
+arquivos fora do escopo, segredo no diff e commit do E1 por task concluída.
 
 O que fazer:
   - Rode o portão:  /mergex-check

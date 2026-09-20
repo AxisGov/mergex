@@ -132,7 +132,7 @@ A coluna "Onde" vale para as duas formas: `docs/sprintx/features/<slug>/` (canô
 | Artefato | Onde | Usado em |
 |---|---|---|
 | `ORQUESTRADOR.md` | pasta do trabalho | E0 (registro da branch e do worktree), E4 (título e objetivo), E2 (comando de teste) |
-| `sprint-NN/tasks.md` | pasta do trabalho | E1 (objetivo, arquivos, testes), E2 (status, suíte, testes), E3 (cobertura por task) — existe **sempre**, nos dois formatos |
+| `sprint-NN/tasks.md` | pasta do trabalho | E1 (objetivo, arquivos, testes), E2 (status, suíte, testes; **V11** — as tasks `concluida` cruzadas com `ENTREGA.commits`), E3 (cobertura por task) — existe **sempre**, nos dois formatos |
 | `sprint-NN/fases.md`, `sprint.md` | pasta do trabalho | E2 (critérios de saída e evidência da suíte inteira) — **só no formato de três arquivos**; na sprint condensada eles não existem, e isso não é arquivo faltando |
 | `00-BLOQUEIOS.md` | pasta do trabalho | E2 (V7 — bloqueio aberto no escopo) |
 | `00-AUDITORIA.md` | pasta do trabalho | E2 (V6 — auditoria reprovada) |

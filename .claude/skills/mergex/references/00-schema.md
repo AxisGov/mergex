@@ -63,7 +63,7 @@ Valem para todo arquivo que leva frontmatter:
 | `tipo_trabalho` | `feature` \| `ocorrencia` |
 | `estado` | `aberto` \| `entregue` \| `bloqueado` |
 | `portao` | `pronto` \| `bloqueado` \| `null` (ainda não rodou) |
-| `falhas_portao` (por item) | `v1` … `v10` \| `v1_sem_prova` … `v10_sem_prova` |
+| `falhas_portao` (por item) | `v1` … `v11` \| `v1_sem_prova` … `v11_sem_prova` |
 | `causa` | ver "A causa do bloqueio" \| `null` (não bloqueado) |
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
@@ -290,6 +290,7 @@ interpreta a narrativa de quem executou e não conhece as classes de pendência 
 | 8 | `v3` | `teste_nao_declarado` |
 | 9 | `v4` | `regressao_nao_declarada` |
 | 10 | `v5` | `qa_nao_aprovado` |
+| 11 | `v11` | `commit_nao_registrado` |
 
 E um valor a mais, que não é causa de trabalho nenhum: **`indeterminada`** — a mergex não
 conseguiu provar a causa. Nenhum outro valor existe. `falha_tecnica`, `decisao_humana` ou qualquer
@@ -307,13 +308,23 @@ falha consequência da outra:
 - `v6` a `v9` em seguida, na numeração: são **fatos que existem independentemente de a execução
   ter terminado** — o veredito da auditoria (que devolve o plano à F3 e invalida as verificações
   medidas contra ele), o `B-NN` registrado, as pré-condições do modo legado, o arquivo no diff.
-- `v1` a `v5` por último, na numeração: leem o **registro da execução**, que fica incompleto
-  justamente quando um daqueles fatos parou o trabalho. O próprio contrato do E2 diz isso: task
-  `bloqueada` aponta o `B-NN` (V1 é sintoma da V7), e o QA da runx ausente é o fluxo que não
-  chegou ao E4 da runx (V5 é sintoma da V1).
+- `v1` a `v5` e `v11` por último, na numeração: leem o **registro da execução**, que fica
+  incompleto justamente quando um daqueles fatos parou o trabalho. O próprio contrato do E2 diz
+  isso: task `bloqueada` aponta o `B-NN` (V1 é sintoma da V7), e o QA da runx ausente é o fluxo
+  que não chegou ao E4 da runx (V5 é sintoma da V1). A `v11` fecha esse grupo porque a prova de
+  E1 que falta é a **última** coisa que a execução registra sobre uma task: com a execução
+  interrompida antes (V1), ou com o commit abortado por segredo (V10), a ausência da prova é
+  consequência, não causa.
 
 Exemplo: `falhas_portao: [v1, v7]` → `causa: bloqueio_aberto`. `[v1, v2]` →
-`tarefa_nao_concluida`. `[v7, v10_sem_prova]` → `indeterminada`.
+`tarefa_nao_concluida`. `[v7, v10_sem_prova]` → `indeterminada`. `[v11]` →
+`commit_nao_registrado`.
+
+**`commit_nao_registrado` não é `tarefa_nao_concluida`.** A task da V11 **está** `concluida` —
+o que falta é a prova de E1 dela em `commits`. Quem lê `tarefa_nao_concluida` vai ao `tasks.md`
+procurar status; quem lê `commit_nao_registrado` vai à lista `commits` deste mesmo arquivo
+procurar o item que falta. Duas evidências diferentes, dois lugares diferentes de correção:
+uma causa só para as duas apagaria a diferença justamente onde ela é acionável.
 
 ### Por estado
 

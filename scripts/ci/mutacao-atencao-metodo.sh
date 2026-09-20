@@ -19,6 +19,11 @@ CAUSA_SH='.claude/skills/mergex/scripts/causa-do-portao.sh'
 SCHEMA='.claude/skills/mergex/references/00-schema.md'
 ABERTURA='.claude/skills/mergex/references/00-abertura.md'
 TEMPLATE_ENTREGA='.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md'
+PROVA_SH='.claude/skills/mergex/scripts/prova-de-commit.sh'
+PRONTIDAO='.claude/skills/mergex/references/02-prontidao.md'
+COMMITS='.claude/skills/mergex/references/01-commits.md'
+TEMPLATE_PRONTIDAO='.claude/skills/mergex/assets/TEMPLATE-prontidao.md'
+CHECK_CMD='.claude/commands/mergex-check.md'
 AGENTE='.claude/agents/revisor-diff.md'
 AGENTE_OC='.opencode/agent/revisor-diff.md'
 
@@ -53,6 +58,7 @@ apaga() {
 teste()     { bash scripts/ci/test-atencao-metodo.sh > saida.log 2>&1; }
 validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
 teste_causa() { bash scripts/ci/test-causa-portao.sh > saida.log 2>&1; }
+teste_v11()   { bash scripts/ci/test-portao-v11.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As mutações: id | descrição | verificação que TEM que falhar | função que muta
@@ -108,13 +114,52 @@ M10() { troca "$CAUSA_SH" '      [ "$t" = "$v" ] && { causa_de "$v"; return 0; }
 M11() { troca "$CAUSA_SH" '      [ "$causa" != null ]      || { ERRO="estado bloqueado exige causa não nula"; return 1; }' \
   '      [ "$causa" = null ] && { printf '"'"'causa=null\n'"'"'; return 0; }'; }
 M12() { troca "$CAUSA_SH" '    if [ "$historico" = 1 ]; then' '    if true; then'; }
-M13() { troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5'" "ORDEM='v1 v2 v3 v4 v5 v6 v7 v8 v9 v10'"; }
+M13() { troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11'" "ORDEM='v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11'"; }
 M14() { troca "$CAUSA_SH" '      [ "$t" = "${v}_sem_prova" ] && { printf '"'"'%s\n'"'"' "$INDETERMINADA"; return 0; }' \
   '      [ "$t" = "${v}_sem_prova" ] && { causa_de "$v"; return 0; }'; }
 M15() { troca "$CAUSA_SH" "      printf 'causa=ausente\n'; return 0" '      ERRO="legado"; return 1'; }
 M16() { troca "$SCHEMA" '| 3 | `v7` | `bloqueio_aberto` |' '| 3 | `v7` | `falha_tecnica` |'; }
 M17() { apaga "$ABERTURA" '| `falhas_portao`, `causa` |'; }
 M18() { apaga "$TEMPLATE_ENTREGA" 'causa: '; }
+
+# --- P0.2-C3: a V11 cobra o commit da task concluída ---
+# Cada mutação quebra UMA das afirmações da V11. Todas têm que morrer.
+M19() { # a V11 nunca falha
+  troca "$PROVA_SH" '  if [ -z "$faltam" ]; then printf '"'"'V11=OK\n'"'"'; return 0; fi' \
+    '  if true; then printf '"'"'V11=OK\n'"'"'; return 0; fi'
+}
+M20() { # basta existir qualquer commit: o id da task deixa de ser cruzado
+  troca "$PROVA_SH" '    printf '"'"'%s\n'"'"' "$provadas" | cut -f1 | grep -Fxq -- "$id" && continue' \
+    '    [ -n "$provadas" ] && continue'
+}
+M21() { # task não concluída também passa a ser cobrada
+  troca "$PROVA_SH" '        st = $0; sub(/^[[:space:]]*status:[[:space:]]*/, "", st); sub(/[[:space:]]+$/, "", st)' \
+    '        st = "concluida"'
+}
+M22() { # só o primeiro item de commits decide
+  troca "$PROVA_SH" '  if ! provadas="$(commits_validos "$ent")"; then' \
+    '  if ! provadas="$(commits_validos "$ent" | head -1)"; then'
+}
+M23() { # commit vazio ou malformado passa a satisfazer
+  troca "$PROVA_SH" '    sha_valido "$c" || continue' '    sha_valido "$c" || true'
+}
+M24a() { # o item que o E1 tardio acrescentou no fim é ignorado
+  troca "$PROVA_SH" '  if ! provadas="$(commits_validos "$ent")"; then' \
+    '  if ! provadas="$(commits_validos "$ent" | sed '"'"'$d'"'"')"; then'
+}
+M24b() { apaga "$COMMITS" '### O E1 tardio'; }
+M25a() { apaga "$PRONTIDAO" '### V11 — Task concluída'; }
+M25b() { apaga "$TEMPLATE_PRONTIDAO" '| V11 |'; }
+M25c() { apaga "$CHECK_CMD" '| V11 |'; }
+M26a() { # a falha V11 deixa de ter causa própria: vira a causa da V1
+  # A linha fecha a string CAUSAS; a aspa faz parte dela.
+  troca "$CAUSA_SH" "v11|commit_nao_registrado'" "v11|tarefa_nao_concluida'"
+}
+M26b() { # a V11 passa a vencer até a V10, e o estado terminal deixa de refletir a falha
+  troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11'" \
+    "ORDEM='v11 v10 v6 v7 v8 v9 v1 v2 v3 v4 v5'"
+}
+M26c() { troca "$SCHEMA" '| 11 | `v11` | `commit_nao_registrado` |' '| 11 | `v11` | `falha_tecnica` |'; }
 
 LISTA='M1a|remove a regra L4 do classificador|teste
 M1b|remove a linha L4 do reference|validador
@@ -136,11 +181,41 @@ M14|verificação sem prova vira causa provada|teste_causa
 M15|leitura histórica recusa ENTREGA anterior às chaves|teste_causa
 M16|tabela de causas do schema diverge do script|validador
 M17|retomada do E0 preserva a causa anterior|validador
-M18|template da ENTREGA omite a chave causa|validador'
+M18|template da ENTREGA omite a chave causa|validador
+M19|V11 sempre OK|teste_v11
+M20|basta existir qualquer commit, sem cruzar o id da task|teste_v11
+M21|task não concluída também é cobrada pela V11|teste_v11
+M22|só o primeiro item de commits decide|teste_v11
+M23|commit vazio ou malformado satisfaz a V11|teste_v11
+M24a|o item acrescentado pelo E1 tardio é ignorado|teste_v11
+M24b|o contrato do E1 perde o procedimento do E1 tardio|validador
+M25a|a V11 sai do portão E2|validador
+M25b|a V11 sai do template de prontidão|validador
+M25c|a V11 sai do comando do portão|validador
+M26a|a falha V11 deixa de ter causa própria|teste_v11
+M26b|a V11 passa a vencer a V10 na precedência|teste_v11
+M26c|tabela de causas do schema diverge no v11|validador'
 
 SELECAO=" $* "
-MORTAS=0; VIVAS=0; ERROS=0
+MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
 PIDS=""; IDS=""
+
+# Controle sem mutação: numa cópia intocada, as verificações TÊM que passar.
+# Sem ele, uma bancada quebrada mataria toda mutação por motivo errado e a
+# suíte ficaria verde sem provar nada.
+controle() {
+  local d rc
+  d="$(copia)"
+  echo "Controle — cópia SEM mutação: as verificações têm que passar"
+  for v in teste teste_causa teste_v11 validador; do
+    rc=0; ( cd "$d" && "$v" ) || rc=$?
+    if [ "$rc" = 0 ]; then printf '  ok     %s\n' "$v"
+    else CONTROLE_OK=0; printf '  FALHA  %s — verde era esperado (rc=%s)\n' "$v" "$rc"
+         sed 's/^/           /' "$d/saida.log" 2>/dev/null | tail -5; fi
+  done
+  echo
+}
+[ "$#" -eq 0 ] && controle
 
 roda() { # id desc verificacao
   local id="$1" desc="$2" verif="$3" d
@@ -186,4 +261,5 @@ EOF
 
 echo "---------------------------------------------"
 printf '%d morta(s), %d viva(s), %d erro(s)\n' "$MORTAS" "$VIVAS" "$ERROS"
-[ "$VIVAS" = 0 ] && [ "$ERROS" = 0 ]
+[ "$CONTROLE_OK" = 1 ] || printf 'controle sem mutação REPROVOU: as mutações não provam nada\n'
+[ "$VIVAS" = 0 ] && [ "$ERROS" = 0 ] && [ "$CONTROLE_OK" = 1 ]

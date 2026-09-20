@@ -237,6 +237,34 @@ outro tipo de bloqueio exige o `B-NN` tipado na sprintx (A5) e a tradução na b
 das duas é pré-requisito desta causa.
 
 **O que invalidaria estas decisões:** uma verificação nova no portão (ganha linha na tabela e
-posição na ordem, no script e no schema juntos); a sprintx gravar o `B-NN` com tipo — o que
-permitiria, em outra entrega, refinar `bloqueio_aberto` a partir de campo tipado, nunca da prosa;
-ou um leitor que precise de todas as falhas, e não só da causa — ele já tem `falhas_portao`.
+posição na ordem, no script e no schema juntos — foi o que aconteceu na P0.2-C3, com a V11); a
+sprintx gravar o `B-NN` com tipo — o que permitiria, em outra entrega, refinar `bloqueio_aberto`
+a partir de campo tipado, nunca da prosa; ou um leitor que precise de todas as falhas, e não só
+da causa — ele já tem `falhas_portao`.
+
+## P0.2-C3 — a V11 cobra o commit da task concluída
+
+O E1 promete, em três lugares do contrato, que a task que ficou sem commit "o E2 vai barrá-la":
+quando a varredura de segredo aborta o commit, quando a branch está errada, quando o hook do
+versionador recusa. A promessa não se cumpria. V1 lê `status`, V2 lê `suite`, V3 lê os testes,
+V9 lê o diff — e **nenhuma** das dez cruzava `tasks.md` com `ENTREGA.commits`. Uma task podia
+estar `concluida`, com suíte verde e os dois testes declarados, sem nenhuma evidência de que
+alguma vez virou commit. O portão não via.
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-117 | O que exatamente a V11 pergunta, sem virar uma segunda V1 nem uma V2 ampliada | **Uma pergunta só:** para cada task `concluida`, existe pelo menos um item de `ENTREGA.commits` com `task` **exatamente** igual ao id dela e `commit` válido? A V11 **não** lê `suite`, **não** lê `teste_integracao`/`teste_funcional` e **não** olha o status das não concluídas. Task `pendente`, `em_andamento` ou `bloqueada` **não é alvo positivo**: ela não tem commit porque não fechou, e a razão é da V1 | Falha independente e diagnosticável. Ampliar a V2 ou reaproveitar a V1 daria duas razões pelo mesmo sintoma e uma causa que não aponta para onde corrigir |
+| DM-118 | `OK` ou `n/a` quando não há nenhuma task concluída | **`n/a`**, com motivo declarado — a convenção real de V1–V10, onde `n/a` é "não se aplica a este trabalho" (V4 fora de bug da runx, V5 na sprintx, V8 sem `PERFIL.md`). Havendo pelo menos uma concluída, é `OK` para o subconjunto concluído. `versionado: false` também é `n/a`: o schema já define `commits: []` sem versionador, e cobrar commit ali seria reprovar todo repositório sem versionador | `OK` sobre conjunto vazio afirmaria uma prova que ninguém produziu. `n/a` distingue "verifiquei e está certo" de "não havia o que verificar" — que é a razão de a tabela nunca omitir linha |
+| DM-119 | Uma task pode aparecer mais de uma vez em `commits` (replanejamento). Quantos itens a V11 exige? | **EXISTE pelo menos um**, nunca exatamente um. Duplicidade **não** é falha da V11, e ordem e sequência dos itens também não são assunto dela. Um item malformado ao lado de um válido não estraga a prova: basta que **um** item prove | `commits` é histórico de execução, não índice de plano (`references/01-commits.md`) — um `id` reaparece legitimamente. Exigir unicidade transformaria histórico correto em falha |
+| DM-120 | O que conta como prova: o texto `task: T-NN.MM` ou o item inteiro? | **O item inteiro, validado.** `commit` vazio, `null`, marcador de template (`{{...}}`, `TODO`, `NÃO DETERMINADO`) ou identificador malformado **não** prova. Válido é o que o E1 grava: hexadecimal minúsculo de 7 a 40 caracteres, o que `git rev-parse --short HEAD` devolve | Procurar o texto do id aceitaria um item pela metade — exatamente o registro incompleto que a V11 existe para pegar. Não havia parser de `commits` a reutilizar: o leitor do `causa-do-portao.sh` lê chaves de topo escalares e não enxerga lista de mapas |
+| DM-121 | A V11 deve confirmar no `git log` que o SHA existe, é ancestral do HEAD e pertence à branch? | **Não.** `ENTREGA.commits` é a evidência canônica do E1 no contrato vigente, e nenhum outro ponto dele exige essas três provas. A V11 fecha a lacuna `tasks.md` ↔ `ENTREGA.commits` e para aí | Ampliar para auditoria de `git log` seria escopo novo sem exigência no contrato — e transformaria uma verificação de registro numa verificação de versionador, com falhas de natureza diferente na mesma linha |
+| DM-122 | Qual `causa` uma falha V11 deriva | **Valor novo: `commit_nao_registrado`.** Nenhuma causa existente serve. `tarefa_nao_concluida` afirma que a task não está concluída, e na V11 ela **está** — quem lê iria ao `tasks.md` e não acharia nada errado. `suite_reprovada`, `teste_nao_declarado` e `regressao_nao_declarada` leem campos que a V11 nem toca. `indeterminada` é "não consegui provar", e a V11 **provou**. O valor novo passa as cinco perguntas do DM-111 | Uma causa só para V1 e V11 apagaria a diferença no ponto em que ela é acionável: `tarefa_nao_concluida` manda olhar o status da task; `commit_nao_registrado` manda olhar a lista `commits` do mesmo arquivo |
+| DM-123 | Onde a `v11` entra na precedência | **Último do grupo que lê o registro da execução:** `v10`, depois `v6`–`v9`, depois `v1`–`v5` e `v11`. A prova de E1 é a **última** coisa que a execução registra sobre uma task — com a execução interrompida antes (V1), com o `B-NN` aberto (V7) ou com o commit abortado por segredo (V10), a ausência da prova é consequência, não causa | Mesma regra do DM-113, sem mudar nenhuma precedência anterior: `[v1, v11]` → `tarefa_nao_concluida`, `[v7, v11]` → `bloqueio_aberto`, `[v11]` → `commit_nao_registrado` |
+| DM-124 | Existe task com `versionado: false` (ou equivalente formal) para isentar a V11? | **Não existe, e não foi inventado.** Os campos obrigatórios de task no contrato de origem são `id`, `status`, `suite`, `arquivos.cria`, `arquivos.altera`, `teste_integracao`, `teste_funcional` e `criterio_aceite` — nenhum `versionado`, nenhum equivalente. `versionado` existe **só** no `kind: entrega`, e é do repositório inteiro. A isenção da V11 é por repositório, nunca por task | Criar a exceção por task exigiria um campo que nenhuma skill grava — e uma isenção que só existe em prosa é uma porta aberta para marcar qualquer task como dispensada da prova |
+| DM-125 | ENTREGA histórica com task concluída sem commit | **Duas leituras separadas.** `--validar-historico` continua aceitando snapshot anterior às chaves e **não roda a V11**: nada é reescrito, nenhum commit é inventado, nenhuma causa é inferida. **Entrega ou prontidão nova roda a V11 sempre** — a inconsistência aparece e barra. O conserto é o **E1 tardio**: commita agora, acrescenta o item ao fim de `commits`, sem reordenar o histórico | Silenciar a V11 em entrega nova "por compatibilidade" devolveria exatamente o buraco que a C3 fecha. Reescrever o histórico para fazê-la passar seria maquiar — o oposto do portão |
+
+**O que invalidaria estas decisões:** o contrato passar a exigir, em outro ponto, que o SHA de
+`commits` seja provado contra o versionador (aí a V11 herda essa prova, em vez de criá-la); a
+sprintx ou a runx passarem a declarar task não versionada com campo tipado (aí o DM-124 ganha o
+`n/a` por task que hoje não existe); ou uma verificação futura assumir ordem e sequência de
+`commits` — que é C4, e por isso a V11 não as toca.

@@ -492,7 +492,7 @@ ordem_schema="$(printf '%s\n' "$tabela_schema" | cut -d'|' -f1 | tr '\n' ' ' | s
   || fail "causa precedence diverges: schema '$ordem_schema' vs script '$(bash "$causa_sh" --ordem)'"
 [ "$(printf '%s\n' "$tabela_schema" | sort)" = "$(bash "$causa_sh" --causas | grep -v '^\*' | sort)" ] \
   || fail 'causa enum diverges between schema and script'
-[ "$(bash "$causa_sh" --causas | grep -c .)" = 11 ] || fail 'causa enum gained or lost a value'
+[ "$(bash "$causa_sh" --causas | grep -c .)" = 12 ] || fail 'causa enum gained or lost a value'
 bash "$causa_sh" --causas | grep -Fxq '*|indeterminada' || fail 'causa enum lost indeterminada'
 grep -Fq '**`indeterminada`**' "$schema" || fail 'schema does not define indeterminada'
 if bash "$causa_sh" --causas | grep -Eq 'falha_tecnica|decisao_humana|trabalho_novo|recurso_externo'; then
@@ -519,5 +519,84 @@ grep -Fq 'causa-do-portao.sh --derivar' "$registro" || fail 'E8 does not derive 
 grep -Fq 'causa-do-portao.sh --validar' "$registro" || fail 'E8 does not validate causa before committing'
 grep -Fq '**nunca** `causa: null` com `estado: bloqueado`' "$registro" || fail 'E8 allows a null causa when blocked'
 grep -Fq 'Um bloqueio legado nunca' "$schema" || fail 'schema may backfill a causa for legacy blocks'
+
+# ---------------------------------------------------------------------------
+# P0.2-C3 — V11: task concluída sem commit do E1. Reference, template, comandos
+# nos dois harnesses, script e enum carregam a MESMA verificação.
+# ---------------------------------------------------------------------------
+prova_sh='.claude/skills/mergex/scripts/prova-de-commit.sh'
+template_prontidao='.claude/skills/mergex/assets/TEMPLATE-prontidao.md'
+check_cmd='.claude/commands/mergex-check.md'
+check_oc='.opencode/commands/mergex-check.md'
+hook_pr='.claude/hooks/mergex/pr-so-com-portao.sh'
+for f in "$prova_sh" "$template_prontidao" "$check_cmd" "$check_oc" "$hook_pr" \
+         scripts/ci/test-portao-v11.sh; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# O espelho OpenCode do comando do portão nunca diverge.
+cmp -s "$check_cmd" "$check_oc" || fail 'OpenCode mergex-check command diverges from Claude Code'
+
+# São ONZE verificações, e a contagem antiga não pode voltar em lugar nenhum.
+# A varredura ignora as fixtures (snapshots congelados) e este próprio arquivo,
+# que precisa citar a forma antiga para poder proibi-la. `-i` porque a contagem
+# aparece no começo de frase ("Dez verificações") e no badge ("10 verificacoes").
+if grep -rIl -i --exclude-dir=.git -e 'dez verifica' -e '10 verifica' -e 'V1\.\.V10)' -e 'as dez linhas' . \
+   | grep -v -e '^\./scripts/ci/fixtures/' -e '^\./scripts/ci/validate-mergex-contract\.sh$' \
+   | grep -q .; then
+  fail 'the gate is still described as ten checks somewhere'
+fi
+grep -Fq 'Onze verificações' "$readme" || fail 'README no longer announces eleven checks'
+grep -Fq '11 verificacoes' .github/assets/badge-portao.svg || fail 'gate badge still shows ten checks'
+grep -Fq '## As onze verificações' "$prontidao" || fail 'E2 no longer announces eleven checks'
+grep -Fq 'a tabela das onze verificações' "$prontidao" || fail 'E2 output table is not eleven rows'
+grep -Fq 'As onze linhas da tabela' "$template_prontidao" || fail 'readiness template is not eleven rows'
+grep -Fq '| V11 |' "$template_prontidao" || fail 'readiness template has no V11 row'
+grep -Fq '| V11 |' "$check_cmd" || fail 'E2 command has no V11 row'
+grep -Fq 'onze verificações (V1..V11)' "$hook_pr" || fail 'PR hook still announces ten checks'
+
+# A V11 existe, é própria, e não é uma V1/V2 ampliada.
+grep -Fq '### V11 — Task concluída sem commit do E1 correspondente' "$prontidao" \
+  || fail 'E2 has no V11 section'
+grep -Fq 'pelo menos um** item em `ENTREGA.commits`' "$prontidao" \
+  || fail 'V11 does not require at least one commits item'
+grep -Fq 'nunca exatamente um' "$prontidao" \
+  || fail 'V11 may demand exactly one commit per task'
+grep -Fq 'não é alvo positivo** da V11' "$prontidao" \
+  || fail 'V11 no longer spares tasks that are not concluded'
+grep -Fq 'A V11 não audita o `git log`' "$prontidao" \
+  || fail 'V11 turned into a git log audit'
+grep -Fq 'prova-de-commit.sh' "$prontidao" || fail 'E2 does not call the V11 script'
+grep -Fq 'prova-de-commit.sh' "$check_cmd" || fail 'E2 command does not call the V11 script'
+
+# `versionado` é do repositório, nunca da task: a isenção não vira exceção textual.
+grep -Fq '`versionado: false` | `n/a`' "$prontidao" \
+  || fail 'V11 does not mark n/a for an unversioned repository'
+if grep -RIn --exclude-dir=.git -e 'task.*versionado: false' -e 'versionado.*por task' \
+     .claude/skills/mergex/references | grep -qv 'nunca'; then
+  fail 'a per-task versionado exemption was invented for V11'
+fi
+
+# O E1 tardio continua permitido, acrescenta ao fim e não reordena o histórico.
+grep -Fq '### O E1 tardio' "$commits" || fail 'E1 has no late-commit procedure'
+grep -Fq '**Não reordene** os itens antigos' "$commits" \
+  || fail 'the late E1 may reorder the existing commit history'
+grep -Fq 'E1 tardio' "$prontidao" || fail 'E2 does not point to the late E1 as the fix'
+grep -Fq 'a **V11**' "$commits" || fail 'E1 does not name V11 as the check that enforces its promise'
+
+# A causa da V11: valor próprio, última posição do grupo que lê a execução.
+grep -Fq '| 11 | `v11` | `commit_nao_registrado` |' "$schema" \
+  || fail 'schema has no causa row for v11'
+grep -Fq '`v1` … `v11`' "$schema" || fail 'schema falhas_portao enum does not reach v11'
+[ "$(bash "$causa_sh" --derivar v11)" = commit_nao_registrado ] \
+  || fail 'v11 does not derive commit_nao_registrado'
+[ "$(bash "$causa_sh" --derivar v1 v11)" = tarefa_nao_concluida ] \
+  || fail 'v11 outranks v1 in the precedence order'
+[ "$(bash "$causa_sh" --derivar v11_sem_prova)" = indeterminada ] \
+  || fail 'v11 without proof does not derive indeterminada'
+grep -Fq '`commit_nao_registrado` não é `tarefa_nao_concluida`' "$schema" \
+  || fail 'schema does not separate commit_nao_registrado from tarefa_nao_concluida'
+grep -Eq '^falhas_portao: .*v1\.\.v11' "$template_entrega" \
+  || fail 'ENTREGA template does not reach v11 in falhas_portao'
 
 printf 'contract checks passed\n'

@@ -12,7 +12,7 @@ A saída é binária: `PRONTO` ou `BLOQUEADO`.
 - O `ORQUESTRADOR.md` e o `tasks.md` do trabalho existem. Sem eles não há o que verificar: relate que o trabalho não está planejado e encerre `BLOQUEADO`.
 - A pasta do trabalho é a **mesma** que o E0 encontrou: na sprintx, `docs/sprintx/features/<slug>/` (canônico) e, só quando ele não existe, `docs/<slug>/` (formato antigo); na runx, `docs/manutencao/<OC-ID>-<slug>/`. Nunca misture as duas pastas da sprintx na mesma verificação.
 
-## As dez verificações
+## As onze verificações
 
 Rode **todas**, sempre, mesmo depois de a primeira falhar. O usuário precisa da lista completa do que falta, não do primeiro erro. Verificação que não se aplica ao trabalho é marcada `n/a`, nunca omitida.
 
@@ -20,7 +20,7 @@ Rode **todas**, sempre, mesmo depois de a primeira falhar. O usuário precisa da
 
 Leia o frontmatter de todo `sprint-NN/tasks.md` do trabalho. Toda task tem que estar `concluida`.
 
-**Os dois formatos de sprint da sprintx valem em V1, V2, V3 e V9.** As tasks vêm sempre da chave `tasks`, no `kind: plano` (condensado) e no `kind: tasks` (três arquivos) — regra única em `references/integracao/sprintx.md`, "Como ler uma sprint da sprintx". O formato nunca muda quais campos existem nem quanto rigor se cobra.
+**Os dois formatos de sprint da sprintx valem em V1, V2, V3, V9 e V11.** As tasks vêm sempre da chave `tasks`, no `kind: plano` (condensado) e no `kind: tasks` (três arquivos) — regra única em `references/integracao/sprintx.md`, "Como ler uma sprint da sprintx". O formato nunca muda quais campos existem nem quanto rigor se cobra.
 
 Falha: qualquer task em `pendente`, `em_andamento` ou `bloqueada`. Nomeie cada uma (id e título) e o status atual. Task `bloqueada` aponta o `B-NN` correspondente em `BLOQUEIOS.md`.
 
@@ -146,6 +146,44 @@ Esta verificação existe em duas camadas de propósito: o E1 impede o segredo d
 
 **Repositório sem versionador:** V9 e V10 rodam sobre os arquivos declarados nas tasks e sobre a árvore de trabalho, em vez do diff. Não pule nenhuma das duas.
 
+### V11 — Task concluída sem commit do E1 correspondente
+
+O E1 commita uma task por vez e registra a prova em `ENTREGA.commits`, um item `{task, commit}` por fechamento (`references/01-commits.md`, "Passo 4"). Quando o commit **não** acontece — segredo detectado na varredura, branch errada, hook do versionador, falha operacional —, o E1 manda a task ficar **sem commit** e promete que "o E2 vai barrá-la". Até aqui nenhuma verificação cruzava as duas pontas, e a promessa não se cumpria: V1 vê `concluida`, V2 vê a suíte, V3 vê os testes, e nada olha se a prova existe.
+
+**A pergunta da V11 é uma só:** cada task `concluida` tem prova de E1?
+
+Para cada task marcada `concluida` no plano executado, tem que existir **pelo menos um** item em `ENTREGA.commits` cujo campo `task` seja **exatamente** o id dessa task, com `commit` preenchido e válido.
+
+```
+bash .claude/skills/mergex/scripts/prova-de-commit.sh --verificar \
+  docs/entregas/<trabalho_id>/ENTREGA.md \
+  docs/sprintx/features/<slug>/sprint-*/tasks.md
+```
+
+Falha: qualquer task `concluida` sem item que a prove. **Nomeie cada uma** (id e o `tasks.md` onde está). A saída do script é a lista, uma task por linha.
+
+| Situação | Resultado |
+|---|---|
+| Toda task `concluida` tem item com `task` igual e `commit` válido | OK |
+| Alguma task `concluida` sem item que a prove | **FALHA** — nomeie a(s) task(s) |
+| Nenhuma task `concluida` no plano | `n/a` — a V11 não tem alvo; a razão é da V1 |
+| `versionado: false` | `n/a` — sem versionador o schema já define `commits: []` |
+| `ENTREGA.md` ou `tasks.md` ilegível | **FALHA**, registrada como `v11_sem_prova` |
+
+**O que conta como prova.** O item inteiro, não o texto `task: T-NN.MM`. `commit` vazio, `null`, marcador de template (`{{...}}`, `TODO`, `NÃO DETERMINADO`) ou identificador malformado **não** prova: o item existe, a prova não. O identificador válido é o que o E1 grava — o hexadecimal minúsculo que `git rev-parse --short HEAD` devolveu, do tamanho curto do versionador ao SHA-1 inteiro.
+
+**Mais de um item para a mesma task não é erro.** `commits` é histórico de execução, não índice de plano: um `id` reaparece legitimamente depois de replanejamento (`references/01-commits.md`, "`commits` é histórico de execução"). A V11 exige que **exista** pelo menos um item, nunca exatamente um, e não trata duplicidade como falha dela. Ordem e sequência dos itens também não são assunto da V11.
+
+**A V11 não audita o `git log`.** `ENTREGA.commits` é a evidência canônica do E1 neste contrato, e é sobre ela que a V11 decide. A lacuna que ela fecha é `tasks.md` ↔ `ENTREGA.commits`; provar que o SHA existe, que é ancestral do HEAD ou que pertence à branch é outra verificação, que nenhum ponto do contrato vigente exige.
+
+**A V11 não duplica a razão de outra verificação.** Task `pendente`, `em_andamento` ou `bloqueada` **não é alvo positivo** da V11: ela não tem commit porque não fechou, e quem responde por isso é a V1. Suíte vermelha é V2, teste não declarado é V3, arquivo fora do plano é V9. A V11 responde por uma coisa só, e é por isso que a falha dela é diagnosticável sozinha.
+
+**Os dois formatos de sprint da sprintx valem aqui**, como em V1, V2, V3 e V9: as tasks vêm sempre da chave `tasks` (`references/integracao/sprintx.md`, "Como ler uma sprint da sprintx").
+
+**Vale nas duas origens.** A V11 não lê pasta: ela recebe o `ENTREGA.md` e os `tasks.md` do trabalho. Na runx, são os de `docs/manutencao/<OC-ID>-<slug>/sprint-*/tasks.md`. A regra e o resultado são os mesmos.
+
+**Leitura histórica × entrega nova.** Uma `ENTREGA.md` anterior a este contrato pode ter task concluída sem o item correspondente. Ler esse snapshot continua possível — a leitura histórica do `ENTREGA.md` (`causa-do-portao.sh --validar-historico`) não roda a V11 e não a inventa. Mas **nenhuma entrega nova passa pelo portão sem a V11**: numa entrega ou prontidão nova, a inconsistência aparece e barra. A V11 **não reescreve o histórico** e **não inventa commit**: ela mostra a lacuna, e quem a preenche é o E1 tardio.
+
 ## Formato exato da saída
 
 Use `assets/TEMPLATE-prontidao.md`. Grave em `docs/entregas/<trabalho_id>/` **não** é obrigatório — a saída do portão é para a tela e para o campo `portao` do `ENTREGA.md`.
@@ -165,7 +203,7 @@ ou
 RESULTADO: BLOQUEADO
 ```
 
-Depois, a tabela das dez verificações, todas as linhas, sempre:
+Depois, a tabela das onze verificações, todas as linhas, sempre:
 
 ```
 | # | Verificação | Resultado |
@@ -173,6 +211,7 @@ Depois, a tabela das dez verificações, todas as linhas, sempre:
 | V1 | Tasks concluídas | OK |
 | V2 | Registro de suíte por task | FALHA |
 ...
+| V11 | Commit do E1 por task concluída | OK |
 ```
 
 Resultado por verificação: `OK`, `FALHA`, `AVISO` ou `n/a`.
@@ -192,7 +231,7 @@ Avisos vão numa seção própria no fim, sem alterar o resultado.
 
 O portão grava no `ENTREGA.md`, **junto com `portao`**, a lista das verificações que deram `FALHA` — a chave `falhas_portao` (`references/00-schema.md`, "A causa do bloqueio"). É dela, e só dela, que o E8 deriva a `causa` do bloqueio.
 
-- Um item por linha `FALHA` da tabela, com o número da verificação em minúscula: `v1` … `v10`.
+- Um item por linha `FALHA` da tabela, com o número da verificação em minúscula: `v1` … `v11`.
 - Verificação que **não pôde rodar** — marcada `FALHA` porque ausência de prova não é prova — entra como `vN_sem_prova`, nunca como `vN`. É o que impede que um "não consegui verificar" seja lido depois como um defeito provado.
 - `AVISO` e `n/a` não entram. `PRONTO` grava `falhas_portao: []`.
 - Na numeração do portão, uma linha só. Monte a lista com o script, que também recusa item desconhecido ou repetido:
@@ -226,4 +265,6 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | Sem versionador | V9 e V10 rodam sobre árvore e tasks; as demais não mudam |
 | Branch base indisponível para o diff | Use `git diff --name-only HEAD~<n>..HEAD` sobre os commits do trabalho registrados no `ENTREGA.md`; registre a imprecisão como aviso |
 | Verificação impossível de rodar | Marque `FALHA`, nunca `OK`, e registre `vN_sem_prova` em `falhas_portao`. Ausência de prova não é prova |
+| Task `concluida` sem item em `ENTREGA.commits` | `FALHA` em V11, nomeando a task. Não invente o commit e não reescreva o histórico: quem preenche é o **E1 tardio** — roda o E1 no formato normal, a lista `commits` recebe o item, e a V11 passa. Não reordene os itens antigos |
+| `ENTREGA.md` sem a chave `commits`, ou ilegível | `FALHA` em V11, registrada como `v11_sem_prova` |
 | `ORQUESTRADOR.md` ou `tasks.md` ausente | `BLOQUEADO`: V1 não tem como determinar status — `v1_sem_prova` —, e as demais que dependem do plano também entram `_sem_prova` |

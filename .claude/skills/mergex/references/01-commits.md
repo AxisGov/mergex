@@ -175,7 +175,7 @@ O commit da task <id> não foi feito. Remova o segredo do arquivo (use variável
 de ambiente), confirme que ele nunca entrou no histórico, e conclua a task de novo.
 ```
 
-Desfaça o staging (`git restore --staged <arquivos>`) e siga para a próxima task. A task fica **sem commit** e o E2 vai barrá-la.
+Desfaça o staging (`git restore --staged <arquivos>`) e siga para a próxima task. A task fica **sem commit** e o E2 vai barrá-la — na **V11**, que é quem cruza task `concluida` com `ENTREGA.commits` (`references/02-prontidao.md`). Sem a V11 essa promessa não se cumpriria: a task continua `concluida`, com suíte e testes em ordem, e nenhuma outra verificação olha se a prova de E1 existe.
 
 **Nunca ecoe o valor do segredo** na saída, no log ou no arquivo de registro: mascare (`sk-...4f2a`).
 
@@ -258,6 +258,16 @@ A regra é **um commit por fechamento de task em cada execução** — não "um 
 
 Isto não muda o schema e não cria campo: `references/00-schema.md` descreve `commits` como "um item por task commitada, na ordem em que fecharam" — uma lista ordenada, sem exigência de id único. Quem lê a lista lê história de execução; quem quer o plano lê `tasks.md`, que é a fonte dele.
 
+### O E1 tardio
+
+Uma task pode ter fechado sem que o commit acontecesse: segredo detectado na varredura, branch errada, hook do versionador, falha operacional. O E2 barra isso na **V11** — task `concluida` sem item em `commits` —, e o conserto é rodar o **E1 tardio**: o mesmo E1, no mesmo formato, no momento em que a lacuna aparece.
+
+- Rode o E1 normalmente para aquela task: selecione o que entra, varra segredo, monte a mensagem, commite.
+- **Acrescente** o item `{task, commit}` ao fim de `commits`. **Não reordene** os itens antigos e não reescreva SHA nenhum: a lista é a sequência real dos fechamentos, e o commit tardio fechou agora.
+- Rode a V11 de novo. Com a prova registrada, ela passa.
+
+O E1 tardio **continua sendo permitido** e não é exceção ao contrato: é o E1 rodando no momento em que deveria ter rodado. O que nunca é permitido é inventar o item sem o commit — um `commit` que não existe não é prova, e a V11 recusa identificador malformado justamente para isso.
+
 Não faça push aqui. Push é E6, e só depois do portão (E2) aprovar.
 
 ### Grave o evento no rastro
@@ -293,7 +303,8 @@ Por task:
 | `suite: vermelha` ou `nao_executada` | Não commita. A task não fechou de verdade — o E2 vai barrá-la nomeando-a |
 | Task sem os dois testes | Não commita. O E2 vai barrá-la |
 | Arquivo fora da lista declarada | Não entra no commit; registra em `desvios`; o E2 barra |
-| Segredo detectado | Aborta o commit, desfaz o staging, avisa com o valor mascarado |
+| Segredo detectado | Aborta o commit, desfaz o staging, avisa com o valor mascarado. A task fica `concluida` sem prova: a **V11** do E2 a nomeia |
+| Task já `concluida` que ficou sem commit | Roda o **E1 tardio** (acima): commita agora e acrescenta o item ao fim de `commits`, sem reordenar o histórico |
 | Branch errada ou principal | Não commita; relata a divergência e para |
 | `git commit` falha (hook, assinatura) | Relata o erro literal do versionador e para; nunca contorna com `--no-verify` |
 | Repositório sem versionador | Nada a fazer; segue sem erro |
