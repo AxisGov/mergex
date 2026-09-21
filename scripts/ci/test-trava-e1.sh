@@ -106,10 +106,21 @@ repo() { # <dir>
     git config user.name Teste
     git config commit.gpgsign false
     git config core.autocrlf false
-    mkdir -p src docs/entregas/ft-teste
+    mkdir -p src docs/entregas/ft-teste docs/sprintx/features/ft-teste/sprint-01
     printf 'base\n' > src/a.js
     printf 'base\n' > src/b.js
     entrega_vazia docs/entregas/ft-teste/ENTREGA.md
+    {
+      printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' \
+        'trabalho_id: ft-teste' 'tasks:'
+      for id in T-01.01 T-01.02 T-01.03 T-02.01 T-02.02 T-03.01 T-03.02 \
+        T-04.01 T-05.01 T-06.01 T-07.01 T-08.01 T-09.01 T-10.01 \
+        T-11.01 T-11.02 T-12.01 T-99.99; do
+        printf '  - id: %s\n    status: concluida\n    arquivos:\n' "$id"
+        printf '      altera: [src/a.js, src/b.js]\n    suite: verde\n'
+      done
+      printf '%s\n' '---'
+    } > docs/sprintx/features/ft-teste/sprint-01/tasks.md
     git add -A >/dev/null 2>&1
     git commit -qm 'chore: base' >/dev/null 2>&1
   )
@@ -376,7 +387,8 @@ if grupo I; then
   # arquivo, que não se comporta igual nos três sistemas suportados.
   duble() { # <dir do duble> <corpo>
     mkdir -p "$1"
-    cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" "$1/"
+    cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" \
+      "$SCRIPTS/ownership-da-task.sh" "$1/"
     printf '%s\n' "$2" > "$1/sequencia-de-commits.sh"
   }
   I="$D/i"; repo "$I"
@@ -452,7 +464,8 @@ if grupo ESPIAO; then
   Sp="$D/s"; repo "$Sp"
   SSp="$D/scripts-s"; REGISTRO="$D/espiao.txt"; : > "$REGISTRO"
   mkdir -p "$SSp"
-  cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" "$SSp/"
+  cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" \
+    "$SCRIPTS/ownership-da-task.sh" "$SSp/"
   {
     printf '#!/usr/bin/env bash\n'
     printf 't="$(git rev-parse --git-path index)%s"\n' "$SUFIXO"
@@ -510,7 +523,8 @@ if grupo EXTRA; then
   P="$D/p"; repo "$P"
   printf 'muda\n' >> "$P/src/a.js"
   mensagem "$D/msg-p.txt" T-11.01
-  saida="$( cd "$P" && bash "$FECHA" --preparar --task T-11.01 -- src/a.js 2>&1 )"
+  saida="$( cd "$P" && bash "$FECHA" --preparar --entrega "$ENTREGA" \
+    --task T-11.01 --mensagem "$D/msg-p.txt" -- src/a.js 2>&1 )"
   rc=$?
   token="$(printf '%s\n' "$saida" | sed -n 's/^token=//p')"
   igual '--preparar conclui com 0' "$rc" 0

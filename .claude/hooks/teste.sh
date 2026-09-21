@@ -36,14 +36,16 @@ cd "$RAIZ_T" || exit 1
 git init -q -b main . 2>/dev/null
 git config user.email teste@expx.local
 git config user.name Teste
-mkdir -p docs/trab
+mkdir -p docs/sprintx/features/trab/sprint-01 docs/entregas/trab
 echo conteudo > arquivo.txt
 git add arquivo.txt && git commit -qm inicial
 
-cat > docs/trab/tasks.md <<'YAML'
+cat > docs/sprintx/features/trab/sprint-01/tasks.md <<'YAML'
 ---
 expx_schema: 1
-kind: tasks
+expx_tool: sprintx
+kind: plano
+trabalho_id: trab
 tasks:
   - id: T-01.01
     titulo: Primeira task
@@ -59,6 +61,17 @@ tasks:
       cria: [src/b.ts]
       altera: []
     suite: vermelha
+---
+YAML
+cat > docs/entregas/trab/ENTREGA.md <<'YAML'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: entrega
+trabalho_id: trab
+entregue_por: mergex
+branch: main
+branch_base: main
 ---
 YAML
 mkdir -p src && touch src/a.ts src/b.ts
@@ -172,11 +185,13 @@ echo "commit-por-task — arquivo de task irma (a quarta situacao do E1)"
 # Duas tasks CONCLUIDAS, para que o que esta em jogo seja so o ownership: nem
 # status, nem suite, nem mistura acidental de trabalho inacabado.
 git reset -q
-mkdir -p docs/irma
-cat > docs/irma/tasks.md <<'YAML'
+mkdir -p docs/sprintx/features/trab/sprint-07
+cat > docs/sprintx/features/trab/sprint-07/tasks.md <<'YAML'
 ---
 expx_schema: 1
-kind: tasks
+expx_tool: sprintx
+kind: plano
+trabalho_id: trab
 tasks:
   - id: T-07.01
     titulo: A task que esta fechando agora
@@ -203,7 +218,7 @@ echo "mudanca" >> src/atual.ts; echo "mudanca" >> src/irma.ts
 MSG_ATUAL='git commit -m "feat(ui): a task atual
 
 Task: T-07.01
-Trabalho: ft-irma"'
+Trabalho: trab"'
 
 git add src/atual.ts
 caso "so o arquivo da task atual"        mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 0
@@ -224,7 +239,7 @@ rm -f .expx/hooks.json
 
 # A mensagem tambem chega por arquivo (`git commit -F`), que e como o E1 a
 # escreve para preservar as quebras de linha do corpo.
-printf 'feat(ui): a task atual\n\nTask: T-07.01\nTrabalho: ft-irma\n' > .git/MENSAGEM
+printf 'feat(ui): a task atual\n\nTask: T-07.01\nTrabalho: trab\n' > .git/MENSAGEM
 caso "mensagem por -F"                   mergex/commit-por-task.sh "$(bash_json 'git commit -F .git/MENSAGEM')" 2
 rm -f .git/MENSAGEM
 
@@ -240,13 +255,13 @@ Task: T-07.02"')" 0
 caso "V9 (uniao) aceita o arquivo da irma" mergex/arquivo-fora-do-plano.sh "$(bash_json "$MSG_ATUAL")" 0
 
 # Replanejado: a task atual passa a declarar o arquivo, e o fechamento segue.
-sed -i.bak 's#cria: \[src/atual.ts\]#cria: [src/atual.ts, src/irma.ts]#' docs/irma/tasks.md
-rm -f docs/irma/tasks.md.bak
+sed -i.bak 's#cria: \[src/atual.ts\]#cria: [src/atual.ts, src/irma.ts]#' docs/sprintx/features/trab/sprint-07/tasks.md
+rm -f docs/sprintx/features/trab/sprint-07/tasks.md.bak
 caso "replanejado: a atual declara, e passa" mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 0
 
 git reset -q
-git checkout -q -- src/atual.ts src/irma.ts docs/irma/tasks.md 2>/dev/null
-rm -rf docs/irma src/atual.ts src/irma.ts
+git checkout -q -- src/atual.ts src/irma.ts docs/sprintx/features/trab/sprint-07/tasks.md 2>/dev/null
+rm -rf docs/sprintx/features/trab/sprint-07 src/atual.ts src/irma.ts
 git add -A && git commit -qm "limpa o cenario da task irma"
 
 echo
@@ -304,7 +319,9 @@ mkdir -p docs/sprintx/features/exportacao-csv/sprint-01 docs/entregas/exportacao
 cat > docs/sprintx/features/exportacao-csv/sprint-01/tasks.md <<'YAML'
 ---
 expx_schema: 1
-kind: tasks
+expx_tool: sprintx
+kind: plano
+trabalho_id: exportacao-csv
 tasks:
   - id: T-02.01
     titulo: Task fechada com o subconjunto afetado
@@ -329,8 +346,20 @@ tasks:
     suite: nao_executada
 ---
 YAML
-# O ENTREGA.md mais recente e o que identifica o trabalho corrente (expx_trabalho_id).
-printf 'portao: null\n' > docs/entregas/exportacao-csv/ENTREGA.md
+# A branch ativa casa com exatamente uma ENTREGA: recência não escolhe trabalho.
+rm -f docs/entregas/trab/ENTREGA.md
+cat > docs/entregas/exportacao-csv/ENTREGA.md <<'YAML'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: entrega
+trabalho_id: exportacao-csv
+entregue_por: mergex
+branch: main
+branch_base: main
+portao: null
+---
+YAML
 touch src/p.ts src/v.ts src/n.ts
 git add -A >/dev/null 2>&1 && git commit -qm "plano da segunda feature"
 
@@ -499,11 +528,22 @@ caso "fechamento final: push --force-with-lease barra" comum/git-perigoso.sh "$(
 git reset -q; rm -f .expx/hooks.json; git checkout -q -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null; git switch -q main
 
 echo
-echo "falha aberta — hook de metodo com insumo corrompido nao pode travar"
-printf 'lixo \x00 nao-yaml' > docs/trab/tasks.md
+echo "plano task-based ausente/ilegivel — ownership manual falha fechado"
+git add -A && git commit -qm "isola cenario de plano invalido"
+git switch -qc hook-plano-invalido
+sed -i.bak 's/^branch: .*/branch: hook-plano-invalido/' docs/entregas/exportacao-csv/ENTREGA.md
+rm -f docs/entregas/exportacao-csv/ENTREGA.md.bak
+MSG_PLANO_INVALIDO='git commit -m "fix(csv): fecha task
+
+Task: T-02.01
+Trabalho: exportacao-csv"'
+printf 'lixo \x00 nao-yaml' > docs/sprintx/features/exportacao-csv/sprint-01/tasks.md
+printf 'mudanca para ownership\n' >> src/a.ts
 git add src/a.ts
-caso "tasks.md corrompido"      mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 0
+caso "tasks.md corrompido barra ownership" mergex/commit-por-task.sh "$(bash_json "$MSG_PLANO_INVALIDO")" 2
 caso "tasks.md corrompido (escopo)" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
+rm -f docs/sprintx/features/exportacao-csv/sprint-01/tasks.md
+caso "tasks.md ausente barra ownership" mergex/commit-por-task.sh "$(bash_json "$MSG_PLANO_INVALIDO")" 2
 
 echo
 echo "---------------------------------------------"

@@ -23,12 +23,12 @@
 # pendência (`defeito_de_plano`) é da sprintx, pelo mesmo corte de dono que a
 # DM-111 já fixou para a `causa` do portão.
 #
-# A task atual é DECLARADA por quem chama, nunca adivinhada aqui: sem ela, ou
-# com uma que o plano não conhece, o script recusa responder (falha fechado).
-# Escolher a "primeira task encontrada" seria inventar o dono.
+# Trabalho, origem e task atual são DECLARADOS por quem chama. O script resolve
+# somente a pasta canônica desse trabalho; id repetido em feature histórica não
+# participa. Escolher a primeira task ou o primeiro plano seria inventar dono.
 #
 # Uso:
-#   ownership-da-task.sh --classificar <raiz> <T-NN.MM> [arquivo...]
+#   ownership-da-task.sh --classificar <raiz> <origem> <trabalho> <T-NN.MM> [arquivo...]
 #       Sem arquivo na linha de comando, lê um caminho por linha da entrada
 #       padrão (`git diff --cached --name-only`, `git status --porcelain`).
 #   ownership-da-task.sh --situacoes     # o enum fechado, `situacao|descrição`
@@ -38,7 +38,7 @@
 #   <situacao>\t<arquivo>\t<tasks que o declaram, ou `-`>
 #
 # Código de saída:
-#   0  nenhum arquivo de task irmã — o fechamento pode seguir
+#   0  nenhum arquivo de task irmã — o fechamento pode seguir; ou ownership=n/a
 #   2  a condição estruturada existe (mesma convenção de bloqueio dos hooks)
 #   1  não deu para determinar o ownership — falha fechado, nunca infere
 #  64  uso inválido
@@ -63,6 +63,35 @@ CONDICAO="$S_IRMA"
 
 ERRO=""
 PLANO=""
+PASTA_TRABALHO=""
+
+contexto() { # <raiz> <origem> <trabalho>
+  local raiz="$1" origem="$2" trabalho="$3" canonico legado
+
+  [ -d "$raiz" ] || { ERRO="raiz inexistente: $raiz"; return 1; }
+  case "$trabalho" in
+    ''|/*|*/*|.|..|.*) ERRO="trabalho_id invalido: '$trabalho'"; return 1 ;;
+  esac
+
+  case "$origem" in
+    sprintx)
+      canonico="$raiz/docs/sprintx/features/$trabalho"
+      legado="$raiz/docs/$trabalho"
+      if [ -d "$canonico" ]; then PASTA_TRABALHO="$canonico"
+      elif [ -d "$legado" ]; then PASTA_TRABALHO="$legado"
+      else ERRO="plano corrente ausente: trabalho sprintx '$trabalho'"; return 1
+      fi ;;
+    runx)
+      PASTA_TRABALHO="$raiz/docs/manutencao/$trabalho"
+      [ -d "$PASTA_TRABALHO" ] \
+        || { ERRO="plano corrente ausente: trabalho runx '$trabalho'"; return 1; } ;;
+    n/a)
+      PASTA_TRABALHO=""; return 2 ;;
+    *)
+      ERRO="origem sem aplicabilidade de tasks determinavel: '$origem'"; return 1 ;;
+  esac
+  return 0
+}
 
 # ---------------------------------------------------------------------------
 # O plano: `id<TAB>arquivo`, uma linha por par declarado, de todas as tasks.
@@ -71,11 +100,16 @@ PLANO=""
 # suíte e a ordem em que as tasks aparecem não entram: a mesma evidência de
 # conjuntos tem que dar sempre a mesma classificação.
 plano() {
-  local raiz="$1" f arqs
-  arqs="$(find "$raiz/docs" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
-  [ -n "$arqs" ] || return 0
+  local pasta="$1" f arqs find_rc
+  arqs="$(find "$pasta" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
+  find_rc=$?
+  [ "$find_rc" = 0 ] \
+    || { printf '__ERRO__plano corrente ilegivel: nao foi possivel percorrer %s\n' "$pasta"; return 1; }
+  [ -n "$arqs" ] || { printf '__ERRO__plano corrente ausente: nenhum tasks.md em %s\n' "$pasta"; return 1; }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    [ -f "$f" ] && [ -r "$f" ] \
+      || { printf '__ERRO__plano corrente ilegivel: %s\n' "$f"; return 1; }
     awk '
       function coleta(s,   n, i, partes) {
         sub(/^[^:]*:[[:space:]]*/, "", s)
@@ -101,7 +135,7 @@ plano() {
         next
       }
       /^[[:space:]]*[a-z_]+:/ { if ($0 !~ /^[[:space:]]*(cria|altera|arquivos):/) dentro = 0 }
-    ' "$f" 2>/dev/null || true
+    ' "$f" 2>/dev/null || { printf '__ERRO__plano corrente ilegivel: %s\n' "$f"; return 1; }
   done <<EOF
 $arqs
 EOF
@@ -140,22 +174,32 @@ situacao_do() {
 }
 
 classificar() {
-  local raiz="$1" atual="$2"; shift 2
+  local raiz="$1" origem="$2" trabalho="$3" atual="$4"; shift 4
   local mudados saida="" arquivo
 
-  [ -d "$raiz" ] || { ERRO="raiz inexistente: $raiz"; return 1; }
+  contexto "$raiz" "$origem" "$trabalho"; local contexto_rc=$?
+  if [ "$contexto_rc" = 2 ]; then
+    printf 'ownership=n/a\n'
+    return 0
+  fi
+  [ "$contexto_rc" = 0 ] || return 1
   case "$atual" in
     T-*) ;;
     *) ERRO="task atual fora do formato T-NN.MM: '$atual'"; return 1 ;;
   esac
 
-  PLANO="$(plano "$raiz")"
-  [ -n "$PLANO" ] || { ERRO="nenhuma task com arquivos declarados sob $raiz/docs"; return 1; }
+  PLANO="$(plano "$PASTA_TRABALHO")"; local plano_rc=$?
+  if [ "$plano_rc" != 0 ]; then
+    ERRO="${PLANO#__ERRO__}"
+    PLANO=""
+    return 1
+  fi
+  [ -n "$PLANO" ] || { ERRO="plano corrente ilegivel: nenhuma task com arquivos declarados em $PASTA_TRABALHO"; return 1; }
 
   # A task atual precisa existir no plano com arquivos declarados. Sem isso o
   # ownership unitário não é determinável — e inferir pela prosa é proibido.
   # Cair para "a primeira task do plano" aqui inventaria o dono.
-  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '$atual' não declara arquivos em nenhum tasks.md"; return 1; }
+  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '$atual' nao declara arquivos no plano corrente de '$trabalho'"; return 1; }
 
   # Os arquivos que mudaram: argumentos, ou a entrada padrão.
   if [ "$#" -gt 0 ]; then
@@ -199,7 +243,7 @@ case "${1:-}" in
   --condicao)  printf '%s\n' "$CONDICAO"; exit 0 ;;
   --classificar)
     shift
-    [ "$#" -ge 2 ] || { printf 'ownership-da-task: --classificar <raiz> <T-NN.MM> [arquivo...]\n' >&2; exit 64; }
+    [ "$#" -ge 4 ] || { printf 'ownership-da-task: --classificar <raiz> <origem> <trabalho> <T-NN.MM> [arquivo...]\n' >&2; exit 64; }
     classificar "$@"; rc=$?
     [ "$rc" = 1 ] && { printf 'ownership-da-task: %s\n' "$ERRO" >&2; exit 1; }
     exit "$rc" ;;

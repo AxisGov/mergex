@@ -224,13 +224,17 @@ if grupo D; then
   Dd="$D/d"; repo "$Dd"
   printf 'orfao\n' > "$Dd/src/orfao.js"
   saida="$(fechar "$Dd" T-01.01 src/orfao.js 2>&1)"; rc=$?
-  igual 'D — o E1 segue (não é a condição estruturada)' "$rc" 0
-  classe="$( cd "$Dd" && printf 'src/orfao.js\n' | bash "$OWN" --classificar . T-01.01 2>&1 )"
+  igual 'D — o E1 para desvio antes do staging' "$rc" 10
+  classe="$( cd "$Dd" && printf 'src/orfao.js\n' | bash "$OWN" --classificar . sprintx ft-integ T-01.01 2>&1 )"
   case "$classe" in
     *arquivo_de_task_irma*) falha 'D — arquivo de nenhuma task virou arquivo_de_task_irma' ;;
     *desvio*) ok 'D — classificado como desvio, como sempre' ;;
     *) falha "D — classificação inesperada: $classe" ;;
   esac
+  igual 'D — nenhum commit parcial foi criado' "$(commits_de "$Dd")" 1
+  igual 'D — nada entrou em stage' "$(stage_de "$Dd")" ''
+  [ -f "$Dd/src/orfao.js" ] && ok 'D — o desvio foi preservado na árvore' \
+    || falha 'D — o desvio foi apagado ou restaurado'
 
 fi
 if grupo E; then
@@ -342,7 +346,7 @@ if grupo K; then
   echo 'K. V9 (união) continua aceitando o arquivo da irmã como planejado'
   # ---------------------------------------------------------------------------
   Kd="$D/k"; repo "$Kd"
-  classe="$( cd "$Kd" && printf 'src/irma.js\n' | bash "$OWN" --classificar . T-01.01 2>&1 )"
+  classe="$( cd "$Kd" && printf 'src/irma.js\n' | bash "$OWN" --classificar . sprintx ft-integ T-01.01 2>&1 )"
   uniao="$(printf '%s\n' "$classe" | awk -F'\t' '$3 != "-" { print $2 }')"
   printf '%s\n' "$uniao" | grep -Fxq src/irma.js \
     && ok 'K — a união (V9) inclui o arquivo da irmã: ele foi planejado na feature' \

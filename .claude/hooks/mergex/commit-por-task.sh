@@ -47,6 +47,25 @@ MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
 PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
 [ -n "$PREP" ] || exit 0
 
+# Contexto defensivo do commit manual: a branch ativa casa com exatamente uma
+# ENTREGA. A task continua vindo somente do rodapé Task: da mensagem.
+TRABALHO="$(expx_trabalho_atual_por_branch "$RAIZ")" || TRABALHO=""
+ORIGEM=""
+PASTA_TRABALHO=""
+if [ -n "$TRABALHO" ]; then
+  ENTREGA_ATUAL="$RAIZ/docs/entregas/$TRABALHO/ENTREGA.md"
+  ORIGEM="$(expx_frontmatter_valor "$ENTREGA_ATUAL" expx_tool)"
+  case "$ORIGEM" in
+    sprintx)
+      if [ -d "$RAIZ/docs/sprintx/features/$TRABALHO" ]; then
+        PASTA_TRABALHO="$RAIZ/docs/sprintx/features/$TRABALHO"
+      elif [ -d "$RAIZ/docs/$TRABALHO" ]; then
+        PASTA_TRABALHO="$RAIZ/docs/$TRABALHO"
+      fi ;;
+    runx) PASTA_TRABALHO="$RAIZ/docs/manutencao/$TRABALHO" ;;
+  esac
+fi
+
 # --------------------------------------------------------------------------
 # Arquivo de task irmã — a quarta situação do E1
 # --------------------------------------------------------------------------
@@ -93,9 +112,43 @@ TASK_ATUAL="$(printf '%s' "$MSG" | grep -oE 'Task:[[:space:]]*T-[0-9]+\.[0-9]+' 
   | sed 's/.*[[:space:]]//' | sort -u)"
 [ "$(printf '%s\n' "$TASK_ATUAL" | grep -c .)" = 1 ] || TASK_ATUAL=""
 
-if [ -n "$TASK_ATUAL" ] && [ -r "$OWNERSHIP" ]; then
-  IRMA="$(printf '%s\n' "$PREP" \
-    | bash "$OWNERSHIP" --classificar "$RAIZ" "$TASK_ATUAL" 2>/dev/null \
+if [ -n "$TASK_ATUAL" ] && [ -n "$TRABALHO" ]; then
+  if [ "$ORIGEM" = sprintx ] || [ "$ORIGEM" = runx ]; then
+    if [ ! -r "$OWNERSHIP" ]; then
+      printf '%s\n' "mergex/commit-por-task — instalação MergeX incompleta
+
+Trabalho: $TRABALHO
+Origem:   $ORIGEM
+Componente ausente: $OWNERSHIP
+
+Este trabalho usa modelo de tasks. A ausência do classificador de ownership
+não pode ser tratada como n/a nem liberar o commit." >&2
+      exit 2
+    fi
+  fi
+fi
+
+if [ -n "$TASK_ATUAL" ] && [ -r "$OWNERSHIP" ] && [ -n "$TRABALHO" ]; then
+  SAIDA_OWNERSHIP="$(printf '%s\n' "$PREP" \
+    | bash "$OWNERSHIP" --classificar "$RAIZ" "$ORIGEM" "$TRABALHO" "$TASK_ATUAL" 2>&1)"
+  RC_OWNERSHIP=$?
+  case "$RC_OWNERSHIP" in
+    0|2) ;;
+    *)
+      printf '%s\n' "mergex/commit-por-task — ownership não determinável
+
+Trabalho: $TRABALHO
+Origem:   $ORIGEM
+Task:     $TASK_ATUAL
+
+$SAIDA_OWNERSHIP
+
+O plano corrente task-based está ausente, ilegível ou inconsistente. O commit
+manual para sem procurar outro trabalho nem degradar para n/a." >&2
+      exit 2 ;;
+  esac
+
+  IRMA="$(printf '%s\n' "$SAIDA_OWNERSHIP" \
     | awk -F'\t' '$1 == "arquivo_de_task_irma" { print "  - " $2 "   (declarado em " $3 ")" }')"
   if [ -n "$IRMA" ]; then
     QTD_IRMA="$(printf '%s\n' "$IRMA" | grep -c .)"
@@ -135,7 +188,11 @@ fi
 # Sem estado próprio: tudo sai de tasks.md, que já existe.
 # Sem tasks.md, não há o que verificar — passa (falha aberta).
 # bash 3.2 (o do macOS) não tem mapfile: usa lista separada por linha.
-TASKS_ARQS="$(find "$RAIZ/docs" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
+if [ -n "$PASTA_TRABALHO" ] && [ -d "$PASTA_TRABALHO" ]; then
+  TASKS_ARQS="$(find "$PASTA_TRABALHO" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
+else
+  TASKS_ARQS=""
+fi
 [ -n "$TASKS_ARQS" ] || exit 0
 
 # Para cada task do plano, extrai: id, status, suite e arquivos declarados.

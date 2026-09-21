@@ -61,8 +61,8 @@ validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
 # 1. A trava é adquirida só DEPOIS do primeiro `git add`.
 M1() {
   troca "$FECHA" '    abre_secao "$TASK"                 # 1 e 2' '    :' || return 1
-  troca "$FECHA" '    prepara "$@"                       # A e B' \
-    '    prepara "$@"; abre_secao "$TASK"'
+  troca "$FECHA" '    prepara "$@"                       # 5 (A) e 6 (B)' \
+    '    prepara "$@"; abre_secao "$TASK"                # 5 (A) e 6 (B)'
 }
 
 # 2. A trava passa a ser do índice do diretório Git COMUM: uma por repositório.
@@ -97,8 +97,8 @@ M6() {
 
 # 7. O `seq` é calculado fora da seção: D a G inteiros saem de baixo da trava.
 M7() {
-  troca "$FECHA" '    conclui "$ENTREGA" "$TASK" "$MENSAGEM"   # D a G' \
-    '    liberar "$TOKEN" >/dev/null 2>&1; LIBERAR_NA_SAIDA=0; conclui "$ENTREGA" "$TASK" "$MENSAGEM"'
+  troca "$FECHA" '    conclui "$ENTREGA" "$TASK" "$MENSAGEM"   # 8-11 (D a G)' \
+    '    liberar "$TOKEN" >/dev/null 2>&1; LIBERAR_NA_SAIDA=0; conclui "$ENTREGA" "$TASK" "$MENSAGEM"   # 8-11 (D a G)'
 }
 
 # 8. O segundo E1 entra na seção e consegue commitar.

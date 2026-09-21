@@ -240,7 +240,7 @@ M39() { troca "$OWN_SH" '  else printf '"'"'4\t%s\n'"'"' "$S_IRMA"' \
                         '  else printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
 M40() { troca "$OWN_SH" '  elif declara "$1" "$2"; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"' \
                         '  elif [ -n "$(tasks_de "$2")" ]; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
-M41() { troca "$OWN_SH" '  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '"'"'$atual'"'"' não declara arquivos em nenhum tasks.md"; return 1; }' \
+M41() { troca "$OWN_SH" '  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '"'"'$atual'"'"' nao declara arquivos no plano corrente de '"'"'$trabalho'"'"'"; return 1; }' \
                         '  atual="$(printf '"'"'%s\n'"'"' "$PLANO" | head -1 | cut -f1)"'; }
 M42() { troca "$OWN_SH" '  printf '"'"'%s'"'"' "$saida" | grep -q "^4${TAB}" && return 2' '  :'; }
 M43() { troca "$HOOK_TASK" '    exit 2' \
@@ -297,8 +297,8 @@ M51() { # 8. a V11 ganha prova mesmo quando o E1 parou sem commitar de verdade
       bash "$SEQ_SH" --acrescentar "$ENTREGA" "$task" "$(git rev-parse --short HEAD 2>/dev/null)" >/dev/null 2>&1'
 }
 M52() { # 9. a trava não é liberada quando o ownership barra
-  troca "$FECHAMENTO_SH" 'verifica_ownership() { # <task> <caminho>...' \
-    'verifica_ownership() { # <task> <caminho>...
+  troca "$FECHAMENTO_SH" 'verifica_ownership() { # <task> [caminho...]; sem caminhos, lê o stage atual' \
+    'verifica_ownership() { # <task> [caminho...]; sem caminhos, lê o stage atual
   LIBERAR_NA_SAIDA=0'
 }
 M53() { # 3b. o caso 2 (arquivo_de_task_irma) é ignorado pelo fechamento real

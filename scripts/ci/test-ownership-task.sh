@@ -109,7 +109,7 @@ RC=0
 SAIDA=""
 classifica() {
   local raiz="$1" task="$2"; shift 2
-  SAIDA="$(bash "$OWNERSHIP" --classificar "$raiz" "$task" "$@" 2>&1)"; RC=$?
+  SAIDA="$(bash "$OWNERSHIP" --classificar "$raiz" sprintx ft-piloto "$task" "$@" 2>&1)"; RC=$?
 }
 
 # situacao_de <saida> <arquivo> — a situação classificada para aquele caminho.
@@ -226,17 +226,17 @@ echo
 echo "8. Sem dono determinado, o script recusa responder (falha fechado)"
 # ---------------------------------------------------------------------------
 # Nunca infere pela prosa, nunca escolhe a primeira task do plano.
-bash "$OWNERSHIP" --classificar "$D" T-09.99 src/ui/menu.tsx >/dev/null 2>&1
+bash "$OWNERSHIP" --classificar "$D" sprintx ft-piloto T-09.99 src/ui/menu.tsx >/dev/null 2>&1
 espera "task que o plano não conhece" 1 "$?"
-bash "$OWNERSHIP" --classificar "$D" '' src/ui/menu.tsx >/dev/null 2>&1
+bash "$OWNERSHIP" --classificar "$D" sprintx ft-piloto '' src/ui/menu.tsx >/dev/null 2>&1
 espera "task vazia" 1 "$?"
-bash "$OWNERSHIP" --classificar "$D" nao-e-task src/ui/menu.tsx >/dev/null 2>&1
+bash "$OWNERSHIP" --classificar "$D" sprintx ft-piloto nao-e-task src/ui/menu.tsx >/dev/null 2>&1
 espera "task fora do formato T-NN.MM" 1 "$?"
-bash "$OWNERSHIP" --classificar "$(novo_tmp)" T-04.03 src/ui/menu.tsx >/dev/null 2>&1
+bash "$OWNERSHIP" --classificar "$(novo_tmp)" sprintx ft-piloto T-04.03 src/ui/menu.tsx >/dev/null 2>&1
 espera "sem plano nenhum" 1 "$?"
 bash "$OWNERSHIP" --classificar "$D" >/dev/null 2>&1
 espera "uso inválido" 64 "$?"
-S="$(bash "$OWNERSHIP" --classificar "$D" T-09.99 src/ui/menu.tsx 2>&1)"
+S="$(bash "$OWNERSHIP" --classificar "$D" sprintx ft-piloto T-09.99 src/ui/menu.tsx 2>&1)"
 case "$S" in
   *na_task_atual*) falha "classificou sem dono determinado" ;;
   *) ok "não classifica nada sem dono determinado" ;;
@@ -273,7 +273,7 @@ printf 'export const menu = 1\n' > "$R/src/ui/menu.tsx"
 printf 'test("topo", () => {})\ntest("menu no topo", () => {})\n' > "$R/tests/ui/cabecalho-topo.test.tsx"
 
 MUDADOS="$(git -C "$R" status --porcelain | sed 's/^...//')"
-S="$(printf '%s\n' "$MUDADOS" | bash "$OWNERSHIP" --classificar "$R" T-04.03 2>&1)"; RC=$?
+S="$(printf '%s\n' "$MUDADOS" | bash "$OWNERSHIP" --classificar "$R" sprintx ft-piloto T-04.03 2>&1)"; RC=$?
 espera "lendo o que mudou da entrada padrão" 2 "$RC"
 espera "src/ui/menu.tsx é da T-04.03" na_task_atual "$(situacao_de "$S" src/ui/menu.tsx)"
 espera "o arquivo da T-03.01 é de task irmã" arquivo_de_task_irma \
@@ -310,7 +310,7 @@ echo "11. Replanejado: a task atual passa a declarar o arquivo → o E1 aceita"
 sed -i.bak 's#cria: \[src/ui/menu.tsx\]#cria: [src/ui/menu.tsx, tests/ui/cabecalho-topo.test.tsx]#' \
   "$R/docs/sprintx/features/ft-piloto/sprint-04/tasks.md"
 rm -f "$R/docs/sprintx/features/ft-piloto/sprint-04/tasks.md.bak"
-S="$(printf '%s\n' "$MUDADOS" | bash "$OWNERSHIP" --classificar "$R" T-04.03 2>&1)"; RC=$?
+S="$(printf '%s\n' "$MUDADOS" | bash "$OWNERSHIP" --classificar "$R" sprintx ft-piloto T-04.03 2>&1)"; RC=$?
 espera "depois do replanejamento, o fechamento segue" 0 "$RC"
 espera "o mesmo arquivo agora é da task atual" na_task_atual \
   "$(situacao_de "$S" tests/ui/cabecalho-topo.test.tsx)"

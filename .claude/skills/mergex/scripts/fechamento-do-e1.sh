@@ -38,7 +38,8 @@
 #       --mensagem <arquivo> [--verificacao <comando>] -- <caminho>...
 #       a seção crítica inteira, num processo só.
 #
-#   fechamento-do-e1.sh --preparar --task <id> -- <caminho>...
+#   fechamento-do-e1.sh --preparar --entrega <ENTREGA.md> --task <id> \
+#       --mensagem <arquivo> -- <caminho>...
 #       A a C, e a trava FICA ADQUIRIDA. Imprime `token=`. É o modo do agente:
 #       a varredura de segredo do E1 é julgamento humano sobre `git diff
 #       --cached`, e ela precisa acontecer DENTRO da seção crítica.
@@ -49,14 +50,15 @@
 #
 #   fechamento-do-e1.sh --status      # diagnóstico da trava desta worktree
 #
-# Ordem normativa combinada (P0.2-C7-A — compõe C1 e C5 na mesma seção):
-#   1 resolver worktree/índice   5 git add                9  capturar SHA
-#   2 adquirir a trava do E1     6 diff em stage           10 acrescentar em
-#   3 stage inicial vazio?       7 demais verificações         ENTREGA.commits
-#   4 ownership unitário da      8 git commit              11 validar a lista
-#     task (ownership-da-task.sh)                          12 liberar a trava
-# O ownership (4) roda DEPOIS da checagem de stage (3) e ANTES de qualquer
-# `git add` (5): ele prova de quem é o ARQUIVO/TASK, nunca de quem é o
+# Ordem normativa combinada (P0.2-C7-B — compõe contexto, C1 e C5):
+#   1 resolver worktree/índice   6 git add                10 validar commit
+#   2 adquirir a trava do E1     7 diff em stage          11 capturar SHA
+#   3 stage inicial vazio?       8 demais verificações    12 acrescentar em
+#   4 contexto + footers         9 git commit                 ENTREGA.commits
+#   5 ownership unitário da                              13 validar a lista
+#     task (ownership-da-task.sh)                         14 liberar a trava
+# O ownership (5) roda DEPOIS da checagem de stage (3) e ANTES de qualquer
+# `git add` (6): ele prova de quem é o ARQUIVO/TASK, nunca de quem é o
 # ÍNDICE. Se o stage de entrada já não estava vazio, a regra 3 (DM-138) já
 # parou antes de chegar aqui — o ownership nunca "explica" ou autoriza um
 # stage preexistente.
@@ -73,6 +75,8 @@
 #      nenhum `git add` ocorreu; a trava desta execução foi liberada
 #   9  ownership não determinável (plano legado, task fora do formato);
 #      nenhum `git add` ocorreu; a trava desta execução foi liberada
+#   10 desvio — arquivo fora de todas as tasks do trabalho corrente;
+#      nenhum `git add` ocorreu; a alteração fica preservada na árvore
 #   64 uso inválido
 #
 # Bash 3.2 (macOS): nada de mapfile, arrays associativos ou ${v,,}.
@@ -82,10 +86,8 @@ set -uo pipefail
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRAVA_SH="$AQUI/trava-do-e1.sh"
 SEQ_SH="$AQUI/sequencia-de-commits.sh"
-# OWNERSHIP_SH NÃO entra no `for` abaixo: a seção crítica em si (trava, stage,
-# commit, seq) funciona sem ele. Ausente — instalação parcial —, o ownership
-# é pulado (ver verifica_ownership), no mesmo espírito de falha aberta que o
-# hook `commit-por-task` já usa para o mesmo script.
+# OWNERSHIP_SH é obrigatório quando a ENTREGA declara sprintx/runx. Ausente,
+# a instalação MergeX está incompleta e o E1 falha fechado antes do staging.
 OWNERSHIP_SH="$AQUI/ownership-da-task.sh"
 
 for f in "$TRAVA_SH" "$SEQ_SH"; do
@@ -115,6 +117,94 @@ para() { # <código> <título> [linha]...
   printf 'mergex E1 %s\n' "$titulo" >&2
   while [ "$#" -gt 0 ]; do printf '%s\n' "$1" >&2; shift; done
   exit "$rc"
+}
+
+fm() { # <arquivo> <chave>
+  [ -r "$1" ] || return 0
+  awk -v chave="$2" '
+    NR == 1 { if ($0 !~ /^---[[:space:]]*\r?$/) exit; next }
+    /^---[[:space:]]*\r?$/ { exit }
+    {
+      linha = $0; gsub(/\r/, "", linha)
+      if (index(linha, chave ":") == 1) {
+        sub(/^[^:]*:[[:space:]]*/, "", linha)
+        gsub(/^["'"'"']|["'"'"']$/, "", linha)
+        gsub(/[[:space:]]+$/, "", linha)
+        print linha; exit
+      }
+    }
+  ' "$1" 2>/dev/null
+}
+
+ORIGEM=""
+TRABALHO=""
+
+carrega_contexto() { # <ENTREGA.md>
+  local entrega="$1" kind pasta
+  kind="$(fm "$entrega" kind)"
+  ORIGEM="$(fm "$entrega" expx_tool)"
+  TRABALHO="$(fm "$entrega" trabalho_id)"
+  [ "$kind" = entrega ] || para 9 'PARADO — ENTREGA corrente inválida' \
+    "kind esperado: entrega; obtido: ${kind:-ausente}"
+  case "$ORIGEM" in
+    sprintx|runx) ;;
+    *) para 9 'PARADO — aplicabilidade do modelo de tasks indeterminada' \
+      "Origem no ENTREGA.md: ${ORIGEM:-ausente}" \
+      'O E1 não inventa heurística global para decidir se há plano.' ;;
+  esac
+  [ -n "$TRABALHO" ] || para 9 'PARADO — ENTREGA corrente sem trabalho_id'
+  pasta="$(basename "$(dirname "$entrega")")"
+  [ "$pasta" = "$TRABALHO" ] || para 9 'PARADO — ENTREGA corrente divergente' \
+    "Pasta da entrega: $pasta" "trabalho_id: $TRABALHO"
+}
+
+registra_contexto_preparado() {
+  local trava dono
+  trava="$(caminho_da_trava 2>/dev/null)"
+  dono="$trava/dono"
+  [ -f "$dono" ] || para 1 'PARADO — a seção crítica não tem registro de dono'
+  {
+    printf 'origem=%s\n' "$ORIGEM"
+    printf 'trabalho=%s\n' "$TRABALHO"
+  } >> "$dono" || para 1 'PARADO — o contexto do --preparar não pôde ser vinculado à seção'
+}
+
+confere_contexto_preparado() {
+  local trava task_preparada origem_preparada trabalho_preparado
+  trava="$(caminho_da_trava 2>/dev/null)"
+  task_preparada="$(campo_do_dono "$trava" task)"
+  origem_preparada="$(campo_do_dono "$trava" origem)"
+  trabalho_preparado="$(campo_do_dono "$trava" trabalho)"
+  [ "$task_preparada" = "$TASK" ] \
+    && [ "$origem_preparada" = "$ORIGEM" ] \
+    && [ "$trabalho_preparado" = "$TRABALHO" ] \
+    && return 0
+  para 4 'PARADO — o contexto do --concluir diverge do --preparar' \
+    "Preparado: origem=${origem_preparada:-ausente} trabalho=${trabalho_preparado:-ausente} task=${task_preparada:-ausente}" \
+    "Concluir:  origem=$ORIGEM trabalho=$TRABALHO task=$TASK" \
+    'O stage preparado foi preservado e nenhum commit foi criado.'
+}
+
+valida_rodapes() { # <texto> <fonte> <codigo>
+  local texto="$1" fonte="$2" codigo="$3" rodapes qtd_task qtd_trabalho task_msg trabalho_msg
+  rodapes="$(printf '%s\n' "$texto" | git interpret-trailers --parse 2>/dev/null)"
+  qtd_task="$(printf '%s\n' "$rodapes" | grep -Ec '^Task:[[:space:]]*')"
+  qtd_trabalho="$(printf '%s\n' "$rodapes" | grep -Ec '^Trabalho:[[:space:]]*')"
+  [ "$qtd_task" = 1 ] || para "$codigo" "PARADO — rodapé $fonte inválido" \
+    "Task: exige exatamente 1 ocorrência; encontrou $qtd_task"
+  [ "$qtd_trabalho" = 1 ] || para "$codigo" "PARADO — rodapé $fonte inválido" \
+    "Trabalho: exige exatamente 1 ocorrência; encontrou $qtd_trabalho"
+  task_msg="$(printf '%s\n' "$rodapes" | sed -n 's/^Task:[[:space:]]*//p')"
+  trabalho_msg="$(printf '%s\n' "$rodapes" | sed -n 's/^Trabalho:[[:space:]]*//p')"
+  [ "$task_msg" = "$TASK" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \
+    "Task da mensagem: $task_msg" "Task explícita do E1: $TASK"
+  [ "$trabalho_msg" = "$TRABALHO" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \
+    "Trabalho da mensagem: $trabalho_msg" "Trabalho corrente: $TRABALHO"
+}
+
+valida_mensagem() { valida_rodapes "$(cat "$MENSAGEM")" 'da mensagem' 4; }
+valida_commit_produzido() {
+  valida_rodapes "$(git log -1 --format=%B 2>/dev/null)" 'do commit produzido' 6
 }
 
 # ---------------------------------------------------------------------------
@@ -193,25 +283,33 @@ confere_stage_de_entrada() {
 # entrada já não estava vazio, a seção 3 já parou antes de chegar aqui, e
 # este passo não roda sobre stage nenhum (DM-138 continua valendo).
 # ---------------------------------------------------------------------------
-verifica_ownership() { # <task> <caminho>...
+verifica_ownership() { # <task> [caminho...]; sem caminhos, lê o stage atual
   local task="$1"; shift
-  local saida rc irma plano
+  local saida rc irma desvios
 
-  # Script ausente — instalação parcial —, segue: a seção crítica não depende
-  # dele para o que é o seu contrato central (trava, stage, commit, seq).
-  [ -f "$OWNERSHIP_SH" ] || return 0
+  # Script ausente em trabalho task-based é instalação incompleta. Não existe
+  # fallback silencioso: ownership=n/a precisa vir de origem explicitamente n/a.
+  [ -f "$OWNERSHIP_SH" ] || para 9 'PARADO — instalação MergeX incompleta' \
+    "Componente ausente: $OWNERSHIP_SH" \
+    "O trabalho '$TRABALHO' é $ORIGEM e exige modelo de tasks; ownership não pode virar n/a."
 
-  # Sem NENHUM tasks.md sob docs/, não há plano contra o qual determinar
-  # ownership: segue, como o resto da mergex já trata "sem tasks.md" (o hook
-  # `commit-por-task` faz a mesma checagem para a verificação de mistura).
-  # "Plano legado" (DM-153) é outra coisa — plano EXISTE, mas a task atual não
-  # é determinável nele — e essa falha fechado abaixo, no `*)`.
-  plano="$(find "$RAIZ/docs" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
-  [ -n "$plano" ] || return 0
-
-  saida="$(printf '%s\n' "$@" | bash "$OWNERSHIP_SH" --classificar "$RAIZ" "$task" 2>&1)"; rc=$?
+  # O classificador recebe o contexto vivo da ENTREGA e resolve somente o
+  # plano daquele trabalho. Plano ausente/ilegível e task indeterminável param.
+  if [ "$#" -gt 0 ]; then
+    saida="$(printf '%s\n' "$@" | bash "$OWNERSHIP_SH" --classificar \
+      "$RAIZ" "$ORIGEM" "$TRABALHO" "$task" 2>&1)"; rc=$?
+  else
+    saida="$(stage_atual | bash "$OWNERSHIP_SH" --classificar \
+      "$RAIZ" "$ORIGEM" "$TRABALHO" "$task" 2>&1)"; rc=$?
+  fi
   case "$rc" in
-    0) return 0 ;;
+    0)
+      desvios="$(printf '%s\n' "$saida" | awk -F'\t' '$1 == "desvio" { print "  - " $2 }')"
+      [ -z "$desvios" ] || para 10 'PARADO — desvio: arquivo não declarado em nenhuma task do trabalho' \
+        "Task sendo fechada: $task" \
+        'Arquivo(s) modificados fora do plano corrente:' "$desvios" \
+        'Nenhum commit parcial foi criado e nada foi apagado, restaurado ou guardado.'
+      return 0 ;;
     2)
       irma="$(printf '%s\n' "$saida" | awk -F'\t' '$1 == "arquivo_de_task_irma" { print "  - " $2 "   (declarado em " $3 ")" }')"
       para 8 'PARADO — arquivo_de_task_irma: arquivo planejado em outra task da feature' \
@@ -271,6 +369,8 @@ conclui() { # <entrega> <task> <mensagem>
       'Nenhum registro de E1 foi escrito: a lista `commits` da ENTREGA não foi' \
       'tocada. Leia o erro literal do versionador acima; nunca contorne com' \
       '`--no-verify`.'
+
+  valida_commit_produzido
 
   sha="$(git rev-parse --short HEAD 2>/dev/null)"
   [ -n "$sha" ] \
@@ -354,6 +454,8 @@ case "$ACAO" in
     recusa_bloco "$@"
     abre_secao "$TASK"                 # 1 e 2
     confere_stage_de_entrada           # 3
+    carrega_contexto "$ENTREGA"
+    valida_mensagem
     verifica_ownership "$TASK" "$@"    # 4
     prepara "$@"                       # 5 (A) e 6 (B)
     verifica "$VERIFICACAO"            # 7 (C)
@@ -361,10 +463,15 @@ case "$ACAO" in
     exit 0 ;;
 
   --preparar)
+    [ -n "$ENTREGA" ] || uso 'falta --entrega'
+    [ -n "$MENSAGEM" ] || uso 'falta --mensagem'
     [ "$CAMINHOS_INICIO" = 1 ] && [ "$#" -gt 0 ] || uso '--preparar precisa de `-- <caminho>...`'
     recusa_bloco "$@"
     abre_secao "$TASK"
     confere_stage_de_entrada
+    carrega_contexto "$ENTREGA"
+    valida_mensagem
+    registra_contexto_preparado
     verifica_ownership "$TASK" "$@"
     prepara "$@"
     # A seção continua aberta: quem preparou tem a trava até `--concluir`.
@@ -388,6 +495,10 @@ case "$ACAO" in
     [ -n "$(stage_atual)" ] \
       || para 4 'PARADO — nada em stage para concluir' \
         'O --preparar desta seção não deixou nada no índice.'
+    carrega_contexto "$ENTREGA"
+    valida_mensagem
+    confere_contexto_preparado
+    verifica_ownership "$TASK"
     conclui "$ENTREGA" "$TASK" "$MENSAGEM"
     exit 0 ;;
 esac

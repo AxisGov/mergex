@@ -888,7 +888,7 @@ grep -Fq 'ownership-da-task.sh' "$hook_task" \
   || fail 'commit-por-task does not delegate to the ownership script'
 grep -Fq 'Task:[[:space:]]*T-[0-9]+\.[0-9]+' "$hook_task" \
   || fail 'commit-por-task no longer reads the declared current task from the Task: footer'
-bloco_irma="$(awk '/^if \[ -n "\$TASK_ATUAL" \] && \[ -r "\$OWNERSHIP" \]; then$/, /^    exit 2$/' "$hook_task")"
+bloco_irma="$(awk 'index($0, "if [ -n \"$TASK_ATUAL\" ] && [ -r \"$OWNERSHIP\" ]") == 1, /^    exit 2$/' "$hook_task")"
 [ -n "$bloco_irma" ] || fail 'commit-por-task lost the sister-task block'
 if printf '%s\n' "$bloco_irma" | grep -Fq 'MODO'; then
   fail 'the sister-task block is gated by the hook mode: it must fail closed even in aviso'
@@ -912,6 +912,10 @@ for dm in DM-147 DM-148 DM-149 DM-150 DM-151 DM-152 DM-153; do
   grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
     || fail "decision log is missing $dm"
 done
+for dm in DM-154 DM-155 DM-156 DM-157 DM-158 DM-159 DM-160; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
 
 # ---------------------------------------------------------------------------
 # P0.2-C7-A — compõe C1 (ownership) com C5 (seção crítica) no fechamento real
@@ -932,6 +936,8 @@ bloco_fechar="$(awk '/^  --fechar\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
 ordem_fechar="$(printf '%s\n' "$bloco_fechar" | awk '
   /abre_secao /              { print "abre_secao"; next }
   /confere_stage_de_entrada/ { print "confere_stage_de_entrada"; next }
+  /carrega_contexto /        { print "carrega_contexto"; next }
+  /valida_mensagem/          { print "valida_mensagem"; next }
   /verifica_ownership /      { print "verifica_ownership"; next }
   /prepara "\$@"/            { print "prepara"; next }
   /verifica "\$VERIFICACAO"/ { print "verifica"; next }
@@ -939,6 +945,8 @@ ordem_fechar="$(printf '%s\n' "$bloco_fechar" | awk '
 ')"
 esperado_fechar='abre_secao
 confere_stage_de_entrada
+carrega_contexto
+valida_mensagem
 verifica_ownership
 prepara
 verifica
@@ -951,27 +959,42 @@ bloco_preparar="$(awk '/^  --preparar\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
 ordem_preparar="$(printf '%s\n' "$bloco_preparar" | awk '
   /abre_secao /              { print "abre_secao"; next }
   /confere_stage_de_entrada/ { print "confere_stage_de_entrada"; next }
+  /carrega_contexto /        { print "carrega_contexto"; next }
+  /valida_mensagem/          { print "valida_mensagem"; next }
+  /registra_contexto_preparado/ { print "registra_contexto_preparado"; next }
   /verifica_ownership /      { print "verifica_ownership"; next }
   /prepara "\$@"/            { print "prepara"; next }
 ')"
 esperado_preparar='abre_secao
 confere_stage_de_entrada
+carrega_contexto
+valida_mensagem
+registra_contexto_preparado
 verifica_ownership
 prepara'
 [ "$ordem_preparar" = "$esperado_preparar" ] \
   || fail "--preparar does not call the critical-section steps in the normative order: got [$ordem_preparar]"
 
-# Ownership é chamado pelo fechamento real, mas degrada como o hook: ausente
-# (instalação parcial), a seção crítica segue sem ele — ela não depende dele
-# para o contrato central (trava, stage, commit, seq). A checagem obrigatória
-# de dependência (`for f in ... exit 1`) cobre só trava e seq, nunca ownership.
+bloco_concluir="$(awk '/^  --concluir\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
+[ -n "$bloco_concluir" ] || fail 'fechamento-do-e1 lost the --concluir block'
+printf '%s\n' "$bloco_concluir" | grep -Fq 'confere_contexto_preparado' \
+  || fail '--concluir does not bind task/work/origin to the prepared section'
+printf '%s\n' "$bloco_concluir" | grep -Fq 'verifica_ownership "$TASK"' \
+  || fail '--concluir does not reclassify the prepared stage before commit'
+
+# Ownership é obrigatório quando a ENTREGA declara origem task-based. Ausente,
+# o fechamento para antes do staging e nomeia a instalação incompleta.
 grep -Fq 'OWNERSHIP_SH="$AQUI/ownership-da-task.sh"' "$fecha_sh" \
   || fail 'fechamento-do-e1 no longer wires the ownership script'
-if grep -Fq 'for f in "$TRAVA_SH" "$SEQ_SH" "$OWNERSHIP_SH"' "$fecha_sh"; then
-  fail 'fechamento-do-e1 hard-requires the ownership script at startup (breaks minimal/duble installs)'
+grep -Fq '[ -f "$OWNERSHIP_SH" ] || para 9' "$fecha_sh" \
+  || fail 'fechamento-do-e1 does not fail closed when ownership is absent for task-based work'
+grep -Fq 'instalação MergeX incompleta' "$fecha_sh" \
+  || fail 'fechamento-do-e1 does not name an incomplete MergeX installation'
+grep -Fq '"$RAIZ" "$ORIGEM" "$TRABALHO" "$task"' "$fecha_sh" \
+  || fail 'fechamento-do-e1 does not pass current-work context to ownership'
+if grep -Fq 'find "$RAIZ/docs" -name tasks.md' "$own_sh" "$fecha_sh"; then
+  fail 'M1 regressed to a global tasks.md search'
 fi
-grep -Fq '  [ -f "$OWNERSHIP_SH" ] || return 0' "$fecha_sh" \
-  || fail 'fechamento-do-e1 does not degrade gracefully when the ownership script is absent'
 
 # `arquivo_de_task_irma`: nenhum `add` ocorreu, a trava é liberada, e a lista
 # de commits não foi tocada por esse caminho.
@@ -995,11 +1018,10 @@ if grep -Fq 'confere_stage_de_entrada' "$fecha_sh"; then
 fi
 
 # Uma implementação só de classificação: os call sites executáveis de
-# `ownership-da-task.sh --classificar` são exatamente estes três — o
-# fechamento real, o hook (defesa em profundidade) e a bancada dedicada.
+# Call sites e provas que nomeiam o classificador formam uma lista fechada.
 own_chamadores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e 'ownership-da-task.sh' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/validate-mergex-contract.sh '
+own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$own_chamadores" = "$own_esperado" ] \
   || fail "unexpected caller of ownership-da-task.sh: $own_chamadores"
 

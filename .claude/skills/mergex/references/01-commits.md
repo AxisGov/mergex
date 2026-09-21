@@ -63,8 +63,9 @@ O mecanismo é o `mkdir` atômico de um diretório. Ele existe igual em Linux, m
 1. Resolver a worktree e o índice.
 2. **Adquirir a trava do E1** — antes do primeiro `git add`.
 3. Conferir o stage de entrada.
-4. **Verificar o ownership unitário da task** (abaixo) — ainda antes do primeiro `git add`.
-5. Só então: staging, verificações, commit, registro.
+4. Resolver origem/trabalho pela `ENTREGA.md` corrente e validar os footers.
+5. **Verificar o ownership unitário da task** (abaixo) — ainda antes do primeiro `git add`.
+6. Só então: staging, verificações, commit, validação do commit produzido e registro.
 
 **Travar depois de montar o stage é não travar**: a mistura já teria acontecido.
 
@@ -92,16 +93,17 @@ A trava permanece adquirida durante o trecho inteiro:
 
 | | Passo |
 |---|---|
-| *(antes de A)* | ownership unitário da task — `arquivo_de_task_irma` pode parar aqui, sem que A chegue a rodar |
+| *(antes de A)* | contexto + footers; depois ownership unitário — `desvio` ou `arquivo_de_task_irma` param aqui, sem que A rode |
 | A | staging da task |
 | B | verificação do diff em stage |
 | C | verificações do E1 aplicáveis (a varredura de segredo do passo 2) |
 | D | `git commit` |
-| E | captura do identificador produzido |
-| F | `sequencia-de-commits.sh --acrescentar` |
-| G | validação da lista final |
+| E | validação dos footers no commit produzido |
+| F | captura do identificador produzido |
+| G | `sequencia-de-commits.sh --acrescentar` |
+| H | validação da lista final |
 
-**Só depois de G a trava é liberada.** A atribuição do `seq` acontece **dentro** da seção — é isso, e só isso, que impede duas sessões de calcularem o mesmo próximo número.
+**Só depois de H a trava é liberada.** A atribuição do `seq` acontece **dentro** da seção — é isso, e só isso, que impede duas sessões de calcularem o mesmo próximo número.
 
 ### O executável
 
@@ -120,12 +122,18 @@ Ele recusa `.`, `-A` e `-u`: o staging continua sendo por caminho explícito.
 **A varredura de segredo (passo 2) é julgamento, e roda DENTRO da seção** — ela lê `git diff --cached`, que só existe depois do staging. Para isso a seção abre em dois tempos, com a mesma trava atravessando os dois:
 
 ```
-bash .../fechamento-do-e1.sh --preparar --task <id> -- <caminho-1> ...
+bash .../fechamento-do-e1.sh --preparar --entrega <ENTREGA.md> \
+  --task <id> --mensagem <arquivo> -- <caminho-1> ...
 # imprime token=<...>; a trava CONTINUA adquirida
 # → varredura de segredo sobre `git diff --cached`
 bash .../fechamento-do-e1.sh --concluir --entrega <ENTREGA.md> \
   --task <id> --mensagem <arquivo> --token <token>
 ```
+
+O `--preparar` vincula `origem`, `trabalho_id` e `task` ao dono da seção. O
+`--concluir` exige o mesmo trio e reclassifica o stage já preparado contra o
+plano corrente antes do commit. O token sozinho não autoriza trocar de trabalho
+nem aproveitar um id de task repetido em outra feature.
 
 Achou segredo entre os dois tempos: **não conclua**. Aborte como manda o passo 2, e libere a seção (`trava-do-e1.sh --liberar <token>`) — a task fica sem commit e a V11 do E2 a nomeia.
 
@@ -140,6 +148,7 @@ Achou segredo entre os dois tempos: **não conclua**. Aborte como manda o passo 
 | 7 | o commit e o item existem e a lista final não valida |
 | 8 | `arquivo_de_task_irma` — arquivo planejado em outra task da feature; nenhum `git add` ocorreu; trava liberada |
 | 9 | ownership não determinável (plano legado, task fora do formato); nenhum `git add` ocorreu |
+| 10 | `desvio` — arquivo fora de todas as tasks do trabalho corrente; nenhum `git add` ocorreu |
 
 ### Liberação
 
@@ -198,19 +207,24 @@ mudou ∩ (união(outras) − atual)   → arquivo_de_task_irma  não entra, NÃ
 |---|---|
 | `na_task_atual` — mudou e a task atual declara | **Entra no commit.** Vale **mesmo que outra task também o declare**: a interseção com a atual vence |
 | `declarado_nao_mudou` — a task atual declara, mas não mudou | Não entra; não é erro (pode ter sido feito em task anterior) |
-| `desvio` — mudou e **nenhuma** task declara | **Não entra.** Registre o desvio e siga — o comportamento de sempre |
+| `desvio` — mudou e **nenhuma** task declara | **Não entra. Pare o fechamento inteiro**, sem commit parcial; preserve a alteração na árvore |
 | `arquivo_de_task_irma` — mudou e **só outra task** declara | **Não entra, e não é desvio.** Pare o fechamento (ver abaixo) |
 
 Quem classifica é o script da skill, que é o único a conceder as quatro situações:
 
 ```
-git diff --cached --name-only | \
-  bash .claude/skills/mergex/scripts/ownership-da-task.sh --classificar . <T-NN.MM>
+git status --porcelain | sed 's/^...//' | \
+  bash .claude/skills/mergex/scripts/ownership-da-task.sh --classificar \
+    . <sprintx|runx|n/a> <trabalho_id> <T-NN.MM>
 ```
 
-Ele devolve `<situacao>\t<arquivo>\t<tasks que o declaram>` e sai `0` quando o fechamento pode seguir, `2` quando existe arquivo de task irmã e `1` quando **não deu para determinar o dono**. A task atual é **declarada por quem chama**, nunca adivinhada: sem ela, ou com uma que o plano não conhece, o script recusa responder. Escolher "a primeira task encontrada" inventaria o dono.
+Ele devolve `<situacao>\t<arquivo>\t<tasks que o declaram>` e sai `0` quando a classificação terminou, `2` quando existe arquivo de task irmã e `1` quando **não deu para determinar o dono**. `ownership=n/a` só existe quando o chamador declara explicitamente a aplicabilidade `n/a`; falta de plano nunca significa n/a. Esse valor é um sinal da interface do classificador, **não** um novo valor persistido de `ENTREGA.expx_tool`: o schema vivo continua aceitando apenas `sprintx|runx`, e ambos são task-based no E1.
 
-Arquivo de **produto** alterado fora da lista declarada de **qualquer** task **continua sendo desvio** de escopo. Não o commite e não o apague: deixe-o na árvore, registre a ocorrência em `docs/entregas/<trabalho_id>/ENTREGA.md` na lista `desvios`, e siga para a próxima task. O E2 vai barrar a entrega por isso, com o arquivo nomeado — e é assim que tem que ser: quem decide o que fazer com aquele arquivo é a pessoa.
+Origem, `trabalho_id` e task são declarados por quem chama. No E1, `--task` é a fonte normativa da task; `expx_tool` e `trabalho_id` vêm da `ENTREGA.md` corrente. O script resolve **uma pasta apenas**: `docs/sprintx/features/<trabalho_id>/` (com o fallback legado do mesmo trabalho) ou `docs/manutencao/<trabalho_id>/`. Nenhum `find "$RAIZ/docs" ... tasks.md` global participa. Se a origem usa tasks e o plano corrente está ausente ou ilegível, falha fechado. Se o classificador está ausente, é instalação MergeX incompleta e o E1 também para.
+
+IDs de task não são globais. Uma feature histórica e a corrente podem ter ambas `T-01.01`; somente os `tasks.md` dentro da pasta resolvida para o trabalho corrente entram nos conjuntos. Ordem alfabética de pastas e ordem das features nunca selecionam plano.
+
+Arquivo de **produto** alterado fora da lista declarada de **qualquer** task **continua sendo desvio** de escopo. Não o commite e não o apague: deixe-o na árvore. No caminho normativo, o desvio para o fechamento antes do staging; nenhum subconjunto da task vira commit parcial enganoso. O lifecycle posterior decide o registro/encaminhamento — o E1 não apaga, restaura nem guarda a alteração.
 
 ### `arquivo_de_task_irma` — o arquivo foi planejado, só que em outra task
 
@@ -413,6 +427,10 @@ O `objetivo` da task, literal, uma frase. **Não parafraseie e não invente** �
 - `Trabalho:` o `trabalho_id` (o slug da feature ou o `<OC-ID>-<slug>`).
 - `Testes:` uma linha resumindo o que `teste_integracao` e `teste_funcional` cobrem. Quando houver `teste_regressao`, cite-o primeiro: é ele que reproduzia o problema.
 
+No E1 normativo, **`--task` seleciona a task**. O rodapé não seleciona nada: é prova durável e assertiva do contexto explícito. Antes de qualquer staging, a estrutura que será usada precisa conter exatamente um `Task:` e exatamente um `Trabalho:`; os valores precisam ser iguais, respectivamente, a `--task` e ao `trabalho_id` da `ENTREGA.md` corrente. Ausência, duplicata ou divergência para. Não se infere valor pelo título, corpo ou outra prosa.
+
+Depois de `git commit`, e ainda sob a trava, o E1 lê a mensagem do commit produzido e valida os mesmos dois footers novamente antes de escrever `ENTREGA.commits`. A validação prévia impede o commit inválido; a posterior prova que o objeto criado preservou a estrutura validada.
+
 ### Exemplo
 
 ```
@@ -539,8 +557,11 @@ Por task:
 
 - [ ] A trava do índice foi adquirida **antes** do primeiro `git add` e liberada só depois da validação da lista.
 - [ ] O stage estava vazio na entrada (e, se não estava, o E1 parou sem tocá-lo).
+- [ ] Origem/trabalho vieram da `ENTREGA.md` corrente; a task veio de `--task`.
+- [ ] A mensagem tinha exatamente um `Task:` e um `Trabalho:`, ambos correspondentes, antes do staging; o commit produzido foi validado de novo.
 - [ ] O ownership da task rodou **antes** do primeiro `git add`, dentro da seção crítica.
 - [ ] Só arquivos declarados **na task que fechou** entraram no commit.
+- [ ] Nenhum `desvio` produziu commit parcial; a alteração ficou preservada na árvore.
 - [ ] Nenhum arquivo `arquivo_de_task_irma` foi commitado, apagado ou restaurado.
 - [ ] A varredura de segredo rodou sobre o diff em stage e não achou nada.
 - [ ] A mensagem tem tipo, escopo, título, objetivo e o rodapé com `Task`, `Trabalho` e `Testes`.
@@ -553,9 +574,12 @@ Por task:
 |---|---|
 | `suite: vermelha` ou `nao_executada` | Não commita. A task não fechou de verdade — o E2 vai barrá-la nomeando-a |
 | Task sem os dois testes | Não commita. O E2 vai barrá-la |
-| Arquivo fora da lista declarada de toda task | Não entra no commit; registra em `desvios`; o E2 barra |
+| Arquivo fora da lista declarada de toda task | **Para o fechamento inteiro antes do staging.** Não entra, não gera commit parcial e fica preservado na árvore |
 | Arquivo declarado só em task irmã (`arquivo_de_task_irma`) | Não entra e **não é desvio**. Para o fechamento da task, sem commit parcial, sem apagar e sem restaurar. Levar ao replanejamento é da sprintx |
 | Dono da task não determinável | Não commita. O script sai `1` e nada é classificado — nunca se infere o dono pela prosa |
+| Origem task-based com plano corrente ausente/ilegível | Não commita. É erro de contrato; nunca vira `n/a` e nunca procura plano histórico |
+| Origem task-based sem `ownership-da-task.sh` | Não commita. A instalação MergeX está incompleta; nunca degrada silenciosamente |
+| Footer `Task:`/`Trabalho:` ausente, duplicado ou divergente | Não commita. A estrutura é validada antes do staging e o commit produzido é conferido novamente |
 | Segredo detectado | Aborta o commit, desfaz o staging, avisa com o valor mascarado. A task fica `concluida` sem prova: a **V11** do E2 a nomeia |
 | Task já `concluida` que ficou sem commit | Roda o **E1 tardio** (acima): commita agora e acrescenta o item ao fim de `commits`, com o próximo `seq`, sem reordenar o histórico |
 | `commits` com sequência quebrada | **Não grave.** Contrato inválido: relate o motivo do `sequencia-de-commits.sh --validar` e pare. Nunca escolha outro número para caber |

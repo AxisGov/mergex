@@ -31,9 +31,10 @@
 #      outro e o stage pode estar preparado pela metade: "a trava parece
 #      velha" não é prova de nada. Recuperação automática de queda não é
 #      requisito desta versão; `--status` diagnostica e a decisão é humana.
-#   6. O CONTEÚDO DA TRAVA É DIAGNÓSTICO — task, pid, instante, raiz, índice.
-#      A correção não depende dele: quem exclui é o diretório, quem autoriza a
-#      liberação é o token.
+#   6. O CONTEÚDO DA TRAVA REGISTRA O DONO — task, pid, instante, raiz, índice
+#      e, no modo em dois tempos, origem/trabalho preparados. O diretório faz
+#      a exclusão e o token autoriza a liberação; o contexto impede concluir
+#      com outra task ou outro trabalho sobre o mesmo stage preparado.
 #
 # Uso:
 #   trava-do-e1.sh --caminho            # onde fica a trava deste índice
@@ -101,7 +102,7 @@ campo_do_dono() {
 # diagnostico <trava> — o que a trava conta sobre quem a tem, indentado.
 diagnostico() {
   local t="$1" c
-  for c in task pid instante raiz indice; do
+  for c in task origem trabalho pid instante raiz indice; do
     printf '  %s=%s\n' "$c" "$(campo_do_dono "$t" "$c")"
   done
 }

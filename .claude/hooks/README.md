@@ -44,14 +44,23 @@ no histórico não tem volta. As demais verificações continuam avisando, e
 
 Quem classifica é `.claude/skills/mergex/scripts/ownership-da-task.sh`: uma
 implementação só, provada pela bancada `scripts/ci/test-ownership-task.sh`.
-Script ausente — instalação parcial — e o hook segue com o que sempre fez.
+Quando a branch identifica exatamente uma entrega SprintX/RunX, script ausente
+é instalação MergeX incompleta e o hook para; não degrada para `n/a`.
+Plano corrente ausente, ilegível ou inconsistente também para o commit manual:
+o hook preserva o código de saída do classificador, em vez de confundir erro
+sem linhas classificadas com autorização para seguir.
+
+O plano também sai desse contexto: branch ativa + `branch:` de exatamente uma
+`docs/entregas/<trabalho_id>/ENTREGA.md`, então `expx_tool` resolve somente a
+pasta canônica daquele trabalho. Nenhum plano histórico com task id repetido
+participa, e recência/rastro nunca selecionam ownership.
 
 A task que está fechando sai do rodapé **`Task: T-NN.MM`** da mensagem de
 commit, que o contrato do E1 já exige (do `-m` ou do arquivo do `-F`). **Nunca
 é adivinhada**: sem rodapé, ou com dois diferentes, o hook não classifica nada
 e vale o comportamento anterior. O contrato inteiro está em
 `references/01-commits.md`, "O dono do arquivo é a task que está sendo
-fechada", e as decisões em DM-147 a DM-153.
+fechada", e as decisões em DM-147 a DM-159.
 
 `scripts/fechamento-do-e1.sh` — a seção crítica do E1 — classifica com o
 **mesmo** script, **antes** do primeiro `git add`: pelo caminho normal, o

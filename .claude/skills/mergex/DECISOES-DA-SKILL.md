@@ -362,3 +362,24 @@ mensagem de commit (o hook perderia a única declaração mecânica do dono); a 
 gravar a task corrente em artefato tipado e versionado (seria uma fonte melhor que o rodapé, e a
 DM-149 mudaria); ou a V9 ganhar um conjunto unitário próprio — o que exigiria rever a DM-152 e a
 verificação inteira, e não cabe numa entrega que não abre verificação nova no portão.
+
+## P0.2-C7-B / M1 — ownership contextual e falha fechada
+
+A integração C7-A tornou o ownership parte do E1 serial, mas ainda deixava o classificador procurar
+todo `tasks.md` sob `docs/`. Como ids de task se repetem entre trabalhos, o mesmo `T-01.01` histórico
+podia atribuir ao trabalho atual um arquivo que ele nunca declarou. M1 fecha a fonte do contexto e
+torna os footers prova assertiva antes do staging.
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-154 | Qual plano participa do ownership | **Somente o plano do trabalho corrente.** O E1 lê `expx_tool` e `trabalho_id` da `ENTREGA.md` explícita; o hook defensivo casa a branch ativa com exatamente uma entrega. SprintX resolve `docs/sprintx/features/<trabalho_id>/` (legado do mesmo trabalho apenas como fallback) e RunX resolve `docs/manutencao/<trabalho_id>/`. Nunca há busca global em `docs/` | Task id não é chave global. Contextualizar pelo trabalho torna feature histórica, ordem alfabética e ordem de criação irrelevantes |
+| DM-155 | Ausência de plano significa `n/a`? | **Não.** `ownership=n/a` só existe quando o chamador declara explicitamente a aplicabilidade `n/a`; não é valor novo de `ENTREGA.expx_tool`. No schema vivo, SprintX/RunX são task-based: plano corrente ausente ou ilegível é erro de contrato e para | Falta acidental de artefato não pode reduzir a proteção. Sem informação suficiente, a resposta correta é não determinar, nunca inventar heurística |
+| DM-156 | O classificador pode faltar numa instalação task-based | **Não.** `ownership-da-task.sh` ausente é instalação MergeX incompleta e o E1 para antes do staging; doubles task-based instalam o bundle completo | Fail-open por instalação parcial reintroduzia silenciosamente o commit sem ownership justamente onde o contrato o exige |
+| DM-157 | Quem seleciona a task e qual papel têm os footers | No E1, **`--task` seleciona**. A mensagem precisa ter exatamente um `Task:` igual ao argumento e um `Trabalho:` igual à entrega. A estrutura é validada antes do staging e o commit produzido é conferido de novo. No hook manual, `Task:` continua sendo a declaração defensiva disponível; rastro nunca seleciona task | Se rodapé selecionasse, argumento e prova poderiam divergir. Separar comando e evidência elimina a ambiguidade sem criar estado novo |
+| DM-158 | `desvio` pode ser excluído do commit e o restante ser commitado | **Não.** No caminho normativo, qualquer `desvio` para o fechamento inteiro antes do primeiro `git add`; nenhuma parte da task vira commit parcial. A alteração permanece na árvore, sem restore, stash ou descarte | Um commit “verde” que omite trabalho real da execução é uma prova enganosa e irreversível. O lifecycle posterior decide o encaminhamento |
+| DM-159 | Stage preexistente pode ser contextualizado pelo ownership | **Não. DM-138 permanece soberana.** A trava é adquirida, o stage de entrada é conferido e, se não vazio, o E1 para antes de contexto, footers e ownership | Ownership responde pelo arquivo no plano; não prova quem montou o índice. Misturar as duas posses apagaria o limite que C5 tornou mecânico |
+| DM-160 | O token de `--preparar` permite concluir com outra entrega/task | **Não.** A seção preparada registra origem, trabalho e task; `--concluir` exige o mesmo contexto e reclassifica o stage contra esse plano antes do commit | O token prova o dono do índice, não o dono lógico dos arquivos. Sem o vínculo, dois trabalhos com `T-01.01` repetido permitiriam preparar em A e registrar/commitar como B |
+
+**O que invalidaria estas decisões:** `ENTREGA.md` deixar de declarar origem/trabalho; SprintX ou
+RunX passarem a versionar um ponteiro canônico mais forte para a pasta do plano; ou o E1 deixar de
+receber `--task` explicitamente. Nenhuma dessas mudanças autoriza voltar à busca global.
