@@ -27,6 +27,9 @@ TEMPLATE_PRONTIDAO='.claude/skills/mergex/assets/TEMPLATE-prontidao.md'
 CHECK_CMD='.claude/commands/mergex-check.md'
 AGENTE='.claude/agents/revisor-diff.md'
 AGENTE_OC='.opencode/agent/revisor-diff.md'
+OWN_SH='.claude/skills/mergex/scripts/ownership-da-task.sh'
+HOOK_TASK='.claude/hooks/mergex/commit-por-task.sh'
+FECHAMENTO_SH='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 
 TMPS=""
 trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
@@ -67,6 +70,9 @@ validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
 teste_causa() { bash scripts/ci/test-causa-portao.sh > saida.log 2>&1; }
 teste_v11()   { bash scripts/ci/test-portao-v11.sh > saida.log 2>&1; }
 teste_seq()   { bash scripts/ci/test-sequencia-commits.sh > saida.log 2>&1; }
+teste_own()   { bash scripts/ci/test-ownership-task.sh > saida.log 2>&1; }
+teste_hooks()      { bash .claude/hooks/teste.sh > saida.log 2>&1; }
+teste_integracao() { bash scripts/ci/test-integracao-c7a.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As mutações: id | descrição | verificação que TEM que falhar | função que muta
@@ -223,6 +229,82 @@ M37f() { # volta a existir um segundo parser de commits fora do leitor único
 bloco_proprio() { bloco "$arq" commits; }'
 }
 
+# --- P0.2-C1: o ownership da task no fechamento (ownership-da-task.sh) ---
+# As cinco tentações que o contrato do E1 proíbe, mais o hook que pararia de
+# falhar fechado. Todas têm que morrer. IDs renumerados de M19-M24 (a branch
+# histórica c6f1510) para M38-M43 na integração P0.2-C7-A: a faixa M19-M37f
+# já era da P0.2-C3/C4 nesta linha.
+M38() { troca "$OWN_SH" '  else printf '"'"'4\t%s\n'"'"' "$S_IRMA"' \
+                        '  else printf '"'"'3\t%s\n'"'"' "$S_DESVIO"'; }
+M39() { troca "$OWN_SH" '  else printf '"'"'4\t%s\n'"'"' "$S_IRMA"' \
+                        '  else printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
+M40() { troca "$OWN_SH" '  elif declara "$1" "$2"; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"' \
+                        '  elif [ -n "$(tasks_de "$2")" ]; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
+M41() { troca "$OWN_SH" '  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '"'"'$atual'"'"' não declara arquivos em nenhum tasks.md"; return 1; }' \
+                        '  atual="$(printf '"'"'%s\n'"'"' "$PLANO" | head -1 | cut -f1)"'; }
+M42() { troca "$OWN_SH" '  printf '"'"'%s'"'"' "$saida" | grep -q "^4${TAB}" && return 2' '  :'; }
+M43() { troca "$HOOK_TASK" '    exit 2' \
+                           '    expx_barra "$MODO" "$RAIZ" "$HOOK" "arquivo de task irma" "$IRMA"'; }
+
+# --- P0.2-C7-A: a composição do ownership (C1) com a seção crítica (C5) ---
+# Os dez mutantes de integração do AGENTS.md — da ORDEM e da COMPOSIÇÃO dos
+# dois contratos no fechamento real (scripts/fechamento-do-e1.sh), não das
+# regras isoladas de cada um, que já morrem em M38-M43 (ownership) e na
+# bancada de C5 (mutacao-trava-e1.sh). Todas têm que morrer.
+M44() { # 1. ownership roda antes de ADQUIRIR A TRAVA (antes de abre_secao)
+  troca "$FECHAMENTO_SH" '    abre_secao "$TASK"                 # 1 e 2' \
+    '    abre_secao "$TASK"                 # 1 e 2
+    verifica_ownership "$TASK" "$@"    # 4 (mutada: antes do lock)' \
+  && troca "$FECHAMENTO_SH" '    verifica_ownership "$TASK" "$@"    # 4' \
+    '    :  # 4 (mutada: já movida para antes do lock)'
+}
+M45() { # 2. ownership roda antes da checagem de STAGE VAZIO (DM-138)
+  troca "$FECHAMENTO_SH" '    confere_stage_de_entrada           # 3' \
+    '    verifica_ownership "$TASK" "$@"    # 4 (mutada: antes da checagem de stage)
+    confere_stage_de_entrada           # 3' \
+  && troca "$FECHAMENTO_SH" '    verifica_ownership "$TASK" "$@"    # 4' \
+    '    :  # 4 (mutada: já movida para antes da checagem de stage)'
+}
+M46() { # 3a. o hook (defesa em profundidade) deixa de barrar arquivo_de_task_irma
+  troca "$HOOK_TASK" '    exit 2' '    exit 0  # mutada: parou de barrar'
+}
+M47() { # 4. o bloqueio de ownership passa a consumir um `seq` mesmo sem commitar
+  # "abc1234" é hexadecimal válido por `sha_valido` (nunca "sem-commit", que o
+  # escritor recusaria por formato — e a mutação não provaria nada).
+  troca "$FECHAMENTO_SH" '    2)' \
+    '    2)
+      bash "$SEQ_SH" --acrescentar "$ENTREGA" "$task" "abc1234" >/dev/null 2>&1'
+}
+M48() { # 5. o stage já preenchido na entrada passa a ser "explicado" pelo ownership
+  troca "$FECHAMENTO_SH" '  [ -n "$staged" ] || return 0' \
+    '  [ -n "$staged" ] || return 0
+  verifica_ownership "$TASK" $staged >/dev/null 2>&1 && return 0'
+}
+M49() { # 6. a V9 (união das tasks) passa a usar o escopo unitário do E1
+  # A frase-alvo fica NO MEIO do parágrafo — `apaga` só corta prefixo de
+  # linha e apagaria zero linhas (falso-negativo). `troca` na linha inteira.
+  troca "$PRONTIDAO" \
+    'Um arquivo declarado **só em outra task** da feature é `arquivo_de_task_irma` no E1 (não entra naquele commit; `references/01-commits.md`) e **passa na V9**, porque ele está no plano do trabalho. Isso não é incoerência: a V9 existe para pegar arquivo que **ninguém** planejou, e transformá-la em escopo unitário faria toda task que toca arquivo de outra reprovar a entrega inteira — barrando trabalho legítimo já replanejado. **Não converta a V9 para o conjunto unitário.**' \
+    'Um arquivo declarado **só em outra task** da feature é `arquivo_de_task_irma` no E1 (não entra naquele commit; `references/01-commits.md`) e **passa na V9**, porque ele está no plano do trabalho. Isso não é incoerência: a V9 existe para pegar arquivo que **ninguém** planejou, e transformá-la em escopo unitário faria toda task que toca arquivo de outra reprovar a entrega inteira — barrando trabalho legítimo já replanejado. **A V9 passa a usar o conjunto unitário do E1.**'
+}
+M50() { # 7. arquivo declarado na atual E numa irmã passa a ser barrado como se fosse só da irmã
+  troca "$OWN_SH" '  elif declara "$1" "$2"; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"' \
+    '  elif declara "$1" "$2" && [ "$(tasks_de "$2")" = "$1" ]; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'
+}
+M51() { # 8. a V11 ganha prova mesmo quando o E1 parou sem commitar de verdade
+  troca "$FECHAMENTO_SH" '    2)' \
+    '    2)
+      bash "$SEQ_SH" --acrescentar "$ENTREGA" "$task" "$(git rev-parse --short HEAD 2>/dev/null)" >/dev/null 2>&1'
+}
+M52() { # 9. a trava não é liberada quando o ownership barra
+  troca "$FECHAMENTO_SH" 'verifica_ownership() { # <task> <caminho>...' \
+    'verifica_ownership() { # <task> <caminho>...
+  LIBERAR_NA_SAIDA=0'
+}
+M53() { # 3b. o caso 2 (arquivo_de_task_irma) é ignorado pelo fechamento real
+  troca "$FECHAMENTO_SH" '  case "$rc" in' '  case 0 in'
+}
+
 LISTA='M1a|remove a regra L4 do classificador|teste
 M1b|remove a linha L4 do reference|validador
 M2a|remove a regra D4 do classificador|teste
@@ -272,7 +354,23 @@ M37b|o schema perde a regra do prefixo legado|validador
 M37c|o E1 tardio perde o proximo seq global|validador
 M37d|o template da ENTREGA perde a chave seq|validador
 M37e|sequencia quebrada vira causa do portao|validador
-M37f|volta a existir um segundo parser de commits|validador'
+M37f|volta a existir um segundo parser de commits|validador
+M38|trata arquivo da irma como desvio|teste_own
+M39|aceita arquivo da irma como se fosse da task atual|teste_own
+M40|usa a uniao das tasks como ownership do E1|teste_own
+M41|escolhe o owner pela primeira task encontrada|teste_own
+M42|nao sinaliza a condicao: deixa sair commit parcial|teste_own
+M43|hook para de falhar fechado e obedece ao modo aviso|validador
+M44|ownership roda antes de adquirir o lock|validador
+M45|ownership roda antes da checagem de stage vazio|validador
+M46|hook deixa de barrar arquivo_de_task_irma (defesa em profundidade)|teste_hooks
+M47|bloqueio de ownership consome seq mesmo sem commitar|teste_integracao
+M48|stage preexistente e "explicado" pelo ownership|teste_integracao
+M49|V9 vira escopo unitario (usa o dono, nao a uniao)|validador
+M50|atual+irma e barrado como se fosse so da irma|teste_integracao
+M51|V11 ganha prova mesmo sem commit real|teste_integracao
+M52|lock nao e liberado na saida do ownership|teste_integracao
+M53|caso 2 (arquivo_de_task_irma) e ignorado pelo fechamento real|teste_integracao'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
@@ -285,7 +383,7 @@ controle() {
   local d rc
   d="$(copia)"
   echo "Controle — cópia SEM mutação: as verificações têm que passar"
-  for v in teste teste_causa teste_v11 teste_seq validador; do
+  for v in teste teste_causa teste_v11 teste_seq teste_own teste_hooks teste_integracao validador; do
     rc=0; ( cd "$d" && "$v" ) || rc=$?
     if [ "$rc" = 0 ]; then printf '  ok     %s\n' "$v"
     else CONTROLE_OK=0; printf '  FALHA  %s — verde era esperado (rc=%s)\n' "$v" "$rc"

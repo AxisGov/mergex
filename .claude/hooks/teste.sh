@@ -168,6 +168,88 @@ caso "sem arquivo: metodo em aviso" mergex/commit-por-task.sh "$(bash_json 'git 
 rm -f .expx/hooks.json
 
 echo
+echo "commit-por-task — arquivo de task irma (a quarta situacao do E1)"
+# Duas tasks CONCLUIDAS, para que o que esta em jogo seja so o ownership: nem
+# status, nem suite, nem mistura acidental de trabalho inacabado.
+git reset -q
+mkdir -p docs/irma
+cat > docs/irma/tasks.md <<'YAML'
+---
+expx_schema: 1
+kind: tasks
+tasks:
+  - id: T-07.01
+    titulo: A task que esta fechando agora
+    status: concluida
+    arquivos:
+      cria: [src/atual.ts]
+      altera: []
+    suite: verde
+  - id: T-07.02
+    titulo: A task irma, ja fechada antes
+    status: concluida
+    arquivos:
+      cria: [src/irma.ts]
+      altera: []
+    suite: verde
+---
+YAML
+echo "atual" > src/atual.ts; echo "irma" > src/irma.ts
+git add -A && git commit -qm "plano com duas tasks concluidas"
+echo "mudanca" >> src/atual.ts; echo "mudanca" >> src/irma.ts
+
+# O rodape `Task:` e o que declara qual task esta fechando. O contrato do E1
+# ja o exige em toda mensagem de commit de task.
+MSG_ATUAL='git commit -m "feat(ui): a task atual
+
+Task: T-07.01
+Trabalho: ft-irma"'
+
+git add src/atual.ts
+caso "so o arquivo da task atual"        mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 0
+git add src/irma.ts
+caso "atual + irma: falha fechada"       mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 2
+git reset -q && git add src/irma.ts
+caso "so o arquivo da irma: falha fechada" mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 2
+
+# O ponto do C1: esta condicao falha FECHADA mesmo com o hook em aviso, que e
+# o modo padrao. Deixa-la passar produziria o commit parcial enganoso da task.
+mkdir -p .expx
+echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"aviso"}}}' > .expx/hooks.json
+caso "em aviso, ainda barra"             mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 2
+# `desligado` continua desligando o hook inteiro: e a valvula de escape do time.
+echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"desligado"}}}' > .expx/hooks.json
+caso "desligado desliga tambem esta"     mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 0
+rm -f .expx/hooks.json
+
+# A mensagem tambem chega por arquivo (`git commit -F`), que e como o E1 a
+# escreve para preservar as quebras de linha do corpo.
+printf 'feat(ui): a task atual\n\nTask: T-07.01\nTrabalho: ft-irma\n' > .git/MENSAGEM
+caso "mensagem por -F"                   mergex/commit-por-task.sh "$(bash_json 'git commit -F .git/MENSAGEM')" 2
+rm -f .git/MENSAGEM
+
+# Sem dono declarado, nada e inferido: vale o comportamento de sempre (aviso).
+caso "sem rodape Task: nao infere dono"  mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 0
+caso "dois rodapes Task: e ambiguo"      mergex/commit-por-task.sh \
+  "$(bash_json 'git commit -m "x
+
+Task: T-07.01
+Task: T-07.02"')" 0
+
+# V9 nao muda: ela pergunta se o arquivo foi planejado NA FEATURE, pela uniao.
+caso "V9 (uniao) aceita o arquivo da irma" mergex/arquivo-fora-do-plano.sh "$(bash_json "$MSG_ATUAL")" 0
+
+# Replanejado: a task atual passa a declarar o arquivo, e o fechamento segue.
+sed -i.bak 's#cria: \[src/atual.ts\]#cria: [src/atual.ts, src/irma.ts]#' docs/irma/tasks.md
+rm -f docs/irma/tasks.md.bak
+caso "replanejado: a atual declara, e passa" mergex/commit-por-task.sh "$(bash_json "$MSG_ATUAL")" 0
+
+git reset -q
+git checkout -q -- src/atual.ts src/irma.ts docs/irma/tasks.md 2>/dev/null
+rm -rf docs/irma src/atual.ts src/irma.ts
+git add -A && git commit -qm "limpa o cenario da task irma"
+
+echo
 echo "arquivo-fora-do-plano"
 git reset -q && git add src/a.ts
 caso "arquivo declarado"        mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0

@@ -48,6 +48,88 @@ PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
 [ -n "$PREP" ] || exit 0
 
 # --------------------------------------------------------------------------
+# Arquivo de task irmã — a quarta situação do E1
+# --------------------------------------------------------------------------
+# Antes de tudo: um arquivo que mudou, que NÃO é da task sendo fechada e que
+# outra task da feature declara. Não é mistura de tasks (o conselho "commite
+# uma de cada vez" fecharia de novo uma task congelada) e não é desvio (o
+# arquivo foi planejado). É evidência mecânica de incompatibilidade entre
+# execução e plano, e o fechamento para aqui.
+#
+# Esta condição FALHA FECHADO mesmo com o hook em `aviso`, e é a única deste
+# hook que faz isso. O motivo é o da própria condição: deixá-la passar produz
+# um commit parcial enganoso da task — o dano que o hook existe para impedir,
+# e que não tem volta depois de entrar no histórico. As demais verificações
+# deste hook continuam exatamente no modo configurado.
+#
+# Quem classifica é o script da skill, não o hook: uma implementação só,
+# provada pela bancada. Ausente — instalação parcial —, o hook segue com o que
+# sempre fez (falha aberta no método).
+#
+# P0.2-C7-A: `scripts/fechamento-do-e1.sh` — a seção crítica do E1 — chama o
+# MESMO script, ANTES do primeiro `git add`. Pelo caminho normal, o arquivo de
+# task irmã nunca chega a este hook, porque nunca chega a ser staged. Este
+# bloco continua existindo como DEFESA EM PROFUNDIDADE, para quem roda
+# `git add`/`git commit` por fora da seção crítica; ele não implementa uma
+# segunda regra, só chama de novo a mesma classificação.
+OWNERSHIP="$DIR/../../skills/mergex/scripts/ownership-da-task.sh"
+
+# A task que está sendo fechada é a que a mensagem DECLARA no rodapé `Task:`,
+# que o contrato do E1 já exige em todo commit de task. Nunca é adivinhada:
+# escolher a primeira task do plano, ou a do arquivo mais recente, inventaria
+# o dono. Duas declarações diferentes, ou nenhuma, é "não determinada".
+MSG="$CMD"
+ARQ_MSG="$(printf '%s' "$CMD" | sed -n 's/.*[[:space:]]-F[[:space:]]*\([^[:space:]]*\).*/\1/p; s/.*--file=\([^[:space:]]*\).*/\1/p' | head -1)"
+if [ -n "$ARQ_MSG" ]; then
+  ARQ_MSG="$(printf '%s' "$ARQ_MSG" | sed "s/^['\"]//; s/['\"]$//")"
+  case "$ARQ_MSG" in
+    /*) : ;;
+    *) ARQ_MSG="$RAIZ/$ARQ_MSG" ;;
+  esac
+  [ -r "$ARQ_MSG" ] && MSG="$MSG
+$(cat "$ARQ_MSG" 2>/dev/null)"
+fi
+TASK_ATUAL="$(printf '%s' "$MSG" | grep -oE 'Task:[[:space:]]*T-[0-9]+\.[0-9]+' \
+  | sed 's/.*[[:space:]]//' | sort -u)"
+[ "$(printf '%s\n' "$TASK_ATUAL" | grep -c .)" = 1 ] || TASK_ATUAL=""
+
+if [ -n "$TASK_ATUAL" ] && [ -r "$OWNERSHIP" ]; then
+  IRMA="$(printf '%s\n' "$PREP" \
+    | bash "$OWNERSHIP" --classificar "$RAIZ" "$TASK_ATUAL" 2>/dev/null \
+    | awk -F'\t' '$1 == "arquivo_de_task_irma" { print "  - " $2 "   (declarado em " $3 ")" }')"
+  if [ -n "$IRMA" ]; then
+    QTD_IRMA="$(printf '%s\n' "$IRMA" | grep -c .)"
+    ARQ_IRMA="$(printf '%s\n' "$IRMA" | sed 's/^  - //; s/   (declarado em .*//' \
+      | jq -R . | jq -sc . 2>/dev/null || echo '[]')"
+    expx_rastro "$RAIZ" "acao_bloqueada" "bloqueado" \
+      "arquivo de task irma no fechamento de $TASK_ATUAL ($QTD_IRMA)" "$HOOK" "$ARQ_IRMA"
+    printf '%s\n' "mergex/commit-por-task — arquivo de OUTRA task no fechamento desta
+
+Task sendo fechada: $TASK_ATUAL
+Arquivo(s) que mudaram e que só outra task da feature declara:
+
+$IRMA
+No E1 o dono do arquivo é a task que está sendo fechada. Estes arquivos foram
+planejados — só que em outra task —, então NÃO são desvio de escopo; e não
+podem entrar neste commit, porque isso os atribuiria em silêncio a $TASK_ATUAL.
+
+Isto é evidência mecânica de que a execução e o plano não batem.
+
+O que fazer:
+  - Tire o arquivo do índice, sem tocar na sua alteração:
+      git restore --staged <arquivo>
+  - Não apague, não restaure o conteúdo, não faça stash e não o mova para
+    outra task: a alteração é real e precisa continuar na árvore.
+  - Leve a condição ao planejamento. Depois que o plano passar a declarar o
+    arquivo na task atual, este commit passa normalmente.
+
+A mergex só detecta e nomeia a condição (arquivo_de_task_irma). Registrar
+bloqueio, abrir B-NN e replanejar é da sprintx." >&2
+    exit 2
+  fi
+fi
+
+# --------------------------------------------------------------------------
 # As tasks do trabalho
 # --------------------------------------------------------------------------
 # Sem estado próprio: tudo sai de tasks.md, que já existe.

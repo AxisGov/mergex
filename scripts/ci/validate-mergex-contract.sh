@@ -813,10 +813,201 @@ grep -Fq '**Leitura não trava nada**' "$commits" \
 # `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
 escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$escritores" = "$esperado" ] \
   || fail "unexpected executable writer of ENTREGA.commits: $escritores"
 grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
   || fail 'E1 does not fence new writes behind the critical section'
+
+# ---------------------------------------------------------------------------
+# P0.2-C1 — arquivo de task irmã: ownership unitário no E1, união na V9
+# ---------------------------------------------------------------------------
+own_sh='.claude/skills/mergex/scripts/ownership-da-task.sh'
+own_teste='scripts/ci/test-ownership-task.sh'
+hook_task='.claude/hooks/mergex/commit-por-task.sh'
+hooks_readme='.claude/hooks/README.md'
+
+for f in "$own_sh" "$own_teste" "$hook_task" "$hooks_readme"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# As quatro situações existem, são exatamente quatro, e o reference nomeia
+# cada uma delas com o mesmo termo do script. Prosa e script ficam amarrados:
+# renomear de um lado só quebra aqui.
+situacoes="$(bash "$own_sh" --situacoes | cut -d'|' -f1)"
+[ "$(printf '%s\n' "$situacoes" | grep -c .)" = 4 ] \
+  || fail 'ownership-da-task no longer declares exactly four situations'
+for s in na_task_atual declarado_nao_mudou desvio arquivo_de_task_irma; do
+  printf '%s\n' "$situacoes" | grep -Fxq "$s" \
+    || fail "ownership-da-task dropped the situation: $s"
+  grep -Fq "$s" "$commits" \
+    || fail "E1 reference does not name the situation: $s"
+done
+[ "$(bash "$own_sh" --condicao)" = arquivo_de_task_irma ] \
+  || fail 'the structured condition is no longer arquivo_de_task_irma'
+
+# A mergex nomeia o que OBSERVA; a classe é da sprintx (DM-147).
+if bash "$own_sh" --situacoes | grep -Fq 'defeito_de_plano'; then
+  fail 'mergex emits the sprintx class defeito_de_plano instead of what it observes'
+fi
+# Só em comentário, explicando de quem é a classe: nunca em código que a emita.
+if grep -v '^[[:space:]]*#' "$own_sh" | grep -Fq 'defeito_de_plano'; then
+  fail 'the ownership script emits the sprintx class defeito_de_plano'
+fi
+grep -Fq 'defeito_de_plano' "$own_sh" \
+  || fail 'the ownership script no longer says who owns the defeito_de_plano class'
+
+# O E1 é unitário e diz que arquivo de task irmã NÃO é desvio.
+grep -Fq 'O dono do arquivo é a task que está sendo fechada' "$commits" \
+  || fail 'E1 no longer states unitary ownership'
+grep -Fq 'ownership-da-task.sh --classificar' "$commits" \
+  || fail 'E1 does not call the ownership script'
+grep -Fq 'mudou e **só outra task** declara' "$commits" \
+  || fail 'E1 dropped the fourth situation from the table'
+grep -Fq 'não é desvio' "$commits" \
+  || fail 'E1 no longer separates arquivo_de_task_irma from desvio'
+grep -Fq 'commit parcial enganoso' "$commits" \
+  || fail 'E1 no longer forbids the misleading partial commit'
+for proibido in 'não** apague' 'não** faça `stash`' 'não** o mova para outra task'; do
+  grep -Fq "$proibido" "$commits" \
+    || fail "E1 dropped a forbidden recovery action: $proibido"
+done
+
+# A V9 continua com a UNIÃO, e o contrato proíbe convertê-la para unitário.
+grep -Fq 'união dos `arquivos.cria` + `arquivos.altera` de todas as tasks' "$prontidao" \
+  || fail 'V9 no longer compares against the union of all tasks'
+grep -Fq '**Não converta a V9 para o conjunto unitário.**' "$prontidao" \
+  || fail 'V9 lost the ban on switching to unitary scope'
+grep -Fq 'passa na V9' "$prontidao" \
+  || fail 'V9 no longer states that a sister-task file passes'
+
+# O hook delega ao script (uma implementação só) e FALHA FECHADO: o bloco da
+# condição não pode ser regido pelo modo do hook, senão em `aviso` — o padrão —
+# ele deixaria passar o commit parcial que a condição existe para impedir.
+grep -Fq 'ownership-da-task.sh' "$hook_task" \
+  || fail 'commit-por-task does not delegate to the ownership script'
+grep -Fq 'Task:[[:space:]]*T-[0-9]+\.[0-9]+' "$hook_task" \
+  || fail 'commit-por-task no longer reads the declared current task from the Task: footer'
+bloco_irma="$(awk '/^if \[ -n "\$TASK_ATUAL" \] && \[ -r "\$OWNERSHIP" \]; then$/, /^    exit 2$/' "$hook_task")"
+[ -n "$bloco_irma" ] || fail 'commit-por-task lost the sister-task block'
+if printf '%s\n' "$bloco_irma" | grep -Fq 'MODO'; then
+  fail 'the sister-task block is gated by the hook mode: it must fail closed even in aviso'
+fi
+printf '%s\n' "$bloco_irma" | grep -Fxq '    exit 2' \
+  || fail 'the sister-task block no longer blocks the commit'
+grep -Fq 'falha fechada mesmo em aviso' "$hooks_readme" \
+  || fail 'hooks README no longer documents the fail-closed exception'
+
+# Nenhum outro hook foi promovido por oportunidade neste bloco.
+grep -Fq '"commit-por-task": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'commit-por-task was promoted out of aviso'
+grep -Fq '"arquivo-fora-do-plano": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'arquivo-fora-do-plano was promoted out of aviso'
+grep -Fq '"pr-so-com-portao": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'pr-so-com-portao was promoted out of aviso'
+
+# As decisões ficaram registradas (renumeradas de DM-117..123 para DM-147..153
+# na integração P0.2-C7-A: a faixa antiga colidia com a P0.2-C3).
+for dm in DM-147 DM-148 DM-149 DM-150 DM-151 DM-152 DM-153; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-A — compõe C1 (ownership) com C5 (seção crítica) no fechamento real
+# ---------------------------------------------------------------------------
+for f in "$fecha_sh" "$own_sh" "$hook_task"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# A ordem normativa dentro de `--fechar` e `--preparar`: resolver/lock, stage
+# vazio, OWNERSHIP, e só então o primeiro `git add`. Checagem estrutural — não
+# de execução — porque é exatamente a ordem das LINHAS que compõe os dois
+# contratos sem ambiguidade.
+bloco_fechar="$(awk '/^  --fechar\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
+[ -n "$bloco_fechar" ] || fail 'fechamento-do-e1 lost the --fechar block'
+# A sequência de RÓTULOS, na ordem em que as linhas aparecem — nunca a
+# ordenação das próprias linhas, que `grep -n` já devolve crescente por
+# construção e não provaria nada.
+ordem_fechar="$(printf '%s\n' "$bloco_fechar" | awk '
+  /abre_secao /              { print "abre_secao"; next }
+  /confere_stage_de_entrada/ { print "confere_stage_de_entrada"; next }
+  /verifica_ownership /      { print "verifica_ownership"; next }
+  /prepara "\$@"/            { print "prepara"; next }
+  /verifica "\$VERIFICACAO"/ { print "verifica"; next }
+  /conclui /                 { print "conclui"; next }
+')"
+esperado_fechar='abre_secao
+confere_stage_de_entrada
+verifica_ownership
+prepara
+verifica
+conclui'
+[ "$ordem_fechar" = "$esperado_fechar" ] \
+  || fail "--fechar does not call the critical-section steps in the normative order: got [$ordem_fechar]"
+
+bloco_preparar="$(awk '/^  --preparar\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
+[ -n "$bloco_preparar" ] || fail 'fechamento-do-e1 lost the --preparar block'
+ordem_preparar="$(printf '%s\n' "$bloco_preparar" | awk '
+  /abre_secao /              { print "abre_secao"; next }
+  /confere_stage_de_entrada/ { print "confere_stage_de_entrada"; next }
+  /verifica_ownership /      { print "verifica_ownership"; next }
+  /prepara "\$@"/            { print "prepara"; next }
+')"
+esperado_preparar='abre_secao
+confere_stage_de_entrada
+verifica_ownership
+prepara'
+[ "$ordem_preparar" = "$esperado_preparar" ] \
+  || fail "--preparar does not call the critical-section steps in the normative order: got [$ordem_preparar]"
+
+# Ownership é chamado pelo fechamento real, mas degrada como o hook: ausente
+# (instalação parcial), a seção crítica segue sem ele — ela não depende dele
+# para o contrato central (trava, stage, commit, seq). A checagem obrigatória
+# de dependência (`for f in ... exit 1`) cobre só trava e seq, nunca ownership.
+grep -Fq 'OWNERSHIP_SH="$AQUI/ownership-da-task.sh"' "$fecha_sh" \
+  || fail 'fechamento-do-e1 no longer wires the ownership script'
+if grep -Fq 'for f in "$TRAVA_SH" "$SEQ_SH" "$OWNERSHIP_SH"' "$fecha_sh"; then
+  fail 'fechamento-do-e1 hard-requires the ownership script at startup (breaks minimal/duble installs)'
+fi
+grep -Fq '  [ -f "$OWNERSHIP_SH" ] || return 0' "$fecha_sh" \
+  || fail 'fechamento-do-e1 does not degrade gracefully when the ownership script is absent'
+
+# `arquivo_de_task_irma`: nenhum `add` ocorreu, a trava é liberada, e a lista
+# de commits não foi tocada por esse caminho.
+grep -Fq 'para 8 ' "$fecha_sh" || fail 'fechamento-do-e1 lost the arquivo_de_task_irma exit code'
+bloco_ownership="$(awk '/^verifica_ownership\(\) \{/,/^}$/' "$fecha_sh")"
+[ -n "$bloco_ownership" ] || fail 'fechamento-do-e1 lost the verifica_ownership function'
+if printf '%s\n' "$bloco_ownership" | grep -Fq 'git add -- '; then
+  fail 'verifica_ownership stages something itself'
+fi
+if printf '%s\n' "$bloco_ownership" | grep -F 'sequencia-de-commits.sh' | grep -Fq -- '--acrescentar'; then
+  fail 'verifica_ownership appends to ENTREGA.commits'
+fi
+
+# Ownership nunca "explica" um stage preexistente: DM-138 continua valendo, e
+# a checagem do stage de entrada vem ANTES do ownership em todo call site.
+if grep -Fq 'confere_stage_de_entrada' "$fecha_sh"; then
+  linha_stage="$(grep -n '    confere_stage_de_entrada' "$fecha_sh" | head -1 | cut -d: -f1)"
+  linha_own="$(grep -n '    verifica_ownership "\$TASK" "\$@"$' "$fecha_sh" | head -1 | cut -d: -f1)"
+  [ -n "$linha_stage" ] && [ -n "$linha_own" ] && [ "$linha_stage" -lt "$linha_own" ] \
+    || fail 'ownership runs before the entry-stage check somewhere in --fechar'
+fi
+
+# Uma implementação só de classificação: os call sites executáveis de
+# `ownership-da-task.sh --classificar` são exatamente estes três — o
+# fechamento real, o hook (defesa em profundidade) e a bancada dedicada.
+own_chamadores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e 'ownership-da-task.sh' . \
+  | LC_ALL=C sort | tr '\n' ' ')"
+own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/validate-mergex-contract.sh '
+[ "$own_chamadores" = "$own_esperado" ] \
+  || fail "unexpected caller of ownership-da-task.sh: $own_chamadores"
+
+# O hook é defesa em profundidade, não uma segunda regra: ele classifica pelo
+# MESMO script que o fechamento real, nunca por uma reimplementação própria.
+if grep -v '^[[:space:]]*#' "$hook_task" | grep -Ev 'ownership-da-task\.sh|OWNERSHIP=' \
+   | grep -Eq 'S_IRMA|arquivo_de_task_irma.*=.*\['; then
+  fail 'commit-por-task reimplements the ownership classification instead of delegating'
+fi
 
 printf 'contract checks passed\n'

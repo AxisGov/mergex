@@ -49,6 +49,18 @@
 #
 #   fechamento-do-e1.sh --status      # diagnóstico da trava desta worktree
 #
+# Ordem normativa combinada (P0.2-C7-A — compõe C1 e C5 na mesma seção):
+#   1 resolver worktree/índice   5 git add                9  capturar SHA
+#   2 adquirir a trava do E1     6 diff em stage           10 acrescentar em
+#   3 stage inicial vazio?       7 demais verificações         ENTREGA.commits
+#   4 ownership unitário da      8 git commit              11 validar a lista
+#     task (ownership-da-task.sh)                          12 liberar a trava
+# O ownership (4) roda DEPOIS da checagem de stage (3) e ANTES de qualquer
+# `git add` (5): ele prova de quem é o ARQUIVO/TASK, nunca de quem é o
+# ÍNDICE. Se o stage de entrada já não estava vazio, a regra 3 (DM-138) já
+# parou antes de chegar aqui — o ownership nunca "explica" ou autoriza um
+# stage preexistente.
+#
 # Códigos:
 #   0  seção crítica concluída (ou preparada, no `--preparar`)
 #   2  E1 OCUPADO — outra execução tem a seção crítica deste índice
@@ -57,6 +69,10 @@
 #   5  `git commit` falhou — nenhum registro de E1 foi escrito
 #   6  o commit existe e o append em `ENTREGA.commits` falhou
 #   7  o commit e o item existem e a lista final não valida
+#   8  `arquivo_de_task_irma` — arquivo planejado em outra task da feature;
+#      nenhum `git add` ocorreu; a trava desta execução foi liberada
+#   9  ownership não determinável (plano legado, task fora do formato);
+#      nenhum `git add` ocorreu; a trava desta execução foi liberada
 #   64 uso inválido
 #
 # Bash 3.2 (macOS): nada de mapfile, arrays associativos ou ${v,,}.
@@ -66,6 +82,11 @@ set -uo pipefail
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRAVA_SH="$AQUI/trava-do-e1.sh"
 SEQ_SH="$AQUI/sequencia-de-commits.sh"
+# OWNERSHIP_SH NÃO entra no `for` abaixo: a seção crítica em si (trava, stage,
+# commit, seq) funciona sem ele. Ausente — instalação parcial —, o ownership
+# é pulado (ver verifica_ownership), no mesmo espírito de falha aberta que o
+# hook `commit-por-task` já usa para o mesmo script.
+OWNERSHIP_SH="$AQUI/ownership-da-task.sh"
 
 for f in "$TRAVA_SH" "$SEQ_SH"; do
   [ -f "$f" ] || { printf 'fechamento-do-e1: falta %s\n' "$f" >&2; exit 1; }
@@ -160,6 +181,51 @@ confere_stage_de_entrada() {
     'Em stage:' \
     "$(printf '%s\n' "$staged" | sed 's/^/  /')" \
     'Decida o que fazer com eles e rode o E1 de novo.'
+}
+
+# ---------------------------------------------------------------------------
+# 4 — ownership unitário da task, DEPOIS do stage vazio (3) e ANTES do
+# primeiro `git add` (5). Mesma classificação que o hook `commit-por-task`
+# usa depois, por outro caminho: uma implementação só
+# (ownership-da-task.sh), nunca duas divergentes.
+#
+# Prova de quem é o ARQUIVO/TASK, nunca de quem é o ÍNDICE: se o stage de
+# entrada já não estava vazio, a seção 3 já parou antes de chegar aqui, e
+# este passo não roda sobre stage nenhum (DM-138 continua valendo).
+# ---------------------------------------------------------------------------
+verifica_ownership() { # <task> <caminho>...
+  local task="$1"; shift
+  local saida rc irma plano
+
+  # Script ausente — instalação parcial —, segue: a seção crítica não depende
+  # dele para o que é o seu contrato central (trava, stage, commit, seq).
+  [ -f "$OWNERSHIP_SH" ] || return 0
+
+  # Sem NENHUM tasks.md sob docs/, não há plano contra o qual determinar
+  # ownership: segue, como o resto da mergex já trata "sem tasks.md" (o hook
+  # `commit-por-task` faz a mesma checagem para a verificação de mistura).
+  # "Plano legado" (DM-153) é outra coisa — plano EXISTE, mas a task atual não
+  # é determinável nele — e essa falha fechado abaixo, no `*)`.
+  plano="$(find "$RAIZ/docs" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
+  [ -n "$plano" ] || return 0
+
+  saida="$(printf '%s\n' "$@" | bash "$OWNERSHIP_SH" --classificar "$RAIZ" "$task" 2>&1)"; rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    2)
+      irma="$(printf '%s\n' "$saida" | awk -F'\t' '$1 == "arquivo_de_task_irma" { print "  - " $2 "   (declarado em " $3 ")" }')"
+      para 8 'PARADO — arquivo_de_task_irma: arquivo planejado em outra task da feature' \
+        "Task sendo fechada: $task" \
+        'Arquivo(s) que mudaram e que só outra task da feature declara:' \
+        "$irma" \
+        'Nada foi adicionado ao índice: o ownership roda antes do primeiro `git add`.' \
+        'A mergex só detecta e nomeia a condição; levar ao replanejamento é da sprintx.' ;;
+    *)
+      para 9 'PARADO — o ownership da task não pôde ser determinado' \
+        "$saida" \
+        'Nada foi adicionado ao índice. O script recusou responder — plano legado' \
+        'ou task fora do formato — e o E1 não infere o dono pela prosa.' ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -288,9 +354,10 @@ case "$ACAO" in
     recusa_bloco "$@"
     abre_secao "$TASK"                 # 1 e 2
     confere_stage_de_entrada           # 3
-    prepara "$@"                       # A e B
-    verifica "$VERIFICACAO"            # C
-    conclui "$ENTREGA" "$TASK" "$MENSAGEM"   # D a G
+    verifica_ownership "$TASK" "$@"    # 4
+    prepara "$@"                       # 5 (A) e 6 (B)
+    verifica "$VERIFICACAO"            # 7 (C)
+    conclui "$ENTREGA" "$TASK" "$MENSAGEM"   # 8-11 (D a G)
     exit 0 ;;
 
   --preparar)
@@ -298,6 +365,7 @@ case "$ACAO" in
     recusa_bloco "$@"
     abre_secao "$TASK"
     confere_stage_de_entrada
+    verifica_ownership "$TASK" "$@"
     prepara "$@"
     # A seção continua aberta: quem preparou tem a trava até `--concluir`.
     LIBERAR_NA_SAIDA=0

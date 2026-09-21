@@ -20,7 +20,7 @@ importam mais, e onde um hook mal escrito faz mais estrago.
 | `sem-segredo` | `PreToolUse` | **bloqueio** | Barra commit e escrita com segredo, credencial ou dado real de cliente |
 | `git-perigoso` | `PreToolUse` | **bloqueio** | Barra push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva |
 | `branch-limpa` | `PreToolUse` | **bloqueio** | Barra criação ou troca de branch com alteração não commitada pendente |
-| `commit-por-task` | `PreToolUse` | aviso | Verifica que o commit corresponde a **uma** task, `concluida` e com registro de suíte válido (`parcial` ou `verde`) |
+| `commit-por-task` | `PreToolUse` | aviso¹ | Verifica que o commit corresponde a **uma** task, `concluida` e com registro de suíte válido (`parcial` ou `verde`); e que nenhum arquivo em preparação pertence **só a outra task** da feature |
 | `arquivo-fora-do-plano` | `PreToolUse` | aviso | Compara o que está em preparação com a lista declarada na task. Artefato de método do **próprio** trabalho é isento; o de outro trabalho, não |
 | `pr-so-com-portao` | `PreToolUse` | aviso | Barra push e abertura de PR sem `PRONTO` registrado no rastro |
 
@@ -28,6 +28,40 @@ Os três de segurança nascem em bloqueio: segredo commitado não tem volta, e o
 falso positivo ali é raro. Os três de método nascem em aviso, e só sobem a
 bloqueio depois de rodarem semanas sem falso positivo — a lista de violações
 que o painel acumula é o que guia a promoção.
+
+### ¹ A exceção do `commit-por-task`: arquivo de task irmã
+
+O hook continua em **aviso**, e todas as verificações dele obedecem ao modo
+configurado — menos **uma**: um arquivo em preparação que mudou, que a task
+sendo fechada **não** declara e que **outra task da feature** declara. Essa
+condição **falha fechada mesmo em aviso** (`exit 2`).
+
+Não é uma promoção do hook, e sim uma condição que não sobrevive a falhar
+aberta: deixá-la passar cria o **commit parcial enganoso** da task — o
+histórico afirmando que a task fechou com o trabalho que ela tem —, e commit
+no histórico não tem volta. As demais verificações continuam avisando, e
+`desligado` continua desligando o hook inteiro.
+
+Quem classifica é `.claude/skills/mergex/scripts/ownership-da-task.sh`: uma
+implementação só, provada pela bancada `scripts/ci/test-ownership-task.sh`.
+Script ausente — instalação parcial — e o hook segue com o que sempre fez.
+
+A task que está fechando sai do rodapé **`Task: T-NN.MM`** da mensagem de
+commit, que o contrato do E1 já exige (do `-m` ou do arquivo do `-F`). **Nunca
+é adivinhada**: sem rodapé, ou com dois diferentes, o hook não classifica nada
+e vale o comportamento anterior. O contrato inteiro está em
+`references/01-commits.md`, "O dono do arquivo é a task que está sendo
+fechada", e as decisões em DM-147 a DM-153.
+
+`scripts/fechamento-do-e1.sh` — a seção crítica do E1 — classifica com o
+**mesmo** script, **antes** do primeiro `git add`: pelo caminho normal, o
+arquivo de task irmã nunca chega a este hook, porque nunca chega a ser
+staged. Este hook continua existindo como **defesa em profundidade** para
+quem roda `git add`/`git commit` por fora da seção crítica — as duas chamadas
+classificam pela mesma implementação, nunca por regras divergentes.
+
+A mergex só **detecta e nomeia** a condição (`arquivo_de_task_irma`). Abrir
+`B-NN` e replanejar é da sprintx.
 
 ## Onde cada coisa mora
 
