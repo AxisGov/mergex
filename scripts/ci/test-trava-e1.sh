@@ -388,7 +388,7 @@ if grupo I; then
   duble() { # <dir do duble> <corpo>
     mkdir -p "$1"
     cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" \
-      "$SCRIPTS/ownership-da-task.sh" "$1/"
+      "$SCRIPTS/ownership-da-task.sh" "$SCRIPTS/contrato-de-commit.sh" "$1/"
     printf '%s\n' "$2" > "$1/sequencia-de-commits.sh"
   }
   I="$D/i"; repo "$I"
@@ -465,7 +465,7 @@ if grupo ESPIAO; then
   SSp="$D/scripts-s"; REGISTRO="$D/espiao.txt"; : > "$REGISTRO"
   mkdir -p "$SSp"
   cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" \
-    "$SCRIPTS/ownership-da-task.sh" "$SSp/"
+    "$SCRIPTS/ownership-da-task.sh" "$SCRIPTS/contrato-de-commit.sh" "$SSp/"
   {
     printf '#!/usr/bin/env bash\n'
     printf 't="$(git rev-parse --git-path index)%s"\n' "$SUFIXO"

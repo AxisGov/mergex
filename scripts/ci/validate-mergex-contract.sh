@@ -27,10 +27,11 @@ abrir_cmd='.claude/commands/mergex-abrir.md'
 abrir_oc='.opencode/commands/mergex-abrir.md'
 mergex_cmd='.claude/commands/mergex.md'
 mergex_oc='.opencode/commands/mergex.md'
+persiste_sh='.claude/skills/mergex/scripts/persistir-metodo.sh'
 
 for f in "$skill" "$abertura" "$commits" "$prontidao" "$integ_sprintx" \
          "$patch_sprintx" "$base_sh" "$hook_escopo" "$abrir_cmd" "$abrir_oc" \
-         "$mergex_cmd" "$mergex_oc"; do
+         "$mergex_cmd" "$mergex_oc" "$persiste_sh"; do
   [ -f "$f" ] || fail "missing required file: $f"
 done
 
@@ -120,7 +121,7 @@ grep -Fq 'artefatos de método do próprio trabalho' "$commits" \
   || fail 'E1 does not define method artifacts'
 grep -Fq 'docs/sprintx/features/<trabalho_id>/' "$commits" \
   || fail 'E1 does not scope the method-artifact exemption to the work folder'
-grep -Fq 'Commit de artefatos de método' "$commits" \
+grep -Fq 'Commit de método é classe de primeira classe' "$commits" \
   || fail 'E1 has no deterministic moment for method artifacts'
 grep -Fq 'continua sendo desvio' "$commits" \
   || fail 'E1 no longer treats undeclared product files as deviations'
@@ -128,7 +129,7 @@ grep -Fq 'artefatos de método do próprio trabalho não são desvio' "$prontida
   || fail 'V9 does not exempt the work own method artifacts'
 
 # ---------------------------------------------------------------------------
-# Trabalho corrente do hook de escopo: pela branch, nunca por recência
+# Hook manual continua defensivo pela branch; lifecycle M2 usa contexto explícito
 # ---------------------------------------------------------------------------
 grep -Fq 'expx_trabalho_atual_por_branch()' "$base_sh" \
   || fail 'base.sh does not define the branch-based current-work resolver'
@@ -151,11 +152,11 @@ if grep -Fq 'estado.json' "$hook_escopo"; then
   fail 'scope hook must never read estado.json to decide the current work'
 fi
 
-# A regra está escrita no contrato, não só no código.
-grep -Fq 'exatamente um' "$commits" \
-  || fail 'E1 does not state the exactly-one rule for identifying the current work'
-grep -Fq 'nunca por recência' "$commits" \
-  || fail 'E1 does not forbid resolving the current work by recency'
+# A fonte normativa do lifecycle está escrita no contrato, não só no código.
+grep -Fq 'contexto explícito do chamador' "$commits" \
+  || fail 'method lifecycle does not take current work from explicit context'
+grep -Fq 'prova de consistência, nunca mecanismo de seleção' "$commits" \
+  || fail 'method lifecycle still selects current work from the branch'
 
 # ---------------------------------------------------------------------------
 # O comando manual de revisão nunca é encadeado por contrato nenhum
@@ -199,24 +200,23 @@ grep -Fq '## O fechamento final' "$registro" \
   || fail 'E8 has no final closing step'
 grep -Fq 'git status --porcelain' "$registro" \
   || fail 'E8 closing step does not inspect the dirty tree'
-grep -Fq 'chore(entrega): finalizar registro do trabalho' "$registro" \
-  || fail 'E8 closing commit message missing'
-grep -Fq 'chore(entrega): finalizar registro do trabalho' "$commits" \
-  || fail 'E1 does not describe the E8 closing commit'
-grep -Fq 'Três momentos, e só esses três' "$commits" \
-  || fail 'E1 no longer lists the three moments for method artifacts'
+grep -Fq 'persistir-metodo.sh --persistir' "$registro" \
+  || fail 'E8 closing no longer uses the lifecycle executor'
+grep -Fq 'chore(mergex): persiste metodo e8' "$commits" \
+  || fail 'E1 reference does not describe the E8 method commit'
+grep -Fq 'três checkpoints executáveis e cumulativos' "$commits" \
+  || fail 'E1 no longer lists the three lifecycle checkpoints'
 
 # O commit de fechamento é artefato de método, nunca task nem produto.
-grep -Fq 'não entra na lista `commits`' "$registro" \
+grep -Fq 'não entra em `ENTREGA.commits`' "$registro" \
   || fail 'E8 closing commit is not excluded from the task commit list'
-grep -Fq 'Nenhum arquivo de produto entra nele' "$registro" \
+grep -Fq 'não inclui produto' "$registro" \
   || fail 'E8 closing commit does not exclude product files'
-grep -Fq 'Nunca `git add .`' "$registro" \
-  || fail 'E8 closing commit no longer forbids bulk staging'
-grep -Fq 'Varredura de segredo' "$registro" \
+grep -Fq 'varredura de segredo' "$registro" \
   || fail 'E8 closing commit skips the secret sweep'
-grep -Fq 'Nunca `--amend`' "$registro" \
-  || fail 'E8 closing commit no longer forbids history rewriting'
+if grep -v '^[[:space:]]*#' "$persiste_sh" | grep -Eq 'git add (-A|--all|\.)'; then
+  fail 'E8 lifecycle executor allows bulk staging'
+fi
 
 # Publicação final: mesmo princípio conservador do E6, sem reconciliar nem forçar.
 grep -Fq 'git rev-list --count HEAD..origin/<branch>' "$registro" \
@@ -263,7 +263,7 @@ grep -Fq 'encerra as etapas de entrega' "$skill" \
   || fail 'SKILL.md does not describe the blocked route to E8'
 grep -Fq '### Fechamento bloqueado' "$registro" \
   || fail 'E8 has no blocked closing section'
-grep -Fq '**O passo 4 não roda**' "$registro" \
+grep -Fq '**O passo 3 não roda**' "$registro" \
   || fail 'blocked closing does not forbid publishing the branch'
 grep -Fq 'E2 → E8 (fechamento bloqueado)' "$integ_sprintx" \
   || fail 'sprintx integration does not describe the blocked closing'
@@ -320,11 +320,11 @@ grep -Fq 'nada equivalente na runx' "$registro" \
 grep -Fq 'a runx não ganha isenção equivalente' "$prontidao" \
   || fail 'V9 does not keep the HISTORICO exception out of runx'
 
-# E1: não entra no commit de task; entra no commit pré-E6.
+# E1: não entra no commit de task; entra no checkpoint pre-e2.
 grep -Fq 'não entra no commit de uma task' "$commits" \
   || fail 'E1 lets the HISTORICO into a task commit'
-grep -Fq 'quando a origem é a sprintx** e ele está sujo. É o ponto normal de versionamento' "$commits" \
-  || fail 'E1 does not put the HISTORICO in the pre-E6 artifact commit'
+grep -Fq 'o catálogo `pre-e2` o seleciona' "$commits" \
+  || fail 'E1 does not put the HISTORICO in the pre-e2 checkpoint'
 
 # V9: exclusão cirúrgica e válida também para o que já está no histórico da branch.
 grep -Fq 'exata e cirúrgica' "$prontidao" \
@@ -335,7 +335,7 @@ grep -Fq 'já está no histórico da branch' "$prontidao" \
 # E8: bloqueado persiste o HISTORICO; pronto não o perde.
 grep -Fq 'Inclusive o `HISTORICO.md`' "$registro" \
   || fail 'blocked closing does not persist the HISTORICO'
-grep -Fq 'não entrou no momento pré-E6 esperado' "$registro" \
+grep -Fq 'porque entrou no `pre-e2`' "$registro" \
   || fail 'final closing may lose a still-dirty HISTORICO'
 
 # O hook de escopo implementa a mesma exceção exata, e só para a sprintx.
@@ -577,8 +577,9 @@ if grep -RIn --exclude-dir=.git -e 'task.*versionado: false' -e 'versionado.*por
   fail 'a per-task versionado exemption was invented for V11'
 fi
 
-# O E1 tardio continua permitido, acrescenta ao fim e não reordena o histórico.
-grep -Fq '### O E1 tardio' "$commits" || fail 'E1 has no late-commit procedure'
+# O E1 tardio continua permitido, agora distinguindo criação tardia de
+# recuperação de um commit que já existe; ambos preservam a ordem histórica.
+grep -Fq '### Dois tipos de lacuna E1' "$commits" || fail 'E1 has no late-commit procedure'
 grep -Fq '**Não reordene** os itens antigos' "$commits" \
   || fail 'the late E1 may reorder the existing commit history'
 grep -Fq 'E1 tardio' "$prontidao" || fail 'E2 does not point to the late E1 as the fix'
@@ -813,7 +814,7 @@ grep -Fq '**Leitura não trava nada**' "$commits" \
 # `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
 escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$escritores" = "$esperado" ] \
   || fail "unexpected executable writer of ENTREGA.commits: $escritores"
 grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
@@ -886,8 +887,9 @@ grep -Fq 'passa na V9' "$prontidao" \
 # ele deixaria passar o commit parcial que a condição existe para impedir.
 grep -Fq 'ownership-da-task.sh' "$hook_task" \
   || fail 'commit-por-task does not delegate to the ownership script'
-grep -Fq 'Task:[[:space:]]*T-[0-9]+\.[0-9]+' "$hook_task" \
-  || fail 'commit-por-task no longer reads the declared current task from the Task: footer'
+grep -Fq "grep -Ec '^Task:[[:space:]]*'" "$hook_task" \
+  && grep -Fq "sed -n 's/^Task:[[:space:]]*//p'" "$hook_task" \
+  || fail 'commit-por-task no longer reads the declared current task from parsed Task trailers'
 bloco_irma="$(awk 'index($0, "if [ -n \"$TASK_ATUAL\" ] && [ -r \"$OWNERSHIP\" ]") == 1, /^    exit 2$/' "$hook_task")"
 [ -n "$bloco_irma" ] || fail 'commit-por-task lost the sister-task block'
 if printf '%s\n' "$bloco_irma" | grep -Fq 'MODO'; then
@@ -1031,5 +1033,55 @@ if grep -v '^[[:space:]]*#' "$hook_task" | grep -Ev 'ownership-da-task\.sh|OWNER
    | grep -Eq 'S_IRMA|arquivo_de_task_irma.*=.*\['; then
   fail 'commit-por-task reimplements the ownership classification instead of delegating'
 fi
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M2 — lifecycle executável dos artefatos de método
+# ---------------------------------------------------------------------------
+persiste_sh='.claude/skills/mergex/scripts/persistir-metodo.sh'
+contrato_commit_sh='.claude/skills/mergex/scripts/contrato-de-commit.sh'
+for f in "$persiste_sh" "$contrato_commit_sh"; do
+  [ -f "$f" ] || fail "missing required M2 file: $f"
+done
+
+for modo in --listar --persistir --verificar; do
+  grep -Fq -- "$modo" "$persiste_sh" || fail "persistir-metodo lost mode $modo"
+done
+for checkpoint in pre-e2 pre-e6 e8; do
+  grep -Fq "$checkpoint" "$persiste_sh" || fail "persistir-metodo lost checkpoint $checkpoint"
+done
+grep -Fq 'trava-do-e1.sh' "$persiste_sh" || fail 'method lifecycle does not reuse the C5 lock'
+grep -Fq 'contrato-de-commit.sh' "$persiste_sh" || fail 'method lifecycle does not validate commit grammar'
+grep -Fq 'sem-segredo.sh' "$persiste_sh" || fail 'method lifecycle bypasses the secret gate'
+if codigo "$persiste_sh" | grep -Eq 'git add (-A|--all|docs/)'; then
+  fail 'method lifecycle performs broad staging'
+fi
+if codigo "$persiste_sh" | grep -Fq 'expx_trabalho_atual_por_branch'; then
+  fail 'method lifecycle selects current work from the branch'
+fi
+grep -Fq -- '--checkpoint pre-e2' '.claude/skills/mergex/references/02-prontidao.md' \
+  || fail 'E2 lost the pre-e2 barrier'
+grep -Fq -- '--checkpoint pre-e6' '.claude/skills/mergex/references/06-push.md' \
+  || fail 'E6 lost the pre-e6 barrier'
+grep -Fq -- '--checkpoint e8' '.claude/skills/mergex/references/08-registro.md' \
+  || fail 'E8 lost the terminal checkpoint'
+
+# O contrato decisorio do M2 e parte da superficie verificavel, nao memoria da
+# implementacao. Cada ambiguidade relevante fica numerada e rastreavel.
+for dm in DM-161 DM-162 DM-163 DM-164 DM-165 DM-166 DM-167 DM-168; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+
+# As duas classes de commit e a recuperacao explicita precisam continuar
+# nomeadas no contrato vivo; isso impede que futuras edicoes voltem a tratar
+# checkpoint como E1 ou a escolher trabalho pela branch.
+grep -Fq 'Commit E1' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'commit reference lost the first-class E1 grammar'
+grep -Fq 'Commit de método' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'commit reference lost the first-class method grammar'
+grep -Fq -- '--registrar-existente' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'commit reference lost explicit E1 recovery'
+grep -Fq '00-PLANEJAMENTO.md' "$persiste_sh" \
+  || fail 'method catalog no longer admits the current SprintX planning artifact'
 
 printf 'contract checks passed\n'

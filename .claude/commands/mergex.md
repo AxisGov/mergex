@@ -6,7 +6,7 @@ Acione a skill `mergex` e execute o **fluxo automático completo** a partir do e
 
 Trabalho: $ARGUMENTS
 
-Se nenhum trabalho for informado, descubra qual é inspecionando o disco: a branch ativa, `docs/entregas/`, e as pastas de trabalho da sprintx (`docs/sprintx/features/<slug>/`, e `docs/<slug>/` no formato antigo) e da runx (`docs/manutencao/<OC-ID>-<slug>/`). Se houver mais de um trabalho em aberto e não for possível determinar qual, liste os candidatos com o estado de cada um e peça que o usuário escolha. **Nunca mova uma pasta em formato antigo.**
+Se nenhum trabalho for informado, use o contexto explícito já fornecido pela sessão ou um único `ENTREGA.md` aberto. Havendo mais de um candidato, peça a escolha: **a branch nunca seleciona o trabalho**; ela apenas precisa conferir com `ENTREGA.branch`. `trabalho_id` e `expx_tool` determinam a pasta canônica `docs/sprintx/features/<slug>/`, o fallback legado `docs/<slug>/` ou a pasta RunX.
 
 ## O que executar
 
@@ -18,15 +18,15 @@ Descubra em que ponto o trabalho está e siga daí:
 | Há task concluída sem commit | **E1** (`references/01-commits.md`) para cada uma, na ordem em que fecharam |
 | A execução terminou | **E2 → E8**, nesta ordem |
 
-O fluxo do fim (E2 a E8):
+O fluxo do fim, com checkpoints explícitos:
 
-1. **E2** `references/02-prontidao.md` — portão de prontidão. **`BLOQUEADO` encerra tudo aqui**: não classifique, não monte PR, não suba nada.
-2. **E3** `references/03-atencao-humana.md` — classificação nas três faixas.
-3. **E4** `references/04-descricao-pr.md` — descrição do pull request.
-4. **E5** `references/05-pacote-qa.md` — pacote para o QA.
-5. **E6** `references/06-push.md` — push da branch.
-6. **E7** `references/07-abertura-pr.md` — abertura do pull request.
-7. **E8** `references/08-registro.md` — registro da entrega.
+1. **pre-e2** — ação auditável: `persistir-metodo.sh --persistir ... --checkpoint pre-e2`.
+2. **E2** — chama apenas `persistir-metodo.sh --verificar ... --checkpoint pre-e2` e então roda o portão. `BLOQUEADO` pula E3–E7 e segue ao E8.
+3. **E3 → E5** — atenção, descrição do PR e pacote de QA.
+4. **pre-e6** — ação auditável: `persistir-metodo.sh --persistir ... --checkpoint pre-e6`.
+5. **E6** — chama apenas `persistir-metodo.sh --verificar ... --checkpoint pre-e6` antes do push.
+6. **E7** — abertura do pull request.
+7. **E8** — grava o terminal e chama `persistir-metodo.sh --persistir ... --checkpoint e8`; só depois publica o commit final no caminho entregue.
 
 Leia o reference da etapa atual antes de agir, e somente o dela.
 

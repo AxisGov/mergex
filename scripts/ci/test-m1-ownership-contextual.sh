@@ -244,7 +244,9 @@ echo
 echo '24. Instalação task-based sem ownership falha fechada'
 R="$D/sem-ownership"; repo_e1 "$R"; mensagem "$D/sem-ownership.msg" T-01.01 ft-m1
 SCRIPTS_INCOMPLETOS="$D/scripts-incompletos"; mkdir -p "$SCRIPTS_INCOMPLETOS"
-cp "$SCRIPTS/fechamento-do-e1.sh" "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/sequencia-de-commits.sh" "$SCRIPTS_INCOMPLETOS/"
+cp "$SCRIPTS/fechamento-do-e1.sh" "$SCRIPTS/trava-do-e1.sh" \
+  "$SCRIPTS/sequencia-de-commits.sh" "$SCRIPTS/contrato-de-commit.sh" \
+  "$SCRIPTS_INCOMPLETOS/"
 printf 'muda\n' >> "$R/src/atual.js"
 FECHA_REAL="$FECHA"; FECHA="$SCRIPTS_INCOMPLETOS/fechamento-do-e1.sh"
 executa_e1 "$R" "$D/sem-ownership.msg" src/atual.js

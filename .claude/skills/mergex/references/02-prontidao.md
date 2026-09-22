@@ -8,6 +8,16 @@ A saída é binária: `PRONTO` ou `BLOQUEADO`.
 
 ## Pré-requisitos verificáveis
 
+Antes de qualquer V1–V11, confirme a barreira executável `pre-e2`:
+
+```bash
+bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> --checkpoint pre-e2
+```
+
+Falhou: **E2 não começa**. Rode a ação explícita `persistir-metodo pre-e2` fora do portão e tente de novo. O E2 nunca chama o modo de gravação para consertar o lifecycle silenciosamente.
+
 - `docs/entregas/<trabalho_id>/ENTREGA.md` existe (o E0 rodou). Se não existir, rode o E0 primeiro (`references/00-abertura.md`) — a branch pode não ter nascido, e o portão precisa saber o que foi commitado.
 - O `ORQUESTRADOR.md` e o `tasks.md` do trabalho existem. Sem eles não há o que verificar: relate que o trabalho não está planejado e encerre `BLOQUEADO`.
 - A pasta do trabalho é a **mesma** que o E0 encontrou: na sprintx, `docs/sprintx/features/<slug>/` (canônico) e, só quando ele não existe, `docs/<slug>/` (formato antigo); na runx, `docs/manutencao/<OC-ID>-<slug>/`. Nunca misture as duas pastas da sprintx na mesma verificação.
@@ -187,13 +197,15 @@ Falha: qualquer task `concluida` sem item que a prove. **Nomeie cada uma** (id e
 
 **A V11 não audita o `git log`.** `ENTREGA.commits` é a evidência canônica do E1 neste contrato, e é sobre ela que a V11 decide. A lacuna que ela fecha é `tasks.md` ↔ `ENTREGA.commits`; provar que o SHA existe, que é ancestral do HEAD ou que pertence à branch é outra verificação, que nenhum ponto do contrato vigente exige.
 
+Na recuperação, essas provas adicionais pertencem ao escritor `--registrar-existente`, não à leitura V11. O ciclo esperado é: antes do registro, V11 falha; após o append, passa na worktree; após `persistir-metodo pre-e2`, passa também ao ler `ENTREGA.md` de `git show HEAD`. A certificação terminal depende dessa última evidência durável.
+
 **A V11 não duplica a razão de outra verificação.** Task `pendente`, `em_andamento` ou `bloqueada` **não é alvo positivo** da V11: ela não tem commit porque não fechou, e quem responde por isso é a V1. Suíte vermelha é V2, teste não declarado é V3, arquivo fora do plano é V9. A V11 responde por uma coisa só, e é por isso que a falha dela é diagnosticável sozinha.
 
 **Os dois formatos de sprint da sprintx valem aqui**, como em V1, V2, V3 e V9: as tasks vêm sempre da chave `tasks` (`references/integracao/sprintx.md`, "Como ler uma sprint da sprintx").
 
 **Vale nas duas origens.** A V11 não lê pasta: ela recebe o `ENTREGA.md` e os `tasks.md` do trabalho. Na runx, são os de `docs/manutencao/<OC-ID>-<slug>/sprint-*/tasks.md`. A regra e o resultado são os mesmos.
 
-**Leitura histórica × entrega nova.** Uma `ENTREGA.md` anterior a este contrato pode ter task concluída sem o item correspondente. Ler esse snapshot continua possível — a leitura histórica do `ENTREGA.md` (`causa-do-portao.sh --validar-historico`) não roda a V11 e não a inventa. Mas **nenhuma entrega nova passa pelo portão sem a V11**: numa entrega ou prontidão nova, a inconsistência aparece e barra. A V11 **não reescreve o histórico** e **não inventa commit**: ela mostra a lacuna, e quem a preenche é o E1 tardio.
+**Leitura histórica × entrega nova.** Uma `ENTREGA.md` anterior a este contrato pode ter task concluída sem o item correspondente. Ler esse snapshot continua possível. Numa entrega nova a inconsistência barra. Se nenhum commit de produto existe, faça o E1 tardio normal; se o commit já existe e só o registro falhou, use `fechamento-do-e1.sh --registrar-existente` com o SHA completo. Nunca crie um segundo commit para recuperar apenas o registro.
 
 ## Formato exato da saída
 
@@ -276,6 +288,6 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | Sem versionador | V9 e V10 rodam sobre árvore e tasks; as demais não mudam |
 | Branch base indisponível para o diff | Use `git diff --name-only HEAD~<n>..HEAD` sobre os commits do trabalho registrados no `ENTREGA.md`; registre a imprecisão como aviso |
 | Verificação impossível de rodar | Marque `FALHA`, nunca `OK`, e registre `vN_sem_prova` em `falhas_portao`. Ausência de prova não é prova |
-| Task `concluida` sem item em `ENTREGA.commits` | `FALHA` em V11, nomeando a task. Não invente o commit e não reescreva o histórico: quem preenche é o **E1 tardio** — roda o E1 no formato normal, a lista `commits` recebe o item, e a V11 passa. Não reordene os itens antigos |
+| Task `concluida` sem item em `ENTREGA.commits` | `FALHA` em V11. Sem commit existente: E1 tardio normal. Com commit existente e append perdido: `--registrar-existente`, nunca um segundo commit. |
 | `ENTREGA.md` sem a chave `commits`, ou ilegível | `FALHA` em V11, registrada como `v11_sem_prova` |
 | `ORQUESTRADOR.md` ou `tasks.md` ausente | `BLOQUEADO`: V1 não tem como determinar status — `v1_sem_prova` —, e as demais que dependem do plano também entram `_sem_prova` |

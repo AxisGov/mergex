@@ -73,8 +73,8 @@ M2() {
 
 # 3. O E1 ignora a trava existente e segue em frente.
 M3() {
-  troca "$TRAVA" '  if ! mkdir "$trava" 2>/dev/null; then' \
-    '  if ! mkdir -p "$trava" 2>/dev/null; then'
+  troca "$FECHA" '  saida="$(adquirir "$1")"; rc=$?' \
+    '  saida="$(adquirir "$1")"; rc=0; saida="token=forcado" # mutante: ignora lock ocupado'
 }
 
 # 4. Stage preexistente é aceito.

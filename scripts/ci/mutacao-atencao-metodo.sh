@@ -161,7 +161,7 @@ M24a() { # o item que o E1 tardio acrescentou no fim é ignorado
   troca "$PROVA_SH" '  if ! provadas="$(commits_validos "$ent")"; then' \
     '  if ! provadas="$(commits_validos "$ent" | sed '"'"'$d'"'"')"; then'
 }
-M24b() { apaga "$COMMITS" '### O E1 tardio'; }
+M24b() { apaga "$COMMITS" '### Dois tipos de lacuna E1'; }
 M25a() { apaga "$PRONTIDAO" '### V11 — Task concluída'; }
 M25b() { apaga "$TEMPLATE_PRONTIDAO" '| V11 |'; }
 M25c() { apaga "$CHECK_CMD" '| V11 |'; }
@@ -266,7 +266,7 @@ M45() { # 2. ownership roda antes da checagem de STAGE VAZIO (DM-138)
     '    :  # 4 (mutada: já movida para antes da checagem de stage)'
 }
 M46() { # 3a. o hook (defesa em profundidade) deixa de barrar arquivo_de_task_irma
-  troca "$HOOK_TASK" '    exit 2' '    exit 0  # mutada: parou de barrar'
+  troca "$HOOK_TASK" '  if [ -n "$IRMA" ]; then' '  if false; then # mutada: parou de barrar'
 }
 M47() { # 4. o bloqueio de ownership passa a consumir um `seq` mesmo sem commitar
   # "abc1234" é hexadecimal válido por `sha_valido` (nunca "sem-commit", que o

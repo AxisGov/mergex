@@ -383,3 +383,27 @@ torna os footers prova assertiva antes do staging.
 **O que invalidaria estas decisões:** `ENTREGA.md` deixar de declarar origem/trabalho; SprintX ou
 RunX passarem a versionar um ponteiro canônico mais forte para a pasta do plano; ou o E1 deixar de
 receber `--task` explicitamente. Nenhuma dessas mudanças autoriza voltar à busca global.
+
+## P0.2-C7-B / M2 — lifecycle executável e recuperação do registro E1
+
+M1 tornou explícitos o trabalho corrente, o ownership e a gramática do E1, mas os artefatos do
+método ainda podiam ficar somente na árvore de trabalho, e uma queda depois do commit de produto
+não tinha recuperação executável sem criar outro commit. M2 fecha essas duas lacunas sem misturar
+produto, lifecycle e seleção de contexto.
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-161 | O trabalho corrente pode ser escolhido pela branch | **Não.** Argumentos/contexto explícito, conferidos contra `ENTREGA.trabalho_id` e `ENTREGA.origem`, selecionam o trabalho. A branch serve apenas como prova de consistência e nunca como seletor | Branch é transporte, não identidade normativa. Usá-la para selecionar regrediria a fonte contextual fechada pelo M1 e voltaria a permitir colisão entre trabalhos com nomes parecidos |
+| DM-162 | Commit de método é um E1 sem task | **Não: é classe de primeira ordem.** E1 tem exatamente um `Task:` e um `Trabalho:`, sem `Metodo:`. Método tem exatamente um `Trabalho:` e um `Metodo:` no enum `pre-e2\|pre-e6\|e8`, sem `Task:`. Híbrido, duplicata e valor fora do enum são inválidos. Commit de método não entra em `ENTREGA.commits`, não consome `seq` e não satisfaz V11 | As duas classes provam eventos diferentes. Reusar parcialmente a gramática do E1 faria o hook rejeitar lifecycle legítimo ou, pior, deixaria um checkpoint contar como produto de uma task |
+| DM-163 | E2 e E6 podem persistir seus próprios artefatos ao entrar | **Não.** `pre-e2` e `pre-e6` são checkpoints explícitos, e E2/E6 têm barreiras executáveis que apenas confirmam que o checkpoint já foi cumprido. E8, último escritor, persiste o terminal no próprio checkpoint `e8` | Conserto silencioso apaga a fronteira auditável entre produzir artefatos e validá-los. E8 é a exceção necessária porque não há etapa posterior que possa persistir seu estado terminal |
+| DM-164 | O catálogo cumulativo permite staging amplo | **Não.** Cumulativo significa conjunto elegível fechado do trabalho corrente: somente paths previstos pelo contrato, existentes e realmente dirty. Em SprintX, `00-PLANEJAMENTO.md` é elegível quando o fluxo corrente o usa; não é inventado quando ausente. `base/**` só entra pelos arquivos enumerados no índice/contrato, e `HISTORICO.md` só pelo path global exato previsto pelo trabalho. Nunca `git add -A`, `git add docs/` ou busca global | O checkpoint deve persistir todo o método elegível sem absorver produto, outro trabalho ou arquivo histórico por coincidência de nome |
+| DM-165 | Retomada pode depender de memória local da sessão | **Não.** A idempotência vem do Git, dos trailers e do estado versionado: sem mudança elegível, o checkpoint é `NO-OP` e não cria commit vazio; se o mesmo estado já foi persistido antes da queda, a nova chamada o reconhece e não duplica o commit | Rastro local desaparece entre máquinas e sessões. A prova que sobrevive à queda é a que já está no histórico ou no artefato versionado |
+| DM-166 | Lifecycle pode usar outro lock ou aceitar stage existente | **Não.** Checkpoints usam a mesma trava C5, exigem stage vazio na entrada, montam somente o catálogo fechado e passam pela mesma varredura de segredo. Nenhum arquivo de produto é aceito no commit de método | Índice, HEAD e staging continuam sendo recursos únicos da worktree. Uma segunda regra de posse reabriria exatamente a corrida que C5 fechou |
+| DM-167 | Como registrar um commit E1 que já existe quando só o append falhou | Pela ação explícita `--registrar-existente`, sob a trava C5 e com stage vazio. Ela exige SHA de 40 hex existente, alcançável de `HEAD`, não-merge, exatamente um `Task:` e um `Trabalho:` correspondentes, nenhum `Metodo:` e ownership válido sobre todos os paths do commit — origem e destino em rename. Não cria, amenda, reseta, rebasa nem aplica commit | O objeto já existente é a prova de produto. Validá-lo e acrescentar a referência recupera o registro perdido sem fabricar um segundo E1 nem reescrever história |
+| DM-168 | Quais são a idempotência e os conflitos da recuperação | Mesmo SHA e mesma task já registrados são `NO-OP`, sem novo item e sem novo `seq`; o mesmo SHA em outra task é conflito; outro SHA para a mesma task é permitido e recebe o próximo `seq`, porque a lista admite histórico múltiplo. Depois do append, `ENTREGA.md` fica dirty e somente o próximo `pre-e2` a versiona | A recuperação corrige apenas a prova em `ENTREGA.commits`. Versionar a entrega dentro dela misturaria de novo E1 e lifecycle, enquanto proibir múltiplos SHAs por task contrariaria o histórico já admitido pela C4 |
+
+**O que invalidaria estas decisões:** `ENTREGA.md` deixar de identificar trabalho e origem; o Git
+deixar de ser a fonte durável do checkpoint; ou surgir uma classe nova de commit com trailers
+próprios, que exigiria ampliar a gramática fechada. Fixture E8/HISTORICO, `.gitattributes`, política
+de CRLF e runbook de lock órfão permanecem deliberadamente para M3; nenhuma decisão acima os
+antecipa. SprintX e BuildX não são alteradas por este marco.

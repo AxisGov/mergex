@@ -50,6 +50,10 @@
 #
 #   fechamento-do-e1.sh --status      # diagnóstico da trava desta worktree
 #
+#   fechamento-do-e1.sh --registrar-existente --entrega <ENTREGA.md> \
+#       --origem <sprintx|runx> --trabalho <id> --task <id> --sha <40-hex>
+#       recupera somente o registro de um commit E1 já existente e alcançável.
+#
 # Ordem normativa combinada (P0.2-C7-B — compõe contexto, C1 e C5):
 #   1 resolver worktree/índice   6 git add                10 validar commit
 #   2 adquirir a trava do E1     7 diff em stage          11 capturar SHA
@@ -86,11 +90,12 @@ set -uo pipefail
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRAVA_SH="$AQUI/trava-do-e1.sh"
 SEQ_SH="$AQUI/sequencia-de-commits.sh"
+CONTRATO_COMMIT_SH="$AQUI/contrato-de-commit.sh"
 # OWNERSHIP_SH é obrigatório quando a ENTREGA declara sprintx/runx. Ausente,
 # a instalação MergeX está incompleta e o E1 falha fechado antes do staging.
 OWNERSHIP_SH="$AQUI/ownership-da-task.sh"
 
-for f in "$TRAVA_SH" "$SEQ_SH"; do
+for f in "$TRAVA_SH" "$SEQ_SH" "$CONTRATO_COMMIT_SH"; do
   [ -f "$f" ] || { printf 'fechamento-do-e1: falta %s\n' "$f" >&2; exit 1; }
 done
 # shellcheck source=trava-do-e1.sh
@@ -98,11 +103,13 @@ done
 
 TOKEN=""
 LIBERAR_NA_SAIDA=0
+RECOVERY_DIFF=""
 
 # A trava só é liberada pelo dono, e o código de saída nunca é mascarado: o
 # `rc` é capturado antes de qualquer outra coisa acontecer.
 encerrar() {
   local rc="$1"
+  [ -z "$RECOVERY_DIFF" ] || rm -f "$RECOVERY_DIFF"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
     liberar "$TOKEN" >/dev/null 2>&1
   fi
@@ -185,26 +192,114 @@ confere_contexto_preparado() {
     'O stage preparado foi preservado e nenhum commit foi criado.'
 }
 
-valida_rodapes() { # <texto> <fonte> <codigo>
-  local texto="$1" fonte="$2" codigo="$3" rodapes qtd_task qtd_trabalho task_msg trabalho_msg
-  rodapes="$(printf '%s\n' "$texto" | git interpret-trailers --parse 2>/dev/null)"
-  qtd_task="$(printf '%s\n' "$rodapes" | grep -Ec '^Task:[[:space:]]*')"
-  qtd_trabalho="$(printf '%s\n' "$rodapes" | grep -Ec '^Trabalho:[[:space:]]*')"
-  [ "$qtd_task" = 1 ] || para "$codigo" "PARADO — rodapé $fonte inválido" \
-    "Task: exige exatamente 1 ocorrência; encontrou $qtd_task"
-  [ "$qtd_trabalho" = 1 ] || para "$codigo" "PARADO — rodapé $fonte inválido" \
-    "Trabalho: exige exatamente 1 ocorrência; encontrou $qtd_trabalho"
-  task_msg="$(printf '%s\n' "$rodapes" | sed -n 's/^Task:[[:space:]]*//p')"
-  trabalho_msg="$(printf '%s\n' "$rodapes" | sed -n 's/^Trabalho:[[:space:]]*//p')"
-  [ "$task_msg" = "$TASK" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \
-    "Task da mensagem: $task_msg" "Task explícita do E1: $TASK"
-  [ "$trabalho_msg" = "$TRABALHO" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \
-    "Trabalho da mensagem: $trabalho_msg" "Trabalho corrente: $TRABALHO"
+valida_mensagem() {
+  local saida
+  saida="$(bash "$CONTRATO_COMMIT_SH" --validar-e1 \
+    --trabalho "$TRABALHO" --task "$TASK" --arquivo "$MENSAGEM" 2>&1)" \
+    || para 4 'PARADO — rodapé da mensagem inválido' "$saida"
+}
+valida_commit_produzido() {
+  local saida
+  saida="$(bash "$CONTRATO_COMMIT_SH" --validar-e1 \
+    --trabalho "$TRABALHO" --task "$TASK" --commit HEAD 2>&1)" \
+    || para 6 'PARADO — rodapé do commit produzido inválido' "$saida"
 }
 
-valida_mensagem() { valida_rodapes "$(cat "$MENSAGEM")" 'da mensagem' 4; }
-valida_commit_produzido() {
-  valida_rodapes "$(git log -1 --format=%B 2>/dev/null)" 'do commit produzido' 6
+carrega_contexto_explicito() { # <entrega> <origem> <trabalho>
+  local entrega="$1" origem_dada="$2" trabalho_dado="$3" branch
+  carrega_contexto "$entrega"
+  [ "$ORIGEM" = "$origem_dada" ] || para 9 'PARADO — origem explícita diverge da ENTREGA' \
+    "Explícita: $origem_dada" "ENTREGA.expx_tool: $ORIGEM"
+  [ "$TRABALHO" = "$trabalho_dado" ] || para 9 'PARADO — trabalho explícito diverge da ENTREGA' \
+    "Explícito: $trabalho_dado" "ENTREGA.trabalho_id: $TRABALHO"
+  branch="$(git branch --show-current 2>/dev/null)" || branch=""
+  [ -n "$branch" ] || para 9 'PARADO — HEAD destacado não prova consistência de branch'
+  [ "$(fm "$entrega" branch)" = "$branch" ] || para 9 'PARADO — branch ativa diverge da ENTREGA' \
+    "Ativa: $branch" "ENTREGA.branch: $(fm "$entrega" branch)"
+}
+
+sha_registrado_resolve() { # <identificador armazenado>
+  local registrado="$1"
+  case "$registrado" in ''|*[!0-9a-f]*) return 1 ;; esac
+  [ "${#registrado}" -ge 7 ] && [ "${#registrado}" -le 40 ] || return 1
+  git rev-parse --verify "$registrado^{commit}" 2>/dev/null
+}
+
+registra_existente() { # <entrega> <origem> <trabalho> <task> <sha completo>
+  local entrega="$1" origem_dada="$2" trabalho_dado="$3" task="$4" sha="$5"
+  local pais status caminho origem_nome destino_nome linha ordem seq task_reg commit_reg objeto saida rc
+  local -a caminhos
+
+  abre_secao "recovery:$task"          # mesma trava C5, antes de qualquer prova mutável
+  confere_stage_de_entrada
+  carrega_contexto_explicito "$entrega" "$origem_dada" "$trabalho_dado"
+
+  printf '%s\n' "$sha" | grep -Eq '^[0-9A-Fa-f]{40}$' \
+    || para 4 'PARADO — --sha precisa ter exatamente 40 hexadecimais'
+  sha="$(printf '%s' "$sha" | tr 'A-F' 'a-f')"
+  git cat-file -e "$sha^{commit}" 2>/dev/null \
+    || para 4 'PARADO — o SHA informado não existe como commit'
+  git merge-base --is-ancestor "$sha" HEAD >/dev/null 2>&1 \
+    || para 4 'PARADO — o commit informado não é alcançável do HEAD atual'
+
+  pais="$(git rev-list --parents -n 1 "$sha" 2>/dev/null)" \
+    || para 4 'PARADO — não foi possível ler os pais do commit informado'
+  set -- $pais
+  [ "$#" -le 2 ] || para 4 'PARADO — merge commit não é um E1 unitário recuperável'
+
+  saida="$(bash "$CONTRATO_COMMIT_SH" --validar-e1 \
+    --trabalho "$trabalho_dado" --task "$task" --commit "$sha" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] || para 4 'PARADO — trailers do commit existente não provam este E1' "$saida"
+
+  RECOVERY_DIFF="$(mktemp "${TMPDIR:-/tmp}/mergex-recovery.XXXXXX")" \
+    || para 4 'PARADO — não foi possível preparar a leitura dos paths do commit'
+  git diff-tree --root --no-commit-id -r -M --name-status -z "$sha" > "$RECOVERY_DIFF" \
+    || para 4 'PARADO — não foi possível ler os paths do commit existente'
+  caminhos=()
+  while IFS= read -r -d '' status <&3; do
+    case "$status" in
+      R*|C*)
+        IFS= read -r -d '' origem_nome <&3 || para 4 'PARADO — rename sem path de origem'
+        IFS= read -r -d '' destino_nome <&3 || para 4 'PARADO — rename sem path de destino'
+        caminhos+=("$origem_nome" "$destino_nome") ;;
+      *)
+        IFS= read -r -d '' caminho <&3 || para 4 'PARADO — entrada de diff sem path'
+        caminhos+=("$caminho") ;;
+    esac
+  done 3< "$RECOVERY_DIFF"
+  [ "${#caminhos[@]}" -gt 0 ] || para 4 'PARADO — commit existente não altera path algum'
+
+  # A classificação recebe exatamente os paths do objeto Git. Em rename,
+  # origem e destino participam; nenhuma prova vem da worktree atual.
+  verifica_ownership "$task" "${caminhos[@]}"
+
+  bash "$SEQ_SH" --validar "$entrega" >/dev/null 2>&1 \
+    || para 4 'PARADO — ENTREGA.commits com sequência inválida' \
+      "$(bash "$SEQ_SH" --validar "$entrega" 2>&1)"
+
+  while IFS=$'\t' read -r ordem seq task_reg commit_reg; do
+    [ -n "$commit_reg" ] || continue
+    objeto="$(sha_registrado_resolve "$commit_reg")" \
+      || para 4 'PARADO — ENTREGA.commits contém SHA que não resolve no repositório' \
+        "Registro: ${commit_reg:-vazio}"
+    [ "$objeto" = "$sha" ] || continue
+    if [ "$task_reg" = "$task" ]; then
+      printf 'noop=true\n'
+      return 0
+    fi
+    para 4 'PARADO — o mesmo commit já está registrado para outra task' \
+      "Informada: $task" "Registrada: $task_reg"
+  done <<EOF
+$(bash "$SEQ_SH" --ler "$entrega")
+EOF
+
+  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \
+    || para 6 'PARADO — commit Git existe; registro E1 não foi concluído' \
+      "commit=$sha" "$saida"
+  bash "$SEQ_SH" --validar "$entrega" >/dev/null 2>&1 \
+    || para 7 'PARADO — a lista ficou inválida depois do registro' \
+      "commit=$sha" "$(bash "$SEQ_SH" --validar "$entrega" 2>&1)"
+  printf '%s\n' "$saida"
 }
 
 # ---------------------------------------------------------------------------
@@ -383,7 +478,7 @@ conclui() { # <entrega> <task> <mensagem>
       "commit=$sha" \
       "$saida" \
       'NENHUM segundo commit foi criado e nada foi desfeito: o commit é real e' \
-      'fica no histórico. Conserte o registro e rode o E1 tardio para a task;' \
+      'fica no histórico. Use --registrar-existente com este SHA completo;' \
       'até lá, a V11 do portão (E2) nomeia a task sem prova.'
 
   seq="$(printf '%s\n' "$saida" | awk -F= '$1 == "seq" { print $2 }')"
@@ -404,11 +499,12 @@ conclui() { # <entrega> <task> <mensagem>
 # CLI
 # ---------------------------------------------------------------------------
 ACAO=""; ENTREGA=""; TASK=""; MENSAGEM=""; VERIFICACAO=""; TOKEN_DADO=""
+ORIGEM_DADA=""; TRABALHO_DADO=""; SHA_DADO=""
 CAMINHOS_INICIO=0
 
 case "${1:-}" in
-  --fechar|--preparar|--concluir|--status) ACAO="$1"; shift ;;
-  *) uso "ação desconhecida: ${1:-<nenhuma>} (--fechar, --preparar, --concluir, --status)" ;;
+  --fechar|--preparar|--concluir|--registrar-existente|--status) ACAO="$1"; shift ;;
+  *) uso "ação desconhecida: ${1:-<nenhuma>} (--fechar, --preparar, --concluir, --registrar-existente, --status)" ;;
 esac
 
 if [ "$ACAO" = --status ]; then
@@ -424,6 +520,9 @@ while [ "$#" -gt 0 ]; do
     --mensagem)    [ "$#" -ge 2 ] || uso '--mensagem precisa de um arquivo'; MENSAGEM="$2"; shift 2 ;;
     --verificacao) [ "$#" -ge 2 ] || uso '--verificacao precisa de um comando'; VERIFICACAO="$2"; shift 2 ;;
     --token)       [ "$#" -ge 2 ] || uso '--token precisa de um token'; TOKEN_DADO="$2"; shift 2 ;;
+    --origem)      [ "$#" -ge 2 ] || uso '--origem precisa de sprintx|runx'; ORIGEM_DADA="$2"; shift 2 ;;
+    --trabalho)    [ "$#" -ge 2 ] || uso '--trabalho precisa de um id'; TRABALHO_DADO="$2"; shift 2 ;;
+    --sha)         [ "$#" -ge 2 ] || uso '--sha precisa de um SHA completo'; SHA_DADO="$2"; shift 2 ;;
     --)            shift; CAMINHOS_INICIO=1; break ;;
     *)             uso "opção desconhecida: $1" ;;
   esac
@@ -447,6 +546,16 @@ fi
 cd "$RAIZ" || { printf 'fechamento-do-e1: raiz inacessível: %s\n' "$RAIZ" >&2; exit 1; }
 
 case "$ACAO" in
+  --registrar-existente)
+    [ -n "$ENTREGA" ] || uso 'falta --entrega'
+    [ -n "$ORIGEM_DADA" ] || uso 'falta --origem'
+    [ -n "$TRABALHO_DADO" ] || uso 'falta --trabalho'
+    [ -n "$SHA_DADO" ] || uso 'falta --sha'
+    [ "$CAMINHOS_INICIO" = 0 ] || uso '--registrar-existente não recebe paths'
+    case "$ORIGEM_DADA" in sprintx|runx) ;; *) uso '--origem precisa ser sprintx|runx' ;; esac
+    registra_existente "$ENTREGA" "$ORIGEM_DADA" "$TRABALHO_DADO" "$TASK" "$SHA_DADO"
+    exit 0 ;;
+
   --fechar)
     [ -n "$ENTREGA" ] || uso 'falta --entrega'
     [ -n "$MENSAGEM" ] || uso 'falta --mensagem'

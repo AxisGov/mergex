@@ -8,6 +8,16 @@ Trabalho: $ARGUMENTS
 
 ## O que fazer
 
+Primeiro execute somente a barreira:
+
+```bash
+bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> --checkpoint pre-e2
+```
+
+Se houver método pendente, pare. Este comando não chama o modo de gravação; o checkpoint é ação explícita anterior ao E2.
+
 Rode **todas as onze verificações**, mesmo depois de a primeira falhar — o usuário precisa da lista completa do que falta, não do primeiro erro. Verificação que não se aplica é marcada `n/a`, nunca omitida.
 
 | # | Verificação |

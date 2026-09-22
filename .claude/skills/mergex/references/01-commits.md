@@ -166,7 +166,7 @@ Se o `git commit` aconteceu e o append em `ENTREGA.commits` falhou:
 commit Git existe; registro E1 não foi concluído
 ```
 
-O commit é real e fica. A **V11** do portão (E2) existe justamente para detectar task concluída sem prova de E1 registrada, e vai nomear a task. O conserto é o **E1 tardio**, depois que a causa do append estiver resolvida.
+O commit é real e fica. A **V11** vai nomear a task; o conserto é `--registrar-existente` com o SHA completo, nunca um segundo E1 de produto.
 
 ### Detecção no ato
 
@@ -279,9 +279,7 @@ sprintx**. Não existe isenção para `docs/sprintx/estimativas/**`, nem para `d
 equivalente na runx: qualquer outro arquivo fora da pasta do trabalho continua podendo ser
 invasão real de escopo.
 
-**Qual é o trabalho deste commit.** O da **branch ativa**: vale a pasta do trabalho cujo `docs/entregas/<trabalho_id>/ENTREGA.md` declara `branch:` igual à branch corrente, e **exatamente um** `ENTREGA.md` pode declará-la. Zero, dois ou mais, ou HEAD destacado: **nenhuma isenção** — o que não estiver declarado em task volta a ser desvio, que é o comportamento conservador.
-
-A identificação é pela branch e **nunca por recência**. Numa árvore que acumula entregas — `docs/entregas/ft-01/`, `ft-02/`, `ft-03/` no mesmo checkout —, o `ENTREGA.md` tocado por último pode ser de uma feature encerrada semanas atrás; isentar a pasta dele deixaria passar exatamente a invasão de escopo que esta verificação existe para pegar.
+**Qual é o trabalho corrente.** Vem do contexto explícito do chamador, conferido contra `ENTREGA.trabalho_id` e `ENTREGA.expx_tool`. A branch ativa só precisa coincidir com `ENTREGA.branch`: é prova de consistência, nunca mecanismo de seleção. Outro `ENTREGA.md` na mesma branch, recência de arquivo e ordem de pastas não mudam o trabalho escolhido.
 
 Entre a pasta canônica e a legada do mesmo trabalho, **a canônica vence**: quando `docs/sprintx/features/<trabalho_id>/` existe, é ela a pasta do trabalho, e a legada não é isenta. É o mesmo desempate que o E0 usa para localizar o trabalho.
 
@@ -291,60 +289,57 @@ Eles **entram no commit** e **nunca contam como desvio**. Três limites, e nenhu
 - **A varredura de segredo (passo 2) roda sobre eles igual.** Plano e decisão também carregam credencial por acidente.
 - **Continuam entrando por caminho explícito**, nunca com `git add .`.
 
-### Quando os artefatos de método entram
+### Lifecycle dos artefatos de método
 
-Três momentos, e só esses três:
+O lifecycle tem três checkpoints executáveis e cumulativos: `pre-e2`, `pre-e6` e `e8`.
 
-**O `HISTORICO.md` não entra no commit de uma task.** A sprintx só o atualiza ao fim do trabalho, e o lugar dele é o commit de artefatos que antecede o push. Se, por uma retomada anormal, ele já estiver sujo durante o E1 de uma task: **não registre como desvio** e **não o inclua no commit da task** — deixe-o para o commit pré-E6. Um commit de task contém a task e o método **daquele** trabalho, não a memória global acumulada.
+**O `HISTORICO.md` não entra no commit de uma task.** Se estiver dirty, o catálogo `pre-e2` o seleciona pelo caminho global exato e prova que o diff pertence ao trabalho explícito.
 
-**1. No commit da task que fechou.** Junto dos arquivos de produto declarados entram os artefatos de método deste trabalho que estiverem sujos naquele momento — a começar pelo `tasks.md` que acabou de marcar a task como `concluida`. No **primeiro** commit do trabalho, é isso que leva ao histórico o que a F1 a F5 produziram (base, decisões, plano, orquestrador, auditoria) e que até ali existia só na árvore — inclusive quando a árvore é um `git worktree` que será removido depois.
+**1. `pre-e2`, ao fim da execução.** Persiste `ENTREGA.md` com todos os appends E1 e o estado SprintX/RunX já produzido: tasks, orquestrador, fechamento, bloqueios, planejamento, auditoria, base enumerada pelo índice e demais paths do catálogo vivo que existam e estejam dirty.
 
-**2. Num commit de artefatos de método, imediatamente antes do push (E6).** O fim do trabalho produz o que nenhuma task fecha. Entram, por **caminho explícito**, os que estiverem sujos:
+**2. `pre-e6`, depois de E3–E5.** O catálogo cumulativo acrescenta os artefatos MergeX dessa faixa:
 
-- `FECHAMENTO.md` e os demais artefatos feature-local ainda sujos deste trabalho;
 - `docs/entregas/<trabalho_id>/` — `ENTREGA.md`, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md`;
-- `docs/sprintx/estimativas/HISTORICO.md`, **quando a origem é a sprintx** e ele está sujo. É o ponto normal de versionamento dele.
+- qualquer path anterior que tenha ficado dirty novamente.
 
 Um commit só, no formato do passo 3:
 
 ```
-chore(entrega): registrar artefatos do trabalho <trabalho_id>
-
-Artefatos de metodo do trabalho; nenhuma alteracao de produto.
+chore(mergex): persiste metodo pre-e6
 
 Trabalho: <trabalho_id>
+Metodo: pre-e6
 ```
 
-**3. No fechamento final do E8, depois do push e do PR.** O E6 e o E7 produzem estado que só existe depois deles — `push_feito`, `pr_url`, `pr_estado` —, e o E8 fecha o registro com `estado: entregue`, `entregue_em` e a prosa correspondente. Esse último registro **não pode ficar só na árvore**: quem integra a branch integra commits, nunca arquivo sujo de worktree. O E8 tem um commit próprio para ele, no mesmo formato; o procedimento completo — o que entra, o que nunca entra, a publicação e o que fazer quando ela falha — está em `references/08-registro.md`:
+**3. `e8`, no fechamento final.** O E8 é o último escritor e chama o mesmo executor depois de gravar o terminal:
 
 ```
-chore(entrega): finalizar registro do trabalho <trabalho_id>
-
-Artefatos finais da entrega; nenhuma alteracao de produto.
+chore(mergex): persiste metodo e8
 
 Trabalho: <trabalho_id>
+Metodo: e8
 ```
 
-**Commit de artefatos de método não é task**: ele **não entra na lista `commits`** do `ENTREGA.md` — ela é de task, uma por task —, e é registrado na prosa do `ENTREGA.md`.
+**Commit de método é classe de primeira classe e não é E1.** A gramática é exatamente `Trabalho: <trabalho_id>` + `Metodo: pre-e2 | pre-e6 | e8`, sem `Task:`. Ele não entra em `ENTREGA.commits`, não consome `seq` e não satisfaz V11.
 
-Isto **não é uma etapa nova**: é o E1, no formato que ele já usa, chamado em outro momento.
+**Por que três checkpoints.** Eles carregam estados diferentes do mesmo trabalho.
 
-**Por que dois commits de método, e não um.** Não é duplicação: eles carregam estados diferentes do mesmo trabalho.
-
-1. **Pré-E6** — leva ao histórico o que precisa existir **antes** da publicação: o `FECHAMENTO.md` da skill de origem e os artefatos da entrega (`ENTREGA.md` como está até ali, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md`). Sem ele, a branch subiria sem a descrição do PR e sem o pacote de QA.
-2. **Fechamento final do E8** — leva o estado que só é conhecido **depois** do push e do PR. Adiá-lo para "o próximo commit de artefatos" deixaria a branch publicada apontando para uma versão anterior do registro, e o estado final morreria junto com o worktree que a skill de origem remove.
+1. **pre-e2** — torna duráveis as provas que o portão vai avaliar.
+2. **pre-e6** — torna duráveis descrição, atenção e pacote de QA antes da publicação.
+3. **e8** — leva o estado que só existe depois do push e do PR.
 
 Nenhum dos dois é task e nenhum dos dois entra na lista `commits`. **Ao retornar do E8, nenhuma atualização final da entrega fica dependendo de um trabalho futuro**: o que a entrega afirma está no commit para o qual a branch aponta.
 
-Adicione **por caminho explícito**, nunca em bloco:
+O executor é o único escritor desses commits:
 
 ```
-git add <caminho-1> <caminho-2> ...
+bash .claude/skills/mergex/scripts/persistir-metodo.sh --persistir \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> \
+  --checkpoint <pre-e2|pre-e6|e8>
 ```
 
-Não use `git add .`, `git add -A` nem `git add -u`. Eles arrastam o que não foi declarado.
-
-**Este `git add` é o começo da seção crítica**, e não acontece fora dela: quem o executa é o `fechamento-do-e1.sh`, depois de adquirir a trava do índice e de conferir o stage de entrada.
+Ele deriva paths exatos, só inclui os que existem e estão dirty, usa a mesma trava C5, exige stage vazio, roda o gate de segredo e não cria commit vazio. E2 e E6 chamam somente `--verificar`; nunca usam gravação para corrigir o lifecycle por trás.
 
 ### Nunca commite
 
@@ -388,6 +383,13 @@ Desfaça o staging (`git restore --staged <arquivos>`) e siga para a próxima ta
 **Nunca ecoe o valor do segredo** na saída, no log ou no arquivo de registro: mascare (`sk-...4f2a`).
 
 ## Passo 3 — Montar a mensagem
+
+### Commit E1: classe e gramática
+
+**Commit E1 é classe de primeira ordem e não é commit de método.** Ele contém exatamente um
+`Task: <task>` e exatamente um `Trabalho: <trabalho_id>`, com os valores do contexto explícito, e
+não contém `Metodo:`. `Task:` + `Metodo:`, trailer duplicado ou valor divergente é contrato
+inválido e para antes do staging.
 
 Formato exato:
 
@@ -506,11 +508,24 @@ A regra é **um commit por fechamento de task em cada execução** — não "um 
 
 Isto não muda o schema e não cria campo: `references/00-schema.md` descreve `commits` como "um item por task commitada, na ordem em que fecharam" — uma lista ordenada, sem exigência de id único. **A chave `seq` não muda isso**: ela dá identidade à ordem, e continua não exigindo que cada `task` apareça uma vez só (`00-schema.md`, "A ordem de registro"). Quem lê a lista lê história de execução; quem quer o plano lê `tasks.md`, que é a fonte dele.
 
-### O E1 tardio
+### Dois tipos de lacuna E1
 
-Uma task pode ter fechado sem que o commit acontecesse: segredo detectado na varredura, branch errada, hook do versionador, falha operacional. O E2 barra isso na **V11** — task `concluida` sem item em `commits` —, e o conserto é rodar o **E1 tardio**: o mesmo E1, no mesmo formato, no momento em que a lacuna aparece.
+**A. A task está concluída e nenhum commit de produto existe.** Rode o E1 tardio normal: ele cria o commit e registra seu SHA.
 
-- Rode o E1 normalmente para aquela task: selecione o que entra, varra segredo, monte a mensagem, commite.
+**B. O commit de produto já existe e só o append falhou.** Não rode E1 normal, porque isso criaria outro commit. Use a recuperação explícita:
+
+```bash
+bash .claude/skills/mergex/scripts/fechamento-do-e1.sh --registrar-existente \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> \
+  --task <T-NN.MM> --sha <40-hex>
+```
+
+Sob a mesma trava C5, ela exige stage vazio, contexto explícito coerente com `ENTREGA.md`, branch consistente, SHA completo existente e alcançável de `HEAD`, commit não-merge, exatamente um `Task:` e um `Trabalho:` correspondentes e nenhum `Metodo:`. O ownership é reexecutado sobre os paths do commit — em rename, origem e destino. Ela não cria, amenda, reseta, rebasa nem aplica commit algum.
+
+Mesmo SHA e mesma task já registrados são `noop=true`, inclusive quando o item contém abreviação equivalente. O mesmo objeto em outra task é conflito. Outro SHA da mesma task é permitido e recebe o próximo `seq` global. Depois do append, `ENTREGA.md` fica dirty até `persistir-metodo pre-e2`.
+
+- No caso A, rode o E1 normalmente para aquela task: selecione o que entra, varra segredo, monte a mensagem e commite. No caso B, use somente `--registrar-existente`.
 - **Acrescente** o item `{seq, task, commit}` ao fim de `commits`, pelo mesmo escritor. **Não reordene** os itens antigos e não reescreva SHA nenhum: a lista é a sequência real dos fechamentos, e o commit tardio fechou agora.
 - Rode a V11 de novo. Com a prova registrada, ela passa.
 
@@ -531,7 +546,7 @@ commits:
 
 Inserir `T-01.02` "entre" os dois primeiros renumeraria itens já gravados e apagaria o fato de que aquele commit só existiu depois — exatamente o que a chave de ordem existe para preservar.
 
-O E1 tardio **continua sendo permitido** e não é exceção ao contrato: é o E1 rodando no momento em que deveria ter rodado. O que nunca é permitido é inventar o item sem o commit — um `commit` que não existe não é prova, e a V11 recusa identificador malformado justamente para isso.
+O E1 tardio normal **continua sendo permitido somente no caso A**. No caso B, o SHA já existente é a prova que a recuperação valida; inventar item sem objeto alcançável continua proibido.
 
 Não faça push aqui. Push é E6, e só depois do portão (E2) aprovar.
 
@@ -581,7 +596,8 @@ Por task:
 | Origem task-based sem `ownership-da-task.sh` | Não commita. A instalação MergeX está incompleta; nunca degrada silenciosamente |
 | Footer `Task:`/`Trabalho:` ausente, duplicado ou divergente | Não commita. A estrutura é validada antes do staging e o commit produzido é conferido novamente |
 | Segredo detectado | Aborta o commit, desfaz o staging, avisa com o valor mascarado. A task fica `concluida` sem prova: a **V11** do E2 a nomeia |
-| Task já `concluida` que ficou sem commit | Roda o **E1 tardio** (acima): commita agora e acrescenta o item ao fim de `commits`, com o próximo `seq`, sem reordenar o histórico |
+| Task `concluida`, sem commit de produto | Caso A: E1 tardio normal; cria e registra com o próximo `seq` |
+| Commit de produto existe, append falhou | Caso B: `--registrar-existente` com SHA completo; nenhum segundo commit |
 | `commits` com sequência quebrada | **Não grave.** Contrato inválido: relate o motivo do `sequencia-de-commits.sh --validar` e pare. Nunca escolha outro número para caber |
 | Branch errada ou principal | Não commita; relata a divergência e para |
 | `git commit` falha (hook, assinatura) | Relata o erro literal do versionador e para; nunca contorna com `--no-verify` |

@@ -92,6 +92,7 @@ fi
 # `git add`/`git commit` por fora da seção crítica; ele não implementa uma
 # segunda regra, só chama de novo a mesma classificação.
 OWNERSHIP="$DIR/../../skills/mergex/scripts/ownership-da-task.sh"
+CONTRATO_COMMIT="$DIR/../../skills/mergex/scripts/contrato-de-commit.sh"
 
 # A task que está sendo fechada é a que a mensagem DECLARA no rodapé `Task:`,
 # que o contrato do E1 já exige em todo commit de task. Nunca é adivinhada:
@@ -107,10 +108,83 @@ if [ -n "$ARQ_MSG" ]; then
   esac
   [ -r "$ARQ_MSG" ] && MSG="$MSG
 $(cat "$ARQ_MSG" 2>/dev/null)"
+else
+  # O evento do harness traz a linha de comando, não argv. Para `-m "..."`,
+  # retire somente o invólucro externo usado pelo chamador; o corpo, inclusive
+  # quebras de linha e trailers, permanece byte a byte para o parser do Git.
+  MARCADOR_M=' -m "'
+  case "$CMD" in
+    *"$MARCADOR_M"*)
+      MSG="${CMD#*"$MARCADOR_M"}"
+      MSG="${MSG%\"*}"
+      ;;
+  esac
 fi
-TASK_ATUAL="$(printf '%s' "$MSG" | grep -oE 'Task:[[:space:]]*T-[0-9]+\.[0-9]+' \
-  | sed 's/.*[[:space:]]//' | sort -u)"
-[ "$(printf '%s\n' "$TASK_ATUAL" | grep -c .)" = 1 ] || TASK_ATUAL=""
+
+# As três chaves de controle formam duas classes mutuamente exclusivas. Esta
+# gramática falha fechada mesmo no modo aviso: aceitar Task+Metodo ou trailers
+# duplicados tornaria o histórico ambíguo depois do commit.
+TRAILERS_CONTROLE="$(printf '%s\n' "$MSG" | git interpret-trailers --parse 2>/dev/null)"
+Q_TASK="$(printf '%s\n' "$TRAILERS_CONTROLE" | grep -Ec '^Task:[[:space:]]*')"
+Q_TRABALHO="$(printf '%s\n' "$TRAILERS_CONTROLE" | grep -Ec '^Trabalho:[[:space:]]*')"
+Q_METODO="$(printf '%s\n' "$TRAILERS_CONTROLE" | grep -Ec '^Metodo:[[:space:]]*')"
+TASK_ATUAL="$(printf '%s\n' "$TRAILERS_CONTROLE" | sed -n 's/^Task:[[:space:]]*//p' | head -1)"
+TRABALHO_MENSAGEM="$(printf '%s\n' "$TRAILERS_CONTROLE" | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
+METODO_ATUAL="$(printf '%s\n' "$TRAILERS_CONTROLE" | sed -n 's/^Metodo:[[:space:]]*//p' | head -1)"
+
+if [ "$Q_TASK" -gt 0 ] || [ "$Q_METODO" -gt 0 ]; then
+  [ -r "$CONTRATO_COMMIT" ] || {
+    printf '%s\n' "mergex/commit-por-task — instalação MergeX incompleta
+
+Componente ausente: $CONTRATO_COMMIT
+Um commit declarou Task ou Metodo, mas sua classe não pode ser provada." >&2
+    exit 2
+  }
+  TMP_MENSAGEM="$(mktemp)" || exit 2
+  printf '%s\n' "$MSG" > "$TMP_MENSAGEM" || { rm -f "$TMP_MENSAGEM"; exit 2; }
+  if [ "$Q_METODO" -gt 0 ]; then
+    SAIDA_CONTRATO="$(bash "$CONTRATO_COMMIT" --validar-metodo \
+      --trabalho "$TRABALHO_MENSAGEM" --checkpoint "$METODO_ATUAL" \
+      --arquivo "$TMP_MENSAGEM" 2>&1)"
+    RC_CONTRATO=$?
+    rm -f "$TMP_MENSAGEM"
+    if [ "$RC_CONTRATO" != 0 ]; then
+      printf '%s\n' "mergex/commit-por-task — classe de commit inválida
+
+$SAIDA_CONTRATO
+
+Commit de método exige exatamente Trabalho + Metodo (pre-e2, pre-e6 ou e8)
+e nunca aceita Task." >&2
+      exit 2
+    fi
+    # Método válido não representa task. O hook de escopo continua responsável
+    # por conferir os arquivos; este hook termina sem exigir status/suíte.
+    exit 0
+  fi
+
+  SAIDA_CONTRATO="$(bash "$CONTRATO_COMMIT" --validar-e1 \
+    --trabalho "$TRABALHO_MENSAGEM" --task "$TASK_ATUAL" \
+    --arquivo "$TMP_MENSAGEM" 2>&1)"
+  RC_CONTRATO=$?
+  rm -f "$TMP_MENSAGEM"
+  if [ "$RC_CONTRATO" != 0 ]; then
+    printf '%s\n' "mergex/commit-por-task — classe de commit inválida
+
+$SAIDA_CONTRATO
+
+Commit E1 exige exatamente Task + Trabalho e nunca aceita Metodo." >&2
+    exit 2
+  fi
+fi
+
+if [ -n "$TASK_ATUAL" ] && [ -n "$TRABALHO" ] \
+  && [ "$TRABALHO_MENSAGEM" != "$TRABALHO" ]; then
+  printf '%s\n' "mergex/commit-por-task — Trabalho diverge do contexto corrente
+
+Trabalho da mensagem: $TRABALHO_MENSAGEM
+Trabalho corrente:     $TRABALHO" >&2
+  exit 2
+fi
 
 if [ -n "$TASK_ATUAL" ] && [ -n "$TRABALHO" ]; then
   if [ "$ORIGEM" = sprintx ] || [ "$ORIGEM" = runx ]; then

@@ -55,12 +55,22 @@ O plano também sai desse contexto: branch ativa + `branch:` de exatamente uma
 pasta canônica daquele trabalho. Nenhum plano histórico com task id repetido
 participa, e recência/rastro nunca selecionam ownership.
 
-A task que está fechando sai do rodapé **`Task: T-NN.MM`** da mensagem de
-commit, que o contrato do E1 já exige (do `-m` ou do arquivo do `-F`). **Nunca
-é adivinhada**: sem rodapé, ou com dois diferentes, o hook não classifica nada
-e vale o comportamento anterior. O contrato inteiro está em
+A mensagem (`-m` ou arquivo de `-F`) declara uma de duas classes mecânicas:
+
+- **E1:** exatamente um `Task:` e um `Trabalho:`, sem `Metodo:`;
+- **método:** exatamente um `Trabalho:` e um `Metodo:` (`pre-e2`, `pre-e6`
+  ou `e8`), sem `Task:`.
+
+`Task:` + `Metodo:`, qualquer chave de controle duplicada e `Metodo:` fora do
+enum param mesmo quando o hook está em aviso. A gramática vem de uma única
+implementação, `scripts/contrato-de-commit.sh`: commit de método válido não é
+interpretado como E1 e segue para o hook de escopo, sem cobrar status/suíte de
+task. Sem nenhuma das duas declarações, o hook não inventa a classe.
+
+A task que está fechando sai do `Task:` validado e **nunca é adivinhada**. O
+contrato inteiro está em
 `references/01-commits.md`, "O dono do arquivo é a task que está sendo
-fechada", e as decisões em DM-147 a DM-159.
+fechada", e nas decisões da skill.
 
 `scripts/fechamento-do-e1.sh` — a seção crítica do E1 — classifica com o
 **mesmo** script, **antes** do primeiro `git add`: pelo caminho normal, o

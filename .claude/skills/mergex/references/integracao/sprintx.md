@@ -30,7 +30,7 @@ A mergex procura **o canônico primeiro e o antigo como fallback**, em todas as 
 |---|---|---|
 | Início da F6, **antes da primeira task** | **E0 ABERTURA** | Adota `feature/<slug>` e o worktree da F1 (ou cria a branch, se ela não existir), registra no `ORQUESTRADOR.md` e cria `docs/entregas/<slug>/ENTREGA.md` |
 | Ao fechar **cada** task (status `concluida`, `suite: parcial` ou `verde`) | **E1 COMMIT** | Um commit por task, com a mensagem no formato da mergex |
-| Fim da F6, com todas as tasks executadas | **E2 → E8** | Portão, classificação, descrição do PR, pacote de QA, push, abertura do PR, registro |
+| Fim da F6, com todas as tasks executadas | **pre-e2 → E2 → E8** | `persistir-metodo pre-e2`, portão, classificação, descrição do PR, pacote de QA, `pre-e6`, push, abertura do PR e `e8` |
 | Fim da F6, com o portão **bloqueado** | **E2 → E8 (fechamento bloqueado)** | E3 a E7 **não executam**. O E8 grava `estado: bloqueado`, persiste o registro por commit e **não publica a branch**; o controle volta à sprintx com o que falta |
 
 Depois do E8, a mergex devolve o controle. **Ela não sugere o E9** (regra 16).
@@ -122,6 +122,8 @@ Os **artefatos de método do próprio trabalho** — a pasta `docs/sprintx/featu
 ### E2 a E8 — ao fim da F6
 
 Rodam quando a F6 termina: todas as tasks executadas, ou nada mais executável.
+
+Antes do E2, a sprintx entrega explicitamente id/origem/`ENTREGA.md` à ação `persistir-metodo pre-e2`. A branch apenas confere `ENTREGA.branch`; nunca escolhe o trabalho. O E2 só verifica a barreira. Depois de E3–E5 o fluxo executa `persistir-metodo pre-e6`, e o E6 só verifica. O E8 grava o terminal e executa `persistir-metodo e8`.
 
 **Auditoria reprovada na F5 faz o E2 barrar** (verificação V6). Se o `00-AUDITORIA.md` do trabalho existe e não contém `VEREDITO: SIM`, ou tem achado ALTA em aberto, o portão devolve `BLOQUEADO` e o fluxo encerra. Achado ALTA manda voltar para a F3 — e um plano que voltou para a F3 não tem entrega a fazer.
 

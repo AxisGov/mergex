@@ -179,9 +179,8 @@ Quem integra a branch — a buildx num fast-forward, o E9, uma pessoa — integr
 a árvore de trabalho. Registro final que fica só no disco não chega à integração e desaparece
 junto com o `git worktree` quando a skill de origem o remove.
 
-Por isso o E8 fecha com um passo explícito de persistência. Ele é o **segundo e último** commit
-de artefatos de método do trabalho — o primeiro é o de antes do push (`01-commits.md`) — e
-**não é task**.
+Por isso o E8 fecha com o checkpoint executável `e8`. Ele é o último escritor do terminal e o
+commit produzido é **método, não E1**.
 
 ### Passo 1 — Separar o que ainda está sujo
 
@@ -197,10 +196,8 @@ git status --porcelain
 | Artefato de **outro** trabalho | **Não entra.** É desvio pelo mesmo critério |
 | Derivado e não versionado: `docs/eventos/<trabalho_id>.jsonl`, `.expx/estado.json`, índice do memox | **Não entra.** Não é artefato da entrega |
 
-**O `HISTORICO.md` normalmente já está limpo aqui**, porque entrou no commit pré-E6
-(`01-commits.md`). Se, por alguma inconsistência, ele ainda estiver sujo no caminho `PRONTO`,
-**não o perca**: inclua-o no fechamento final como artefato global de método e registre um aviso
-de que ele não entrou no momento pré-E6 esperado.
+**O `HISTORICO.md` normalmente já está limpo aqui**, porque entrou no `pre-e2`. Se voltou a ficar
+dirty e o diff continua pertencendo ao trabalho explícito, o catálogo cumulativo de `e8` o inclui.
 
 Depois do E6 e do E7, o que costuma estar sujo é **um arquivo só**: o próprio `ENTREGA.md` — o
 E7 gravou `pr_url` e `pr_estado`, e o E8 acabou de gravar `estado`, `portao`, `push_feito`,
@@ -217,34 +214,22 @@ plano é desvio: ele **não entra** no commit, **não é apagado**, e continua a
 dentro do commit "para deixar a árvore limpa" seria exatamente a invasão de escopo que o método
 existe para impedir.
 
-### Passo 2 — Varredura de segredo
+### Passo 2 — Persistir pelo executor
 
-A mesma do `01-commits.md`, passo 2, sobre `git diff --cached`, com o mesmo desfecho: encontrou,
-**aborta o commit**, não commita parcialmente, não remove o trecho por conta própria e **nunca
-ecoa o valor**. Artefato de método carrega credencial por acidente como qualquer outro arquivo.
-
-### Passo 3 — Commitar
-
-Adicione **por caminho explícito**. Nunca `git add .`, `git add -A` nem `git add -u`:
+A lista acima é catálogo conceitual; staging e commit não são feitos à mão. Depois de gravar e
+validar todos os campos terminais, execute:
 
 ```
-git add docs/entregas/<trabalho_id>/ENTREGA.md <outros caminhos deste trabalho>
-git commit -F <arquivo-de-mensagem>
+bash .claude/skills/mergex/scripts/persistir-metodo.sh --persistir \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> --checkpoint e8
 ```
 
-```
-chore(entrega): finalizar registro do trabalho <trabalho_id>
+O executor usa a trava C5, exige stage vazio, deriva paths exatos, roda a varredura de segredo e
+valida `Trabalho:` + `Metodo: e8`, sem `Task:`. Sem mudanças elegíveis devolve `noop=true`; nunca
+cria commit vazio. O commit não entra em `ENTREGA.commits`, não consome `seq` e não inclui produto.
 
-Artefatos finais da entrega; nenhuma alteracao de produto.
-
-Trabalho: <trabalho_id>
-```
-
-Este commit **não entra na lista `commits`** do `ENTREGA.md` — ela é de task, uma por task — e é
-registrado na prosa. Nenhum arquivo de produto entra nele. Nunca `--amend`, nunca reescrita de
-histórico (regra 11).
-
-### Passo 4 — Publicar o commit final
+### Passo 3 — Publicar o commit final
 
 Só quando **todas** valerem: `versionado: true`, há remoto configurado, e o E6 publicou a branch
 (`push_feito: true`). Fora disso, pule este passo — não é erro.
@@ -295,7 +280,7 @@ A circularidade é aparente — gravar `push_feito` num arquivo que ainda vai vi
 commit ainda vai ser publicado — e se resolve pela **ordem**, nunca por um estado intermediário:
 
 1. O E8 grava `push_feito` com o resultado do E6.
-2. O fechamento final commita o registro.
+2. O checkpoint `e8` persiste o registro.
 3. O push final publica esse commit.
 4. Deu certo: **nada muda depois.** `true` continua verdadeiro, agora inclusive sobre o commit
    que o contém.
@@ -368,10 +353,10 @@ O enum, a precedência entre várias falhas e o valor `indeterminada` estão em
 `--validar` reprovado: o E8 não commita e relata o motivo literal.
 
 O fechamento bloqueado faz **três coisas e nada mais**: escreve a prosa com o que falta (o mesmo
-que o relatório do E2 apontou), persiste os artefatos de método deste trabalho pelos passos 1 a 3
-acima, e informa o desenvolvedor. **O passo 4 não roda**: branch bloqueada não é publicada.
+que o relatório do E2 apontou), persiste os artefatos de método deste trabalho pelo checkpoint `e8`
+acima, e informa o desenvolvedor. **O passo 3 não roda**: branch bloqueada não é publicada.
 
-**Inclusive o `HISTORICO.md`.** No caminho bloqueado não existe commit pré-E6 — E3 a E7 não
+**Inclusive o `HISTORICO.md`.** No caminho bloqueado não existe `pre-e6` — E3 a E7 não
 rodaram —, mas a sprintx já gravou `docs/sprintx/estimativas/HISTORICO.md` antes do
 `FECHAMENTO.md` e do portão. Quando a origem é a sprintx e ele está sujo, ele **entra no commit
 final do bloqueio**: por caminho explícito, com a mesma varredura de segredo, fora da lista
@@ -458,7 +443,7 @@ Avisos: <lista, ou "nenhum">
 | E3 não rodou (portão barrou) | `faixa_atencao: []` e `atencao` zerado; `arquivos_alterados` continua sendo o diff real |
 | `.expx/` não existe | Segue sem limpar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
 | Gravação do `estado.json` falhou | Registra no rastro e segue; a entrega continua concluída |
-| Nada deste trabalho está sujo no fechamento | Não há commit a fazer; nunca `--allow-empty` |
+| Nada deste trabalho está sujo no fechamento | O checkpoint devolve `noop=true`; nunca cria commit vazio |
 | Segredo no artefato do fechamento | Aborta o commit final, mascara o trecho, e a entrega fica sem o registro publicado até a pessoa resolver |
 | Remoto à frente na publicação final | Não publica, não reconcilia, não força; relata literal; branch local guarda o registro final |
 | Push final rejeitado (permissão, hook, proteção) | Erro literal no relatório; sem novo push automático; `push_feito: false` por commit corretivo quando ele estava `true` |

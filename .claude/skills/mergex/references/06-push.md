@@ -6,6 +6,16 @@ Você está no E6. Aqui a branch sobe para o remoto. É a primeira etapa que sai
 
 Todos, sem exceção:
 
+- [ ] A barreira `pre-e6` passa, sem gravar nada dentro do E6:
+
+```bash
+bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> --checkpoint pre-e6
+```
+
+Se falhar, o E6 não começa. A ação explícita `persistir-metodo pre-e6` pertence ao fluxo anterior ao gate; E6 só confirma que ela foi cumprida.
+
 - [ ] O repositório é versionado. Se não for, o E6 não tem o que fazer: registre `push_feito: false` e siga para o E8 (não há PR a abrir).
 - [ ] O E2 devolveu `PRONTO`. **Portão bloqueado não sobe.**
 - [ ] `docs/entregas/<trabalho_id>/QA-PACOTE.md` existe (E5).

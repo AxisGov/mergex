@@ -243,13 +243,52 @@ printf 'feat(ui): a task atual\n\nTask: T-07.01\nTrabalho: trab\n' > .git/MENSAG
 caso "mensagem por -F"                   mergex/commit-por-task.sh "$(bash_json 'git commit -F .git/MENSAGEM')" 2
 rm -f .git/MENSAGEM
 
-# Sem dono declarado, nada e inferido: vale o comportamento de sempre (aviso).
-caso "sem rodape Task: nao infere dono"  mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 0
-caso "dois rodapes Task: e ambiguo"      mergex/commit-por-task.sh \
+# Commit de método é uma classe própria: Trabalho + Metodo, sem Task. A
+# gramática das três chaves de controle falha fechada mesmo com o hook em aviso.
+git reset -q
+mkdir -p docs/entregas/trab
+printf 'metodo\n' > docs/entregas/trab/PR.md
+git add docs/entregas/trab/PR.md
+MSG_METODO='git commit -m "chore(mergex): persiste metodo pre-e2
+
+Trabalho: trab
+Metodo: pre-e2"'
+caso "metodo valido nao e E1 invalido" mergex/commit-por-task.sh "$(bash_json "$MSG_METODO")" 0
+caso "Task + Metodo e classe hibrida" mergex/commit-por-task.sh \
   "$(bash_json 'git commit -m "x
 
 Task: T-07.01
-Task: T-07.02"')" 0
+Trabalho: trab
+Metodo: pre-e2"')" 2
+caso "Metodo duplicado e invalido" mergex/commit-por-task.sh \
+  "$(bash_json 'git commit -m "x
+
+Trabalho: trab
+Metodo: pre-e2
+Metodo: pre-e2"')" 2
+caso "Trabalho duplicado em metodo e invalido" mergex/commit-por-task.sh \
+  "$(bash_json 'git commit -m "x
+
+Trabalho: trab
+Trabalho: trab
+Metodo: pre-e2"')" 2
+caso "Metodo fora do enum e invalido" mergex/commit-por-task.sh \
+  "$(bash_json 'git commit -m "x
+
+Trabalho: trab
+Metodo: outro"')" 2
+git reset -q
+rm -f docs/entregas/trab/PR.md
+git add src/irma.ts
+
+# Sem dono declarado, nada e inferido: vale o comportamento de sempre (aviso).
+caso "sem rodape Task: nao infere dono"  mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 0
+caso "dois rodapes Task: e invalido"      mergex/commit-por-task.sh \
+  "$(bash_json 'git commit -m "x
+
+Task: T-07.01
+Task: T-07.02
+Trabalho: trab"')" 2
 
 # V9 nao muda: ela pergunta se o arquivo foi planejado NA FEATURE, pela uniao.
 caso "V9 (uniao) aceita o arquivo da irma" mergex/arquivo-fora-do-plano.sh "$(bash_json "$MSG_ATUAL")" 0

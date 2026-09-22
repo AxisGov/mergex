@@ -7,6 +7,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OWN='.claude/skills/mergex/scripts/ownership-da-task.sh'
 FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
+CONTRATO='.claude/skills/mergex/scripts/contrato-de-commit.sh'
 TMPS=""
 trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
 
@@ -43,18 +44,18 @@ M4() {
     '  if [ "$plano_rc" != 0 ]; then printf '\''ownership=n/a\n'\''; return 0 # mutante: plano ausente vira n/a'
 }
 M5() {
-  troca "$FECHA" '  [ "$task_msg" = "$TASK" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \' \
-    '  [ -n "$task_msg" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \'
+  troca "$CONTRATO" '    [ "$V_TASK" = "$TASK" ] || invalido "Task divergente: mensagem=$V_TASK contexto=$TASK"' \
+    '    [ -n "$V_TASK" ] || invalido "Task divergente: mensagem=$V_TASK contexto=$TASK"'
 }
 M6() {
-  troca "$FECHA" '  [ "$trabalho_msg" = "$TRABALHO" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \' \
-    '  [ -n "$trabalho_msg" ] || para "$codigo" "PARADO — rodapé $fonte divergente" \'
+  troca "$CONTRATO" '    [ "$V_TRABALHO" = "$TRABALHO" ] \' \
+    '    [ -n "$V_TRABALHO" ] \'
 }
 M7() {
-  troca "$FECHA" '  [ "$qtd_task" = 1 ] || para "$codigo" "PARADO — rodapé $fonte inválido" \' \
-    '  [ "$qtd_task" -ge 1 ] || para "$codigo" "PARADO — rodapé $fonte inválido" \' &&
-  troca "$FECHA" '  task_msg="$(printf '\''%s\n'\'' "$rodapes" | sed -n '\''s/^Task:[[:space:]]*//p'\'')"' \
-    '  task_msg="$(printf '\''%s\n'\'' "$rodapes" | sed -n '\''s/^Task:[[:space:]]*//p'\'' | head -1)"'
+  troca "$CONTRATO" '    [ "$Q_TASK" = 1 ] || invalido "E1 exige exatamente um Task; encontrou $Q_TASK"' \
+    '    [ "$Q_TASK" -ge 1 ] || invalido "E1 exige exatamente um Task; encontrou $Q_TASK"' &&
+  troca "$CONTRATO" 'V_TASK="$(printf '\''%s\n'\'' "$TRAILERS" | sed -n '\''s/^Task:[[:space:]]*//p'\'')"' \
+    'V_TASK="$(printf '\''%s\n'\'' "$TRAILERS" | sed -n '\''s/^Task:[[:space:]]*//p'\'' | head -1)"'
 }
 M8() {
   troca "$FECHA" '      desvios="$(printf '\''%s\n'\'' "$saida" | awk -F'\''\t'\'' '\''$1 == "desvio" { print "  - " $2 }'\'')"' \
