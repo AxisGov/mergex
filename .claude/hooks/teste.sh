@@ -9,6 +9,9 @@
 
 set -uo pipefail
 H="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$H/../.." && pwd)"
+# shellcheck source=scripts/ci/lib/fixture-git.sh
+. "$REPO_ROOT/scripts/ci/lib/fixture-git.sh" || exit 1
 OK=0; FALHOU=0; PULADOS=0
 
 # Os hooks leem o evento do harness com jq. Sem jq, todo hook sai cedo e por
@@ -30,7 +33,9 @@ fi
 RAIZ_T="$(mktemp -d)"
 WT_T="${RAIZ_T}--wt"        # worktree derivado: .git e ARQUIVO, nao diretorio
 SEMGIT_T="$(mktemp -d)"
-trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T"' EXIT
+HIST_T="$(mktemp -d)"
+trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T" "$HIST_T"' EXIT
+HOOK_CWD="$RAIZ_T"
 
 cd "$RAIZ_T" || exit 1
 git init -q -b main . 2>/dev/null
@@ -96,8 +101,8 @@ caso() {
   fi
 }
 
-bash_json() { jq -cn --arg c "$1" --arg w "$RAIZ_T" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}'; }
-write_json() { jq -cn --arg c "$1" --arg w "$RAIZ_T" '{tool_name:"Write",cwd:$w,tool_input:{content:$c}}'; }
+bash_json() { jq -cn --arg c "$1" --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}'; }
+write_json() { jq -cn --arg c "$1" --arg w "$HOOK_CWD" '{tool_name:"Write",cwd:$w,tool_input:{content:$c}}'; }
 
 echo
 echo "sem-segredo — tem que BARRAR"
@@ -414,6 +419,34 @@ caso "suite nao_executada barra"       mergex/commit-por-task.sh "$(bash_json 'g
 
 echo
 echo "artefato de metodo: o trabalho corrente sai da BRANCH, nunca da recencia"
+# Este bloco historico usa repositorio proprio: nenhuma sujeira produzida pelos
+# casos anteriores pode influenciar selecao de trabalho, E8 ou HISTORICO.
+cd "$HIST_T" || exit 1
+HOOK_CWD="$HIST_T"
+git init -q -b main . 2>/dev/null || exit 1
+git config user.email teste@expx.local
+git config user.name Teste
+mkdir -p docs/sprintx/features/ft-01 docs/sprintx/features/ft-02/sprint-01 docs/ft-legado src/fora
+printf 'b\n' > docs/sprintx/features/ft-01/00-BLOQUEIOS.md
+printf 'b\n' > docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+printf 'b\n' > docs/ft-legado/00-BLOQUEIOS.md
+printf 'base\n' > src/base.ts
+cat > docs/sprintx/features/ft-02/sprint-01/tasks.md <<'YAML'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: plano
+trabalho_id: ft-02
+tasks:
+  - id: T-01.01
+    status: concluida
+    arquivos:
+      cria: [src/base.ts]
+      altera: []
+    suite: verde
+---
+YAML
+git add -A >/dev/null 2>&1 && git commit -qm "base da fixture historica" || exit 1
 # Numa arvore integrada (varias features ja entregues no mesmo checkout),
 # docs/entregas/ tem uma pasta por trabalho. Qual delas e o trabalho de AGORA
 # nao se decide por mtime: decide-se pela branch ativa casada com o `branch:`
@@ -425,13 +458,14 @@ entrega() { # entrega <trabalho_id> <branch>
     "$1" "$2" > "docs/entregas/$1/ENTREGA.md"
 }
 
-mkdir -p docs/sprintx/features/ft-01 docs/sprintx/features/ft-02 docs/ft-legado
-printf 'b\n' > docs/sprintx/features/ft-01/00-BLOQUEIOS.md
-printf 'b\n' > docs/sprintx/features/ft-02/00-BLOQUEIOS.md
-printf 'b\n' > docs/ft-legado/00-BLOQUEIOS.md
-git add -A >/dev/null 2>&1 && git commit -qm "features ja integradas na arvore"
+# Os artefatos usados depois de varias trocas ja nascem tracked em todas as
+# branches da fixture. Assim, switch nenhum depende de sujeira residual.
+entrega ft-01 feature/ft-01
+entrega ft-02 feature/ft-02
+entrega ft-legado feature/ft-legado
+git add docs/entregas >/dev/null 2>&1 && git commit -qm "entregas da fixture historica" || exit 1
 
-git switch -q -c feature/ft-02
+fixture_switch_exato feature/ft-02 -c feature/ft-02 || exit 1
 mkdir -p .expx
 echo '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
 
@@ -458,18 +492,25 @@ caso "D: duas ENTREGA na mesma branch => sem isencao" mergex/arquivo-fora-do-pla
 rm -rf docs/entregas/ft-03
 
 # E — nenhuma ENTREGA declara a branch atual
-git switch -q -c feature/sem-entrega
+fixture_restaurar_tracked docs/sprintx/features/ft-01/00-BLOQUEIOS.md docs/sprintx/features/ft-02/00-BLOQUEIOS.md || exit 1
+fixture_switch_exato feature/sem-entrega -c feature/sem-entrega || exit 1
+printf 'novo\n' >> docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+git add -f docs/sprintx/features/ft-02/00-BLOQUEIOS.md
 caso "E: nenhuma ENTREGA para a branch => sem isencao" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
 
 # F — HEAD destacado: nao ha branch para casar
-git switch -q feature/ft-02
-git checkout -q --detach
+fixture_restaurar_tracked docs/sprintx/features/ft-02/00-BLOQUEIOS.md || exit 1
+fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
+git checkout -q --detach || exit 1
+printf 'novo\n' >> docs/sprintx/features/ft-02/00-BLOQUEIOS.md
+git add -f docs/sprintx/features/ft-02/00-BLOQUEIOS.md
 caso "F: detached HEAD => sem isencao" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
-git switch -q feature/ft-02
+fixture_restaurar_tracked docs/sprintx/features/ft-02/00-BLOQUEIOS.md || exit 1
+fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
 
 # I — pasta legada do trabalho certo, quando nao existe a canonica
 entrega ft-legado feature/ft-legado
-git switch -q -c feature/ft-legado
+fixture_switch_exato feature/ft-legado -c feature/ft-legado || exit 1
 git reset -q; printf 'novo\n' >> docs/ft-legado/00-BLOQUEIOS.md
 git add -f docs/ft-legado/00-BLOQUEIOS.md
 caso "I: pasta legada do trabalho certo e isenta" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
@@ -480,12 +521,14 @@ git add -f docs/sprintx/features/ft-01/00-BLOQUEIOS.md
 caso "G: pasta de outro trabalho e desvio" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
 
 # H — arquivo de produto fora do plano continua sendo desvio
-git switch -q feature/ft-02
-git reset -q; printf 'produto nao planejado\n' > src/fora/surpresa2.ts
+fixture_restaurar_tracked docs/ft-legado/00-BLOQUEIOS.md docs/sprintx/features/ft-01/00-BLOQUEIOS.md || exit 1
+fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
+printf 'produto nao planejado\n' > src/fora/surpresa2.ts
 git add -f src/fora/surpresa2.ts
 caso "H: produto fora do plano e desvio" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
 
-git reset -q; rm -f .expx/hooks.json; git switch -q main
+git reset -q; rm -f src/fora/surpresa2.ts .expx/hooks.json
+fixture_switch_exato main main || exit 1
 
 echo
 echo "runx — a estrutura da runx nao regride"
@@ -494,7 +537,7 @@ echo "runx — a estrutura da runx nao regride"
 mkdir -p docs/manutencao/OC-2026-0001-erro
 printf 'b\n' > docs/manutencao/OC-2026-0001-erro/BLOQUEIOS.md
 git add -A >/dev/null 2>&1 && git commit -qm "ocorrencia da runx"
-git switch -q -c fix/OC-2026-0001-erro
+fixture_switch_exato fix/OC-2026-0001-erro -c fix/OC-2026-0001-erro || exit 1
 mkdir -p .expx
 echo '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
 entrega OC-2026-0001-erro fix/OC-2026-0001-erro
@@ -508,14 +551,16 @@ caso "runx: pasta de outro trabalho e desvio"     mergex/arquivo-fora-do-plano.s
 git reset -q; mkdir -p docs/sprintx/estimativas; printf 'h\n' >> docs/sprintx/estimativas/HISTORICO.md
 git add -f docs/sprintx/estimativas/HISTORICO.md
 caso "runx NAO ganha a isencao do HISTORICO"      mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
-git reset -q; rm -f .expx/hooks.json; git switch -q main
+fixture_restaurar_tracked docs/manutencao/OC-2026-0001-erro/BLOQUEIOS.md docs/sprintx/features/ft-01/00-BLOQUEIOS.md || exit 1
+rm -f .expx/hooks.json
+fixture_switch_exato main main || exit 1
 
 echo
 echo "E8 — fechamento final (o registro da entrega vai para o historico)"
 # O E8 fecha commitando o ENTREGA.md final: sem isso, a branch integrada leva um
 # registro defasado e o estado final morre com o worktree. Os hooks precisam
 # deixar esse commit passar, SEM afrouxar nada do resto.
-git switch -q feature/ft-02
+fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
 mkdir -p .expx
 echo '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
 
@@ -564,12 +609,17 @@ caso "publicacao do fechamento com portao bloqueado barra" mergex/pr-so-com-port
 caso "fechamento final: push --force barra"            comum/git-perigoso.sh "$(bash_json 'git push --force origin feature/ft-02')" 2
 caso "fechamento final: push --force-with-lease barra" comum/git-perigoso.sh "$(bash_json 'git push --force-with-lease origin feature/ft-02')" 2
 
-git reset -q; rm -f .expx/hooks.json; git checkout -q -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null; git switch -q main
+git reset -q; rm -f .expx/hooks.json
+git restore --worktree -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null || true
+fixture_switch_exato main main || exit 1
+
+cd "$RAIZ_T" || exit 1
+HOOK_CWD="$RAIZ_T"
 
 echo
 echo "plano task-based ausente/ilegivel — ownership manual falha fechado"
 git add -A && git commit -qm "isola cenario de plano invalido"
-git switch -qc hook-plano-invalido
+fixture_switch_exato hook-plano-invalido -c hook-plano-invalido || exit 1
 sed -i.bak 's/^branch: .*/branch: hook-plano-invalido/' docs/entregas/exportacao-csv/ENTREGA.md
 rm -f docs/entregas/exportacao-csv/ENTREGA.md.bak
 MSG_PLANO_INVALIDO='git commit -m "fix(csv): fecha task

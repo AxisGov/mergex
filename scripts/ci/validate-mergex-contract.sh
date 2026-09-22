@@ -775,6 +775,31 @@ fi
 grep -Fq 'nenhuma execução remove a trava de outra' "$commits" \
   || fail 'E1 lets one run release another run lock'
 
+# M3: a recuperacao de uma trava orfa e um runbook humano, literal e auditavel.
+grep -Fq '### Recuperação humana de trava órfã' "$commits" \
+  || fail 'E1 has no canonical human orphan-lock recovery runbook'
+for prova in \
+  'trava-do-e1.sh --status' \
+  'git status --porcelain' \
+  'git diff --cached --name-status' \
+  "rm -f -- '<caminho-exato-da-trava>/dono'" \
+  "rmdir -- '<caminho-exato-da-trava>'" \
+  'Stage não vazio: PARE' \
+  '`--force-unlock` é proibido' \
+  'idade ou PID nunca autorizam remoção'; do
+  grep -Fq "$prova" "$commits" || fail "orphan-lock runbook lost: $prova"
+done
+bloco_orfao="$(sed -n '/^### Recuperação humana de trava órfã/,/^### /p' "$commits")"
+if printf '%s\n' "$bloco_orfao" | grep -E '^[[:space:]]*(rm|rmdir).*([*?]|\[[^]]*\])' >/dev/null; then
+  fail 'orphan-lock runbook uses a glob in a removal command'
+fi
+if printf '%s\n' "$bloco_orfao" | grep -Fq 'git-common-dir'; then
+  fail 'orphan-lock runbook reaches the common git directory'
+fi
+if codigo "$trava_sh" | grep -Fq -- '--force-unlock'; then
+  fail 'production lock exposes --force-unlock'
+fi
+
 # Stage de entrada: PARA, e nada é desfeito.
 grep -Fq '**Stage já não vazio antes de o E1 preparar qualquer coisa: PARE.**' "$commits" \
   || fail 'E1 no longer stops on a dirty index'
@@ -1083,5 +1108,34 @@ grep -Fq -- '--registrar-existente' '.claude/skills/mergex/references/01-commits
   || fail 'commit reference lost explicit E1 recovery'
 grep -Fq '00-PLANEJAMENTO.md' "$persiste_sh" \
   || fail 'method catalog no longer admits the current SprintX planning artifact'
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M3 — fixture fail-closed, runbook humano e LF materializado
+# ---------------------------------------------------------------------------
+fixture_lib='scripts/ci/lib/fixture-git.sh'
+teste_m3='scripts/ci/test-m3-fixture-lock-lf.sh'
+[ -f "$fixture_lib" ] || fail 'M3 fixture helper is missing'
+[ -f "$teste_m3" ] || fail 'M3 focused suite is missing'
+[ -f .gitattributes ] || fail 'root .gitattributes is missing'
+[ "$(cat .gitattributes)" = '*.sh text eol=lf' ] \
+  || fail '.gitattributes must contain only the shell LF policy'
+[ "$(wc -l < .gitattributes | tr -d '[:space:]')" = 1 ] \
+  || fail '.gitattributes gained rules outside M3 scope'
+grep -Fq 'git switch -q "$@" || return 1' "$fixture_lib" \
+  || fail 'fixture helper no longer rejects switch failure'
+grep -Fq '[ "$atual" = "$esperado" ] || return 1' "$fixture_lib" \
+  || fail 'fixture helper no longer verifies the resulting branch'
+grep -Fq 'git restore --worktree -- "$@"' "$fixture_lib" \
+  || fail 'fixture helper no longer restores explicit tracked paths'
+grep -Fq '. "$REPO_ROOT/scripts/ci/lib/fixture-git.sh"' .claude/hooks/teste.sh \
+  || fail 'hook bench does not use the fail-closed fixture helper'
+grep -Fq 'HOOK_CWD="$HIST_T"' .claude/hooks/teste.sh \
+  || fail 'historical hook block is not isolated in its own repository'
+grep -Fq "grep -q \$'\\r'" "$teste_m3" \
+  || fail 'M3 clone proof no longer inspects CR bytes'
+for dm in DM-169 DM-170; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
 
 printf 'contract checks passed\n'

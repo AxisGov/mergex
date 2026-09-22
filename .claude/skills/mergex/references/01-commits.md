@@ -79,6 +79,44 @@ Outro E1 tem a seção crítica, ou sobrou uma trava órfã. Nos dois casos, o c
 
 Recuperação automática de queda não é requisito: o diagnóstico é `trava-do-e1.sh --status`, que **nunca remove nada**, e a decisão sobre uma trava órfã é humana.
 
+### Recuperação humana de trava órfã
+
+Este procedimento é deliberadamente humano. Não existe recuperação por
+idade, teste automático de processo ou nova opção no script:
+`--force-unlock` é proibido, e idade ou PID nunca autorizam remoção.
+
+1. Na worktree afetada, rode
+   `bash .claude/skills/mergex/scripts/trava-do-e1.sh --status` e copie o valor
+   literal de `trava=`. Não derive o caminho por `.git`, pelo diretório Git comum
+   ou por busca no disco.
+2. Confira no diagnóstico a `raiz`, o `indice`, a `task`, a `origem`, o
+   `trabalho`, o `pid` e o `instante`. Qualquer divergência ou campo que não
+   possa ser explicado: PARE.
+3. Confirme por meios humanos do sistema operacional e da sessão de trabalho
+   que nenhum E1 ainda está vivo para aquela worktree. PID ausente ou antigo,
+   sozinho, não prova orfandade.
+4. Rode `git status --porcelain` e leia toda a saída. Depois rode
+   `git diff --cached --name-status` e leia todo o stage.
+5. **Stage não vazio: PARE.** Não remova a trava, não limpe o stage e não
+   tente outro E1. Preserve o estado para diagnóstico humano.
+6. Somente depois das provas anteriores, substitua o marcador abaixo pelo
+   caminho literal copiado no passo 1 e remova exclusivamente o arquivo de
+   dono e o diretório daquela trava:
+
+   ```bash
+   rm -f -- '<caminho-exato-da-trava>/dono'
+   rmdir -- '<caminho-exato-da-trava>'
+   ```
+
+   Não use glob, curinga, caminho pai, busca recursiva nem remova o diretório
+   Git comum. Se `rmdir` falhar porque há outro conteúdo, PARE: o estado não é
+   o que este procedimento conhece.
+7. Rode novamente `trava-do-e1.sh --status` na mesma worktree e exija
+   `estado=livre`.
+8. Antes do E1 seguinte, exija outra vez `git diff --cached --name-status`
+   vazio. A nova execução adquire sua própria trava; ela nunca reutiliza a
+   posse removida.
+
 ### O stage na entrada
 
 **Stage já não vazio antes de o E1 preparar qualquer coisa: PARE.** Não importa se o que está lá parece ser da task atual — não existe prova durável de que este E1 o preparou.

@@ -329,6 +329,9 @@ if grupo E; then
   igual 'E — --liberar com token errado não remove a trava' "$( [ -d "$te" ] && echo sim )" sim
   ( cd "$Em" && bash "$TRAVA" --status >/dev/null 2>&1 )
   igual 'E — --status diagnostica sem remover (código 2)' "$( [ -d "$te" ] && echo sim )" sim
+  ( cd "$Em" && bash "$TRAVA" --force-unlock >/dev/null 2>&1 ); rc=$?
+  igual 'E — --force-unlock inexiste (uso inválido)' "$rc" 64
+  igual 'E — opção inventada não remove a trava' "$( [ -d "$te" ] && echo sim )" sim
   ( cd "$Em" && bash "$TRAVA" --liberar de-outra-execucao >/dev/null 2>&1 ) \
     && ok 'E — o dono do token libera a própria trava' || falha 'E — o dono não conseguiu liberar'
   [ -d "$te" ] && falha 'E — a trava do próprio dono não saiu' || ok 'E — a trava saiu com o token certo'

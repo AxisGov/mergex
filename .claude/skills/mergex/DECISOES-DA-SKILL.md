@@ -407,3 +407,14 @@ deixar de ser a fonte durável do checkpoint; ou surgir uma classe nova de commi
 próprios, que exigiria ampliar a gramática fechada. Fixture E8/HISTORICO, `.gitattributes`, política
 de CRLF e runbook de lock órfão permanecem deliberadamente para M3; nenhuma decisão acima os
 antecipa. SprintX e BuildX não são alteradas por este marco.
+
+## P0.2-C7-B / M3 — fixture histórica, lock órfão e portabilidade
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-169 | O checkout pode materializar scripts shell em CRLF quando `core.autocrlf=true` | **Não.** Todo `.sh` versionado usa `text eol=lf`; clone Windows e worktree vinculada precisam provar `i/lf`, `w/lf`, atributo `eol=lf`, ausência byte a byte de CR e shebang literal | Um blob LF não basta para execução portável: sem atributo, o checkout Windows pode reescrever o arquivo e quebrar o interpretador antes de qualquer teste rodar |
+| DM-170 | A máquina pode decidir que uma trava C5 é órfã e removê-la | **Não.** Recuperação é humana, parte de `--status`, prova worktree/índice/dono e stage vazio, remove somente o caminho literal examinado e revalida `estado=livre`; não existe `--force-unlock`, expiração por idade ou heurística de PID | PID pode ser reutilizado, relógio não prova posse e o stage pode estar preparado pela metade. Remoção automática recriaria a corrida que a trava existe para impedir |
+
+**O que invalidaria estas decisões:** o suporte a scripts shell ou a checkout Windows deixar de
+existir; ou surgir um protocolo durável, atômico e multiplataforma capaz de provar abandono e posse
+do stage sem julgamento humano. Até lá, LF e recuperação conservadora são requisitos de contrato.
