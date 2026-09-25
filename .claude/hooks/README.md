@@ -205,4 +205,7 @@ M4-A.
 
 **Timeout.** O harness cancela o hook que estoura o timeout e deixa o comando
 rodar — timeout é falha aberta. O `mergex/git-perigoso` usa 30 s, o mesmo
-timeout crítico do `sprintx/git-perigoso`.
+timeout crítico do `sprintx/git-perigoso`. A barreira posterior, fechada, é o
+E1 (`fechamento-do-e1.sh`): ele inventaria a árvore inteira antes do
+`git add`, então um arquivo de task irmã escrito enquanto o hook de escopo da
+skill de origem estourava o timeout ainda barra o fechamento (DM-172).

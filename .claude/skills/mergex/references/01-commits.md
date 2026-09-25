@@ -40,6 +40,8 @@ A C4 fez o **resultado** disso — lista com `seq` duplicado — parar como cont
 
 **O índice Git é recurso de DONO ÚNICO durante o E1.** Na mesma worktree, dois E1 nunca executam ao mesmo tempo. A execução das tasks pode ser paralela; o **fechamento** delas é serial.
 
+**Um único escritor por worktree** (DM-173). Tasks **sequenciais** podem reutilizar a mesma worktree depois do fechamento da anterior. Tasks **simultaneamente em voo** exigem worktrees distintas: o E1 inventaria a árvore inteira (abaixo, "O inventário da árvore inteira"), e numa worktree compartilhada o produto em voo de outra task é indistinguível de uma escrita fora do escopo — ele barra o fechamento, nunca entra nele.
+
 ### O recurso travado é o índice, nunca o repositório
 
 Worktrees diferentes têm **índices independentes** e fecham tasks em paralelo, sem se bloquear. A trava é do índice daquela worktree, e fica em área **não versionada**, colada nele:
@@ -123,7 +125,7 @@ idade, teste automático de processo ou nova opção no script:
 
 Nada de `git reset`, `git restore --staged`, `git stash`, limpeza ou commit do que se encontrou. **Deixe exatamente como estava**, e mostre os caminhos staged no relatório.
 
-Working tree suja **não** é este caso: artefato e desvio são assunto do E1 (lista declarada) e do E2. Aqui o assunto é o **índice**.
+Working tree suja **não** é este caso: artefato e desvio são assunto do inventário do E1 (passo 5, depois desta verificação) e do E2. Aqui o assunto é o **índice** — e o stage preexistente para **antes** do inventário.
 
 ### O que a seção cobre
 
@@ -131,7 +133,7 @@ A trava permanece adquirida durante o trecho inteiro:
 
 | | Passo |
 |---|---|
-| *(antes de A)* | contexto + footers; depois ownership unitário — `desvio` ou `arquivo_de_task_irma` param aqui, sem que A rode |
+| *(antes de A)* | contexto + footers; inventário da árvore inteira; depois ownership unitário de todo produto dirty — `arquivo_de_task_irma`, `desvio` ou produto da task atual não listado param aqui, sem que A rode |
 | A | staging da task |
 | B | verificação do diff em stage |
 | C | verificações do E1 aplicáveis (a varredura de segredo do passo 2) |
@@ -187,6 +189,7 @@ Achou segredo entre os dois tempos: **não conclua**. Aborte como manda o passo 
 | 8 | `arquivo_de_task_irma` — arquivo planejado em outra task da feature; nenhum `git add` ocorreu; trava liberada |
 | 9 | ownership não determinável (plano legado, task fora do formato); nenhum `git add` ocorreu |
 | 10 | `desvio` — arquivo fora de todas as tasks do trabalho corrente; nenhum `git add` ocorreu |
+| 11 | produto da task atual alterado e **não listado** no E1 — o ownership não autoriza inclusão automática; nenhum `git add` ocorreu |
 
 ### Liberação
 
@@ -227,6 +230,25 @@ git status --porcelain
 ```
 
 **Regra dura: nunca commitar arquivo fora da lista declarada na task** (regra 4).
+
+### O inventário da árvore inteira (M4)
+
+A lista de caminhos que o agente passa ao E1 **não limita a detecção** e **não autoriza inclusão** (DM-172, DM-173). O `fechamento-do-e1.sh` faz, sob a trava, com o stage de entrada já confirmado vazio e o contexto validado — e antes de qualquer `git add`:
+
+1. inventaria **toda** alteração da worktree, NUL-safe: `git status --porcelain=v1 -z --untracked-files=all` — modificado, não rastreado, removido, e as duas pontas de um rename; conflito não resolvido para;
+2. separa o que é **artefato de método do trabalho corrente** pelo catálogo compartilhado com o lifecycle (`scripts/catalogo-de-metodo.sh`, o mesmo do `persistir-metodo.sh`): paths exatos, nunca `docs/**`. Método fica dirty, **não entra no E1** e é persistido em `pre-e2`/`pre-e6`/`e8`. O que o Git ignora (`docs/eventos/`, estado local) nem aparece, e nenhuma exceção manual é criada;
+3. classifica **todo o resto** — produto — junto com os caminhos listados, pelo `ownership-da-task.sh`.
+
+| Produto dirty | Desfecho |
+|---|---|
+| só de task irmã — listado ou não | **PARE**, `arquivo_de_task_irma` (código 8) |
+| de nenhuma task — listado ou não | **PARE**, `desvio` (código 10); a alteração fica na árvore |
+| da task atual **e listado** | entra no commit — inclusive o declarado também numa irmã: a atual vence (C1) |
+| da task atual e **não listado** | **PARE** (código 11): o ownership não autoriza inclusão automática |
+
+Qualquer barreira: nenhum `git add`, nenhum commit, nenhum `seq`, nenhum item em `ENTREGA.commits` e, por isso, nenhuma prova para a V11. A trava desta execução é liberada.
+
+É o **backstop fail-closed** do hook de escopo da skill de origem: se aquele `PreToolUse` estourou o timeout, foi contornado ou regrediu, o arquivo que ele deveria ter barrado ainda é encontrado aqui, mesmo que o agente não o liste. O `--registrar-existente` não inventaria a worktree: ele classifica os caminhos do commit já existente.
 
 ### O dono do arquivo é a task que está sendo fechada
 
@@ -321,7 +343,7 @@ invasão real de escopo.
 
 Entre a pasta canônica e a legada do mesmo trabalho, **a canônica vence**: quando `docs/sprintx/features/<trabalho_id>/` existe, é ela a pasta do trabalho, e a legada não é isenta. É o mesmo desempate que o E0 usa para localizar o trabalho.
 
-Eles **entram no commit** e **nunca contam como desvio**. Três limites, e nenhum é flexível:
+Eles **nunca contam como desvio** e **não entram no commit de uma task**: o inventário do E1 os separa do produto, e eles entram nos commits de método do lifecycle (abaixo). Três limites, e nenhum é flexível:
 
 - **Só a pasta deste trabalho.** `docs/` inteiro não é isento: a pasta de **outro** trabalho continua sendo desvio — é assim que se percebe uma feature que invadiu o território de outra.
 - **A varredura de segredo (passo 2) roda sobre eles igual.** Plano e decisão também carregam credencial por acidente.

@@ -8,6 +8,8 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PERSISTE='.claude/skills/mergex/scripts/persistir-metodo.sh'
 FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
+# Desde o M4 o catálogo de método mora no helper compartilhado (DM-172).
+CATALOGO='.claude/skills/mergex/scripts/catalogo-de-metodo.sh'
 CMD='.claude/commands/mergex.md'
 TMPS=""
 FALHAS="$REPO/.mutacao-m2-falhas-$$"
@@ -37,8 +39,8 @@ remove_contendo() { # <arquivo> <literal>
 }
 
 M1()  { remove_contendo "$CMD" '--checkpoint pre-e2'; }
-M2()  { troca "$PERSISTE" 'adiciona "$ENTREGA"' 'adiciona "$ENTREGA"
-adiciona "src/ORQUESTRADOR.md" # mutante: produto entra no catalogo'; }
+M2()  { troca "$CATALOGO" '  printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md"' '  printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md"
+  printf '\''%s\n'\'' src/ORQUESTRADOR.md # mutante: produto entra no catalogo'; }
 M3()  { troca "$PERSISTE" '  printf '\''Metodo: %s\n'\'' "$CHECKPOINT"' '  printf '\''Task: T-00.00\n'\'' # mutante: metodo recebe Task
   printf '\''Metodo: %s\n'\'' "$CHECKPOINT"'; }
 M4()  { troca "$PERSISTE" 'while IFS= read -r caminho; do' 'sed -i '\''s/^commits: \[\]$/commits:\n  - task: METHOD\n    commit: method/'\'' "$RAIZ/$ENTREGA" # mutante: metodo entra em ENTREGA.commits
@@ -48,7 +50,7 @@ while IFS= read -r caminho; do'; }
 M6()  { troca "$PERSISTE" 'if [ "$MODO" = verificar ]; then' 'if [ "$MODO" = verificar ]; then
   printf '\''ok=true\n'\''; exit 0 # mutante: barreira aceita metodo dirty'; }
 M7()  { remove_contendo "$CMD" '--checkpoint pre-e6'; }
-M8()  { troca "$PERSISTE" 'adiciona "$ENTREGA"' '[ "$CHECKPOINT" = e8 ] || adiciona "$ENTREGA" # mutante: E8 deixa terminal dirty'; }
+M8()  { troca "$CATALOGO" '  printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md"' '  [ "$checkpoint" = e8 ] || printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md" # mutante: E8 deixa terminal dirty'; }
 M9()  { troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \' '  git commit --allow-empty -qm '\''mutante: segundo E1'\'' # mutante: recovery cria commit
   saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \'; }
 M10() { troca "$FECHA" "  printf '%s\\n' \"\$sha\" | grep -Eq '^[0-9A-Fa-f]{40}\$' \\" "  printf '%s\\n' \"\$sha\" | grep -Eq '^[0-9A-Fa-f]{7,40}\$' \\"; }

@@ -61,8 +61,8 @@ validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
 # 1. A trava é adquirida só DEPOIS do primeiro `git add`.
 M1() {
   troca "$FECHA" '    abre_secao "$TASK"                 # 1 e 2' '    :' || return 1
-  troca "$FECHA" '    prepara "$@"                       # 5 (A) e 6 (B)' \
-    '    prepara "$@"; abre_secao "$TASK"                # 5 (A) e 6 (B)'
+  troca "$FECHA" '    prepara                            # 5 (A) e 6 (B)' \
+    '    prepara; abre_secao "$TASK"                # 5 (A) e 6 (B)'
 }
 
 # 2. A trava passa a ser do índice do diretório Git COMUM: uma por repositório.

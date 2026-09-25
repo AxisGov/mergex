@@ -269,13 +269,21 @@ if grupo F; then
   printf 'muda2\n' >> "$Fd/src/irma.js"
   saida2="$(fechar "$Fd" T-01.01 src/irma.js 2>&1)"; rc2=$?
   igual 'F — tentativa barrada pelo ownership' "$rc2" 8
-  printf 'muda3\n' >> "$Fd/src/a.js"
-  saida3="$(fechar "$Fd" T-01.01 src/a.js 2>&1)"; rc3=$?
-  igual 'F — próximo E1 válido conclui com 0' "$rc3" 0
+  grep -q muda2 "$Fd/src/irma.js" && ok 'F — a alteração barrada ficou na árvore' \
+    || falha 'F — a alteração barrada foi descartada'
+  # M4: a alteração preservada continua visível para todo E1 desta worktree.
+  # Quem a resolve é o fechamento da task dona dela — que recebe o seq que
+  # receberia sem a tentativa barrada.
+  saida3="$(fechar "$Fd" T-01.02 src/irma.js 2>&1)"; rc3=$?
+  igual 'F — próximo E1 válido (a task dona da irmã) conclui com 0' "$rc3" 0
   case "$saida3" in
     *seq=2*) ok 'F — recebeu seq=2: a tentativa barrada não consumiu seq' ;;
     *) falha "F — esperava seq=2 (a barrada não pode ter avançado o contador): $saida3" ;;
   esac
+  printf 'muda3\n' >> "$Fd/src/a.js"
+  saida4="$(fechar "$Fd" T-01.01 src/a.js 2>&1)"; rc4=$?
+  igual 'F — árvore resolvida: a task atual volta a fechar' "$rc4" 0
+  case "$saida4" in *seq=3*) ok 'F — seq=3 em sequência' ;; *) falha "F — esperava seq=3: $saida4" ;; esac
   ( cd "$Fd" && bash "$SEQ" --validar "$ENTREGA" >/dev/null 2>&1 ) \
     && ok 'F — a lista continua válida' || falha 'F — a lista ficou inválida'
 
@@ -307,9 +315,12 @@ if grupo I; then
   echo 'I. Dois E1 concorrentes na MESMA worktree: a C5 continua funcionando'
   echo '   com o ownership (C1) presente'
   # ---------------------------------------------------------------------------
+  # Um escritor por worktree: a segunda chamada chega com a seção ocupada e
+  # para pela trava antes de qualquer classificação. Só a primeira task tem
+  # produto dirty — tasks simultaneamente em voo exigem worktrees distintas
+  # (grupo J), e na mesma worktree o E1 barra (I2).
   Id="$D/i"; repo "$Id"
   printf 'primeira\n' >> "$Id/src/a.js"
-  printf 'segunda\n' >> "$Id/src/irma.js"
   ( fechar "$Id" T-01.01 src/a.js --verificacao 'sleep 3' >"$D/i1.out" 2>&1; printf '%s\n' "$?" >"$D/i1.rc" ) &
   espera_trava "$Id"
   fechar "$Id" T-01.02 src/irma.js >"$D/i2.out" 2>&1; printf '%s\n' "$?" >"$D/i2.rc"
@@ -317,6 +328,17 @@ if grupo I; then
   igual 'I — a primeira concluiu' "$(cat "$D/i1.rc")" 0
   igual 'I — a segunda PARA no código de E1 ocupado (o lock, não o ownership)' "$(cat "$D/i2.rc")" 2
   [ -d "$(trava_de "$Id")" ] && falha 'I — sobrou trava' || ok 'I — nenhuma trava sobrou'
+
+  I2="$D/i2"; repo "$I2"
+  printf 'primeira\n' >> "$I2/src/a.js"
+  printf 'segunda em voo\n' >> "$I2/src/irma.js"
+  fechar "$I2" T-01.01 src/a.js >"$D/i2b.out" 2>&1; rc=$?
+  igual 'I2 — irmã em voo na mesma worktree barra o E1 (arquivo_de_task_irma)' "$rc" 8
+  igual 'I2 — nenhum commit' "$(commits_de "$I2")" 1
+  igual 'I2 — nenhum seq' "$(itens_de "$I2" | wc -l | tr -d '[:space:]')" 0
+  igual 'I2 — nada no índice' "$(stage_de "$I2")" ''
+  grep -q 'segunda em voo' "$I2/src/irma.js" && ok 'I2 — o trabalho em voo ficou na árvore' \
+    || falha 'I2 — o trabalho em voo foi descartado'
 
 fi
 if grupo J; then

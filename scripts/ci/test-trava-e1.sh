@@ -209,9 +209,11 @@ if grupo B; then
   echo
   echo 'B. Dois E1 simultâneos na MESMA worktree — um ganha, o outro PARA'
   # ---------------------------------------------------------------------------
+  # Um escritor por worktree (DM-173): a segunda chamada chega enquanto a
+  # primeira tem a seção. Só a primeira task tem produto dirty — tasks
+  # simultaneamente EM VOO exigem worktrees distintas (C/N e B2 abaixo).
   B="$D/b"; repo "$B"
   printf 'primeira\n' >> "$B/src/a.js"
-  printf 'segunda\n'  >> "$B/src/b.js"
   ( fechar "$B" T-02.01 src/a.js --verificacao 'sleep 4' >"$D/b1.out" 2>&1; printf '%s\n' "$?" >"$D/b1.rc" ) &
   if espera_trava "$B"; then
     ok 'B — a primeira execução adquiriu a trava do índice'
@@ -237,6 +239,24 @@ if grupo B; then
   esac
   igual 'B — a segunda não deixou nada no índice' "$(stage_de "$B")" ''
   [ -d "$(trava_de "$B")" ] && falha 'B — sobrou trava no fim' || ok 'B — nenhuma trava sobrou'
+
+  echo
+  echo 'B2. Duas tasks EM VOO na mesma worktree — o E1 barra, nada é absorvido'
+  # O arquivo compartilhado pelas duas tasks mudou pelas duas execuções: listar
+  # só o próprio não autoriza o E1 a levar o do outro, e omitir não o esconde.
+  B2="$D/b2"; repo "$B2"
+  printf 'primeira\n' >> "$B2/src/a.js"
+  printf 'segunda em voo\n' >> "$B2/src/b.js"
+  mensagem "$D/msg-b2.txt" T-02.01
+  saida="$( cd "$B2" && bash "$FECHA" --fechar --entrega "$ENTREGA" \
+    --task T-02.01 --mensagem "$D/msg-b2.txt" -- src/a.js 2>&1 )"; rc=$?
+  igual 'B2 — produto da task atual não listado barra' "$rc" 11
+  igual 'B2 — nenhum commit' "$(commits_de "$B2")" 1
+  igual 'B2 — nada no índice' "$(stage_de "$B2")" ''
+  igual 'B2 — nenhum item em ENTREGA.commits' "$(itens_de "$B2" | wc -l | tr -d '[:space:]')" 0
+  grep -q 'segunda em voo' "$B2/src/b.js" && ok 'B2 — o trabalho em voo ficou na árvore' \
+    || falha 'B2 — o trabalho em voo foi descartado'
+  [ -d "$(trava_de "$B2")" ] && falha 'B2 — sobrou trava' || ok 'B2 — nenhuma trava sobrou'
 
 fi
 if grupo C; then
@@ -391,7 +411,8 @@ if grupo I; then
   duble() { # <dir do duble> <corpo>
     mkdir -p "$1"
     cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" \
-      "$SCRIPTS/ownership-da-task.sh" "$SCRIPTS/contrato-de-commit.sh" "$1/"
+      "$SCRIPTS/ownership-da-task.sh" "$SCRIPTS/contrato-de-commit.sh" \
+      "$SCRIPTS/catalogo-de-metodo.sh" "$1/"
     printf '%s\n' "$2" > "$1/sequencia-de-commits.sh"
   }
   I="$D/i"; repo "$I"
@@ -468,7 +489,8 @@ if grupo ESPIAO; then
   SSp="$D/scripts-s"; REGISTRO="$D/espiao.txt"; : > "$REGISTRO"
   mkdir -p "$SSp"
   cp "$SCRIPTS/trava-do-e1.sh" "$SCRIPTS/fechamento-do-e1.sh" \
-    "$SCRIPTS/ownership-da-task.sh" "$SCRIPTS/contrato-de-commit.sh" "$SSp/"
+    "$SCRIPTS/ownership-da-task.sh" "$SCRIPTS/contrato-de-commit.sh" \
+    "$SCRIPTS/catalogo-de-metodo.sh" "$SSp/"
   {
     printf '#!/usr/bin/env bash\n'
     printf 't="$(git rev-parse --git-path index)%s"\n' "$SUFIXO"
@@ -536,8 +558,9 @@ if grupo EXTRA; then
     || falha 'o --preparar liberou a trava'
   igual '--preparar deixou o diff em stage para a varredura de segredo' \
     "$(stage_de "$P" | tr '\n' ' ' | sed 's/ *$//')" 'src/a.js'
-  # Enquanto a seção está aberta, outro E1 não entra.
-  printf 'outra\n' >> "$P/src/b.js"
+  # Enquanto a seção está aberta, outro E1 não entra — a trava é conferida
+  # antes de qualquer coisa. (Um segundo escritor sujando a árvore desta
+  # worktree seria barrado pelo inventário: B2.)
   fechar "$P" T-11.02 src/b.js >/dev/null 2>&1
   igual 'outro E1 não entra enquanto a seção preparada está aberta' "$?" 2
   # Token errado não conclui a seção de ninguém.

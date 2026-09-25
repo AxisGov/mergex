@@ -67,6 +67,18 @@
 # parou antes de chegar aqui — o ownership nunca "explica" ou autoriza um
 # stage preexistente.
 #
+# M4 — o ownership (5) classifica a ÁRVORE INTEIRA, não só os caminhos que o
+# chamador listou (DM-172). Antes dele, `git status --porcelain -z
+# --untracked-files=all` inventaria tudo o que está dirty; o que o catálogo de
+# método do trabalho corrente reconhece (catalogo-de-metodo.sh, o mesmo do M2)
+# fica fora do E1 e espera o checkpoint; TODO o resto é produto e passa pelo
+# classificador junto com os caminhos dados. A lista do chamador nunca limita
+# a barreira: se o hook de escopo da skill de origem estourou o timeout ou foi
+# contornado, o arquivo de task irmã ainda é encontrado aqui. E o ownership
+# não autoriza inclusão (DM-173): entra no commit só o que o chamador LISTOU;
+# produto da task atual alterado e não listado para o E1 (código 11), porque
+# na mesma worktree ele pode ser trabalho de outra execução em voo.
+#
 # Códigos:
 #   0  seção crítica concluída (ou preparada, no `--preparar`)
 #   2  E1 OCUPADO — outra execução tem a seção crítica deste índice
@@ -77,10 +89,13 @@
 #   7  o commit e o item existem e a lista final não valida
 #   8  `arquivo_de_task_irma` — arquivo planejado em outra task da feature;
 #      nenhum `git add` ocorreu; a trava desta execução foi liberada
-#   9  ownership não determinável (plano legado, task fora do formato);
+#   9  ownership não determinável (plano legado, task fora do formato,
+#      árvore ou catálogo de método ilegível, conflito não resolvido);
 #      nenhum `git add` ocorreu; a trava desta execução foi liberada
 #   10 desvio — arquivo fora de todas as tasks do trabalho corrente;
 #      nenhum `git add` ocorreu; a alteração fica preservada na árvore
+#   11 produto da task atual alterado e NÃO listado no E1 — o ownership não
+#      autoriza inclusão automática; nenhum `git add` ocorreu
 #   64 uso inválido
 #
 # Bash 3.2 (macOS): nada de mapfile, arrays associativos ou ${v,,}.
@@ -94,6 +109,9 @@ CONTRATO_COMMIT_SH="$AQUI/contrato-de-commit.sh"
 # OWNERSHIP_SH é obrigatório quando a ENTREGA declara sprintx/runx. Ausente,
 # a instalação MergeX está incompleta e o E1 falha fechado antes do staging.
 OWNERSHIP_SH="$AQUI/ownership-da-task.sh"
+# CATALOGO_SH separa método de produto no inventário da árvore (M4). Mesma
+# regra: ausente em trabalho task-based, o E1 para antes do staging.
+CATALOGO_SH="$AQUI/catalogo-de-metodo.sh"
 
 for f in "$TRAVA_SH" "$SEQ_SH" "$CONTRATO_COMMIT_SH"; do
   [ -f "$f" ] || { printf 'fechamento-do-e1: falta %s\n' "$f" >&2; exit 1; }
@@ -104,12 +122,16 @@ done
 TOKEN=""
 LIBERAR_NA_SAIDA=0
 RECOVERY_DIFF=""
+INVENTARIO_TMP=""
+CATALOGO_TMP=""
 
 # A trava só é liberada pelo dono, e o código de saída nunca é mascarado: o
 # `rc` é capturado antes de qualquer outra coisa acontecer.
 encerrar() {
   local rc="$1"
   [ -z "$RECOVERY_DIFF" ] || rm -f "$RECOVERY_DIFF"
+  [ -z "$INVENTARIO_TMP" ] || rm -f "$INVENTARIO_TMP"
+  [ -z "$CATALOGO_TMP" ] || rm -f "$CATALOGO_TMP"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
     liberar "$TOKEN" >/dev/null 2>&1
   fi
@@ -378,15 +400,16 @@ confere_stage_de_entrada() {
 # entrada já não estava vazio, a seção 3 já parou antes de chegar aqui, e
 # este passo não roda sobre stage nenhum (DM-138 continua valendo).
 # ---------------------------------------------------------------------------
+CLASSIFICACAO=""
+NOTA_INDICE='Nada foi adicionado ao índice: o ownership roda antes do primeiro `git add`.'
+
 verifica_ownership() { # <task> [caminho...]; sem caminhos, lê o stage atual
   local task="$1"; shift
   local saida rc irma desvios
 
   # Script ausente em trabalho task-based é instalação incompleta. Não existe
   # fallback silencioso: ownership=n/a precisa vir de origem explicitamente n/a.
-  [ -f "$OWNERSHIP_SH" ] || para 9 'PARADO — instalação MergeX incompleta' \
-    "Componente ausente: $OWNERSHIP_SH" \
-    "O trabalho '$TRABALHO' é $ORIGEM e exige modelo de tasks; ownership não pode virar n/a."
+  confere_instalacao
 
   # O classificador recebe o contexto vivo da ENTREGA e resolve somente o
   # plano daquele trabalho. Plano ausente/ilegível e task indeterminável param.
@@ -397,13 +420,15 @@ verifica_ownership() { # <task> [caminho...]; sem caminhos, lê o stage atual
     saida="$(stage_atual | bash "$OWNERSHIP_SH" --classificar \
       "$RAIZ" "$ORIGEM" "$TRABALHO" "$task" 2>&1)"; rc=$?
   fi
+  CLASSIFICACAO="$saida"
   case "$rc" in
     0)
       desvios="$(printf '%s\n' "$saida" | awk -F'\t' '$1 == "desvio" { print "  - " $2 }')"
       [ -z "$desvios" ] || para 10 'PARADO — desvio: arquivo não declarado em nenhuma task do trabalho' \
         "Task sendo fechada: $task" \
         'Arquivo(s) modificados fora do plano corrente:' "$desvios" \
-        'Nenhum commit parcial foi criado e nada foi apagado, restaurado ou guardado.'
+        'Nenhum commit parcial foi criado e nada foi apagado, restaurado ou guardado.' \
+        "$NOTA_INDICE"
       return 0 ;;
     2)
       irma="$(printf '%s\n' "$saida" | awk -F'\t' '$1 == "arquivo_de_task_irma" { print "  - " $2 "   (declarado em " $3 ")" }')"
@@ -411,7 +436,7 @@ verifica_ownership() { # <task> [caminho...]; sem caminhos, lê o stage atual
         "Task sendo fechada: $task" \
         'Arquivo(s) que mudaram e que só outra task da feature declara:' \
         "$irma" \
-        'Nada foi adicionado ao índice: o ownership roda antes do primeiro `git add`.' \
+        "$NOTA_INDICE" \
         'A mergex só detecta e nomeia a condição; levar ao replanejamento é da sprintx.' ;;
     *)
       para 9 'PARADO — o ownership da task não pôde ser determinado' \
@@ -422,10 +447,164 @@ verifica_ownership() { # <task> [caminho...]; sem caminhos, lê o stage atual
 }
 
 # ---------------------------------------------------------------------------
+# M4 — inventário da árvore inteira, antes do ownership e do primeiro `git add`.
+#
+# A barreira não depende do que o chamador lembrou de listar: toda alteração
+# da worktree é classificada. Três grupos, e nenhum path fica sem grupo:
+#   - ignorado pelo Git: nem aparece (docs/eventos/, estado local); nenhuma
+#     exceção manual é criada aqui;
+#   - método do trabalho corrente: path EXATO do catálogo compartilhado com
+#     o M2; fica dirty, não entra no E1 e é persistido em pre-e2/pre-e6/e8;
+#   - produto: todo o resto, classificado pelo ownership-da-task.sh.
+# ---------------------------------------------------------------------------
+DIRTY=""
+METODO=""
+PRODUTO=""
+STAGING=""
+
+confere_instalacao() {
+  [ -f "$OWNERSHIP_SH" ] || para 9 'PARADO — instalação MergeX incompleta' \
+    "Componente ausente: $OWNERSHIP_SH" \
+    "O trabalho '$TRABALHO' é $ORIGEM e exige modelo de tasks; ownership não pode virar n/a."
+  [ -f "$CATALOGO_SH" ] || para 9 'PARADO — instalação MergeX incompleta' \
+    "Componente ausente: $CATALOGO_SH" \
+    'Sem o catálogo de método, a árvore não separa método de produto.'
+}
+
+# Toda entrada de `git status`, NUL-safe: modificado, não rastreado, removido,
+# rename/cópia (origem E destino). Conflito não resolvido para.
+inventaria_arvore() {
+  local entrada estado caminho origem_nome
+  INVENTARIO_TMP="$(mktemp "${TMPDIR:-/tmp}/mergex-inventario.XXXXXX")" \
+    || para 9 'PARADO — não foi possível preparar o inventário da árvore' "$NOTA_INDICE"
+  git status --porcelain=v1 -z --untracked-files=all > "$INVENTARIO_TMP" \
+    || para 9 'PARADO — não foi possível inventariar a árvore' "$NOTA_INDICE"
+  DIRTY=""
+  while IFS= read -r -d '' entrada <&3; do
+    estado="${entrada:0:2}"
+    caminho="${entrada:3}"
+    case "$estado" in
+      DD|AU|UD|UA|DU|AA|UU)
+        para 9 'PARADO — a árvore tem conflito não resolvido' \
+          "Em conflito: $caminho" "$NOTA_INDICE" ;;
+    esac
+    case "$caminho" in
+      ''|*$'\n'*)
+        para 9 'PARADO — path que o inventário não representa sem ambiguidade' \
+          "Entrada: $(printf '%q' "$entrada")" "$NOTA_INDICE" ;;
+    esac
+    DIRTY="$DIRTY$caminho"$'\n'
+    case "$estado" in
+      R*|C*|?R|?C)
+        IFS= read -r -d '' origem_nome <&3 \
+          || para 9 'PARADO — rename sem path de origem no inventário' "$NOTA_INDICE"
+        case "$origem_nome" in
+          ''|*$'\n'*)
+            para 9 'PARADO — path que o inventário não representa sem ambiguidade' \
+              "Origem: $(printf '%q' "$origem_nome")" "$NOTA_INDICE" ;;
+        esac
+        DIRTY="$DIRTY$origem_nome"$'\n' ;;
+    esac
+  done 3< "$INVENTARIO_TMP"
+}
+
+# A pasta do trabalho, pelo mesmo desempate do classificador: a canônica vence.
+pasta_do_trabalho() {
+  case "$ORIGEM" in
+    sprintx)
+      if [ -d "docs/sprintx/features/$TRABALHO" ] || [ ! -d "docs/$TRABALHO" ]; then
+        printf 'docs/sprintx/features/%s\n' "$TRABALHO"
+      else
+        printf 'docs/%s\n' "$TRABALHO"
+      fi ;;
+    runx) printf 'docs/manutencao/%s\n' "$TRABALHO" ;;
+  esac
+}
+
+separa_metodo() {
+  local caminho
+  # shellcheck source=catalogo-de-metodo.sh
+  . "$CATALOGO_SH"
+  CATALOGO_TMP="$(mktemp "${TMPDIR:-/tmp}/mergex-catalogo.XXXXXX")" \
+    || para 9 'PARADO — não foi possível preparar o catálogo de método' "$NOTA_INDICE"
+  # e8 é o catálogo cumulativo inteiro: artefato de método do trabalho em
+  # qualquer ponto do lifecycle.
+  catalogo_metodo "$RAIZ" "$ORIGEM" "$TRABALHO" "$(pasta_do_trabalho)" e8 > "$CATALOGO_TMP" \
+    || para 9 'PARADO — o catálogo de método do trabalho não pôde ser lido' \
+      "$CATALOGO_ERRO" "$NOTA_INDICE"
+  METODO=""; PRODUTO=""
+  while IFS= read -r caminho; do
+    [ -n "$caminho" ] || continue
+    if grep -Fxq -- "$caminho" "$CATALOGO_TMP" && [ ! -L "$caminho" ]; then
+      METODO="$METODO$caminho"$'\n'
+    else
+      PRODUTO="$PRODUTO$caminho"$'\n'
+    fi
+  done <<EOF
+$DIRTY
+EOF
+}
+
+# Os caminhos dados MAIS todo produto dirty passam pelo classificador — a
+# lista do chamador não limita a DETECÇÃO. Ela também não é ampliada: o
+# ownership não autoriza INCLUSÃO. Em STAGING fica só o que o chamador listou;
+# produto da task atual que ele não listou PARA o E1 (código 11, DM-173), em
+# vez de ser absorvido no commit.
+classifica_arvore() { # <task> <caminho listado>...
+  local task="$1" caminho omitidos
+  shift
+  confere_instalacao
+  inventaria_arvore
+  separa_metodo
+  local -a entrada
+  entrada=()
+  while IFS= read -r caminho; do
+    [ -n "$caminho" ] && entrada+=("$caminho")
+  done <<EOF
+$( { [ "$#" -eq 0 ] || printf '%s\n' "$@"; printf '%s' "$PRODUTO"; } | LC_ALL=C sort -u)
+EOF
+  if [ "${#entrada[@]}" -eq 0 ]; then
+    STAGING=""
+    return 0
+  fi
+  verifica_ownership "$task" "${entrada[@]}"
+  omitidos="$(printf '%s\n' "$CLASSIFICACAO" | awk -F'\t' '$1 == "na_task_atual" { print $2 }' \
+    | while IFS= read -r caminho; do
+        [ -n "$caminho" ] || continue
+        printf '%s\n' "$@" | grep -Fxq -- "$caminho" || printf '  - %s\n' "$caminho"
+      done)"
+  [ -z "$omitidos" ] || para 11 'PARADO — produto da task atual alterado e não listado no E1' \
+    "Task sendo fechada: $task" \
+    'Arquivo(s) que mudaram, que a task atual declara e que o fechamento não listou:' \
+    "$omitidos" \
+    'O ownership não autoriza inclusão automática: sem a lista explícita, o commit' \
+    'poderia absorver trabalho de outra execução na mesma worktree. Liste os' \
+    'arquivos no E1 se são desta task; se outra task está em voo nesta worktree,' \
+    'ela precisa de uma worktree própria. Nada foi apagado, restaurado ou guardado.' \
+    "$NOTA_INDICE"
+  STAGING="$(printf '%s\n' "$CLASSIFICACAO" | awk -F'\t' '$1 == "na_task_atual" { print $2 }' \
+    | while IFS= read -r caminho; do
+        [ -n "$caminho" ] || continue
+        printf '%s\n' "$@" | grep -Fxq -- "$caminho" && printf '%s\n' "$caminho"
+      done)"
+}
+
+# ---------------------------------------------------------------------------
 # A a C — staging, diff em stage e verificações aplicáveis, tudo sob a trava.
 # ---------------------------------------------------------------------------
-prepara() { # <caminho>...
-  git add -- "$@" \
+prepara() { # usa STAGING, a saída da classificação da árvore (M4)
+  local caminho
+  local -a alvos
+  alvos=()
+  while IFS= read -r caminho; do
+    [ -n "$caminho" ] && alvos+=("$caminho")
+  done <<EOF
+$STAGING
+EOF
+  [ "${#alvos[@]}" -gt 0 ] \
+    || para 4 'PARADO — nada entrou em stage' \
+      'Nenhum caminho alterado é da task atual.'
+  git add -- "${alvos[@]}" \
     || para 4 'PARADO — o staging da task falhou' \
       'Nenhum commit foi criado. O índice ficou como o versionador o deixou.'
   [ -n "$(stage_atual)" ] \
@@ -565,8 +744,8 @@ case "$ACAO" in
     confere_stage_de_entrada           # 3
     carrega_contexto "$ENTREGA"
     valida_mensagem
-    verifica_ownership "$TASK" "$@"    # 4
-    prepara "$@"                       # 5 (A) e 6 (B)
+    classifica_arvore "$TASK" "$@"     # 4 (M4: árvore inteira + dados)
+    prepara                            # 5 (A) e 6 (B)
     verifica "$VERIFICACAO"            # 7 (C)
     conclui "$ENTREGA" "$TASK" "$MENSAGEM"   # 8-11 (D a G)
     exit 0 ;;
@@ -581,8 +760,8 @@ case "$ACAO" in
     carrega_contexto "$ENTREGA"
     valida_mensagem
     registra_contexto_preparado
-    verifica_ownership "$TASK" "$@"
-    prepara "$@"
+    classifica_arvore "$TASK" "$@"
+    prepara
     # A seção continua aberta: quem preparou tem a trava até `--concluir`.
     LIBERAR_NA_SAIDA=0
     printf 'token=%s\n' "$TOKEN"
@@ -607,7 +786,17 @@ case "$ACAO" in
     carrega_contexto "$ENTREGA"
     valida_mensagem
     confere_contexto_preparado
-    verifica_ownership "$TASK"
+    NOTA_INDICE='O stage preparado foi preservado e nenhum commit foi criado.'
+    verifica_ownership "$TASK"         # o stage, sem isenção de método
+    # M4: a lista do --concluir é o stage que o --preparar montou; o que ficou
+    # dirty fora dele desde então é classificado e barra do mesmo jeito.
+    LISTA_PREPARADA=()
+    while IFS= read -r caminho_preparado; do
+      [ -n "$caminho_preparado" ] && LISTA_PREPARADA+=("$caminho_preparado")
+    done <<EOF
+$(git diff --cached --name-only --no-renames 2>/dev/null)
+EOF
+    classifica_arvore "$TASK" "${LISTA_PREPARADA[@]}"
     conclui "$ENTREGA" "$TASK" "$MENSAGEM"
     exit 0 ;;
 esac

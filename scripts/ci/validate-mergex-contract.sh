@@ -839,7 +839,7 @@ grep -Fq '**Leitura não trava nada**' "$commits" \
 # `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
 escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$escritores" = "$esperado" ] \
   || fail "unexpected executable writer of ENTREGA.commits: $escritores"
 grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
@@ -965,8 +965,8 @@ ordem_fechar="$(printf '%s\n' "$bloco_fechar" | awk '
   /confere_stage_de_entrada/ { print "confere_stage_de_entrada"; next }
   /carrega_contexto /        { print "carrega_contexto"; next }
   /valida_mensagem/          { print "valida_mensagem"; next }
-  /verifica_ownership /      { print "verifica_ownership"; next }
-  /prepara "\$@"/            { print "prepara"; next }
+  /classifica_arvore /       { print "classifica_arvore"; next }
+  /^    prepara( |$)/         { print "prepara"; next }
   /verifica "\$VERIFICACAO"/ { print "verifica"; next }
   /conclui /                 { print "conclui"; next }
 ')"
@@ -974,7 +974,7 @@ esperado_fechar='abre_secao
 confere_stage_de_entrada
 carrega_contexto
 valida_mensagem
-verifica_ownership
+classifica_arvore
 prepara
 verifica
 conclui'
@@ -989,15 +989,15 @@ ordem_preparar="$(printf '%s\n' "$bloco_preparar" | awk '
   /carrega_contexto /        { print "carrega_contexto"; next }
   /valida_mensagem/          { print "valida_mensagem"; next }
   /registra_contexto_preparado/ { print "registra_contexto_preparado"; next }
-  /verifica_ownership /      { print "verifica_ownership"; next }
-  /prepara "\$@"/            { print "prepara"; next }
+  /classifica_arvore /       { print "classifica_arvore"; next }
+  /^    prepara( |$)/         { print "prepara"; next }
 ')"
 esperado_preparar='abre_secao
 confere_stage_de_entrada
 carrega_contexto
 valida_mensagem
 registra_contexto_preparado
-verifica_ownership
+classifica_arvore
 prepara'
 [ "$ordem_preparar" = "$esperado_preparar" ] \
   || fail "--preparar does not call the critical-section steps in the normative order: got [$ordem_preparar]"
@@ -1039,7 +1039,7 @@ fi
 # a checagem do stage de entrada vem ANTES do ownership em todo call site.
 if grep -Fq 'confere_stage_de_entrada' "$fecha_sh"; then
   linha_stage="$(grep -n '    confere_stage_de_entrada' "$fecha_sh" | head -1 | cut -d: -f1)"
-  linha_own="$(grep -n '    verifica_ownership "\$TASK" "\$@"$' "$fecha_sh" | head -1 | cut -d: -f1)"
+  linha_own="$(grep -n '    classifica_arvore "\$TASK" "\$@"' "$fecha_sh" | head -1 | cut -d: -f1)"
   [ -n "$linha_stage" ] && [ -n "$linha_own" ] && [ "$linha_stage" -lt "$linha_own" ] \
     || fail 'ownership runs before the entry-stage check somewhere in --fechar'
 fi
@@ -1048,7 +1048,7 @@ fi
 # Call sites e provas que nomeiam o classificador formam uma lista fechada.
 own_chamadores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e 'ownership-da-task.sh' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-m4b-arvore-inteira.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$own_chamadores" = "$own_esperado" ] \
   || fail "unexpected caller of ownership-da-task.sh: $own_chamadores"
 
@@ -1106,7 +1106,9 @@ grep -Fq 'Commit de método' '.claude/skills/mergex/references/01-commits.md' \
   || fail 'commit reference lost the first-class method grammar'
 grep -Fq -- '--registrar-existente' '.claude/skills/mergex/references/01-commits.md' \
   || fail 'commit reference lost explicit E1 recovery'
-grep -Fq '00-PLANEJAMENTO.md' "$persiste_sh" \
+# Desde o M4 o catálogo mora em catalogo-de-metodo.sh, fonte única do
+# lifecycle (persistir-metodo.sh) e do inventário do E1.
+grep -Fq '00-PLANEJAMENTO.md' '.claude/skills/mergex/scripts/catalogo-de-metodo.sh' \
   || fail 'method catalog no longer admits the current SprintX planning artifact'
 
 # ---------------------------------------------------------------------------
@@ -1164,5 +1166,36 @@ grep -Fq 'command -v jq' "$hook_git" || fail 'M4-A: hook lost the jq contract ch
 [ -f scripts/ci/test-m4a-git-perigoso-namespace.sh ] || fail 'M4-A focused suite is missing'
 grep -Fq '| DM-171 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
   || fail 'decision log is missing DM-171'
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M4-B — o E1 classifica a árvore inteira antes do staging
+# ---------------------------------------------------------------------------
+catalogo_sh='.claude/skills/mergex/scripts/catalogo-de-metodo.sh'
+[ -f "$catalogo_sh" ] || fail 'M4-B: shared method catalog is missing'
+grep -Fq 'catalogo-de-metodo.sh' "$fecha_sh" || fail 'M4-B: E1 does not use the shared method catalog'
+grep -Fq 'catalogo-de-metodo.sh' "$persiste_sh" || fail 'M4-B: method lifecycle does not use the shared catalog'
+grep -Fq 'git status --porcelain=v1 -z --untracked-files=all' "$fecha_sh" \
+  || fail 'M4-B: E1 lost the NUL-safe whole-tree inventory'
+if codigo "$catalogo_sh" | grep -Fq 'docs/*'; then
+  fail 'M4-B: method catalog uses a directory glob'
+fi
+grep -Fq 'para 11 ' "$fecha_sh" || fail 'M4-B: E1 lost the unlisted-current-product barrier (code 11)'
+bloco_classifica="$(awk '/^classifica_arvore\(\) \{/,/^}$/' "$fecha_sh")"
+printf '%s\n' "$bloco_classifica" | grep -Fq 'inventaria_arvore' \
+  || fail 'M4-B: classification does not inventory the whole tree'
+if printf '%s\n' "$bloco_classifica" | grep -Fq 'git add'; then
+  fail 'M4-B: classification stages something itself'
+fi
+grep -Fq '**Um único escritor por worktree**' "$commits" \
+  || fail 'M4-B: contract lost the single-writer-per-worktree rule'
+grep -Fq 'tasks simultaneamente em voo exigem árvores distintas' AGENTS.md \
+  || fail 'M4-B: AGENTS.md lost the in-flight tasks rule'
+for f in scripts/ci/test-m4b-arvore-inteira.sh scripts/ci/mutacao-m4b-arvore-inteira.sh; do
+  [ -f "$f" ] || fail "M4-B: missing $f"
+done
+for dm in DM-172 DM-173; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
 
 printf 'contract checks passed\n'

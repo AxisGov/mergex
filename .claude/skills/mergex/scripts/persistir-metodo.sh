@@ -13,14 +13,17 @@ BASE_SH="$AQUI/../../../hooks/comum/base.sh"
 TRAVA_SH="$AQUI/trava-do-e1.sh"
 CONTRATO_SH="$AQUI/contrato-de-commit.sh"
 SEGREDO_SH="$AQUI/../../../hooks/comum/sem-segredo.sh"
+CATALOGO_SH="$AQUI/catalogo-de-metodo.sh"
 
-for dependencia in "$BASE_SH" "$TRAVA_SH" "$CONTRATO_SH" "$SEGREDO_SH"; do
+for dependencia in "$BASE_SH" "$TRAVA_SH" "$CONTRATO_SH" "$SEGREDO_SH" "$CATALOGO_SH"; do
   [ -r "$dependencia" ] || { printf 'persistir-metodo: dependência indisponível: %s\n' "$dependencia" >&2; exit 1; }
 done
 # shellcheck source=../../../hooks/comum/base.sh
 . "$BASE_SH"
 # shellcheck source=trava-do-e1.sh
 . "$TRAVA_SH"
+# shellcheck source=catalogo-de-metodo.sh
+. "$CATALOGO_SH"
 set +e
 
 MODO=""
@@ -71,11 +74,13 @@ TOKEN=""
 LIBERAR_NA_SAIDA=0
 TMP_LISTA=""
 TMP_MSG=""
+TMP_CATALOGO=""
 
 encerrar() {
   local rc="$1"
   [ -z "$TMP_LISTA" ] || rm -f "$TMP_LISTA"
   [ -z "$TMP_MSG" ] || rm -f "$TMP_MSG"
+  [ -z "$TMP_CATALOGO" ] || rm -f "$TMP_CATALOGO"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
     liberar "$TOKEN" >/dev/null 2>&1
   fi
@@ -150,59 +155,6 @@ adiciona() {
   printf '%s\n' "$caminho" >> "$TMP_LISTA"
 }
 
-areas_do_indice() {
-  awk '
-    NR == 1 { if ($0 !~ /^---[[:space:]]*\r?$/) exit; next }
-    /^---[[:space:]]*\r?$/ { exit }
-    {
-      linha = $0; gsub(/\r/, "", linha)
-      if (linha ~ /^[[:space:]]*-?[[:space:]]*arquivo:[[:space:]]*/) {
-        sub(/^[[:space:]]*-?[[:space:]]*arquivo:[[:space:]]*/, "", linha)
-        gsub(/^["'"'"']|["'"'"'][[:space:]]*$/, "", linha)
-        gsub(/[[:space:]]+$/, "", linha)
-        print linha
-      }
-    }
-  ' "$1" 2>/dev/null
-}
-
-adiciona_base() {
-  local indice="$PASTA/base/00-INDICE.md" area
-  adiciona "$PASTA/base/00-LACUNAS.md"
-  [ -f "$RAIZ/$indice" ] || return 0
-  [ ! -L "$RAIZ/$indice" ] || para "$indice é link simbólico"
-  [ "$(fm "$RAIZ/$indice" kind)" = base_indice ] || para "$indice não declara kind: base_indice"
-  [ "$(fm "$RAIZ/$indice" trabalho_id)" = "$TRABALHO" ] || para "$indice pertence a outro trabalho"
-  adiciona "$indice"
-  while IFS= read -r area; do
-    [ -n "$area" ] || continue
-    case "$area" in
-      */*|*\\*|*..*|00-INDICE.md|00-LACUNAS.md|*.md) ;;
-      *) para "$indice enumera nome inválido: $area" ;;
-    esac
-    case "$area" in
-      */*|*\\*|*..*|00-INDICE.md|00-LACUNAS.md) para "$indice enumera caminho fora da base: $area" ;;
-      *.md) ;;
-      *) para "$indice enumera arquivo que não é Markdown: $area" ;;
-    esac
-    adiciona "$PASTA/base/$area"
-  done <<EOF
-$(areas_do_indice "$RAIZ/$indice")
-EOF
-}
-
-adiciona_sprints() {
-  local dir nome arquivo
-  for dir in "$RAIZ/$PASTA"/sprint-*; do
-    [ -d "$dir" ] || continue
-    nome="$(basename "$dir")"
-    printf '%s\n' "$nome" | grep -Eq '^sprint-[0-9]{2,}$' || continue
-    for arquivo in tasks.md sprint.md fases.md; do
-      adiciona "$PASTA/$nome/$arquivo"
-    done
-  done
-}
-
 confere_historico_corrente() {
   local caminho='docs/sprintx/estimativas/HISTORICO.md' diff linha valor
   sujo "$caminho" || return 0
@@ -236,31 +188,16 @@ $diff
 EOF
 }
 
-if [ "$ORIGEM" = sprintx ]; then
-  for nome in 00-DECISOES.md BUILDX-PREMISSAS.md 00-ESTIMATIVA.md ORQUESTRADOR.md \
-    00-AUDITORIA.md FECHAMENTO.md 00-PLANEJAMENTO.md 00-BLOQUEIOS.md; do
-    adiciona "$PASTA/$nome"
-  done
-  adiciona_sprints
-  adiciona_base
-  confere_historico_corrente
-  adiciona docs/sprintx/estimativas/HISTORICO.md
-else
-  for nome in 00-OCORRENCIA.md 01-CAUSA-RAIZ.md ORQUESTRADOR.md QA.md BLOQUEIOS.md; do
-    adiciona "$PASTA/$nome"
-  done
-  adiciona_sprints
-  adiciona_base
-fi
-
-adiciona "$ENTREGA"
-case "$CHECKPOINT" in
-  pre-e6|e8)
-    adiciona "docs/entregas/$TRABALHO/ATENCAO.md"
-    adiciona "docs/entregas/$TRABALHO/PR.md"
-    adiciona "docs/entregas/$TRABALHO/QA-PACOTE.md"
-    ;;
-esac
+# Os caminhos vêm do catálogo compartilhado (catalogo-de-metodo.sh), o mesmo
+# que o E1 usa para separar método de produto. Aqui cada um só entra se
+# existe, é arquivo regular e está dirty.
+TMP_CATALOGO="$(mktemp "${TMPDIR:-/tmp}/mergex-catalogo.XXXXXX")" || para 'não foi possível criar catálogo temporário'
+catalogo_metodo "$RAIZ" "$ORIGEM" "$TRABALHO" "$PASTA" "$CHECKPOINT" > "$TMP_CATALOGO" || para "$CATALOGO_ERRO"
+[ "$ORIGEM" = sprintx ] && confere_historico_corrente
+while IFS= read -r caminho; do
+  [ -n "$caminho" ] || continue
+  adiciona "$caminho"
+done < "$TMP_CATALOGO"
 
 LC_ALL=C sort -u -o "$TMP_LISTA" "$TMP_LISTA"
 

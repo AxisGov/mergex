@@ -254,15 +254,15 @@ M43() { troca "$HOOK_TASK" '    exit 2' \
 M44() { # 1. ownership roda antes de ADQUIRIR A TRAVA (antes de abre_secao)
   troca "$FECHAMENTO_SH" '    abre_secao "$TASK"                 # 1 e 2' \
     '    abre_secao "$TASK"                 # 1 e 2
-    verifica_ownership "$TASK" "$@"    # 4 (mutada: antes do lock)' \
-  && troca "$FECHAMENTO_SH" '    verifica_ownership "$TASK" "$@"    # 4' \
+    classifica_arvore "$TASK" "$@"     # 4 (mutada: antes do lock)' \
+  && troca "$FECHAMENTO_SH" '    classifica_arvore "$TASK" "$@"     # 4 (M4: árvore inteira + dados)' \
     '    :  # 4 (mutada: já movida para antes do lock)'
 }
 M45() { # 2. ownership roda antes da checagem de STAGE VAZIO (DM-138)
   troca "$FECHAMENTO_SH" '    confere_stage_de_entrada           # 3' \
-    '    verifica_ownership "$TASK" "$@"    # 4 (mutada: antes da checagem de stage)
+    '    classifica_arvore "$TASK" "$@"     # 4 (mutada: antes da checagem de stage)
     confere_stage_de_entrada           # 3' \
-  && troca "$FECHAMENTO_SH" '    verifica_ownership "$TASK" "$@"    # 4' \
+  && troca "$FECHAMENTO_SH" '    classifica_arvore "$TASK" "$@"     # 4 (M4: árvore inteira + dados)' \
     '    :  # 4 (mutada: já movida para antes da checagem de stage)'
 }
 M46() { # 3a. o hook (defesa em profundidade) deixa de barrar arquivo_de_task_irma

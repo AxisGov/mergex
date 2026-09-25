@@ -35,6 +35,7 @@ Valem sempre, em qualquer etapa:
 - Nunca configurar credencial nem armazenar segredo.
 - Nunca commitar arquivo fora da lista declarada na task.
 - Nunca rodar dois E1 ao mesmo tempo na mesma árvore de trabalho: o índice Git é de dono único enquanto uma task fecha. A execução das tasks pode ser paralela; o fechamento delas é serial. Árvores de trabalho diferentes têm índices independentes e não se bloqueiam.
+- Um único escritor por árvore de trabalho. Tasks sequenciais podem reutilizar a mesma árvore depois do fechamento da anterior; tasks simultaneamente em voo exigem árvores distintas. O E1 inventaria a árvore inteira antes do `git add`: produto de task irmã, desvio e produto da task atual não listado barram o fechamento — nada é absorvido no commit.
 - Nunca commitar com o índice já preenchido por outra execução, e nunca limpar o que se encontrou nele — pare e relate.
 - A varredura de segredo, credencial e dado real de cliente roda a cada commit e no portão de prontidão. Encontrou, aborta.
 - Repositório sem versionador: siga sem essas etapas, sem erro e sem bloqueio.
