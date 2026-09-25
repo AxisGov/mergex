@@ -147,7 +147,7 @@ O `analista-de-conflito` não tem ferramenta de escrita nem de execução: é
 | Hook | Modo inicial | O que garante |
 |---|---|---|
 | `sem-segredo` | **bloqueio** | Regra 5 — varredura a cada commit, não só no portão |
-| `git-perigoso` | **bloqueio** | Regra 11 — nunca forçado, nunca na principal, nunca reescrever o enviado |
+| `mergex/git-perigoso` | **bloqueio** | Regra 11 — nunca forçado, nunca na principal, nunca reescrever o enviado |
 | `branch-limpa` | **bloqueio** | Regra 2 — nunca criar ou trocar branch com alteração pendente |
 | `commit-por-task` | aviso | Regra 3 — um commit por task, concluída e com suíte verde; e nenhum arquivo de **outra** task no commit desta — essa condição barra **mesmo em aviso** |
 | `arquivo-fora-do-plano` | aviso | Regra 4 — nunca commitar arquivo fora da lista declarada |

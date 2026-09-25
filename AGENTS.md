@@ -54,7 +54,7 @@ de ferramenta.
 Três nascem em **bloqueio**, porque o erro não tem volta:
 
 - `sem-segredo` — segredo, credencial ou dado real de cliente em commit ou escrita
-- `git-perigoso` — push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva
+- `mergex/git-perigoso` — push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva
 - `branch-limpa` — criar ou trocar branch com alteração não commitada pendente
 
 Três nascem em **aviso**, e só sobem a bloqueio depois de rodarem sem falso

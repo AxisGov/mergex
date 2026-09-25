@@ -275,7 +275,7 @@ Toda regra inviolável da skill era, até aqui, uma instrução que o modelo pod
 | Hook | Modo | O que garante |
 |---|---|---|
 | `sem-segredo` | **bloqueio** | Varredura a cada commit e a cada escrita, não só no portão |
-| `git-perigoso` | **bloqueio** | Nunca forçado, nunca na principal, nunca reescrever o já enviado, nunca descartar alteração local |
+| `mergex/git-perigoso` | **bloqueio** | Nunca forçado, nunca na principal, nunca reescrever o já enviado, nunca descartar alteração local |
 | `branch-limpa` | **bloqueio** | Nunca criar ou trocar branch com alteração pendente |
 | `commit-por-task` | aviso | Um commit por task, concluída e com suíte verde |
 | `arquivo-fora-do-plano` | aviso | Nada commitado fora da lista declarada na task |

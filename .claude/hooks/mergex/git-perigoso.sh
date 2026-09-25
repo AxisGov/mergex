@@ -16,15 +16,47 @@
 # Regra 1 do desenho: casar com PRECISÃO. Uma regra frouxa que barre qualquer
 # coisa contendo "push" atrapalha o dev o dia inteiro. Todo casamento aqui
 # exige `git` como programa e a forma real da opção.
+#
+# Caminho e id com o namespace da skill (DM-171): `.claude/hooks/mergex/
+# git-perigoso.sh`, modo em `.expx/hooks.json` sob `mergex/git-perigoso`. A
+# sprintx publica um hook de mesmo nome, com regras próprias, em
+# `.claude/hooks/sprintx/git-perigoso.sh` sob `sprintx/git-perigoso`: nenhum
+# dos dois sobrescreve o outro, e o modo de um nunca desliga o outro. O id sem
+# namespace (`git-perigoso`) não é lido: um "desligado" antigo não rebaixa
+# este hook.
 
-HOOK="git-perigoso"
+HOOK="mergex/git-perigoso"
 PADRAO="bloqueio"
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=base.sh
-. "$DIR/base.sh"
+# shellcheck source=../comum/base.sh
+. "$DIR/../comum/base.sh"
 
 ENTRADA="$(cat)"
+
+# jq é dependência declarada dos hooks (hooks/README.md): é ele que lê o
+# payload. Sem jq, o `tool_name` sairia vazio e o hook devolveria sucesso sem
+# ter avaliado nada — falha aberta silenciosa num hook de segurança (DM-171).
+# Aqui não há parser alternativo: se o payload cru menciona `git`, a chamada
+# é barrada por contrato de instalação; o resto segue, porque não é assunto
+# deste hook. Sem jq, o modo em `.expx/hooks.json` também não pode ser lido —
+# nem o "desligado".
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s' "$ENTRADA" | grep -Eq '(^|[^A-Za-z0-9_./\\-])git([[:space:]]|\\[nrt]|"|$)' || exit 0
+  printf '%s\n' \
+"mergex/git-perigoso — dependência ausente: jq
+
+Este hook de segurança lê o comando pelo jq, e o jq não está no PATH. Sem ele
+não há como provar que o comando git é seguro, então a chamada foi barrada em
+vez de passar sem avaliação.
+
+O que fazer:
+  - Instale o jq (https://jqlang.org) e confira com: jq --version
+  - Os hooks da mergex dependem de bash, jq, git e utilitários POSIX
+    (.claude/hooks/README.md, \"Dependências\")." >&2
+  exit 2
+fi
+
 [ "$(printf '%s' "$ENTRADA" | jq -r '.tool_name // empty' 2>/dev/null)" = "Bash" ] || exit 0
 
 CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"

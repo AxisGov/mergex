@@ -26,7 +26,7 @@ printf '%s' "$CMD" | grep -Eq '(^|[;&|`(){}[:space:]])git([[:space:]]|$)' || exi
 # Só troca ou criação de branch interessa:
 #   git switch <b> | git switch -c <b> | git checkout <b> | git checkout -b <b>
 # `git checkout -- <path>` NÃO é troca de branch (é descarte, assunto do
-# git-perigoso): o `--` exclui.
+# mergex/git-perigoso): o `--` exclui.
 TROCA=0
 if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+switch([[:space:]]|$)'; then
   TROCA=1

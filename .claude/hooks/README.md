@@ -18,7 +18,7 @@ importam mais, e onde um hook mal escrito faz mais estrago.
 | Hook | Evento | Modo inicial | O que faz |
 |---|---|---|---|
 | `sem-segredo` | `PreToolUse` | **bloqueio** | Barra commit e escrita com segredo, credencial ou dado real de cliente |
-| `git-perigoso` | `PreToolUse` | **bloqueio** | Barra push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva |
+| `mergex/git-perigoso` | `PreToolUse` | **bloqueio** | Barra push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva |
 | `branch-limpa` | `PreToolUse` | **bloqueio** | Barra criação ou troca de branch com alteração não commitada pendente |
 | `commit-por-task` | `PreToolUse` | aviso¹ | Verifica que o commit corresponde a **uma** task, `concluida` e com registro de suíte válido (`parcial` ou `verde`); e que nenhum arquivo em preparação pertence **só a outra task** da feature |
 | `arquivo-fora-do-plano` | `PreToolUse` | aviso | Compara o que está em preparação com a lista declarada na task. Artefato de método do **próprio** trabalho é isento; o de outro trabalho, não |
@@ -87,7 +87,7 @@ A mergex só **detecta e nomeia** a condição (`arquivo_de_task_irma`). Abrir
 Segue a convenção do ecossistema — a mesma da `stackx` e da `sprintx`:
 
 ```
-.claude/hooks/comum/     hooks compartilhados (segredo, git, branch)
+.claude/hooks/comum/     biblioteca e hooks compartilhados (base, segredo, branch)
 .claude/hooks/mergex/    hooks próprios da mergex
 .claude/hooks/teste.sh   a suíte
 .claude/settings.json    o registro dos hooks no Claude Code
@@ -96,6 +96,13 @@ Segue a convenção do ecossistema — a mesma da `stackx` e da `sprintx`:
 .opencode/agent/         os mesmos agentes, no formato do OpenCode
 .expx/hooks.json         o modo de cada hook
 ```
+
+**Hook com nome que outra skill também usa mora no namespace da skill.** O
+`git-perigoso` da mergex é `.claude/hooks/mergex/git-perigoso.sh`, com id
+`mergex/git-perigoso` em `.expx/hooks.json`; a sprintx publica o dela em
+`.claude/hooks/sprintx/git-perigoso.sh`, com id `sprintx/git-perigoso`. Os
+dois coexistem sem sobrescrita, e desligar um id não desliga o outro. O id sem
+namespace (`git-perigoso`) não é lido por nenhum dos dois (DM-171).
 
 **A lógica não é duplicada entre os dois harnesses.** O plugin do OpenCode
 (`.opencode/plugin/mergex.ts`) invoca os **mesmos scripts** de
@@ -119,7 +126,7 @@ O modo vive em `.expx/hooks.json`, na raiz do projeto:
   "expx_hooks": 1,
   "hooks": {
     "sem-segredo": { "modo": "bloqueio" },
-    "git-perigoso": { "modo": "bloqueio" },
+    "mergex/git-perigoso": { "modo": "bloqueio" },
     "branch-limpa": { "modo": "bloqueio" },
     "commit-por-task": { "modo": "aviso" },
     "arquivo-fora-do-plano": { "modo": "aviso" },
@@ -185,3 +192,17 @@ diferenças aparecem.
 
 Dependências: `bash`, `jq`, `git`, e os utilitários POSIX (`grep`, `sed`,
 `awk`, `find`). Nenhuma chamada de rede, em nenhum caminho.
+
+**`jq` precisa estar no PATH do processo que executa o hook**, não só no do
+terminal interativo: o harness roda `bash` não interativo, que não lê
+`~/.bash_profile`. No `mergex/git-perigoso`, jq ausente é **bloqueio de
+contrato** — toda chamada cujo payload menciona `git` é barrada com a mensagem
+`dependência ausente: jq` — porque sem jq o comando não pode ser lido e o hook
+passaria sem avaliar nada (DM-171). Não existe parser alternativo. Os demais
+hooks que leem o payload por jq (`sem-segredo`, `branch-limpa` e os de método)
+ainda **falham abertos** sem jq: risco registrado na DM-171, fora do escopo do
+M4-A.
+
+**Timeout.** O harness cancela o hook que estoura o timeout e deixa o comando
+rodar — timeout é falha aberta. O `mergex/git-perigoso` usa 30 s, o mesmo
+timeout crítico do `sprintx/git-perigoso`.

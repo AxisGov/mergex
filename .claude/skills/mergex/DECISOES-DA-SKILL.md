@@ -418,3 +418,9 @@ antecipa. SprintX e BuildX não são alteradas por este marco.
 **O que invalidaria estas decisões:** o suporte a scripts shell ou a checkout Windows deixar de
 existir; ou surgir um protocolo durável, atômico e multiplataforma capaz de provar abandono e posse
 do stage sem julgamento humano. Até lá, LF e recuperação conservadora são requisitos de contrato.
+
+## P0.2-C7-B / M4 — namespace do `git-perigoso` e backstop fail-closed do E1
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-171 | O `git-perigoso` da mergex pode continuar em `comum/`, com id `git-perigoso`, ao lado do hook homônimo da sprintx | **Não.** Caminho `.claude/hooks/mergex/git-perigoso.sh`, id `mergex/git-perigoso` em `.expx/hooks.json`, registro único em `settings.json` e no plugin OpenCode; a biblioteca continua sendo `comum/base.sh`, importada e não copiada. O id sem namespace não é lido. As regras de proteção não mudam. jq ausente deixa de ser sucesso silencioso: payload que menciona `git` é barrado por contrato de instalação, sem parser alternativo; timeout sobe a 30 s, o crítico da sprintx | `sprintx/git-perigoso` já ocupa o nome com regras próprias: no mesmo caminho um sobrescreveria o outro e no mesmo id um "desligado" desligaria os dois. Sem jq o hook de segurança passava sem avaliar — e timeout também é falha aberta. `sem-segredo`, `branch-limpa` e os hooks de método ainda falham abertos sem jq: risco registrado, fora deste marco |

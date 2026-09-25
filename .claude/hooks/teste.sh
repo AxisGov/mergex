@@ -131,24 +131,24 @@ caso "comando comum"        comum/sem-segredo.sh "$(bash_json 'npm test')" 0
 
 echo
 echo "git-perigoso — tem que BARRAR"
-caso "push --force"           comum/git-perigoso.sh "$(bash_json 'git push --force origin main')" 2
-caso "push -f"                comum/git-perigoso.sh "$(bash_json 'git push -f')" 2
-caso "push --force-with-lease" comum/git-perigoso.sh "$(bash_json 'git push --force-with-lease')" 2
-caso "push +refspec"          comum/git-perigoso.sh "$(bash_json 'git push origin +feat:main')" 2
-caso "commit na principal"    comum/git-perigoso.sh "$(bash_json "git commit -m x")" 2
-caso "clean -fd"              comum/git-perigoso.sh "$(bash_json 'git clean -fd')" 2
+caso "push --force"           mergex/git-perigoso.sh "$(bash_json 'git push --force origin main')" 2
+caso "push -f"                mergex/git-perigoso.sh "$(bash_json 'git push -f')" 2
+caso "push --force-with-lease" mergex/git-perigoso.sh "$(bash_json 'git push --force-with-lease')" 2
+caso "push +refspec"          mergex/git-perigoso.sh "$(bash_json 'git push origin +feat:main')" 2
+caso "commit na principal"    mergex/git-perigoso.sh "$(bash_json "git commit -m x")" 2
+caso "clean -fd"              mergex/git-perigoso.sh "$(bash_json 'git clean -fd')" 2
 echo "git-perigoso — tem que PASSAR (falsos positivos)"
-caso "git status"             comum/git-perigoso.sh "$(bash_json 'git status')" 0
-caso "git log"                comum/git-perigoso.sh "$(bash_json 'git log --oneline')" 0
-caso "npm run push-notifications" comum/git-perigoso.sh "$(bash_json 'npm run push-notifications')" 0
-caso "echo sobre push --force"    comum/git-perigoso.sh "$(bash_json "echo 'nao faca push --force'")" 0
-caso "grep por push"          comum/git-perigoso.sh "$(bash_json 'grep -r push src/')" 0
-caso "git clean -n (seco)"    comum/git-perigoso.sh "$(bash_json 'git clean -n')" 0
-caso "git fetch"              comum/git-perigoso.sh "$(bash_json 'git fetch origin')" 0
+caso "git status"             mergex/git-perigoso.sh "$(bash_json 'git status')" 0
+caso "git log"                mergex/git-perigoso.sh "$(bash_json 'git log --oneline')" 0
+caso "npm run push-notifications" mergex/git-perigoso.sh "$(bash_json 'npm run push-notifications')" 0
+caso "echo sobre push --force"    mergex/git-perigoso.sh "$(bash_json "echo 'nao faca push --force'")" 0
+caso "grep por push"          mergex/git-perigoso.sh "$(bash_json 'grep -r push src/')" 0
+caso "git clean -n (seco)"    mergex/git-perigoso.sh "$(bash_json 'git clean -n')" 0
+caso "git fetch"              mergex/git-perigoso.sh "$(bash_json 'git fetch origin')" 0
 # Desfazer o stage NAO toca a arvore e nao destroi nada: barrar isso seria o
 # falso positivo que atrapalha o dia inteiro. Regressao de um caso real.
-caso "restore --staged (so o stage)" comum/git-perigoso.sh "$(bash_json 'git restore --staged f.txt')" 0
-caso "checkout de branch"            comum/git-perigoso.sh "$(bash_json 'git checkout outra-branch')" 0
+caso "restore --staged (so o stage)" mergex/git-perigoso.sh "$(bash_json 'git restore --staged f.txt')" 0
+caso "checkout de branch"            mergex/git-perigoso.sh "$(bash_json 'git checkout outra-branch')" 0
 
 echo
 echo "branch-limpa"
@@ -156,8 +156,8 @@ caso "troca com arvore limpa"  comum/branch-limpa.sh "$(bash_json 'git switch ou
 echo modificado >> arquivo.txt
 caso "troca com arvore suja"   comum/branch-limpa.sh "$(bash_json 'git switch outra')" 2
 # Descarte so e perigoso quando ha o que perder: aqui a arvore esta suja.
-caso "restore sem flag"   comum/git-perigoso.sh "$(bash_json 'git restore arquivo.txt')" 2
-caso "restore --worktree" comum/git-perigoso.sh "$(bash_json 'git restore --worktree arquivo.txt')" 2
+caso "restore sem flag"   mergex/git-perigoso.sh "$(bash_json 'git restore arquivo.txt')" 2
+caso "restore --worktree" mergex/git-perigoso.sh "$(bash_json 'git restore --worktree arquivo.txt')" 2
 caso "switch -c com suja"      comum/branch-limpa.sh "$(bash_json 'git switch -c nova')" 2
 caso "checkout -- nao e troca" comum/branch-limpa.sh "$(bash_json 'git checkout -- arquivo.txt')" 0
 caso "npm run switch"          comum/branch-limpa.sh "$(bash_json 'npm run switch')" 0
@@ -606,8 +606,8 @@ echo '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"bloqueio"}}}' > .expx
 caso "publicacao do fechamento com portao bloqueado barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 2
 
 # 5 — forcar a publicacao do fechamento continua proibido
-caso "fechamento final: push --force barra"            comum/git-perigoso.sh "$(bash_json 'git push --force origin feature/ft-02')" 2
-caso "fechamento final: push --force-with-lease barra" comum/git-perigoso.sh "$(bash_json 'git push --force-with-lease origin feature/ft-02')" 2
+caso "fechamento final: push --force barra"            mergex/git-perigoso.sh "$(bash_json 'git push --force origin feature/ft-02')" 2
+caso "fechamento final: push --force-with-lease barra" mergex/git-perigoso.sh "$(bash_json 'git push --force-with-lease origin feature/ft-02')" 2
 
 git reset -q; rm -f .expx/hooks.json
 git restore --worktree -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null || true

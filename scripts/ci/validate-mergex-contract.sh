@@ -1138,4 +1138,31 @@ for dm in DM-169 DM-170; do
     || fail "decision log is missing $dm"
 done
 
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M4-A — git-perigoso com caminho e id da skill
+# ---------------------------------------------------------------------------
+hook_git='.claude/hooks/mergex/git-perigoso.sh'
+[ -f "$hook_git" ] || fail 'M4-A: mergex/git-perigoso.sh is missing'
+[ ! -e '.claude/hooks/comum/git-perigoso.sh' ] || fail 'M4-A: comum/git-perigoso.sh still published'
+grep -Fxq 'HOOK="mergex/git-perigoso"' "$hook_git" || fail 'M4-A: hook id is not namespaced'
+grep -Fq '. "$DIR/../comum/base.sh"' "$hook_git" || fail 'M4-A: hook does not import comum/base.sh'
+grep -Fq '"mergex/git-perigoso": { "modo": "bloqueio" }' .expx/hooks.json \
+  || fail 'M4-A: .expx/hooks.json lost mergex/git-perigoso in bloqueio'
+if grep -Eq '"git-perigoso"[[:space:]]*:' .expx/hooks.json; then
+  fail 'M4-A: .expx/hooks.json still registers the bare git-perigoso id'
+fi
+[ "$(grep -Fc '/.claude/hooks/mergex/git-perigoso.sh' .claude/settings.json)" = 1 ] \
+  || fail 'M4-A: settings.json must register mergex/git-perigoso.sh exactly once'
+if grep -rFq --exclude-dir=.git --exclude-dir=.superpowers --exclude='validate-mergex-contract.sh' \
+    --exclude='test-m4a-git-perigoso-namespace.sh' \
+    'comum/git-perigoso.sh' .claude .opencode scripts AGENTS.md README.md; then
+  fail 'M4-A: a registry or document still points to comum/git-perigoso.sh'
+fi
+grep -Fq '"mergex/git-perigoso.sh",' .opencode/plugin/mergex.ts \
+  || fail 'M4-A: OpenCode bridge does not run the namespaced hook'
+grep -Fq 'command -v jq' "$hook_git" || fail 'M4-A: hook lost the jq contract check'
+[ -f scripts/ci/test-m4a-git-perigoso-namespace.sh ] || fail 'M4-A focused suite is missing'
+grep -Fq '| DM-171 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-171'
+
 printf 'contract checks passed\n'
