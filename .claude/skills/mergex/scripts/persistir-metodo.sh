@@ -14,8 +14,9 @@ TRAVA_SH="$AQUI/trava-do-e1.sh"
 CONTRATO_SH="$AQUI/contrato-de-commit.sh"
 SEGREDO_SH="$AQUI/../../../hooks/comum/sem-segredo.sh"
 CATALOGO_SH="$AQUI/catalogo-de-metodo.sh"
+PROVA_SH="$AQUI/prova-de-commit.sh"
 
-for dependencia in "$BASE_SH" "$TRAVA_SH" "$CONTRATO_SH" "$SEGREDO_SH" "$CATALOGO_SH"; do
+for dependencia in "$BASE_SH" "$TRAVA_SH" "$CONTRATO_SH" "$SEGREDO_SH" "$CATALOGO_SH" "$PROVA_SH"; do
   [ -r "$dependencia" ] || { printf 'persistir-metodo: dependência indisponível: %s\n' "$dependencia" >&2; exit 1; }
 done
 # shellcheck source=../../../hooks/comum/base.sh
@@ -155,11 +156,202 @@ adiciona() {
   printf '%s\n' "$caminho" >> "$TMP_LISTA"
 }
 
+# Primeira criação do HISTORICO global (DM-174). Sem versão em HEAD não existe
+# diff que prove ownership: a prova é sobre o ARQUIVO INTEIRO, e falha fechado.
+# Só depois dela o arquivo entra no commit de método, e dali em diante ele é
+# tracked e cai na prova por diff de confere_historico_corrente.
+confere_historico_inicial() {
+  local caminho='docs/sprintx/estimativas/HISTORICO.md' presenca parcial componente
+  local dir nome concluidas motivo
+  git -C "$RAIZ" rev-parse -q --verify 'HEAD^{commit}' >/dev/null 2>&1 \
+    || para 'HISTORICO global inicial sem HEAD para provar a ausência da versão anterior'
+  presenca="$(git -C "$RAIZ" ls-tree --name-only HEAD -- "$caminho" 2>/dev/null)" \
+    || para 'não foi possível provar a ausência do HISTORICO global em HEAD'
+  [ -z "$presenca" ] \
+    || para 'HISTORICO global existe em HEAD, mas está fora do índice; estado anômalo não é primeira criação'
+
+  parcial="$RAIZ"
+  for componente in docs sprintx estimativas HISTORICO.md; do
+    parcial="$parcial/$componente"
+    [ ! -L "$parcial" ] || para 'HISTORICO global inicial passa por link simbólico'
+  done
+  [ -f "$RAIZ/$caminho" ] || para 'HISTORICO global inicial não é arquivo regular'
+
+  # Tasks concluídas do trabalho corrente, pelo leitor único da V11, sobre os
+  # tasks.md que o catálogo reconhece como sprints deste trabalho.
+  set --
+  for dir in "$RAIZ/$PASTA"/sprint-*; do
+    [ -d "$dir" ] || continue
+    nome="$(basename "$dir")"
+    printf '%s\n' "$nome" | grep -Eq '^sprint-[0-9]{2,}$' || continue
+    [ -f "$dir/tasks.md" ] && set -- "$@" "$dir/tasks.md"
+  done
+  concluidas=""
+  if [ "$#" -gt 0 ]; then
+    concluidas="$(bash "$PROVA_SH" --concluidas "$@" 2>/dev/null)" \
+      || para 'HISTORICO global inicial: tasks do trabalho ilegíveis'
+    concluidas="$(printf '%s\n' "$concluidas" | cut -f1 | LC_ALL=C sort -u)"
+  fi
+
+  motivo="$(HIST_TRABALHO="$TRABALHO" HIST_CONCLUIDAS="$concluidas" awk '
+    function erro(m) { if (!falhou) print m; falhou = 1; exit 1 }
+    function apara(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
+    function escalar(v) {
+      v = apara(v)
+      if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+      return v
+    }
+    function cita_tasks(texto,   id) {
+      while (match(texto, /T-[0-9]+\.[0-9]+/)) {
+        id = substr(texto, RSTART, RLENGTH)
+        if (!(id in concluida)) erro("cita task que não é concluída do trabalho corrente: " id)
+        texto = substr(texto, RSTART + RLENGTH)
+      }
+    }
+    function cita_trabalho(texto,   v) {
+      while (match(texto, /trabalho_id:[[:space:]]*[^[:space:]`|,;]+/)) {
+        v = substr(texto, RSTART, RLENGTH); sub(/^trabalho_id:[[:space:]]*/, "", v)
+        gsub(/["\047]/, "", v)
+        if (v != trabalho && v != "null") erro("cita outro trabalho: " v)
+        texto = substr(texto, RSTART + RLENGTH)
+      }
+    }
+    function fecha_item(   k) {
+      if (!item) return
+      if (secao == "entradas" && !("trabalho_id" in tem)) erro("entrada sem trabalho_id")
+      if (secao == "entradas" && !("task_id" in tem)) erro("entrada sem task_id")
+      if (secao == "calibracao" && !("tipo_task" in tem)) erro("calibração sem tipo_task")
+      for (k in tem) delete tem[k]
+      item = 0
+    }
+    function campo(chave, valor,   v) {
+      if (secao == "entradas") {
+        if (!(chave in campo_entrada)) erro("entrada com chave fora do contrato: " chave)
+      } else if (secao == "calibracao") {
+        if (!(chave in campo_calibracao)) erro("calibração com chave fora do contrato: " chave)
+      } else erro("item fora de entradas/calibracao")
+      if (chave in tem) erro("chave repetida no mesmo item: " chave)
+      tem[chave] = 1
+      v = escalar(valor)
+      if (secao == "entradas" && chave == "trabalho_id" && v != trabalho)
+        erro("entrada de outro trabalho: " v)
+      if (secao == "entradas" && chave == "task_id") {
+        if (!(v in concluida)) erro("entrada de task que não é concluída do trabalho corrente: " v)
+        if (v in registrada) erro("entrada duplicada para a task: " v)
+        registrada[v] = 1
+      }
+      if (chave == "tipo_task" && !(v in tipo)) erro("tipo_task fora do enum: " v)
+      if (chave != "task_id") cita_tasks(valor)
+      cita_trabalho(valor)
+    }
+    function linha_tabela(   partes, c1, c2) {
+      split($0, partes, "|")
+      c1 = apara(partes[2]); c2 = apara(partes[3])
+      if (tabela == "") {
+        if (c1 == "Trabalho") tabela = "entradas"
+        else if (c1 == "Tipo de task") tabela = "calibracao"
+        else erro("tabela fora do contrato no corpo: " c1)
+        separador = 1; return
+      }
+      if (separador) {
+        if ($0 !~ /^[[:space:]]*\|([[:space:]]*:?-+:?[[:space:]]*\|)+[[:space:]]*$/)
+          erro("tabela sem linha separadora")
+        separador = 0; return
+      }
+      if (tabela == "entradas") {
+        if (c1 != trabalho) erro("linha da tabela de entradas de outro trabalho: " c1)
+        if (!(c2 in concluida)) erro("linha da tabela de task que não é concluída do trabalho corrente: " c2)
+        if (c2 in linha_vista) erro("linha duplicada na tabela de entradas: " c2)
+        linha_vista[c2] = 1
+      } else if (!(c1 in tipo)) erro("linha da tabela de calibração fora do enum tipo_task: " c1)
+    }
+    BEGIN {
+      trabalho = ENVIRON["HIST_TRABALHO"]
+      n = split(ENVIRON["HIST_CONCLUIDAS"], lista, "\n")
+      for (i = 1; i <= n; i++) if (lista[i] != "") concluida[lista[i]] = 1
+      n = split("expx_schema expx_tool kind trabalho_id atualizado_em unidade entradas calibracao", lista, " ")
+      for (i = 1; i <= n; i++) { topo[lista[i]] = 1; ordem[i] = lista[i] }
+      n_topo = n
+      n = split("trabalho_id task_id tipo_task area sinais estimado_min estimado_max estimado_media real duracao_observada desvio registrado_em", lista, " ")
+      for (i = 1; i <= n; i++) campo_entrada[lista[i]] = 1
+      n = split("tipo_task entradas desvio_medio fator_ativo", lista, " ")
+      for (i = 1; i <= n; i++) campo_calibracao[lista[i]] = 1
+      n = split("config client dominio persistencia api ui integracao_externa teste infra refatoracao", lista, " ")
+      for (i = 1; i <= n; i++) tipo[lista[i]] = 1
+      estado = "inicio"
+    }
+    { sub(/\r$/, "") }
+    estado == "inicio" {
+      if ($0 !~ /^---[[:space:]]*$/) erro("não começa por frontmatter")
+      estado = "fm"; next
+    }
+    estado == "fm" && /^---[[:space:]]*$/ { fecha_item(); estado = "corpo"; next }
+    estado == "fm" {
+      if ($0 ~ /\t/) erro("frontmatter com tabulação")
+      if ($0 ~ /^[[:space:]]*$/) next
+      if ($0 ~ /^[a-z0-9_]+:/) {
+        fecha_item()
+        chave = $0; sub(/:.*/, "", chave)
+        valor = $0; sub(/^[^:]*:/, "", valor)
+        if (!(chave in topo)) erro("chave de topo fora do contrato: " chave)
+        if (chave in visto) erro("chave de topo repetida: " chave)
+        visto[chave] = 1; valor_topo[chave] = escalar(valor)
+        secao = ""
+        if (chave == "entradas" || chave == "calibracao") {
+          if (escalar(valor) == "") secao = chave
+          else if (escalar(valor) != "[]") erro(chave " fora do formato de lista")
+        } else { cita_tasks(valor); cita_trabalho(valor) }
+        next
+      }
+      if ($0 ~ /^ +- [a-z0-9_]+:/) {
+        fecha_item(); item = 1
+        recuo = match($0, /-/) - 1
+        resto = $0; sub(/^ +- /, "", resto)
+        chave = resto; sub(/:.*/, "", chave)
+        valor = resto; sub(/^[^:]*:/, "", valor)
+        campo(chave, valor); next
+      }
+      if ($0 ~ /^ +[a-z0-9_]+:/) {
+        if (!item || match($0, /[^ ]/) - 1 <= recuo) erro("linha fora de item: " $0)
+        chave = $0; sub(/^ +/, "", chave); sub(/:.*/, "", chave)
+        valor = $0; sub(/^[^:]*:/, "", valor)
+        campo(chave, valor); next
+      }
+      erro("linha não reconhecida no frontmatter: " $0)
+    }
+    estado == "corpo" {
+      cita_tasks($0); cita_trabalho($0)
+      if ($0 ~ /^[[:space:]]*```/) { cerca = !cerca; tabela = ""; next }
+      if (cerca) next
+      if ($0 ~ /^[[:space:]]*\|/) { linha_tabela(); next }
+      tabela = ""; separador = 0
+    }
+    END {
+      if (falhou) exit 1
+      if (estado != "corpo") { print "frontmatter não fechado"; exit 1 }
+      for (i = 1; i <= n_topo; i++)
+        if (!(ordem[i] in visto)) { print "falta a chave " ordem[i]; exit 1 }
+      if (valor_topo["expx_schema"] != "1") { print "expx_schema não é 1"; exit 1 }
+      if (valor_topo["expx_tool"] != "sprintx") { print "expx_tool não é sprintx"; exit 1 }
+      if (valor_topo["kind"] != "estimativa_historico") { print "kind não é estimativa_historico"; exit 1 }
+      if (valor_topo["trabalho_id"] != "null") { print "trabalho_id do cabeçalho não é null"; exit 1 }
+      if (valor_topo["unidade"] != "h") { print "unidade não é h"; exit 1 }
+      if (valor_topo["atualizado_em"] !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
+        print "atualizado_em fora de AAAA-MM-DD"; exit 1
+      }
+    }
+  ' "$RAIZ/$caminho" 2>&1)" \
+    || para "HISTORICO global inicial sem ownership integral: ${motivo:-leitura falhou}"
+  return 0
+}
+
 confere_historico_corrente() {
   local caminho='docs/sprintx/estimativas/HISTORICO.md' diff linha valor
   sujo "$caminho" || return 0
-  git -C "$RAIZ" ls-files --error-unmatch -- "$caminho" >/dev/null 2>&1 \
-    || para 'HISTORICO global untracked não tem base para provar ownership'
+  if ! git -C "$RAIZ" ls-files --error-unmatch -- "$caminho" >/dev/null 2>&1; then
+    confere_historico_inicial
+    return 0
+  fi
   diff="$(git -C "$RAIZ" diff HEAD --no-color --no-ext-diff -U0 -- "$caminho" 2>/dev/null)" \
     || para 'não foi possível provar o diff do HISTORICO global'
   while IFS= read -r linha; do

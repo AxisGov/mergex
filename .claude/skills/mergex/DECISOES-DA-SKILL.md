@@ -432,3 +432,17 @@ execução escreveu cada arquivo (por exemplo, a reivindicação de task da skil
 evidência durável e verificável pelo E1) — aí tasks em voo poderiam dividir a mesma worktree; ou a
 sprintx deixar de publicar hook de mesmo nome, o que tornaria o namespace redundante, mas não
 errado. SprintX, BuildX e ExpxDev não são alterados por este marco.
+
+## P0.2 / D-02 — primeiro `HISTORICO.md` global da sprintx
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-174 | O `HISTORICO.md` global que ainda não existe em HEAD pode ser versionado pela mergex, se não há diff que prove ownership | **Sim, só depois da prova integral.** A primeira criação do HISTORICO global pode ser versionada pela MergeX sem base tracked somente após prova integral de ownership; versões subsequentes continuam exigindo prova por diff contra HEAD. A primeira criação exige: `ls-tree HEAD` vazio para o caminho exato (HEAD com o arquivo e índice sem ele é estado anômalo e para); arquivo regular, sem link simbólico no caminho; frontmatter de gramática fechada (`expx_schema: 1`, `expx_tool: sprintx`, `kind: estimativa_historico`, `trabalho_id: null`, `unidade: h`, `atualizado_em` ISO, só as chaves do contrato em topo, entrada e calibração, sem comentário); toda entrada com `trabalho_id` igual ao trabalho explícito e `task_id` concluída nos `sprint-NN/tasks.md` dele (leitor da V11), sem duplicata; no corpo, só as tabelas de entradas e de calibração, e toda task citada é concluída do trabalho corrente. Qualquer falha para antes do `git add`: stage vazio, trava da execução liberada, arquivo intacto. Trava C5, stage vazio de entrada, catálogo exato, gate de segredo e contrato de commit não mudam, e vale nos três checkpoints | A sprintx cria o arquivo do template no primeiro trabalho e declara que a mergex o versiona; recusar todo HISTORICO untracked deixava o primeiro trabalho de qualquer projeto sem caminho público para o E2 nem para o E8 bloqueado. Exigir base manual ou relaxar untracked em geral trocaria o deadlock por um buraco. Sem versão anterior não há evidência antiga a proteger — a pergunta passa a ser se o arquivo inteiro é do trabalho corrente, e só a prova integral responde |
+
+**O que invalidaria esta decisão:** a sprintx mudar o contrato de `estimativa_historico` (chaves,
+enums ou tabelas do corpo), o que exige atualizar a gramática da prova integral junto; ou o
+HISTORICO deixar de ser global. **Fora do escopo, de propósito:** concorrência entre features.
+O HISTORICO é global: duas features que o criem ou acrescentem em paralelo produzem conflito Git
+normal no merge, resolvido por quem revisa. Esta decisão prova ownership da primeira criação no
+lifecycle; não é mecanismo de merge distribuído do HISTORICO. SprintX, BuildX e ExpxDev não são
+alterados por este reparo.

@@ -77,6 +77,10 @@ Na mergex, isso significa:
 - **não** entra na lista `commits` do `ENTREGA.md` — não é task; é citado na prosa;
 - é excluído da conta de "arquivo de produto fora do plano" na V9;
 - continua sujeito à **varredura de segredo**, como qualquer arquivo do commit;
+- no **primeiro trabalho do projeto**, ele ainda não existe em HEAD: a sprintx o cria do template
+  e o checkpoint de método o versiona depois de provar que o arquivo **inteiro** pertence ao
+  trabalho explícito (DM-174). Não existe commit de base manual. É global: features concorrentes
+  que o tocam produzem conflito Git normal no merge, resolvido por quem revisa;
 - no **E3**, é classificado pelo catálogo de artefatos de método: DISPENSÁVEL (D4) só quando, contra a
   base, apenas acrescenta entradas deste trabalho; qualquer reescrita vai para LEITURA RÁPIDA (L4)
   (`references/03-atencao-humana.md`, "Artefatos de método").

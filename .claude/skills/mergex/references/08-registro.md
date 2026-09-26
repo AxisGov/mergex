@@ -361,7 +361,9 @@ rodaram —, mas a sprintx já gravou `docs/sprintx/estimativas/HISTORICO.md` an
 `FECHAMENTO.md` e do portão. Quando a origem é a sprintx e ele está sujo, ele **entra no commit
 final do bloqueio**: por caminho explícito, com a mesma varredura de segredo, fora da lista
 `commits`, sem inventar task e sem publicar nada. É o que evita que uma retomada perca a memória
-que a sprintx já havia registrado.
+que a sprintx já havia registrado. Vale também quando ele **nasceu neste trabalho** e nenhum
+checkpoint anterior o persistiu: o `e8` faz a prova integral da primeira criação (DM-174) e, se
+ela falhar, para sem commit.
 
 Termina com o bloqueio preservado no HEAD local — é o que permite a uma sessão futura, ou a
 outra skill, ver que este trabalho parou no portão, e por quê, mesmo depois de o worktree sumir.
