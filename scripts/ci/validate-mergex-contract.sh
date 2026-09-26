@@ -1198,4 +1198,24 @@ for dm in DM-172 DM-173; do
     || fail "decision log is missing $dm"
 done
 
+# ---------------------------------------------------------------------------
+# P0.2 / D-02 — primeiro HISTORICO global da sprintx
+# ---------------------------------------------------------------------------
+grep -Fq '| DM-174 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-174'
+grep -Fq 'confere_historico_inicial()' "$persiste_sh" \
+  || fail 'D-02: method lifecycle lost the whole-file proof of the first HISTORICO'
+if codigo "$persiste_sh" | grep -Fq 'untracked não tem base'; then
+  fail 'D-02: method lifecycle still refuses every untracked HISTORICO'
+fi
+grep -Fq 'ls-tree --name-only HEAD -- "$caminho"' "$persiste_sh" \
+  || fail 'D-02: first HISTORICO no longer proves absence in HEAD'
+grep -Fq "remove ou reescreve evidência existente" "$persiste_sh" \
+  || fail 'D-02: tracked HISTORICO lost the diff proof'
+grep -Fq 'DM-174' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'D-02: E1 reference does not state the first HISTORICO rule'
+for f in scripts/ci/test-d02-historico-inicial.sh scripts/ci/mutacao-d02-historico-inicial.sh; do
+  [ -f "$f" ] || fail "D-02: missing $f"
+done
+
 printf 'contract checks passed\n'
