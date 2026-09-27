@@ -1163,6 +1163,9 @@ grupo_e1() {
     || falha "pre-e2 depois do E1 nao versionou o HISTORICO (rc=$rc)"
 }
 
+# Carregada com `.` pela bancada D-04: só as fixtures e os helpers, nenhum grupo.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
+
 grupo="${1:-all}"
 case "$grupo" in
   all) grupo_central; grupo_checkpoints; grupo_negativos; grupo_contrato; grupo_subsequente; grupo_tracked; grupo_e1 ;;

@@ -1245,4 +1245,32 @@ fi
 grep -Fq 'grupo_tracked' scripts/ci/test-d02-historico-inicial.sh \
   || fail 'DM-175: bench lost the tracked group'
 
+# ---------------------------------------------------------------------------
+# P0.2 / D-04 — valor efetivo de escalares YAML no HISTORICO (DM-176)
+# ---------------------------------------------------------------------------
+grep -Fq '| DM-176 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-176'
+grep -Fq 'DM-176' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'DM-176: E1 reference does not state the effective-value rule'
+grep -Fq 'function decodifica(' "$persiste_sh" \
+  || fail 'DM-176: HISTORICO reader lost the single quoted-scalar decoder'
+# Um decodificador só: escalar e efetivo não desaspam o miolo cru.
+if codigo "$persiste_sh" | grep -Fq -e 'if (aspas) return substr(v, 2' -e 'if (aspas) return "s:" substr(v, 2'; then
+  fail 'DM-176: a quoted scalar is unquoted outside the single decoder'
+fi
+# Não é parser YAML geral, e a decisão diz isso.
+grep -F '| DM-176 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' | grep -Fq 'falha fechado' \
+  || fail 'DM-176: decision does not state that unsupported escapes fail closed'
+grep -Fq 'parser YAML geral' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'DM-176: decision no longer states it is not a general YAML parser'
+# Comentário #3 do CodeAnt: a DM-174 não pode voltar a barrar {{...}} na prosa
+# humana, que a DM-175 esclareceu; a redação original fica citada, não apagada.
+dm174="$(grep -F '| DM-174 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md')"
+printf '%s\n' "$dm174" | grep -Fq 'na prosa humana explicativa é texto' \
+  && printf '%s\n' "$dm174" | grep -Fq 'parcialmente esclarecida pela DM-175' \
+  || fail 'DM-174 contradicts DM-175 again: {{...}} in human prose is text, not pending data'
+for f in scripts/ci/test-d04-historico-yaml-escalar.sh scripts/ci/mutacao-d04-historico-yaml-escalar.sh; do
+  [ -f "$f" ] || fail "D-04: missing $f"
+done
+
 printf 'contract checks passed\n'
