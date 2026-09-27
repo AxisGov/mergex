@@ -7,7 +7,12 @@
 # criação entra pelo próprio persistir-metodo.sh depois da prova integral de
 # ownership (DM-174), e a prova por diff do HISTORICO tracked continua intacta.
 #
-# Uso: bash scripts/ci/test-d02-historico-inicial.sh [central|checkpoints|negativos|subsequente|e1]
+# O grupo contrato é diferencial contra o contrato PUBLICADO da sprintx: o que
+# o contrato permite (sinais em bloco, prosa, heading e tabela humana, menção
+# incidental a task, comentário YAML) passa; o que fere ownership ou a
+# estrutura (marcador, outro trabalho, sinais ambíguos, YAML inválido) barra.
+#
+# Uso: bash scripts/ci/test-d02-historico-inicial.sh [central|checkpoints|negativos|contrato|subsequente|e1]
 
 set -uo pipefail
 
@@ -426,10 +431,6 @@ p_linha_alheia() { # só a primeira coluna denuncia: task concluída, sem duplic
   troca_linha "$1/$HIST" "$LINHA_T0201" '| outro-trabalho | T-02.01 | ui | accountability | — | — | — | 0,13 h | — |'
 }
 p_linha_duplicada() { insere_depois "$1/$HIST" "$LINHA_T0201" "$LINHA_T0101"; }
-p_prosa_task() { printf '\nHerdado da T-07.03 de outro trabalho.\n' >> "$1/$HIST"; }
-p_prosa_trabalho() { printf '\ntrabalho_id: outro-trabalho\n' >> "$1/$HIST"; }
-p_tabela_alheia() { printf '\n| Coisa | Valor |\n|---|---|\n| outro-trabalho | 3 h |\n' >> "$1/$HIST"; }
-p_comentario() { insere_antes "$1/$HIST" 'calibracao: []' '# outro-trabalho registrou aqui'; }
 p_stage() {
   printf 'mudanca\n' >> "$1/src/rotulo.js"
   git -C "$1" add -- src/rotulo.js
@@ -452,10 +453,6 @@ grupo_negativos() {
   nega 'calibracao usada como buraco para outro trabalho' p_calibracao_buraco
   nega 'linha da tabela de outro trabalho' p_linha_alheia
   nega 'linha duplicada na tabela de entradas' p_linha_duplicada
-  nega 'prosa citando task estranha' p_prosa_task
-  nega 'prosa citando outro trabalho' p_prosa_trabalho
-  nega 'tabela fora do contrato no corpo' p_tabela_alheia
-  nega 'comentario YAML nao atribuivel' p_comentario
 
   # Path parecido: não é o HISTORICO, não é método, não entra em commit nenhum.
   repo="$D/parecido"; repo_c7c "$repo"
@@ -500,6 +497,216 @@ grupo_negativos() {
     && trava_livre "$repo" \
     && ok 'gate de segredo continua barrando a primeira criacao' \
     || falha "primeira criacao pulou o gate de segredo (rc=$rc)"
+}
+
+# Cada positivo roda numa cópia nova do C7-C com a variação aplicada: o pre-e2
+# persiste, o HISTORICO entra byte a byte, stage vazio, trava livre e o
+# --verificar seguinte fica limpo.
+aceita() { # <descricao> <preparo>
+  local descricao="$1" preparo="$2" repo rc saida
+  repo="$D/aceita-$(printf '%s' "$descricao" | tr -c 'a-z0-9' '-')"
+  repo_c7c "$repo"; fim_da_f6 "$repo"
+  "$preparo" "$repo"
+  cp "$repo/$HIST" "$D/aceita.antes"
+  saida="$(metodo "$repo" --persistir pre-e2 2>"$D/aceita.err")"; rc=$?
+  if [ "$rc" = 0 ] && printf '%s\n' "$saida" | grep -Eq '^commit=[0-9a-f]{40}$' \
+     && git -C "$repo" show "HEAD:$HIST" | cmp -s - "$D/aceita.antes" \
+     && [ -z "$(staged "$repo")" ] && trava_livre "$repo" \
+     && metodo "$repo" --verificar pre-e2 >/dev/null 2>&1; then
+    ok "aceita: $descricao"
+  else
+    falha "nao aceitou: $descricao (rc=$rc; $(cat "$D/aceita.err"))"
+  fi
+}
+
+# DEVEM PASSAR — forma permitida pelo contrato publicado da sprintx.
+v_sinais_inline() { troca_linha "$1/$HIST" '    sinais: []' '    sinais: [sem_cobertura, integracao_externa]'; }
+v_sinais_bloco() {
+  troca_linha "$1/$HIST" '    sinais: []' '    sinais:
+      - sem_cobertura
+      - integracao_externa'
+}
+v_sinais_bloco_aspas() {
+  troca_linha "$1/$HIST" '    sinais: []' '    sinais:
+      - "sem_cobertura"
+      - integracao_externa  # declarado na estimativa' 2
+}
+v_paragrafo() {
+  insere_depois "$1/$HIST" "$LINHA_T0201" '
+Observação da equipe: as duas tasks rodaram no mesmo dia, uma depois da outra.'
+}
+v_heading() {
+  insere_antes "$1/$HIST" '## Calibração por tipo de task' '## Notas da equipe
+
+Nenhuma interrupção relevante durante a execução.
+'
+}
+v_tabela_humana() { # mesmo cabeçalho da oficial, mas fora de "## Entradas"
+  printf '\n## Comparação com outro projeto\n\n| Trabalho | Task | Real |\n|---|---|---|\n| outro-trabalho | T-07.03 | 3 h |\n' \
+    >> "$1/$HIST"
+}
+v_tabela_humana_na_secao() { # depois da oficial, com outro cabeçalho
+  insere_depois "$1/$HIST" "$LINHA_T0201" '
+| Nota | Valor |
+|---|---|
+| revisão | sem ressalva |'
+}
+v_mencao_task() {
+  printf '\nA T-99.99 citada aqui é só um exemplo de id, não uma entrada.\n' >> "$1/$HIST"
+}
+v_mencao_trabalho() {
+  printf '\nNo YAML de outro projeto se lê trabalho_id: outro-trabalho, e isso não é entrada daqui.\n' >> "$1/$HIST"
+}
+v_exemplo_codigo() {
+  printf '\n```yaml\n  - trabalho_id: outro-trabalho\n    task_id: T-99.99\n```\n' >> "$1/$HIST"
+}
+v_comentario_linha() { insere_antes "$1/$HIST" 'calibracao: []' '# outro-trabalho registrou aqui'; }
+v_comentario_fim() {
+  troca_linha "$1/$HIST" '    real: 0.12' '    real: 0.12  # medido no rastro, sem pausa'
+  troca_linha "$1/$HIST" "  - trabalho_id: $TRAB" "  - trabalho_id: $TRAB # dono desta entrada" 2
+  troca_linha "$1/$HIST" 'calibracao: []' 'calibracao: [] # sem estimativa, sem fator'
+}
+v_comentario_recuado() {
+  insere_depois "$1/$HIST" '    task_id: T-01.01' '      # comentario com recuo arbitrario'
+}
+
+# DEVEM BARRAR — ownership ou estrutura.
+p_marcador_tabela() {
+  troca_linha "$1/$HIST" "$LINHA_T0201" \
+    '| issue-123-rotulo-parecer | T-02.01 | {{tipo_task}} | accountability | — | — | — | 0,13 h | — |'
+}
+p_marcador_fm() { troca_linha "$1/$HIST" '    area: accountability' '    area: {{area}}'; }
+p_marcador_prosa() {
+  printf '\n{{Trabalho que rodou sem a F3.5 entra assim}}\n' >> "$1/$HIST"
+}
+p_cabecalho_renomeado() {
+  troca_linha "$1/$HIST" '| Trabalho | Task | Tipo | Área | Sinais | Estimado (min–max) | Média est. | Real | Desvio |' \
+    '| Job | Task | Tipo | Área | Sinais | Estimado (min–max) | Média est. | Real | Desvio |'
+}
+p_segunda_oficial_alheia() { # sub-heading não tira a tabela da seção Entradas
+  insere_depois "$1/$HIST" "$LINHA_T0201" '
+### Mais entradas
+
+| Trabalho | Task | Tipo |
+|---|---|---|
+| outro-trabalho | T-02.01 | ui |'
+}
+p_tabela_sem_barra() { # GFM renderiza sem a barra inicial: não pode escapar da prova
+  insere_depois "$1/$HIST" "$LINHA_T0201" '
+Trabalho | Task | Tipo
+---|---|---
+outro-trabalho | T-02.01 | ui'
+}
+p_sinais_escalar() { troca_linha "$1/$HIST" '    sinais: []' '    sinais: sem_cobertura'; }
+p_sinais_aberta() { troca_linha "$1/$HIST" '    sinais: []' '    sinais: [sem_cobertura, integracao_externa'; }
+p_sinais_nula() { troca_linha "$1/$HIST" '    sinais: []' '    sinais:'; }
+p_sinais_recuo() {
+  troca_linha "$1/$HIST" '    sinais: []' '    sinais:
+      - sem_cobertura
+        - integracao_externa'
+}
+p_sinais_mapa() {
+  troca_linha "$1/$HIST" '    sinais: []' '    sinais:
+      - trabalho_id: outro-trabalho'
+}
+p_sinais_aninhada() { troca_linha "$1/$HIST" '    sinais: []' '    sinais: [sem_cobertura, [integracao_externa]]'; }
+p_sinais_item_vazio() { troca_linha "$1/$HIST" '    sinais: []' '    sinais: [sem_cobertura, , integracao_externa]'; }
+p_sinais_virgula() {
+  troca_linha "$1/$HIST" '    sinais: []' '    sinais:
+      - sem_cobertura, integracao_externa'
+}
+p_chave_sem_espaco() { troca_linha "$1/$HIST" 'kind: estimativa_historico' 'kind:estimativa_historico'; }
+p_chave_recuada() { troca_linha "$1/$HIST" '    real: 0.12' '      real: 0.12'; }
+p_item_recuo() { troca_linha "$1/$HIST" "  - trabalho_id: $TRAB" "    - trabalho_id: $TRAB" 2; }
+p_aspas_abertas() { troca_linha "$1/$HIST" '    area: accountability' '    area: "accountability'; }
+p_escalar_bloco() {
+  troca_linha "$1/$HIST" '    area: accountability' '    area: |
+      accountability'
+}
+p_fm_aberto() { awk '$0 == "---" && ++n == 2 { next } { print }' "$1/$HIST" > "$1/$HIST.tmp" && mv "$1/$HIST.tmp" "$1/$HIST"; }
+# O relaxamento de comentário não pode esconder o valor efetivo.
+p_hash_colado() { troca_linha "$1/$HIST" "  - trabalho_id: $TRAB" "  - trabalho_id: $TRAB#outro-trabalho"; }
+p_comentario_disfarca() {
+  troca_linha "$1/$HIST" "  - trabalho_id: $TRAB" "  - trabalho_id: outro-trabalho # $TRAB" 2
+}
+p_comentario_task() { troca_linha "$1/$HIST" '    task_id: T-02.01' '    task_id: T-03.01 # T-02.01'; }
+p_aspas_com_hash() { troca_linha "$1/$HIST" "  - trabalho_id: $TRAB" "  - trabalho_id: \"$TRAB # x\""; }
+
+# A8 — o mesmo ownership do C7-C noutra formatação válida: sinais em bloco e
+# uma observação humana a mais. A mergex não pode depender do byte do piloto.
+historico_c7c_variante() { # <arquivo>
+  historico_c7c "$1"
+  troca_linha "$1" '    sinais: []' '    sinais:
+      - sem_cobertura
+      - arquivo_novo_isolado'
+  troca_linha "$1" '    sinais: []' '    sinais:
+      - sem_cobertura'
+  insere_depois "$1" "$LINHA_T0201" '
+> Observação humana: a T-02.01 dependeu do rótulo criado na T-01.01.'
+}
+
+grupo_contrato() {
+  local repo rc
+  printf '\nCONTRATO — diferencial contra o contrato publicado da sprintx (A7/A8)\n'
+  aceita '1 sinais inline' v_sinais_inline
+  aceita '2 sinais multilinha' v_sinais_bloco
+  aceita '2b sinais multilinha com aspas e comentario' v_sinais_bloco_aspas
+  aceita '3 paragrafo humano adicional' v_paragrafo
+  aceita '4 heading humano adicional' v_heading
+  aceita '5 tabela humana com cabecalho igual fora de entradas' v_tabela_humana
+  aceita '5b tabela humana depois da oficial' v_tabela_humana_na_secao
+  aceita '6 mencao a T-99-99 em frase humana' v_mencao_task
+  aceita '6b mencao a trabalho-id em frase humana' v_mencao_trabalho
+  aceita '6c exemplo em bloco de codigo' v_exemplo_codigo
+  aceita '7 comentario YAML de linha inteira' v_comentario_linha
+  aceita '7b comentario YAML ao fim da linha' v_comentario_fim
+  aceita '7c comentario YAML com recuo arbitrario' v_comentario_recuado
+
+  nega '8 marcador na linha-modelo da tabela' p_marcador_tabela
+  nega '8b marcador no frontmatter' p_marcador_fm
+  nega '8c marcador na prosa' p_marcador_prosa
+  nega '9 entradas trabalho-id de outro trabalho' p_outro
+  nega '10 task-id de outro trabalho' p_estranha
+  nega '10b task-id nao concluida' p_nao_concluida
+  nega '11 duplicata de entrada' p_duplicada
+  nega '12 linha de dados da tabela oficial de outro trabalho' p_linha_alheia
+  nega '12b tabela oficial sob sub-heading com outro trabalho' p_segunda_oficial_alheia
+  nega '12c tabela de entradas com cabecalho renomeado' p_cabecalho_renomeado
+  nega '12d tabela de entradas sem barra inicial com outro trabalho' p_tabela_sem_barra
+  nega '13 sinais escalar' p_sinais_escalar
+  nega '13b sinais inline sem fechamento' p_sinais_aberta
+  nega '13c sinais sem valor' p_sinais_nula
+  nega '13d sinais com recuo inconsistente' p_sinais_recuo
+  nega '13e sinais com item chave-valor' p_sinais_mapa
+  nega '13f sinais aninhada' p_sinais_aninhada
+  nega '13g sinais com item vazio' p_sinais_item_vazio
+  nega '13h sinais com virgula ambigua em bloco' p_sinais_virgula
+  nega '14 chave sem espaco depois dos dois pontos' p_chave_sem_espaco
+  nega '14b chave de entrada mais recuada' p_chave_recuada
+  nega '14c item com recuo inconsistente' p_item_recuo
+  nega '14d aspas sem fechamento' p_aspas_abertas
+  nega '14e texto multilinha em bloco' p_escalar_bloco
+  nega '14f frontmatter sem fechamento' p_fm_aberto
+  nega '15 hash colado nao e comentario' p_hash_colado
+  nega '15b comentario nao disfarca outro trabalho' p_comentario_disfarca
+  nega '15c comentario nao disfarca task estranha' p_comentario_task
+  nega '15d hash entre aspas e valor' p_aspas_com_hash
+
+  # A8: o C7-C real já passa no grupo central; a variante tem de passar igual,
+  # e o checkpoint seguinte continua no caminho tracked.
+  repo="$D/variante"; repo_c7c "$repo"; fim_da_f6 "$repo"
+  historico_c7c_variante "$repo/$HIST"
+  cp "$repo/$HIST" "$D/variante.md"
+  metodo "$repo" --persistir pre-e2 >/dev/null 2>"$D/variante.err"; rc=$?
+  [ "$rc" = 0 ] && git -C "$repo" show "HEAD:$HIST" | cmp -s - "$D/variante.md" \
+    && metodo "$repo" --verificar pre-e2 >/dev/null 2>&1 \
+    && ok 'A8: variante C7-C (sinais em bloco + observacao humana) persiste byte a byte' \
+    || falha "A8: variante C7-C recusada (rc=$rc; $(cat "$D/variante.err"))"
+  troca_linha "$repo/$HIST" 'atualizado_em: 2026-09-26' 'atualizado_em: 2026-09-27'
+  metodo "$repo" --persistir pre-e6 >/dev/null 2>&1; rc=$?
+  [ "$rc" = 0 ] && [ "$(nomes_head "$repo")" = "$HIST" ] \
+    && ok 'A8: depois da variante, pre-e6 segue pelo caminho tracked' \
+    || falha "A8: pre-e6 depois da variante falhou (rc=$rc)"
 }
 
 grupo_subsequente() {
@@ -577,10 +784,11 @@ grupo_e1() {
 
 grupo="${1:-all}"
 case "$grupo" in
-  all) grupo_central; grupo_checkpoints; grupo_negativos; grupo_subsequente; grupo_e1 ;;
+  all) grupo_central; grupo_checkpoints; grupo_negativos; grupo_contrato; grupo_subsequente; grupo_e1 ;;
   central) grupo_central ;;
   checkpoints) grupo_checkpoints ;;
   negativos) grupo_negativos ;;
+  contrato) grupo_contrato ;;
   subsequente) grupo_subsequente ;;
   e1) grupo_e1 ;;
   *) printf 'grupo desconhecido: %s\n' "$grupo" >&2; exit 64 ;;

@@ -437,7 +437,7 @@ errado. SprintX, BuildX e ExpxDev não são alterados por este marco.
 
 | # | Ambiguidade | Decisão tomada | Motivo |
 |---|---|---|---|
-| DM-174 | O `HISTORICO.md` global que ainda não existe em HEAD pode ser versionado pela mergex, se não há diff que prove ownership | **Sim, só depois da prova integral.** A primeira criação do HISTORICO global pode ser versionada pela MergeX sem base tracked somente após prova integral de ownership; versões subsequentes continuam exigindo prova por diff contra HEAD. A primeira criação exige: `ls-tree HEAD` vazio para o caminho exato (HEAD com o arquivo e índice sem ele é estado anômalo e para); arquivo regular, sem link simbólico no caminho; frontmatter de gramática fechada (`expx_schema: 1`, `expx_tool: sprintx`, `kind: estimativa_historico`, `trabalho_id: null`, `unidade: h`, `atualizado_em` ISO, só as chaves do contrato em topo, entrada e calibração, sem comentário); toda entrada com `trabalho_id` igual ao trabalho explícito e `task_id` concluída nos `sprint-NN/tasks.md` dele (leitor da V11), sem duplicata; no corpo, só as tabelas de entradas e de calibração, e toda task citada é concluída do trabalho corrente. Qualquer falha para antes do `git add`: stage vazio, trava da execução liberada, arquivo intacto. Trava C5, stage vazio de entrada, catálogo exato, gate de segredo e contrato de commit não mudam, e vale nos três checkpoints | A sprintx cria o arquivo do template no primeiro trabalho e declara que a mergex o versiona; recusar todo HISTORICO untracked deixava o primeiro trabalho de qualquer projeto sem caminho público para o E2 nem para o E8 bloqueado. Exigir base manual ou relaxar untracked em geral trocaria o deadlock por um buraco. Sem versão anterior não há evidência antiga a proteger — a pergunta passa a ser se o arquivo inteiro é do trabalho corrente, e só a prova integral responde |
+| DM-174 | O `HISTORICO.md` global que ainda não existe em HEAD pode ser versionado pela mergex, se não há diff que prove ownership | **Sim, só depois da prova integral.** A primeira criação do HISTORICO global pode ser versionada pela MergeX sem base tracked somente após prova integral de ownership; versões subsequentes continuam exigindo prova por diff contra HEAD. A primeira criação exige: `ls-tree HEAD` vazio para o caminho exato (HEAD com o arquivo e índice sem ele é estado anômalo e para); arquivo regular, sem link simbólico no caminho; frontmatter de gramática fechada (`expx_schema: 1`, `expx_tool: sprintx`, `kind: estimativa_historico`, `trabalho_id: null`, `unidade: h`, `atualizado_em` ISO, só as chaves do contrato em topo, entrada e calibração); toda entrada com `trabalho_id` igual ao trabalho explícito e `task_id` concluída nos `sprint-NN/tasks.md` dele (leitor da V11), sem duplicata; no corpo, toda linha de dados da tabela oficial de `## Entradas` é do trabalho explícito, de task concluída, sem duplicata; nenhum marcador `{{...}}` do template em lugar nenhum do arquivo. Qualquer falha para antes do `git add`: stage vazio, trava da execução liberada, arquivo intacto. Trava C5, stage vazio de entrada, catálogo exato, gate de segredo e contrato de commit não mudam, e vale nos três checkpoints | A sprintx cria o arquivo do template no primeiro trabalho e declara que a mergex o versiona; recusar todo HISTORICO untracked deixava o primeiro trabalho de qualquer projeto sem caminho público para o E2 nem para o E8 bloqueado. Exigir base manual ou relaxar untracked em geral trocaria o deadlock por um buraco. Sem versão anterior não há evidência antiga a proteger — a pergunta passa a ser se o arquivo inteiro é do trabalho corrente, e só a prova integral responde |
 
 **O que invalidaria esta decisão:** a sprintx mudar o contrato de `estimativa_historico` (chaves,
 enums ou tabelas do corpo), o que exige atualizar a gramática da prova integral junto; ou o
@@ -446,3 +446,31 @@ O HISTORICO é global: duas features que o criem ou acrescentem em paralelo prod
 normal no merge, resolvido por quem revisa. Esta decisão prova ownership da primeira criação no
 lifecycle; não é mecanismo de merge distribuído do HISTORICO. SprintX, BuildX e ExpxDev não são
 alterados por este reparo.
+
+**Alinhamento ao contrato publicado (esclarecimento da DM-174, não decisão nova).** A mergex
+prova ownership; ela não define um segundo formato de `estimativa_historico`. A fonte de máquina
+é o frontmatter, como manda o `expx-schema` da sprintx; a prosa abaixo dele é representação
+humana. Por isso a prova integral:
+
+- lê os **valores efetivos** do YAML: comentário de linha inteira é ignorado, e o comentário ao
+  fim da linha só começa num `#` precedido de espaço e fora de aspas — `id#x` e `"id # x"` são
+  valores, não comentários;
+- aceita `sinais` como `[]`, `[a, b]` ou lista em bloco (`sinais:` seguido de itens `- a` mais
+  recuados que a chave); escalar, lista sem fechamento, `sinais:` sem itens, item vazio, aninhado,
+  com vírgula ou par `chave: valor`, e recuo inconsistente barram;
+- tira ownership **só** de `entradas[].trabalho_id` e `entradas[].task_id`, e das linhas de dados
+  da tabela oficial de `## Entradas` (a tabela da seção cujo cabeçalho começa por `Trabalho`,
+  inclusive sob sub-heading; a primeira tabela da seção com outro cabeçalho barra, e tabela sem a
+  barra inicial na seção também barra, porque renderizaria sem passar pela prova). Menção a
+  `T-NN.MM` ou a `trabalho_id:` em prosa, exemplo, código, outra seção ou tabela humana não é
+  evidência e não barra;
+- aceita parágrafo, heading, observação e tabela humana no corpo; a tabela de calibração (seção
+  `Calibração…`, cabeçalho `Tipo de task`) continua com `tipo_task` no enum;
+- continua barrando o que é YAML inválido ou fere a regra de campo de uma linha: chave sem espaço
+  depois de `:`, chave ou item com recuo inconsistente, aspas sem fechamento, texto em bloco
+  (`|`/`>`), frontmatter sem fechamento, tabulação.
+
+Nada do fail-closed de ownership mudou: ausência em HEAD, caminho exato, arquivo regular,
+schema/tool/kind, cabeçalho `trabalho_id: null`, catálogo fechado de chaves, outro trabalho,
+mistura, task estranha ou não concluída, duplicata, stage prévio, gate de segredo, e o E1 nunca
+absorve o HISTORICO. O caminho tracked (prova por diff) não foi alterado.

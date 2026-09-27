@@ -193,28 +193,86 @@ confere_historico_inicial() {
     concluidas="$(printf '%s\n' "$concluidas" | cut -f1 | LC_ALL=C sort -u)"
   fi
 
+  # O frontmatter é a fonte de máquina (contrato expx-schema da sprintx); a
+  # prosa abaixo dele é representação humana. A prova lê os valores efetivos
+  # do YAML — comentário de linha inteira não existe para o YAML, e comentário
+  # ao fim da linha só começa num "#" precedido de espaço, fora de aspas — e
+  # não procura task nem trabalho em texto livre. No corpo, só as linhas de
+  # dados da tabela oficial de "## Entradas" são atribuídas; parágrafo,
+  # heading, exemplo, código e tabela humana ficam fora da prova. Marcador
+  # "{{...}}" do template em qualquer lugar do arquivo barra.
   motivo="$(HIST_TRABALHO="$TRABALHO" HIST_CONCLUIDAS="$concluidas" awk '
     function erro(m) { if (!falhou) print m; falhou = 1; exit 1 }
     function apara(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
+    function recuo_de(l) { return match(l, /[^ ]/) - 1 }
+    # Valor efetivo de um escalar de uma linha. Aspas abertas e não fechadas
+    # seriam texto multilinha, que o contrato proíbe (regra 8): barra.
+    function sem_comentario(v,   q, i, c, fim, resto) {
+      v = apara(v); aspas = 0
+      q = substr(v, 1, 1)
+      if (q == "\"" || q == "\047") {
+        fim = 0
+        for (i = 2; i <= length(v); i++) {
+          c = substr(v, i, 1)
+          if (q == "\"" && c == "\\") { i++; continue }
+          if (c != q) continue
+          if (q == "\047" && substr(v, i + 1, 1) == "\047") { i++; continue }
+          fim = i; break
+        }
+        if (!fim) erro("texto entre aspas sem fechamento na mesma linha: " v)
+        resto = substr(v, fim + 1)
+        if (resto !~ /^[[:space:]]*$/ && resto !~ /^[[:space:]]+#/) erro("conteúdo depois das aspas: " v)
+        aspas = 1
+        return substr(v, 1, fim)
+      }
+      if (q == "#") return ""
+      if (match(v, /[[:space:]]#/)) v = substr(v, 1, RSTART - 1)
+      return apara(v)
+    }
     function escalar(v) {
-      v = apara(v)
-      if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+      v = sem_comentario(v)
+      if (aspas) return substr(v, 2, length(v) - 2)
+      if (v ~ /^[|>]/) erro("texto multilinha fora do contrato (campos são de uma linha): " v)
       return v
     }
-    function cita_tasks(texto,   id) {
-      while (match(texto, /T-[0-9]+\.[0-9]+/)) {
-        id = substr(texto, RSTART, RLENGTH)
-        if (!(id in concluida)) erro("cita task que não é concluída do trabalho corrente: " id)
-        texto = substr(texto, RSTART + RLENGTH)
-      }
+    # Um sinal é um escalar simples: sem estrutura aninhada, sem vírgula que
+    # torne a lista ambígua, sem par chave:valor.
+    function sinal_valido(v) {
+      v = sem_comentario(v)
+      if (aspas) return length(v) > 2
+      if (v == "") return 0
+      if (index("-?:,#&*!|>%@`[]{}", substr(v, 1, 1))) return 0
+      if (index(v, "[") || index(v, "]") || index(v, "{") || index(v, "}") || index(v, ",")) return 0
+      if (v ~ /:[[:space:]]/ || v ~ /:$/) return 0
+      return 1
     }
-    function cita_trabalho(texto,   v) {
-      while (match(texto, /trabalho_id:[[:space:]]*[^[:space:]`|,;]+/)) {
-        v = substr(texto, RSTART, RLENGTH); sub(/^trabalho_id:[[:space:]]*/, "", v)
-        gsub(/["\047]/, "", v)
-        if (v != trabalho && v != "null") erro("cita outro trabalho: " v)
-        texto = substr(texto, RSTART + RLENGTH)
+    # sinais: [a, b] | sinais: [] | sinais: seguido de itens "- a" mais
+    # recuados que a chave. Qualquer outra forma barra.
+    function trata_sinais(valor, coluna,   v, interior, n, it, i) {
+      v = sem_comentario(valor)
+      if (!aspas && v == "") {
+        sinais_aberto = 1; sinais_recuo = coluna; sinais_item_recuo = -1; sinais_n = 0
+        return
       }
+      if (aspas || v !~ /^\[.*\]$/) erro("sinais fora do formato de lista: " v)
+      interior = substr(v, 2, length(v) - 2)
+      if (apara(interior) == "") return
+      n = split(interior, it, ",")
+      for (i = 1; i <= n; i++)
+        if (!sinal_valido(it[i])) erro("sinais com item inválido ou ambíguo: " v)
+    }
+    function item_sinal(   r, v) {
+      r = recuo_de($0)
+      if (sinais_item_recuo < 0) sinais_item_recuo = r
+      else if (r != sinais_item_recuo) erro("sinais com recuo inconsistente: " $0)
+      v = $0; sub(/^ +- /, "", v)
+      if (!sinal_valido(v)) erro("sinais com item inválido ou ambíguo: " apara(v))
+      sinais_n++
+    }
+    function fecha_sinais() {
+      if (!sinais_aberto) return
+      sinais_aberto = 0
+      if (sinais_n == 0) erro("sinais sem lista (lista vazia é [])")
     }
     function fecha_item(   k) {
       if (!item) return
@@ -224,7 +282,7 @@ confere_historico_inicial() {
       for (k in tem) delete tem[k]
       item = 0
     }
-    function campo(chave, valor,   v) {
+    function campo(chave, valor, coluna,   v) {
       if (secao == "entradas") {
         if (!(chave in campo_entrada)) erro("entrada com chave fora do contrato: " chave)
       } else if (secao == "calibracao") {
@@ -232,6 +290,7 @@ confere_historico_inicial() {
       } else erro("item fora de entradas/calibracao")
       if (chave in tem) erro("chave repetida no mesmo item: " chave)
       tem[chave] = 1
+      if (chave == "sinais") { trata_sinais(valor, coluna); return }
       v = escalar(valor)
       if (secao == "entradas" && chave == "trabalho_id" && v != trabalho)
         erro("entrada de outro trabalho: " v)
@@ -241,18 +300,31 @@ confere_historico_inicial() {
         registrada[v] = 1
       }
       if (chave == "tipo_task" && !(v in tipo)) erro("tipo_task fora do enum: " v)
-      if (chave != "task_id") cita_tasks(valor)
-      cita_trabalho(valor)
     }
+    function titulo(   nivel, texto) {
+      match($0, /^#+/); nivel = RLENGTH
+      texto = apara(substr($0, nivel + 1)); sub(/[[:space:]]+#+$/, "", texto)
+      tabela = ""; separador = 0
+      if (nivel > 2) return
+      secao_corpo = ""
+      if (texto == "Entradas") { secao_corpo = "entradas"; oficial_vista = 0 }
+      else if (index(texto, "Calibração") == 1) secao_corpo = "calibracao"
+    }
+    # Tabela oficial: a de "## Entradas" (cabeçalho publicado começa por
+    # Trabalho) e a de calibração (Tipo de task). Qualquer outra é humana.
     function linha_tabela(   partes, c1, c2) {
       split($0, partes, "|")
       c1 = apara(partes[2]); c2 = apara(partes[3])
       if (tabela == "") {
-        if (c1 == "Trabalho") tabela = "entradas"
-        else if (c1 == "Tipo de task") tabela = "calibracao"
-        else erro("tabela fora do contrato no corpo: " c1)
-        separador = 1; return
+        if (secao_corpo == "entradas" && c1 == "Trabalho") tabela = "entradas"
+        else if (secao_corpo == "entradas" && !oficial_vista)
+          erro("a tabela de ## Entradas não tem o cabeçalho publicado: " c1)
+        else if (secao_corpo == "calibracao" && c1 == "Tipo de task") tabela = "calibracao"
+        else tabela = "humana"
+        if (secao_corpo == "entradas") oficial_vista = 1
+        separador = (tabela != "humana"); return
       }
+      if (tabela == "humana") return
       if (separador) {
         if ($0 !~ /^[[:space:]]*\|([[:space:]]*:?-+:?[[:space:]]*\|)+[[:space:]]*$/)
           erro("tabela sem linha separadora")
@@ -281,49 +353,64 @@ confere_historico_inicial() {
       estado = "inicio"
     }
     { sub(/\r$/, "") }
+    {
+      p = index($0, "{{")
+      if (p && index(substr($0, p + 2), "}}")) erro("marcador do template não substituído: " apara($0))
+    }
     estado == "inicio" {
       if ($0 !~ /^---[[:space:]]*$/) erro("não começa por frontmatter")
       estado = "fm"; next
     }
-    estado == "fm" && /^---[[:space:]]*$/ { fecha_item(); estado = "corpo"; next }
+    estado == "fm" && /^---[[:space:]]*$/ { fecha_sinais(); fecha_item(); estado = "corpo"; next }
     estado == "fm" {
-      if ($0 ~ /\t/) erro("frontmatter com tabulação")
       if ($0 ~ /^[[:space:]]*$/) next
-      if ($0 ~ /^[a-z0-9_]+:/) {
+      if ($0 ~ /^ *#/) next
+      if ($0 ~ /\t/) erro("frontmatter com tabulação")
+      if (sinais_aberto) {
+        if ($0 ~ /^ +- / && recuo_de($0) > sinais_recuo) { item_sinal(); next }
+        fecha_sinais()
+      }
+      if ($0 ~ /^[a-z0-9_]+:$/ || $0 ~ /^[a-z0-9_]+: /) {
         fecha_item()
         chave = $0; sub(/:.*/, "", chave)
         valor = $0; sub(/^[^:]*:/, "", valor)
         if (!(chave in topo)) erro("chave de topo fora do contrato: " chave)
         if (chave in visto) erro("chave de topo repetida: " chave)
         visto[chave] = 1; valor_topo[chave] = escalar(valor)
-        secao = ""
+        secao = ""; recuo_secao = -1
         if (chave == "entradas" || chave == "calibracao") {
-          if (escalar(valor) == "") secao = chave
-          else if (escalar(valor) != "[]") erro(chave " fora do formato de lista")
-        } else { cita_tasks(valor); cita_trabalho(valor) }
+          if (valor_topo[chave] == "") secao = chave
+          else if (valor_topo[chave] != "[]") erro(chave " fora do formato de lista")
+        }
         next
       }
-      if ($0 ~ /^ +- [a-z0-9_]+:/) {
+      if ($0 ~ /^ +- [a-z0-9_]+:$/ || $0 ~ /^ +- [a-z0-9_]+: /) {
         fecha_item(); item = 1
-        recuo = match($0, /-/) - 1
+        recuo = recuo_de($0)
+        if (recuo_secao < 0) recuo_secao = recuo
+        else if (recuo != recuo_secao) erro("item com recuo inconsistente: " $0)
         resto = $0; sub(/^ +- /, "", resto)
         chave = resto; sub(/:.*/, "", chave)
         valor = resto; sub(/^[^:]*:/, "", valor)
-        campo(chave, valor); next
+        campo(chave, valor, recuo + 2); next
       }
-      if ($0 ~ /^ +[a-z0-9_]+:/) {
-        if (!item || match($0, /[^ ]/) - 1 <= recuo) erro("linha fora de item: " $0)
+      if ($0 ~ /^ +[a-z0-9_]+:$/ || $0 ~ /^ +[a-z0-9_]+: /) {
+        if (!item || recuo_de($0) != recuo + 2) erro("linha fora de item: " $0)
         chave = $0; sub(/^ +/, "", chave); sub(/:.*/, "", chave)
         valor = $0; sub(/^[^:]*:/, "", valor)
-        campo(chave, valor); next
+        campo(chave, valor, recuo + 2); next
       }
       erro("linha não reconhecida no frontmatter: " $0)
     }
     estado == "corpo" {
-      cita_tasks($0); cita_trabalho($0)
-      if ($0 ~ /^[[:space:]]*```/) { cerca = !cerca; tabela = ""; next }
+      if ($0 ~ /^[[:space:]]*```/) { cerca = !cerca; tabela = ""; separador = 0; next }
       if (cerca) next
+      if ($0 ~ /^#+[[:space:]]/) { titulo(); next }
       if ($0 ~ /^[[:space:]]*\|/) { linha_tabela(); next }
+      # Tabela sem a barra inicial também renderiza: em "## Entradas" ela
+      # escaparia da prova das linhas de dados, então barra.
+      if (secao_corpo == "entradas" && $0 ~ /\|/ && $0 ~ /^[[:space:]]*:?-+:?[[:space:]]*(\|[[:space:]]*:?-+:?[[:space:]]*)+\|?[[:space:]]*$/)
+        erro("tabela de ## Entradas sem a barra inicial do formato publicado")
       tabela = ""; separador = 0
     }
     END {

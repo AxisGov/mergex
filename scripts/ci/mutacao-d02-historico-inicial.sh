@@ -95,6 +95,46 @@ M17() { # calibração vira buraco: qualquer chave passa
     '        # mutante'
 }
 
+# Alinhamento ao contrato publicado da sprintx: o relaxamento sintático não
+# pode voltar a ser restrição de formato, nem virar buraco de ownership.
+M18() { # volta a exigir sinais inline
+  troca "$PERSISTE" '      if (!aspas && v == "") {' \
+    '      if (!aspas && v == "") { erro("sinais fora do formato de lista: " v)'
+}
+M19() { # volta a varrer task id em toda a prosa
+  troca "$PERSISTE" '    estado == "corpo" {' \
+    '    estado == "corpo" { if (match($0, /T-[0-9]+\.[0-9]+/) && !(substr($0, RSTART, RLENGTH) in concluida)) erro("cita task: " $0)'
+}
+M20() { # volta a proibir qualquer tabela humana extra
+  troca "$PERSISTE" '        else tabela = "humana"' \
+    '        else erro("tabela fora do contrato no corpo: " c1)'
+}
+M21() { # deixa marcador {{...}} passar
+  troca "$PERSISTE" '      if (p && index(substr($0, p + 2), "}}")) erro("marcador do template não substituído: " apara($0))' \
+    '      p = 0'
+}
+M22() { # tabela oficial aceita outro trabalho: a seção Entradas deixa de ser reconhecida
+  troca "$PERSISTE" '      if (texto == "Entradas") { secao_corpo = "entradas"; oficial_vista = 0 }' \
+    '      if (0) { }'
+}
+M23() { # tabela oficial aceita outro trabalho: sub-heading tira a tabela da seção
+  troca "$PERSISTE" '      if (nivel > 2) return' '      # mutante'
+}
+M24() { # tabela oficial aceita outro trabalho: cabeçalho renomeado vira tabela humana
+  troca "$PERSISTE" '        else if (secao_corpo == "entradas" && !oficial_vista)' '        else if (0)'
+}
+M25() { # frontmatter aceita outro trabalho: "#" colado ao valor vira comentário
+  troca "$PERSISTE" '      if (match(v, /[[:space:]]#/)) v = substr(v, 1, RSTART - 1)' \
+    '      if (match(v, /#/)) v = substr(v, 1, RSTART - 1)'
+}
+M27() { # tabela oficial aceita outro trabalho: sem a barra inicial escapa da prova
+  troca "$PERSISTE" '        erro("tabela de ## Entradas sem a barra inicial do formato publicado")' '        p = p'
+}
+M26() { # frontmatter aceita outro trabalho: item de sinais esconde par chave:valor
+  troca "$PERSISTE" '      if (!sinal_valido(v)) erro("sinais com item inválido ou ambíguo: " apara(v))' \
+    '      v = v'
+}
+
 LISTA='M1|mantém rejeição absoluta de untracked
 M2|aceita qualquer HISTORICO untracked
 M3|não verifica ausência em HEAD
@@ -111,7 +151,17 @@ M13|caminho tracked deixa remover evidência antiga
 M14|e8 continua rejeitando primeira criação válida
 M15|aceita entrada duplicada
 M16|aceita linha de tabela de outro trabalho
-M17|calibração aceita chave fora do contrato'
+M17|calibração aceita chave fora do contrato
+M18|volta a exigir sinais inline
+M19|volta a varrer task id em toda a prosa
+M20|volta a proibir qualquer tabela humana extra
+M21|deixa marcador {{...}} passar
+M22|tabela oficial aceita outro trabalho (seção não reconhecida)
+M23|tabela oficial aceita outro trabalho (sub-heading)
+M24|tabela oficial aceita outro trabalho (cabeçalho renomeado)
+M25|frontmatter aceita outro trabalho (# colado vira comentário)
+M26|frontmatter aceita outro trabalho (sinais esconde chave:valor)
+M27|tabela oficial aceita outro trabalho (sem barra inicial)'
 
 FILTRAR=" $* "
 FALHAS="$(mktemp)"

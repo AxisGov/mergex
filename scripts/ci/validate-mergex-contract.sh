@@ -1217,5 +1217,15 @@ grep -Fq 'DM-174' '.claude/skills/mergex/references/01-commits.md' \
 for f in scripts/ci/test-d02-historico-inicial.sh scripts/ci/mutacao-d02-historico-inicial.sh; do
   [ -f "$f" ] || fail "D-02: missing $f"
 done
+# Alinhamento ao contrato publicado: a prova não é um segundo schema sprintx.
+if codigo "$persiste_sh" | grep -Fq 'cita_tasks'; then
+  fail 'D-02: first HISTORICO proof scans task ids in free prose again'
+fi
+grep -Fq 'marcador do template não substituído' "$persiste_sh" \
+  || fail 'D-02: first HISTORICO proof lets template markers through'
+grep -Fq 'Alinhamento ao contrato publicado' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'D-02: DM-174 does not state the alignment to the published sprintx contract'
+grep -Fq 'grupo_contrato' scripts/ci/test-d02-historico-inicial.sh \
+  || fail 'D-02: bench lost the differential contract group'
 
 printf 'contract checks passed\n'
