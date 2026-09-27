@@ -474,3 +474,24 @@ Nada do fail-closed de ownership mudou: ausência em HEAD, caminho exato, arquiv
 schema/tool/kind, cabeçalho `trabalho_id: null`, catálogo fechado de chaves, outro trabalho,
 mistura, task estranha ou não concluída, duplicata, stage prévio, gate de segredo, e o E1 nunca
 absorve o HISTORICO. O caminho tracked (prova por diff) não foi alterado.
+
+## P0.2 / D-02 — `HISTORICO.md` tracked: entradas, não bytes
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-175 | O `HISTORICO.md` global é append-only quanto a quê: aos bytes do arquivo ou às entradas de evidência? E um `{{...}}` na prosa é marcador pendente? | **Às entradas.** O HISTORICO é append-only quanto às entradas de evidência, não quanto aos bytes do arquivo. Em versão tracked, entradas anteriores são imutáveis; novas entradas só podem pertencer ao trabalho corrente; campos derivados (`atualizado_em` e `calibracao`) e representação humana podem ser recalculados sem perder a prova histórica. A prova tracked deixa de ser diff textual: HEAD e working tree passam pelo **mesmo** leitor limitado (`ler_historico`, o da primeira criação) e as representações são comparadas por `confere_ownership_historico` — a primeira criação é o mesmo comparador com base vazia. Entrada anterior = mesmo `trabalho_id` + `task_id`, com o mesmo valor efetivo em todos os campos, inclusive a presença ou ausência de `duracao_observada`; a comparação não depende de ordem de chaves, comentário YAML, aspas, `3.50`/`3.5` nem de `sinais` inline ou em bloco. Entrada nova: `trabalho_id` do trabalho explícito, `task_id` concluída dele, sem duplicata, no schema (`tipo_task` no enum, `area`, `sinais` lista, `real` número, estimados e `desvio` número ou `null`, `duracao_observada` número ou `null`, `registrado_em` AAAA-MM-DD). `calibracao` final: `tipo_task` no enum e sem repetição, `entradas` inteiro que não passa do número de entradas finais do tipo, `desvio_medio` número, `fator_ativo` booleano e `true` exatamente a partir de 3 entradas. Tabela oficial de `## Entradas`: nenhuma linha anterior some, e toda linha final corresponde a uma entrada do frontmatter final. Tabela de calibração, heading, parágrafo e comentário podem mudar. Marcador `{{...}}` barra só no frontmatter (inclusive em comentário dele) e nas linhas de dados das duas tabelas oficiais; na prosa é texto. HEAD fora do contrato não serve de base e para | A sprintx manda, no mesmo passo, "entrada anterior não se apaga nem se reescreve" e "recalcule a tabela de calibração por tipo ao acrescentar entradas" (`06-execucao`, Passo 3). O diff textual recusava toda linha `-`, então o segundo trabalho de qualquer projeto não conseguia recalibrar — nem no frontmatter, nem na tabela humana. E o template publicado traz, na própria prosa, "Substitua TODOS os marcadores `{{...}}`": varrer a prosa barrava o arquivo que o contrato manda produzir. Dois leitores (inicial e tracked) divergiriam na primeira manutenção; um só leitor dá às três versões — inicial, HEAD e working tree — a mesma interpretação |
+
+**O que esta decisão não prova, de propósito:** o valor exato de `desvio_medio`. A sprintx diz
+"média dos `desvio_task`" (`06-execucao`, `07-estimativa`, template) e também "a calibração usa
+mediana" (`06-execucao`, `08-rastro`, DS-37), não diz se entrada com `desvio: null` conta em
+`entradas`, e não fixa precisão nem arredondamento. Inventar a fórmula aqui criaria um segundo
+contrato; a mergex prova estrutura e coerência (a contagem nunca passa do que existe, e o fator
+segue a regra das 3 entradas), e o cálculo fica com a sprintx. Também não se compara célula a
+célula a tabela humana de `## Entradas` com o frontmatter: a fonte de máquina é o frontmatter.
+
+**O que invalidaria esta decisão:** a sprintx passar a permitir correção de entrada antiga
+(errata), mudar as chaves de `estimativa_historico`, ou fixar a fórmula de `desvio_medio` — este
+último permite (e pede) provar o valor exato. Esclarece a DM-174 onde ela diz que versões
+subsequentes "continuam exigindo prova por diff contra HEAD": a prova contra HEAD continua, agora
+estruturada. Primeira criação, trava C5, stage vazio, catálogo exato, gate de segredo, contrato de
+commit e o E1 que nunca absorve o HISTORICO não mudam.

@@ -119,6 +119,63 @@ conteudo inicial
 YAML
 }
 
+# Sprint SprintX com uma task concluída: o HISTORICO só aceita entrada de task
+# concluída do trabalho explícito (DM-174/DM-175).
+tasks_concluida() { # <arquivo>
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<'YAML'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: tasks
+trabalho_id: ft-m2
+tasks:
+  - id: T-01.01
+    titulo: Alterar A
+    status: concluida
+    suite: verde
+---
+conteudo inicial
+YAML
+}
+
+# HISTORICO global no contrato estimativa_historico, ainda sem entradas.
+historico_vazio() { # <arquivo>
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<'YAML'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: estimativa_historico
+trabalho_id: null
+atualizado_em: 2026-09-21
+unidade: h
+entradas: []
+calibracao: []
+---
+YAML
+}
+
+# A F6 acrescenta a entrada de <trabalho> para T-01.01 ao HISTORICO.
+acrescenta_historico() { # <arquivo> <trabalho>
+  T="$2" awk '
+    $0 == "entradas: []" {
+      print "entradas:"
+      print "  - trabalho_id: " ENVIRON["T"]
+      print "    task_id: T-01.01"
+      print "    tipo_task: api"
+      print "    area: a"
+      print "    sinais: []"
+      print "    estimado_min: null"
+      print "    estimado_max: null"
+      print "    estimado_media: null"
+      print "    real: 1"
+      print "    desvio: null"
+      next
+    }
+    { print }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
 repo_catalogo() { # <dir> <origem> <layout: canonico|legado>
   local dir="$1" origem="$2" layout="$3" pasta
   git init -q -b feature/ft-m2 "$dir" 2>/dev/null || return 1
@@ -135,7 +192,7 @@ repo_catalogo() { # <dir> <origem> <layout: canonico|legado>
       artefato "$pasta/ORQUESTRADOR.md" orquestrador ft-m2
       artefato "$pasta/00-PLANEJAMENTO.md" planejamento ft-m2
       artefato "$pasta/FECHAMENTO.md" fechamento ft-m2
-      artefato "$pasta/sprint-01/tasks.md" tasks ft-m2
+      tasks_concluida "$pasta/sprint-01/tasks.md"
       artefato "$pasta/sprint-01/sprint.md" sprint ft-m2
       cat > "$pasta/base/00-INDICE.md" <<'YAML'
 ---
@@ -149,7 +206,7 @@ areas:
 YAML
       artefato "$pasta/base/area com espaco.md" base_area ft-m2
       artefato "$pasta/base/nao-listada.md" base_area ft-m2
-      artefato docs/sprintx/estimativas/HISTORICO.md estimativa_historico null
+      historico_vazio docs/sprintx/estimativas/HISTORICO.md
     else
       pasta="docs/manutencao/ft-m2"
       mkdir -p "$pasta/base"
@@ -374,7 +431,7 @@ grupo_catalog() {
   printf '\nmudanca\n' >> "$repo/$pasta/00-PLANEJAMENTO.md"
   printf '\nmudanca\n' >> "$repo/$pasta/sprint-01/tasks.md"
   printf '\nmudanca\n' >> "$repo/$pasta/base/area com espaco.md"
-  printf '\n  - trabalho_id: ft-m2\n' >> "$repo/docs/sprintx/estimativas/HISTORICO.md"
+  acrescenta_historico "$repo/docs/sprintx/estimativas/HISTORICO.md" ft-m2
   printf '\nmudanca\n' >> "$repo/docs/entregas/ft-m2/ENTREGA.md"
   printf '\nmudanca\n' >> "$repo/docs/entregas/ft-m2/PR.md"
   printf '\nnao entra\n' >> "$repo/$pasta/base/nao-listada.md"
@@ -433,7 +490,7 @@ grupo_catalog() {
 
   repo="$D/catalogo-historico-alheio"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
-  printf '\n  - trabalho_id: outro\n' >> "$repo/docs/sprintx/estimativas/HISTORICO.md"
+  acrescenta_historico "$repo/docs/sprintx/estimativas/HISTORICO.md" outro
   lista_catalogo "$repo" sprintx pre-e2 >/dev/null 2>&1; rc=$?
   [ "$rc" != 0 ] && ok 'HISTORICO global com diff de outro trabalho para' \
     || falha 'HISTORICO global de outro trabalho entrou no catalogo corrente'
@@ -447,7 +504,7 @@ grupo_lifecycle() {
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
   printf '\nappend da ultima task\n' >> "$repo/docs/entregas/ft-m2/ENTREGA.md"
   printf '\nestado final F6\n' >> "$repo/$pasta/00-PLANEJAMENTO.md"
-  printf '\n  - trabalho_id: ft-m2\n' >> "$repo/docs/sprintx/estimativas/HISTORICO.md"
+  acrescenta_historico "$repo/docs/sprintx/estimativas/HISTORICO.md" ft-m2
   printf '\nproduto continua dirty\n' >> "$repo/src/ORQUESTRADOR.md"
 
   metodo "$repo" --verificar sprintx pre-e2 >/dev/null 2>&1; rc=$?

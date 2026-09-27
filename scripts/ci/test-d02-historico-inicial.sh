@@ -5,14 +5,17 @@
 # criou `docs/sprintx/estimativas/HISTORICO.md` do template, como o contrato
 # dela manda, e o lifecycle recusava todo HISTORICO untracked. Aqui a primeira
 # criação entra pelo próprio persistir-metodo.sh depois da prova integral de
-# ownership (DM-174), e a prova por diff do HISTORICO tracked continua intacta.
+# ownership (DM-174). Depois dela, o HISTORICO tracked é provado pelo mesmo
+# leitor, HEAD contra working tree (DM-175): entradas antigas imutáveis,
+# entradas novas só do trabalho corrente, calibração e prosa recalculáveis.
 #
 # O grupo contrato é diferencial contra o contrato PUBLICADO da sprintx: o que
 # o contrato permite (sinais em bloco, prosa, heading e tabela humana, menção
-# incidental a task, comentário YAML) passa; o que fere ownership ou a
-# estrutura (marcador, outro trabalho, sinais ambíguos, YAML inválido) barra.
+# incidental a task, comentário YAML, o literal {{...}} da instrução do
+# template) passa; o que fere ownership ou a estrutura (marcador em dado,
+# outro trabalho, sinais ambíguos, YAML inválido) barra.
 #
-# Uso: bash scripts/ci/test-d02-historico-inicial.sh [central|checkpoints|negativos|contrato|subsequente|e1]
+# Uso: bash scripts/ci/test-d02-historico-inicial.sh [central|checkpoints|negativos|contrato|subsequente|tracked|e1]
 
 set -uo pipefail
 
@@ -111,12 +114,19 @@ por seis horas pode ter tido vinte minutos de trabalho e um almoço no meio. Por
 existem separadas, e a `duracao_observada` nunca substitui o `real` — aqui elas apenas têm o mesmo
 valor, e o registro diz por quê.
 
+**Ressalva de comparabilidade, para quem for calibrar em cima disto:** as duas entradas vêm de
+execução por agente, em sessão não interativa, num diff de 6 linhas de produto. Um `real` de 0,12 h
+não descreve o esforço que a mesma task custaria a uma pessoa, e comparar estas entradas com
+entradas de origem humana mistura duas populações. Se o projeto passar a registrar as duas origens,
+vale separá-las antes de calcular fator.
+
 ## Calibração por tipo de task
 
 `desvio_medio` é a média dos desvios das entradas encerradas daquele tipo. `1,0` é o alvo; `1,4` significa que aquele tipo de task leva, em média, 40% a mais que o estimado.
 
 `calibracao: []` — **nenhum fator é calculável ainda**. Sem `00-ESTIMATIVA.md`, não há estimado com
-que comparar o real, então nenhuma das duas entradas produz desvio.
+que comparar o real, então nenhuma das duas entradas produz desvio. E, mesmo que produzisse, a regra
+do fator exige **3 ou mais** entradas encerradas do mesmo tipo: há uma de `teste` e uma de `ui`.
 
 **Regra do fator.** O desvio de um tipo só vira fator de correção nas estimativas seguintes a partir de **3 entradas encerradas** daquele tipo — abaixo disso é ruído. Quando aplicado, o fator é **sempre declarado na saída da estimativa**, nunca embutido em silêncio.
 
@@ -166,6 +176,104 @@ calibracao: []
 | Trabalho | Task | Tipo | Área | Sinais | Estimado (min–max) | Média est. | Real | Desvio |
 |---|---|---|---|---|---|---|---|---|
 | trabalho-anterior | T-01.01 | api | cadastro | — | — | — | 1,5 h | — |
+MD
+}
+
+# HISTORICO já versionado com um trabalho anterior calibrado — base do grupo
+# tracked (DM-175). Tem as três linhas de instrução do template (com o literal
+# {{...}}), calibração por tipo nas duas representações, sinais não vazios e
+# uma entrada (T-03.01, sem F3.5) que só existe no frontmatter.
+historico_calibrado() { # <arquivo>
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<'MD'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: estimativa_historico
+trabalho_id: null
+atualizado_em: 2026-09-01
+unidade: h
+entradas:
+  - trabalho_id: trabalho-anterior
+    task_id: T-01.01
+    tipo_task: api
+    area: cadastro
+    sinais: [sem_cobertura, integracao_externa]
+    estimado_min: 2
+    estimado_max: 4
+    estimado_media: 3
+    real: 3.3
+    desvio: 1.1
+    registrado_em: 2026-09-01
+  - trabalho_id: trabalho-anterior
+    task_id: T-01.02
+    tipo_task: api
+    area: cadastro
+    sinais: []
+    estimado_min: 1
+    estimado_max: 3
+    estimado_media: 2
+    real: 2.6
+    desvio: 1.3
+    registrado_em: 2026-09-01
+  - trabalho_id: trabalho-anterior
+    task_id: T-02.01
+    tipo_task: ui
+    area: tela de cadastro
+    sinais: []
+    estimado_min: 1
+    estimado_max: 2
+    estimado_media: 1.5
+    real: 1.5
+    duracao_observada: 2.25
+    desvio: 1.0
+    registrado_em: 2026-09-02
+  - trabalho_id: trabalho-anterior
+    task_id: T-03.01
+    tipo_task: infra
+    area: pipeline
+    sinais: []
+    estimado_min: null
+    estimado_max: null
+    estimado_media: null
+    real: 0.5
+    desvio: null
+    registrado_em: 2026-09-02
+calibracao:
+  - tipo_task: api
+    entradas: 2
+    desvio_medio: 1.2
+    fator_ativo: false
+  - tipo_task: ui
+    entradas: 1
+    desvio_medio: 1.0
+    fator_ativo: false
+---
+
+> Substitua TODOS os marcadores `{{...}}`. Roteiro operacional em `references/07-estimativa.md`.
+> Este arquivo é do PROJETO, não de um trabalho: vive em `docs/sprintx/estimativas/HISTORICO.md` e acumula entradas de todos os trabalhos. Por isso `trabalho_id` no cabeçalho é `null` — o `trabalho_id` de cada linha vive dentro de `entradas:`.
+> Este é o único arquivo da skill que é APENDADO, nunca sobrescrito. Trabalho novo acrescenta entradas; entrada antiga não se apaga nem se reescreve.
+
+# Histórico de esforço — calibração das estimativas
+
+## Entradas
+
+| Trabalho | Task | Tipo | Área | Sinais | Estimado (min–max) | Média est. | Real | Desvio |
+|---|---|---|---|---|---|---|---|---|
+| trabalho-anterior | T-01.01 | api | cadastro | sem_cobertura, integracao_externa | 2–4 h | 3 h | 3,3 h | 1,1 |
+| trabalho-anterior | T-01.02 | api | cadastro | — | 1–3 h | 2 h | 2,6 h | 1,3 |
+| trabalho-anterior | T-02.01 | ui | tela de cadastro | — | 1–2 h | 1,5 h | 1,5 h | 1,0 |
+
+A T-03.01 do trabalho anterior rodou sem a F3.5 e ficou só no frontmatter.
+
+## Calibração por tipo de task
+
+| Tipo de task | Entradas | Desvio médio | Fator ativo? |
+|---|---|---|---|
+| api | 2 | 1,2 | não — menos de 3 entradas |
+| ui | 1 | 1,0 | não — menos de 3 entradas |
+
+**Regra do fator.** O desvio de um tipo só vira fator de correção a partir de **3 entradas encerradas** daquele tipo.
 MD
 }
 
@@ -240,6 +348,7 @@ atualizado_em: 2026-09-26
 ---
 YAML
     [ "$base" = anterior ] && historico_anterior "$HIST"
+    [ "$base" = calibrado ] && historico_calibrado "$HIST"
     git add -A
     git commit -qm 'chore: base'
   )
@@ -327,7 +436,7 @@ grupo_central() {
   git -C "$repo" ls-files --error-unmatch -- "$HIST" >/dev/null 2>&1 \
     && ok 'HISTORICO passa a ser tracked' || falha 'HISTORICO continuou untracked'
 
-  # Depois da primeira criação, o checkpoint seguinte cai na prova por diff:
+  # Depois da primeira criação, o checkpoint seguinte cai na prova contra HEAD:
   # reescrever uma linha já versionada é aceito pela prova integral, mas não
   # pelo caminho tracked — e é o tracked que tem de decidir.
   troca_linha "$repo/$HIST" '    real: 0.12' '    real: 0.50'
@@ -427,6 +536,14 @@ p_calibracao_buraco() {
     entradas: 1
     trabalho_id: outro-trabalho'
 }
+p_calibracao_chave_extra() { # item de calibração válido: só a chave extra denuncia
+  troca_linha "$1/$HIST" 'calibracao: []' 'calibracao:
+  - tipo_task: ui
+    entradas: 1
+    desvio_medio: 1.0
+    fator_ativo: false
+    trabalho_id: outro-trabalho'
+}
 p_linha_alheia() { # só a primeira coluna denuncia: task concluída, sem duplicata
   troca_linha "$1/$HIST" "$LINHA_T0201" '| outro-trabalho | T-02.01 | ui | accountability | — | — | — | 0,13 h | — |'
 }
@@ -451,6 +568,7 @@ grupo_negativos() {
   nega 'chave de topo nao atribuivel' p_topo_extra
   nega 'chave de entrada fora do contrato' p_chave_entrada
   nega 'calibracao usada como buraco para outro trabalho' p_calibracao_buraco
+  nega 'calibracao valida com chave extra de outro trabalho' p_calibracao_chave_extra
   nega 'linha da tabela de outro trabalho' p_linha_alheia
   nega 'linha duplicada na tabela de entradas' p_linha_duplicada
 
@@ -576,9 +694,40 @@ p_marcador_tabela() {
     '| issue-123-rotulo-parecer | T-02.01 | {{tipo_task}} | accountability | — | — | — | 0,13 h | — |'
 }
 p_marcador_fm() { troca_linha "$1/$HIST" '    area: accountability' '    area: {{area}}'; }
-p_marcador_prosa() {
+p_marcador_fm_comentario() { insere_antes "$1/$HIST" 'calibracao: []' '# preencher {{tipo_task}}'; }
+# DM-175: "{{...}}" em prosa humana é texto, não dado pendente. O próprio
+# TEMPLATE-HISTORICO da sprintx diz "Substitua TODOS os marcadores `{{...}}`".
+v_marcador_prosa() {
   printf '\n{{Trabalho que rodou sem a F3.5 entra assim}}\n' >> "$1/$HIST"
 }
+# O arquivo criado do template com todos os dados substituídos, mas com as
+# três linhas de instrução do template mantidas logo depois do frontmatter.
+v_instrucao_template() {
+  insere_antes "$1/$HIST" '# Histórico de esforço — calibração das estimativas' \
+'> Substitua TODOS os marcadores `{{...}}`. Roteiro operacional em `references/07-estimativa.md`.
+> Este arquivo é do PROJETO, não de um trabalho: vive em `docs/sprintx/estimativas/HISTORICO.md` e acumula entradas de todos os trabalhos. Por isso `trabalho_id` no cabeçalho é `null` — o `trabalho_id` de cada linha vive dentro de `entradas:`.
+> Este é o único arquivo da skill que é APENDADO, nunca sobrescrito. Trabalho novo acrescenta entradas; entrada antiga não se apaga nem se reescreve.
+'
+}
+p_marcador_calibracao() { # linha-modelo da tabela oficial de calibração
+  insere_depois "$1/$HIST" '`calibracao: []` — **nenhum fator é calculável ainda**. Sem `00-ESTIMATIVA.md`, não há estimado com' \
+'que comparar o real.
+
+| Tipo de task | Entradas | Desvio médio | Fator ativo? |
+|---|---|---|---|
+| {{tipo_task}} | {{n}} | {{desvio}} | não — menos de 3 entradas |
+'
+}
+# Isolados: só a regra nomeada barra; a tabela oficial não denuncia.
+p_outro_sem_linha() {
+  troca_linha "$1/$HIST" "  - trabalho_id: $TRAB" '  - trabalho_id: outro-trabalho' 2
+  grep -vxF -- "$LINHA_T0201" "$1/$HIST" > "$1/$HIST.tmp" && mv "$1/$HIST.tmp" "$1/$HIST"
+}
+p_real_texto() { troca_linha "$1/$HIST" '    real: 0.12' '    real: doze minutos'; }
+p_estimado_texto() { troca_linha "$1/$HIST" '    estimado_max: null' '    estimado_max: tres'; }
+p_registrado_formato() { troca_linha "$1/$HIST" '    registrado_em: 2026-09-26' '    registrado_em: 26/09/2026'; }
+p_sem_area() { troca_linha "$1/$HIST" '    area: accountability' '    area:'; }
+p_sem_real() { grep -vxF '    real: 0.13' "$1/$HIST" > "$1/$HIST.tmp" && mv "$1/$HIST.tmp" "$1/$HIST"; }
 p_cabecalho_renomeado() {
   troca_linha "$1/$HIST" '| Trabalho | Task | Tipo | Área | Sinais | Estimado (min–max) | Média est. | Real | Desvio |' \
     '| Job | Task | Tipo | Área | Sinais | Estimado (min–max) | Média est. | Real | Desvio |'
@@ -661,11 +810,20 @@ grupo_contrato() {
   aceita '7 comentario YAML de linha inteira' v_comentario_linha
   aceita '7b comentario YAML ao fim da linha' v_comentario_fim
   aceita '7c comentario YAML com recuo arbitrario' v_comentario_recuado
+  aceita '8c literal {{...}} em prosa humana e texto, nao dado' v_marcador_prosa
+  aceita '8d criado do template, dados substituidos, instrucao {{...}} mantida' v_instrucao_template
 
   nega '8 marcador na linha-modelo da tabela' p_marcador_tabela
   nega '8b marcador no frontmatter' p_marcador_fm
-  nega '8c marcador na prosa' p_marcador_prosa
+  nega '8e marcador em comentario do frontmatter' p_marcador_fm_comentario
+  nega '8f marcador na linha-modelo da tabela de calibracao' p_marcador_calibracao
   nega '9 entradas trabalho-id de outro trabalho' p_outro
+  nega '9b outro trabalho sem linha na tabela oficial' p_outro_sem_linha
+  nega '9c real nao numerico' p_real_texto
+  nega '9d estimado nao numerico' p_estimado_texto
+  nega '9e registrado_em fora de AAAA-MM-DD' p_registrado_formato
+  nega '9f entrada sem area' p_sem_area
+  nega '9g entrada sem real' p_sem_real
   nega '10 task-id de outro trabalho' p_estranha
   nega '10b task-id nao concluida' p_nao_concluida
   nega '11 duplicata de entrada' p_duplicada
@@ -711,7 +869,7 @@ grupo_contrato() {
 
 grupo_subsequente() {
   local repo rc remocoes
-  printf '\nSUBSEQUENTE — HISTORICO ja versionado continua na prova por diff\n'
+  printf '\nSUBSEQUENTE — HISTORICO ja versionado continua provado contra HEAD\n'
   repo="$D/subsequente"; repo_c7c "$repo" anterior
   cp "$repo/$HIST" "$D/anterior.md"
   conclui "$repo" T-01.01
@@ -758,6 +916,229 @@ grupo_subsequente() {
     || falha 'caminho tracked aceitou entrada de outro trabalho'
 }
 
+# ---------------------------------------------------------------------------
+# TRACKED — DM-175: append-only quanto às entradas, não quanto aos bytes.
+# ---------------------------------------------------------------------------
+LINHA_ANT_T0101='| trabalho-anterior | T-01.01 | api | cadastro | sem_cobertura, integracao_externa | 2–4 h | 3 h | 3,3 h | 1,1 |'
+LINHA_ANT_T0201='| trabalho-anterior | T-02.01 | ui | tela de cadastro | — | 1–2 h | 1,5 h | 1,5 h | 1,0 |'
+LINHA_NOVA_T0101="| $TRAB | T-01.01 | api | accountability | — | 1–3 h | 2 h | 3 h | 1,5 |"
+LINHA_NOVA_T0201="| $TRAB | T-02.01 | ui | accountability | sem_cobertura | 1–2 h | 1,5 h | 2,1 h | 1,4 |"
+
+entrada_nova() { # <trabalho> <task> <tipo> [area]
+  printf '  - trabalho_id: %s\n    task_id: %s\n    tipo_task: %s\n    area: %s\n    sinais: []\n    estimado_min: 1\n    estimado_max: 3\n    estimado_media: 2\n    real: 3\n    desvio: 1.5\n    registrado_em: 2026-09-26' \
+    "$1" "$2" "$3" "${4:-accountability}"
+}
+
+# O acréscimo que a F6 do trabalho corrente faz, sem recalibrar nada ainda:
+# duas entradas novas e as duas linhas da tabela oficial.
+acrescimo_f6() { # <repo>
+  local h="$1/$HIST"
+  insere_antes "$h" 'calibracao:' "$(entrada_nova "$TRAB" T-01.01 api)
+  - trabalho_id: $TRAB
+    task_id: T-02.01
+    tipo_task: ui
+    area: accountability
+    sinais: [sem_cobertura]
+    estimado_min: 1
+    estimado_max: 2
+    estimado_media: 1.5
+    real: 2.1
+    desvio: 1.4
+    registrado_em: 2026-09-26"
+  insere_depois "$h" "$LINHA_ANT_T0201" "$LINHA_NOVA_T0101
+$LINHA_NOVA_T0201"
+}
+
+remove_entrada() { # <arquivo> <trabalho> <task> — só no frontmatter
+  T="  - trabalho_id: $2" K="    task_id: $3" awk '
+    function despeja(   i) { if (n && !(tem_t && tem_k)) for (i = 1; i <= n; i++) print buf[i]; n = 0; tem_t = tem_k = 0 }
+    fm < 2 && $0 == "---" { despeja(); fm++; print; next }
+    fm == 1 && /^  - / { despeja(); dentro = 1 }
+    fm == 1 && /^[a-z]/ { despeja(); dentro = 0 }
+    fm == 1 && dentro { buf[++n] = $0; if ($0 == ENVIRON["T"]) tem_t = 1; if ($0 == ENVIRON["K"]) tem_k = 1; next }
+    { print }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
+repo_tracked() { # <dir>
+  repo_c7c "$1" calibrado
+  conclui "$1" T-01.01
+  conclui "$1" T-02.01
+  acrescimo_f6 "$1"
+}
+
+aceita_t() { # <descricao> <preparo>
+  local descricao="$1" preparo="$2" repo rc saida
+  repo="$D/tracked-aceita-$(printf '%s' "$descricao" | tr -c 'a-z0-9' '-')"
+  repo_tracked "$repo"
+  "$preparo" "$repo"
+  cp "$repo/$HIST" "$D/tracked.antes"
+  saida="$(metodo "$repo" --persistir pre-e2 2>"$D/tracked.err")"; rc=$?
+  if [ "$rc" = 0 ] && printf '%s\n' "$saida" | grep -Eq '^commit=[0-9a-f]{40}$' \
+     && nomes_head "$repo" | grep -Fxq "$HIST" \
+     && git -C "$repo" show "HEAD:$HIST" | cmp -s - "$D/tracked.antes" \
+     && [ -z "$(staged "$repo")" ] && trava_livre "$repo" \
+     && metodo "$repo" --verificar pre-e2 >/dev/null 2>&1; then
+    ok "tracked aceita: $descricao"
+  else
+    falha "tracked nao aceitou: $descricao (rc=$rc; $(cat "$D/tracked.err"))"
+  fi
+}
+
+nega_t() { # <descricao> <preparo> [trecho esperado no erro]
+  local descricao="$1" preparo="$2" trecho="${3:-HISTORICO global}" repo rc antes head_antes
+  repo="$D/tracked-nega-$(printf '%s' "$descricao" | tr -c 'a-z0-9' '-')"
+  repo_tracked "$repo"
+  "$preparo" "$repo"
+  [ -e "$repo/$HIST" ] && cp "$repo/$HIST" "$D/tracked.antes"
+  antes="$(commits "$repo")"; head_antes="$(git -C "$repo" rev-parse "HEAD:$HIST")"
+  metodo "$repo" --persistir pre-e2 >/dev/null 2>"$D/tracked.err"; rc=$?
+  if [ "$rc" != 0 ] && grep -Fq -- "$trecho" "$D/tracked.err" \
+     && [ "$(commits "$repo")" = "$antes" ] && [ -z "$(staged "$repo")" ] \
+     && trava_livre "$repo" && [ "$(git -C "$repo" rev-parse "HEAD:$HIST")" = "$head_antes" ] \
+     && { [ ! -e "$repo/$HIST" ] || cmp -s "$repo/$HIST" "$D/tracked.antes"; }; then
+    ok "tracked barra: $descricao"
+  else
+    falha "tracked nao barrou: $descricao (rc=$rc; $(cat "$D/tracked.err"))"
+  fi
+}
+
+# DEVEM PASSAR
+t_nada() { :; }
+t_ui_1_para_2() { troca_linha "$1/$HIST" '    entradas: 1' '    entradas: 2'; }
+t_desvio_medio() { troca_linha "$1/$HIST" '    desvio_medio: 1.0' '    desvio_medio: 1.2'; }
+t_fator_cruza() {
+  troca_linha "$1/$HIST" '    entradas: 2' '    entradas: 3'
+  troca_linha "$1/$HIST" '    desvio_medio: 1.2' '    desvio_medio: 1.3'
+  troca_linha "$1/$HIST" '    fator_ativo: false' '    fator_ativo: true'
+}
+t_tabela_calibracao() {
+  troca_linha "$1/$HIST" '| api | 2 | 1,2 | não — menos de 3 entradas |' '| api | 3 | 1,3 | sim, aplicado como fator ×1,3 |'
+  troca_linha "$1/$HIST" '| ui | 1 | 1,0 | não — menos de 3 entradas |' '| ui | 2 | 1,2 | não — menos de 3 entradas |'
+}
+t_atualizado_em() { troca_linha "$1/$HIST" 'atualizado_em: 2026-09-01' 'atualizado_em: 2026-09-26'; }
+t_comentario() {
+  insere_antes "$1/$HIST" 'calibracao:' '# recalibrado ao fechar issue-123-rotulo-parecer'
+  insere_depois "$1/$HIST" '## Calibração por tipo de task' '
+<!-- recalculada pela F6 em 2026-09-26 -->
+Observação da equipe: o tipo api passou a ter fator ativo.'
+}
+t_sinais_bloco() {
+  troca_linha "$1/$HIST" '    sinais: [sem_cobertura, integracao_externa]' '    sinais:
+      - sem_cobertura
+      - "integracao_externa"  # como na estimativa'
+}
+t_marcador_prosa() {
+  grep -Fq 'Substitua TODOS os marcadores `{{...}}`' "$1/$HIST" || return 1
+  insere_depois "$1/$HIST" 'A T-03.01 do trabalho anterior rodou sem a F3.5 e ficou só no frontmatter.' '
+Ao copiar o template, os marcadores `{{...}}` são trocados pelos dados; esta frase fica.'
+}
+t_recalibracao_completa() {
+  t_ui_1_para_2 "$1"; t_desvio_medio "$1"; t_fator_cruza "$1"; t_tabela_calibracao "$1"
+  t_atualizado_em "$1"; t_comentario "$1"
+}
+
+# DEVEM BARRAR
+n_remove() { remove_entrada "$1/$HIST" trabalho-anterior T-03.01; }
+n_real() { troca_linha "$1/$HIST" '    real: 3.3' '    real: 3.9'; }
+n_trabalho() { troca_linha "$1/$HIST" '  - trabalho_id: trabalho-anterior' "  - trabalho_id: $TRAB" 4; }
+n_task() { troca_linha "$1/$HIST" '    task_id: T-03.01' '    task_id: T-03.02'; }
+n_estimativa() { troca_linha "$1/$HIST" '    estimado_max: 4' '    estimado_max: 5'; }
+n_sinais() { troca_linha "$1/$HIST" '    sinais: [sem_cobertura, integracao_externa]' '    sinais: [sem_cobertura]'; }
+n_outro_trabalho() { insere_antes "$1/$HIST" 'calibracao:' "$(entrada_nova outro-trabalho T-02.01 ui)"; }
+n_nao_concluida() { insere_antes "$1/$HIST" 'calibracao:' "$(entrada_nova "$TRAB" T-03.01 infra)"; }
+n_duplicada() { insere_antes "$1/$HIST" 'calibracao:' "$(entrada_nova "$TRAB" T-01.01 api)"; }
+n_marcador_fm() { troca_linha "$1/$HIST" '    area: accountability' '    area: {{area}}' 2; }
+n_marcador_linha() {
+  troca_linha "$1/$HIST" "$LINHA_NOVA_T0201" "| $TRAB | T-02.01 | {{tipo_task}} | accountability | sem_cobertura | 1–2 h | 1,5 h | 2,1 h | 1,4 |"
+}
+n_remove_linha() { grep -vxF -- "$LINHA_ANT_T0101" "$1/$HIST" > "$1/$HIST.tmp" && mv "$1/$HIST.tmp" "$1/$HIST"; }
+n_linha_sem_entrada() { insere_depois "$1/$HIST" "$LINHA_NOVA_T0201" "| $TRAB | T-03.01 | infra | accountability | — | — | — | 1 h | — |"; }
+n_apagado() { rm -f "$1/$HIST"; }
+n_real_texto() { troca_linha "$1/$HIST" '    real: 2.1' '    real: duas horas'; }
+n_cal_fator_sem_base() { troca_linha "$1/$HIST" '    fator_ativo: false' '    fator_ativo: true'; }
+n_cal_entradas_texto() { troca_linha "$1/$HIST" '    entradas: 2' '    entradas: duas'; }
+n_cal_desvio_texto() { troca_linha "$1/$HIST" '    desvio_medio: 1.2' '    desvio_medio: alto'; }
+n_cal_fator_texto() { troca_linha "$1/$HIST" '    fator_ativo: false' '    fator_ativo: sim'; }
+n_cal_conta_demais() {
+  troca_linha "$1/$HIST" '    entradas: 1' '    entradas: 5'
+  troca_linha "$1/$HIST" '    fator_ativo: false' '    fator_ativo: true' 2
+}
+n_cal_tipo_repetido() { troca_linha "$1/$HIST" '  - tipo_task: ui' '  - tipo_task: api'; }
+n_cal_tipo_fora() { troca_linha "$1/$HIST" '  - tipo_task: ui' '  - tipo_task: mobile'; }
+n_cal_sem_fator() { grep -vxF '    fator_ativo: false' "$1/$HIST" > "$1/$HIST.tmp" && mv "$1/$HIST.tmp" "$1/$HIST"; }
+
+grupo_tracked() {
+  local repo rc
+  printf '\nTRACKED — entradas imutaveis, calibracao derivada, prosa humana (DM-175)\n'
+  aceita_t '1 HEAD com trabalho A, worktree acrescenta trabalho B' t_nada
+  aceita_t '2 calibracao de um tipo muda de 1 para 2 entradas' t_ui_1_para_2
+  aceita_t '3 desvio_medio muda' t_desvio_medio
+  aceita_t '4 fator_ativo muda ao cruzar 3 entradas' t_fator_cruza
+  aceita_t '5 tabela humana de calibracao recalculada' t_tabela_calibracao
+  aceita_t '6 atualizado_em muda' t_atualizado_em
+  aceita_t '7 comentario humano acrescentado (YAML e corpo)' t_comentario
+  aceita_t '8 sinais antigos de inline para bloco, mesma lista' t_sinais_bloco
+  aceita_t '9 literal {{...}} permanece e aparece na prosa' t_marcador_prosa
+  aceita_t '9b recalibracao completa da F6' t_recalibracao_completa
+
+  nega_t '10 remove entrada historica' n_remove 'remove ou reescreve'
+  nega_t '11 muda real de entrada historica' n_real 'remove ou reescreve'
+  nega_t '12 muda trabalho_id historico' n_trabalho 'remove ou reescreve'
+  nega_t '13 muda task_id historico' n_task 'remove ou reescreve'
+  nega_t '14 muda estimativa historica' n_estimativa 'remove ou reescreve'
+  nega_t '15 muda sinais semanticamente' n_sinais 'remove ou reescreve'
+  nega_t '16 acrescenta entrada de outro trabalho' n_outro_trabalho 'outro trabalho'
+  nega_t '17 acrescenta task nao concluida' n_nao_concluida 'não é concluída'
+  nega_t '18 nova entrada duplicada' n_duplicada 'duplicada'
+  nega_t '19 marcador pendente no frontmatter' n_marcador_fm 'marcador'
+  nega_t '20 marcador pendente em linha oficial de dados' n_marcador_linha 'marcador'
+  nega_t '21 remove linha antiga da tabela oficial de Entradas' n_remove_linha 'remove ou reescreve'
+  nega_t '22 linha oficial sem entrada no frontmatter' n_linha_sem_entrada 'sem entrada'
+  nega_t '23 HISTORICO tracked apagado' n_apagado 'remove ou reescreve'
+  nega_t '24 nova entrada fora do schema (real texto)' n_real_texto 'real'
+  nega_t '25 calibracao com fator ativo abaixo de 3 entradas' n_cal_fator_sem_base 'fator_ativo'
+  nega_t '26 calibracao com entradas nao inteiro' n_cal_entradas_texto 'entradas'
+  nega_t '27 calibracao com desvio_medio nao numerico' n_cal_desvio_texto 'desvio_medio'
+  nega_t '28 calibracao com fator_ativo nao booleano' n_cal_fator_texto 'fator_ativo'
+  nega_t '29 calibracao conta mais entradas do que existem' n_cal_conta_demais 'mais entradas'
+  nega_t '30 calibracao repete tipo' n_cal_tipo_repetido 'repetida'
+  nega_t '31 calibracao com tipo fora do enum' n_cal_tipo_fora 'enum'
+  nega_t '32 calibracao sem fator_ativo' n_cal_sem_fator 'fator_ativo'
+
+  # HEAD fora do contrato: não há base estruturada, então nada é provado.
+  repo="$D/tracked-head-invalido"; repo_c7c "$repo" calibrado
+  sed -i 's/^expx_tool: sprintx$/expx_tool: teste/' "$repo/$HIST"
+  git -C "$repo" commit -qam 'chore: historico fora do contrato'
+  conclui "$repo" T-01.01; conclui "$repo" T-02.01; acrescimo_f6 "$repo"
+  sed -i 's/^expx_tool: teste$/expx_tool: sprintx/' "$repo/$HIST"
+  metodo "$repo" --persistir pre-e2 >/dev/null 2>"$D/tracked.err"; rc=$?
+  [ "$rc" != 0 ] && grep -Fq 'em HEAD fora do contrato' "$D/tracked.err" && [ -z "$(staged "$repo")" ] \
+    && ok 'tracked barra: HEAD fora do contrato nao serve de base' \
+    || falha "HEAD fora do contrato virou base (rc=$rc; $(cat "$D/tracked.err"))"
+
+  # Checkpoints seguintes: o mesmo leitor em pre-e6 e e8.
+  repo="$D/tracked-checkpoints"; repo_tracked "$repo"
+  metodo "$repo" --persistir pre-e2 >/dev/null 2>&1 || falha 'tracked checkpoints: pre-e2 falhou'
+  t_recalibracao_completa "$repo"
+  printf 'pr\n' > "$repo/docs/entregas/$TRAB/PR.md"
+  metodo "$repo" --persistir pre-e6 >/dev/null 2>&1; rc=$?
+  [ "$rc" = 0 ] && nomes_head "$repo" | grep -Fxq "$HIST" \
+    && ok 'tracked: pre-e6 persiste a recalibracao depois do pre-e2' \
+    || falha "tracked: pre-e6 recusou recalibracao (rc=$rc)"
+  troca_linha "$repo/$HIST" '    real: 2.1' '    real: 2.4'
+  printf 'estado: bloqueado\n' >> "$repo/$ENT"
+  metodo "$repo" --persistir e8 >/dev/null 2>"$D/tracked.err"; rc=$?
+  [ "$rc" != 0 ] && grep -Fq 'remove ou reescreve' "$D/tracked.err" && [ -z "$(staged "$repo")" ] \
+    && ok 'tracked: e8 barra reescrita de entrada ja versionada pelo pre-e2' \
+    || falha "tracked: e8 aceitou reescrita (rc=$rc; $(cat "$D/tracked.err"))"
+  troca_linha "$repo/$HIST" '    real: 2.4' '    real: 2.1'
+  metodo "$repo" --persistir e8 >/dev/null 2>&1; rc=$?
+  [ "$rc" = 0 ] && git -C "$repo" show "HEAD:$ENT" | grep -Fq 'estado: bloqueado' \
+    && metodo "$repo" --verificar e8 >/dev/null 2>&1 \
+    && ok 'tracked: e8 bloqueado persiste depois de desfeita a reescrita' \
+    || falha "tracked: e8 bloqueado falhou (rc=$rc)"
+}
+
 grupo_e1() {
   local repo rc msg
   printf '\nE1 — o HISTORICO inicial e metodo, nunca produto da task\n'
@@ -784,12 +1165,13 @@ grupo_e1() {
 
 grupo="${1:-all}"
 case "$grupo" in
-  all) grupo_central; grupo_checkpoints; grupo_negativos; grupo_contrato; grupo_subsequente; grupo_e1 ;;
+  all) grupo_central; grupo_checkpoints; grupo_negativos; grupo_contrato; grupo_subsequente; grupo_tracked; grupo_e1 ;;
   central) grupo_central ;;
   checkpoints) grupo_checkpoints ;;
   negativos) grupo_negativos ;;
   contrato) grupo_contrato ;;
   subsequente) grupo_subsequente ;;
+  tracked) grupo_tracked ;;
   e1) grupo_e1 ;;
   *) printf 'grupo desconhecido: %s\n' "$grupo" >&2; exit 64 ;;
 esac

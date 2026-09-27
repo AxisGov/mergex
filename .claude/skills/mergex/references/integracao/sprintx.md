@@ -81,6 +81,10 @@ Na mergex, isso significa:
   e o checkpoint de método o versiona depois de provar que o arquivo **inteiro** pertence ao
   trabalho explícito (DM-174). Não existe commit de base manual. É global: features concorrentes
   que o tocam produzem conflito Git normal no merge, resolvido por quem revisa;
+- nos **trabalhos seguintes**, é append-only quanto às **entradas**, não aos bytes (DM-175): a
+  entrada anterior é imutável, a nova só pode ser do trabalho explícito, e a sprintx pode
+  recalcular `calibracao`, a tabela de calibração, `atualizado_em` e a prosa, como o Passo 3 da
+  execução dela manda;
 - no **E3**, é classificado pelo catálogo de artefatos de método: DISPENSÁVEL (D4) só quando, contra a
   base, apenas acrescenta entradas deste trabalho; qualquer reescrita vai para LEITURA RÁPIDA (L4)
   (`references/03-atencao-humana.md`, "Artefatos de método").

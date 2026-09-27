@@ -1211,7 +1211,7 @@ fi
 grep -Fq 'ls-tree --name-only HEAD -- "$caminho"' "$persiste_sh" \
   || fail 'D-02: first HISTORICO no longer proves absence in HEAD'
 grep -Fq "remove ou reescreve evidência existente" "$persiste_sh" \
-  || fail 'D-02: tracked HISTORICO lost the diff proof'
+  || fail 'D-02: tracked HISTORICO lost the proof against HEAD'
 grep -Fq 'DM-174' '.claude/skills/mergex/references/01-commits.md' \
   || fail 'D-02: E1 reference does not state the first HISTORICO rule'
 for f in scripts/ci/test-d02-historico-inicial.sh scripts/ci/mutacao-d02-historico-inicial.sh; do
@@ -1227,5 +1227,22 @@ grep -Fq 'Alinhamento ao contrato publicado' '.claude/skills/mergex/DECISOES-DA-
   || fail 'D-02: DM-174 does not state the alignment to the published sprintx contract'
 grep -Fq 'grupo_contrato' scripts/ci/test-d02-historico-inicial.sh \
   || fail 'D-02: bench lost the differential contract group'
+
+# DM-175 — HISTORICO tracked: append-only quanto às entradas, não aos bytes.
+grep -Fq '| DM-175 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-175'
+grep -Fq 'DM-175' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'DM-175: E1 reference does not state the tracked HISTORICO rule'
+for fn in 'ler_historico()' 'confere_ownership_historico()' 'confere_historico_versionado()'; do
+  grep -Fq "$fn" "$persiste_sh" || fail "DM-175: method lifecycle lost $fn"
+done
+# Um leitor só: HEAD e working tree passam pelo mesmo parser da primeira criação.
+[ "$(codigo "$persiste_sh" | grep -c 'ler_historico "')" -ge 3 ] \
+  || fail 'DM-175: initial, HEAD and worktree HISTORICO no longer share one reader'
+if codigo "$persiste_sh" | grep -Eq 'diff HEAD .*-- "\$caminho"'; then
+  fail 'DM-175: tracked HISTORICO is proved by textual diff again'
+fi
+grep -Fq 'grupo_tracked' scripts/ci/test-d02-historico-inicial.sh \
+  || fail 'DM-175: bench lost the tracked group'
 
 printf 'contract checks passed\n'

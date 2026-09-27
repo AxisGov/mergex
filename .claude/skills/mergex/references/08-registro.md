@@ -197,7 +197,8 @@ git status --porcelain
 | Derivado e não versionado: `docs/eventos/<trabalho_id>.jsonl`, `.expx/estado.json`, índice do memox | **Não entra.** Não é artefato da entrega |
 
 **O `HISTORICO.md` normalmente já está limpo aqui**, porque entrou no `pre-e2`. Se voltou a ficar
-dirty e o diff continua pertencendo ao trabalho explícito, o catálogo cumulativo de `e8` o inclui.
+dirty e a prova contra HEAD continua passando (entradas antigas intactas, novas só do trabalho
+explícito — DM-175), o catálogo cumulativo de `e8` o inclui.
 
 Depois do E6 e do E7, o que costuma estar sujo é **um arquivo só**: o próprio `ENTREGA.md` — o
 E7 gravou `pr_url` e `pr_estado`, e o E8 acabou de gravar `estado`, `portao`, `push_feito`,
