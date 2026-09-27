@@ -175,6 +175,14 @@ HISTORICO_GLOBAL='docs/sprintx/estimativas/HISTORICO.md'
 # template barra no frontmatter e nas linhas de dados oficiais; na prosa ele é
 # texto — o próprio template diz "Substitua TODOS os marcadores `{{...}}`".
 #
+# Escalar entre aspas vale pelo valor, não pela grafia (DM-176): todo escalar
+# do frontmatter — cabeçalho, campos, identidade e itens de sinais — passa
+# pelo decodificador único `decodifica`. Aspas simples só desdobram ''; aspas
+# duplas decodificam o subconjunto suportado. Escape cujo valor não caiba num
+# campo de uma linha, ou que o leitor não suporte, barra: nunca é conservado
+# como texto. Caractere de controle nunca entra na saída, que usa TAB, \034 e
+# \037 como separadores.
+#
 # Saída, só quando o arquivo é válido: um fato por linha, campos por TAB.
 #   E <trabalho_id> <task_id> <tipo_task> <area> <sinais> <estimado_min>
 #     <estimado_max> <estimado_media> <real> <duracao_observada> <desvio>
@@ -196,10 +204,52 @@ ler_historico() { # <arquivo>
       p = index($0, "{{")
       return p && index(substr($0, p + 2), "}}")
     }
-    # Valor efetivo de um escalar de uma linha. Aspas abertas e não fechadas
-    # seriam texto multilinha, que o contrato proíbe (regra 8): barra.
+    function controle(s,   i) {
+      for (i = 1; i <= length(s); i++) if (index(CONTROLE, substr(s, i, 1))) return 1
+      return 0
+    }
+    # \xHH do subconjunto: só ASCII imprimível (20–7E). Controle, DEL e byte
+    # fora de ASCII (que o YAML leria como outro code point) barram.
+    function ascii_hexa(h, v,   a, b) {
+      a = index("0123456789abcdef", tolower(substr(h, 1, 1)))
+      b = index("0123456789abcdef", tolower(substr(h, 2, 1)))
+      if (length(h) != 2 || !a || !b) erro("escape \\x sem dois dígitos hexadecimais: " v)
+      a = (a - 1) * 16 + b - 1
+      if (a < 32 || a > 126) erro("escape \\x fora de ASCII imprimível (campos são de uma linha): " v)
+      return sprintf("%c", a)
+    }
+    # O decodificador ÚNICO de escalar entre aspas (DM-176): recebe o token
+    # com as aspas, como sem_comentario o devolve, e dá o valor efetivo ou
+    # barra. Não é parser YAML geral.
+    function decodifica(v,   q, s, r, i, c) {
+      q = substr(v, 1, 1); s = substr(v, 2, length(v) - 2); r = ""
+      if (q == "\047") {
+        # Aspas simples: a barra invertida é texto; só a aspa dobrada vira uma.
+        gsub("\047\047", "\047", s)
+        r = s
+      } else for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c != "\\") { r = r c; continue }
+        c = substr(s, ++i, 1)
+        if (c == "") erro("escape inválido em texto entre aspas duplas: " v)
+        else if (c == "\"") r = r "\""
+        else if (c == "\\") r = r "\\"
+        else if (c == "/") r = r "/"
+        else if (c == " ") r = r " "
+        else if (c == "x") { r = r ascii_hexa(substr(s, i + 1, 2), v); i += 2 }
+        else if (c == "\t" || index("0abtnvfreNLP", c)) erro("escape que produz controle ou quebra de linha (campos são de uma linha): " v)
+        else if (c == "u" || c == "U" || c == "_") erro("escape YAML fora do subconjunto suportado pelo leitor: " v)
+        else erro("escape inválido em texto entre aspas duplas: " v)
+      }
+      if (controle(r)) erro("caractere de controle no valor (campos são de uma linha): " v)
+      return r
+    }
+    # Separa o escalar do comentário. Entre aspas devolve o token com as
+    # aspas (decodifica dá o valor); aspas abertas e não fechadas seriam
+    # texto multilinha, que o contrato proíbe (regra 8): barra.
     function sem_comentario(v,   q, i, c, fim, resto) {
       v = apara(v); aspas = 0
+      if (controle(v)) erro("caractere de controle no valor (campos são de uma linha): " v)
       q = substr(v, 1, 1)
       if (q == "\"" || q == "\047") {
         fim = 0
@@ -222,7 +272,7 @@ ler_historico() { # <arquivo>
     }
     function escalar(v) {
       v = sem_comentario(v)
-      if (aspas) return substr(v, 2, length(v) - 2)
+      if (aspas) return decodifica(v)
       if (v ~ /^[|>]/) erro("texto multilinha fora do contrato (campos são de uma linha): " v)
       return v
     }
@@ -244,14 +294,14 @@ ler_historico() { # <arquivo>
     }
     function efetivo(v) {
       v = sem_comentario(v)
-      if (aspas) return "s:" substr(v, 2, length(v) - 2)
+      if (aspas) return "s:" decodifica(v)
       return tipado(v)
     }
     # Um sinal é um escalar simples: sem estrutura aninhada, sem vírgula que
     # torne a lista ambígua, sem par chave:valor.
     function sinal_valido(v) {
       v = sem_comentario(v)
-      if (aspas) return length(v) > 2
+      if (aspas) return decodifica(v) != ""
       if (v == "") return 0
       if (index("-?:,#&*!|>%@`[]{}", substr(v, 1, 1))) return 0
       if (index(v, "[") || index(v, "]") || index(v, "{") || index(v, "}") || index(v, ",")) return 0
@@ -358,6 +408,7 @@ ler_historico() { # <arquivo>
         separador = 0; return
       }
       if (marcador()) erro("marcador do template não substituído em linha oficial de dados: " apara($0))
+      if (controle(c1) || controle(c2)) erro("caractere de controle em linha oficial de dados: " apara($0))
       if (tabela == "entradas") {
         if ((c1 SUBSEP c2) in linha_vista) erro("linha duplicada na tabela de entradas: " c1 " " c2)
         linha_vista[c1 SUBSEP c2] = 1
@@ -377,6 +428,11 @@ ler_historico() { # <arquivo>
       for (i = 1; i <= n_calibracao; i++) campo_calibracao[ordem_calibracao[i]] = 1
       n = split("config client dominio persistencia api ui integracao_externa teste infra refatoracao", lista, " ")
       for (i = 1; i <= n; i++) tipo[lista[i]] = 1
+      # C0 e DEL: nenhum cabe num campo de uma linha, e TAB, \034 e \037
+      # separam a saída. NUL nem chega a string portável de awk.
+      CONTROLE = ""
+      for (i = 1; i < 32; i++) CONTROLE = CONTROLE sprintf("%c", i)
+      CONTROLE = CONTROLE sprintf("%c", 127)
       estado = "inicio"
     }
     { sub(/\r$/, "") }
