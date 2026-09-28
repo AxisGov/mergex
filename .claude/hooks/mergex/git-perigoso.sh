@@ -140,10 +140,35 @@ O que fazer:
   fi
 fi
 
-# push explícito para a principal
+# push para a principal — duas perguntas, e uma não cobre a outra:
+#
+#   a) o comando NOMEIA a principal como destino? Então barra, qualquer que
+#      seja a branch ativa. O nome do destino aparece depois de espaço
+#      (`origin main`, `--delete main`, `-d main`), depois de `:`
+#      (`HEAD:main`, `:main`, `:refs/heads/main`, `feature/x:main`) e depois
+#      do `+` do refspec — a regra antiga só reconhecia depois de espaço, e
+#      por isso `git push origin :main` escapava.
+#
+#   b) o comando NÃO nomeia destino nenhum (`git push`, `git push origin`,
+#      `git push --all origin`)? Então o destino é o upstream da branch ativa,
+#      e só nesse caso "estou na principal" é motivo suficiente. `HEAD` (e
+#      `@`) como destino entra aqui pelo mesmo motivo: HEAD é a branch ativa.
+#
+# Aplicar (b) a qualquer push era o falso positivo: barrava `git push origin
+# feature/x`, `git push origin --delete feature/x` e `git push origin
+# :refs/heads/feature/x` estando em main — destinos que não tocam a principal
+# e são exatamente o trabalho legítimo de quem nunca saiu dela.
+#
+# A forma "sem destino" é ENUMERADA, não inferida, e não é um parser de linha
+# de comando: opções, no máximo uma palavra solta (o remoto) e fim do comando.
+# Palavra que não caiba nessa forma — refspec, opção com valor separado — não
+# vira "sem destino": fica só com a regra (a), que é o lado fechado.
 if printf '%s' "$CMD" | grep -Eq "git([[:space:]]+-[^[:space:]]+)*[[:space:]]+push([[:space:]]|$)"; then
-  if printf '%s' "$CMD" | grep -Eq "[[:space:]](HEAD:)?(refs/heads/)?${PRINCIPAL}([[:space:]]|$)" \
-  || { [ -n "$ATUAL" ] && [ "$ATUAL" = "$PRINCIPAL" ]; }; then
+  SEM_DESTINO='git([[:space:]]+-[^[:space:]]+)*[[:space:]]+push([[:space:]]+-[^[:space:]]+)*([[:space:]]+[A-Za-z0-9_./@-]+)?[[:space:]]*($|[;&|])'
+  if printf '%s' "$CMD" | grep -Eq "(^|[[:space:]:+])(refs/heads/)?${PRINCIPAL}([[:space:]]|$)" \
+  || { [ -n "$ATUAL" ] && [ "$ATUAL" = "$PRINCIPAL" ] \
+       && { printf '%s' "$CMD" | grep -Eq '(^|[[:space:]:+])(HEAD|@)([[:space:]]|$)' \
+            || printf '%s' "$CMD" | grep -Eq "$SEM_DESTINO"; }; }; then
     barra "push na branch principal" \
 "mergex/git-perigoso — push direto na branch principal
 

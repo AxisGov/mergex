@@ -187,6 +187,108 @@ else
 fi
 
 echo
+echo '6. Destino do push: decide o destino nomeado, não a branch ativa'
+#
+# O bloco "push na principal" respondia a uma pergunta só — "a branch ativa é a
+# principal?" — e com ela cobria duas situações que não são a mesma:
+#
+#   - o comando NOMEIA um destino. Aí quem decide é o destino: estando em main,
+#     `git push origin feature/x` não toca a principal e é trabalho legítimo;
+#   - o comando não nomeia destino nenhum (`git push`, `git push origin`,
+#     `--all`). Aí o destino é o upstream da branch ativa, e só nesse caso
+#     "estou na principal" é motivo suficiente.
+#
+# Confundir as duas dava os dois defeitos cobertos aqui: o falso positivo que
+# barra destino explícito de feature estando em main, e a falha aberta que
+# deixa `git push origin :main` passar estando fora dela.
+
+repo_principal() { # <dir> — repo cuja branch ativa É a principal (main)
+  git init -q -b main "$1" 2>/dev/null || return 1
+  git -C "$1" config user.email teste@expx.local
+  git -C "$1" config user.name Teste
+  git -C "$1" commit -q --allow-empty -m base
+}
+
+repo_trabalho() { # <dir> — main existe (é a principal), mas a ativa é feature/x
+  repo_principal "$1" || return 1
+  git -C "$1" switch -q -c feature/x
+}
+
+EM_MAIN="$D/em-main"; repo_principal "$EM_MAIN" || falha 'fixture em-main não pôde ser criada'
+FORA="$D/fora-main";  repo_trabalho  "$FORA"    || falha 'fixture fora-main não pôde ser criada'
+
+# Cada caso executa o hook de verdade, por payload, como o harness faz.
+em_main() { # <rc esperado> <comando>
+  roda "$HOOK" "$(carga "$2" "$EM_MAIN")" "$EM_MAIN"; igual "em main: $2" "$1" "$RC"
+}
+fora() { # <rc esperado> <comando>
+  roda "$HOOK" "$(carga "$2" "$FORA")" "$FORA"; igual "fora de main: $2" "$1" "$RC"
+}
+
+igual 'fixture em-main: a branch ativa é main' main "$(git -C "$EM_MAIN" branch --show-current)"
+igual 'fixture fora-main: a branch ativa é feature/x' feature/x "$(git -C "$FORA" branch --show-current)"
+git -C "$FORA" show-ref --verify --quiet refs/heads/main \
+  && ok 'fixture fora-main: main existe, logo é a principal do repo' \
+  || falha 'fixture fora-main: sem refs/heads/main o hook não enxerga a principal'
+
+echo
+echo '6.1 Em main, destino explícito de branch de trabalho passa'
+em_main 0 'git push origin --delete feature/x'
+em_main 0 'git push origin :refs/heads/feature/x'
+em_main 0 'git push -u origin feature/x'
+em_main 0 'git push origin feature/x'
+
+echo
+echo '6.2 Em main, o que tem de continuar barrado continua'
+em_main 2 'git push'
+em_main 2 'git push origin'
+em_main 2 'git push origin HEAD'
+em_main 2 'git push --all origin'
+em_main 2 'git push origin main'
+em_main 2 'git push origin refs/heads/main'
+em_main 2 'git push origin HEAD:main'
+em_main 2 'git push origin :main'
+em_main 2 'git push origin --delete main'
+em_main 2 'git push origin -d main'
+em_main 2 'git push --force origin feature/x'
+em_main 2 'git push -f origin feature/x'
+em_main 2 'git push --force-with-lease origin feature/x'
+em_main 2 'git push origin +feature/x:feature/x'
+em_main 2 'git commit -m trabalho'
+
+echo
+echo '6.3 Fora de main, qualquer destino main barra — inclusive depois de `:`'
+fora 2 'git push origin :main'
+fora 2 'git push origin :refs/heads/main'
+fora 2 'git push origin feature/x:main'
+fora 2 'git push origin refs/heads/feature/x:refs/heads/main'
+fora 2 'git push origin main'
+fora 2 'git push origin HEAD:main'
+fora 2 'git push origin --delete main'
+fora 2 'git push origin -d main'
+fora 2 'git push --force origin feature/x'
+fora 2 'git push origin +feature/x:feature/x'
+
+echo
+echo '6.4 Fora de main, o trabalho normal não é incomodado'
+fora 0 'git push'
+fora 0 'git push origin'
+fora 0 'git push origin HEAD'
+fora 0 'git push -u origin feature/x'
+fora 0 'git push origin --delete feature/x'
+fora 0 'git push origin :refs/heads/feature/x'
+fora 0 'git commit -m trabalho'
+
+echo
+echo '6.5 Precisão: nome que só contém "main" não é a principal'
+em_main 0 'git push origin domain'
+em_main 0 'git push origin feature/main-menu'
+em_main 0 'git push origin :domain'
+fora 0 'git push origin domain'
+fora 0 'git push origin feature/main-menu'
+fora 0 'git push origin :feature/main-menu'
+
+echo
 echo '---------------------------------------------'
 printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADO"
 [ "$FALHOU" = 0 ]
