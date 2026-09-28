@@ -162,23 +162,80 @@ destino_do_refspec() {
   printf '%s' "$r"
 }
 
+# Programas que RODAM o que vem no argumento. É esta lista que separa EXECUTAR
+# de CITAR: `bash -c "git push origin main"` executa o push; `echo "git push
+# origin main"` só imprime o texto. Sem a distinção, procurar o `git` em
+# qualquer posição do segmento barrava toda citação — o aviso impresso, a
+# mensagem de commit que fala de push, a busca por push no código. Falso
+# positivo que atrapalha o dia inteiro é o que a regra 1 do desenho proíbe.
+#
+# Compara-se o NOME do programa, não o caminho: `/bin/sh` é o mesmo `sh`.
+#
+# Um lançador fora desta lista não é lido como execução de push. É uma troca
+# consciente e declarada: o hook prefere não enxergar um push escondido em
+# `find -exec` a barrar toda linha que apenas MENCIONA um push.
+executor() {
+  case "$1" in
+    bash|sh|dash|zsh|ksh|ksh93|mksh|ash|busybox) return 0 ;;
+    eval|command|exec|env|sudo|doas|nohup|setsid|nice|time|timeout|stdbuf|xargs) return 0 ;;
+  esac
+  return 1
+}
+
+# O número que ABRE um redirecionamento sobra no fim do segmento depois da
+# quebra: `git push origin main 2>/tmp/log` vira o segmento `git push origin
+# main 2`. Ele é descritor porque é uma palavra INTEIRA, só de dígitos. O
+# dígito colado no fim de outra palavra pertence à palavra: `git push origin
+# main2>/tmp/log` empurra para `main2`, que é outra branch. Cortar o dígito
+# grudado transformava `main2` na principal `main` — barrava um push legítimo —
+# e comia o fim de qualquer destino terminado em número.
+sem_descritor() {
+  local v="$1" t
+  t="${v##*[[:space:]]}"
+  case "$t" in
+    ''|*[!0-9]*) printf '%s' "$v" ;;
+    *)           printf '%s' "${v%"$t"}" ;;
+  esac
+}
+
 # Lê um segmento. Devolve 0 se ele era mesmo um `git ... push`.
 le_push() {
-  local tok d remoto_lido=0 n_refspec=0
+  local tok d seg remoto_lido=0 n_refspec=0 atribuiu=0
+  seg="$(sem_descritor "$1")"
   set -f                    # o segmento é texto: nada aqui vira glob
   # shellcheck disable=SC2086
-  set -- $1
+  set -- $seg
   set +f
 
-  # O `git` não é necessariamente a primeira palavra do segmento: `bash -c
-  # "git push origin main"`, `sh -c ...` e `eval ...` o colocam dentro de um
-  # argumento, e ele continua sendo o programa que vai rodar. Procurar em vez
-  # de exigir a posição é o que impede que embrulhar o comando vire bypass.
+  # Prefixo de ambiente: `GIT_DIR=/tmp/x git push ...` continua sendo um push.
+  # Valor com espaço (`GIT_SSH_COMMAND="ssh -v" git push`) chega partido em
+  # vários tokens, então, depois da primeira atribuição, os pedaços soltos
+  # também são pulados até o nome do programa.
   while [ "$#" -gt 0 ]; do
-    [ "$(sem_aspas "$1")" = git ] && break
+    case "$(sem_aspas "$1")" in
+      [_[:alpha:]]*=*) atribuiu=1 ;;
+      -*)              [ "$atribuiu" = 1 ] || break ;;
+      *)               break ;;
+    esac
     shift
   done
   [ "$#" -gt 0 ] || return 1
+
+  # O `git` não é necessariamente a primeira palavra do segmento: `bash -c
+  # "git push origin main"`, `sh -c ...` e `eval ...` o colocam dentro de um
+  # argumento, e ele continua sendo o programa que vai rodar. Mas só quem RODA
+  # o argumento pode esconder um push ali dentro — em `echo "git push origin
+  # main"` a mesma palavra é só texto. Por isso o `git` é procurado adiante
+  # apenas quando o programa do segmento é um executor.
+  tok="$(sem_aspas "$1")"
+  if [ "$tok" != git ]; then
+    executor "${tok##*/}" || return 1
+    while [ "$#" -gt 0 ]; do
+      [ "$(sem_aspas "$1")" = git ] && break
+      shift
+    done
+    [ "$#" -gt 0 ] || return 1
+  fi
   shift
 
   # Opções globais do git, antes do subcomando. As desta lista levam o valor
@@ -250,19 +307,57 @@ le_push() {
 # separando comandos, porque é isso que ela faz no shell: juntar tudo faria a
 # palavra de um comando virar argumento do push do comando vizinho.
 #
+# E a barra que continua a linha é a que NÃO está escapada. Barras andam em
+# pares: `\\` é UMA barra literal, e a quebra depois dela segue sendo fim de
+# comando — o push escrito na linha seguinte é um push por si e tem de ser
+# lido. Apagar todo par barra+quebra sem contar a corrida de barras fundia dois
+# comandos que o shell mantém separados: a palavra da linha de cima colava no
+# `git` da linha de baixo, o segmento deixava de começar em `git` e o push
+# sumia — falha ABERTA do mesmo tamanho da que a emenda veio consertar. Quem
+# decide é a paridade: ímpar emenda, par separa.
+#
 # A emenda serve à LEITURA do push. As mensagens seguem mostrando o comando
 # como ele foi escrito ($CMD).
-CMD_PUSH="${CMD//\\$'\n'/}"
+emenda_continuacao() {
+  local linha saida='' barras
+  while IFS= read -r linha; do
+    barras="${linha##*[!\\]}"          # a corrida de barras no fim da linha
+    if [ $(( ${#barras} % 2 )) = 1 ]; then
+      saida="$saida${linha%?}"         # ímpar: a última barra continua a linha
+    else
+      saida="$saida$linha"$'\n'        # par: a quebra continua separando
+    fi
+  done <<<"$1"
+  printf '%s' "$saida"
+}
+
+# Sem continuação, não há o que emendar — e a esmagadora maioria dos comandos
+# não tem. A pergunta é de expansão de parâmetro, sem processo nenhum.
+case "$CMD" in
+  *\\$'\n'*) CMD_PUSH="$(emenda_continuacao "$CMD")" ;;
+  *)         CMD_PUSH="$CMD" ;;
+esac
 
 if printf '%s' "$CMD_PUSH" | grep -Fq push; then
   # Separadores de segmento: `&&`, `||`, `;`, `|`, `&`, subshell, crase e
   # redirecionamento. O que vem depois deles é outro comando, ou não é
-  # argumento do push.
+  # argumento do push. Cada separador vira uma quebra de linha e o laço lê um
+  # segmento por linha — a quebra que já estava no comando continua separando,
+  # porque é o que ela faz no shell. `&&` e `||` viram duas quebras, e o
+  # segmento vazio do meio não incomoda ninguém.
+  #
+  # A troca é do `tr`, não do `sed`: `s/X/\n/` com QUEBRA DE LINHA no lado
+  # direito é extensão GNU, e o contrato deste repositório é bash 3.2 mais
+  # utilitários POSIX (macOS incluído). No sed do BSD aquele `\n` é a letra
+  # `n`: os segmentos saíam grudados numa linha só, `git status; git push
+  # origin main` virava `git statusngit push origin main`, o push deixava de
+  # ser reconhecido — e o hook falhava ABERTO justamente na cadeia que ele
+  # existe para barrar. Em `tr`, `\n` é quebra de linha em qualquer Unix, e a
+  # troca é byte a byte: um conjunto de destino do mesmo tamanho do de origem,
+  # sem depender do preenchimento automático que o POSIX não garante.
   while IFS= read -r SEG; do
     case "$SEG" in *push*) le_push "$SEG" || true ;; esac
-  done <<<"$(printf '%s\n' "$CMD_PUSH" \
-    | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/[;|&`()]/\n/g' \
-          -e 's/[0-9]*>>*/\n/g' -e 's/</\n/g')"
+  done <<<"$(printf '%s\n' "$CMD_PUSH" | tr ';|&()`<>' '\n\n\n\n\n\n\n\n')"
 fi
 
 # --------------------------------------------------------------------------

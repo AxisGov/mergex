@@ -477,6 +477,177 @@ fora    2 "echo ini${NL}git push origin main"
 fora    0 "echo ini${NL}git push origin feature/x"
 
 echo
+echo '6.16 Citar um push em texto não é executar um push'
+#
+# O hook procurava a palavra `git` em QUALQUER posição do segmento, para
+# enxergar o push embrulhado por `bash -c`. Só que "aparecer no meio da linha"
+# não distingue quem RODA de quem CITA: `echo "git push origin main"` imprime
+# um texto e não empurra nada, e passou a ser barrado — junto com a mensagem
+# que fala de push, o aviso impresso e a busca por push no código. Falso
+# positivo que atrapalha o dia inteiro é o que a regra 1 do desenho proíbe.
+#
+# Quem decide agora é o PROGRAMA do segmento: `git` ele mesmo, ou um programa
+# que roda o que vem no argumento (6.17).
+em_main 0 'echo "git push origin main"'
+fora    0 'echo "git push origin main"'
+em_main 0 'echo git push origin main'
+em_main 0 'echo "git push --all"'
+fora    0 'echo "git push --mirror origin"'
+fora    0 'printf "%s\n" "git push --force origin main"'
+em_main 0 'echo "nao faca git push origin main" > /tmp/m4a-aviso.txt'
+fora    0 'grep -rn "git push --force" docs/'
+fora    0 'git log --oneline --grep "git push origin main"'
+# A mensagem de commit cita um push; o comando é um commit. Na principal ele
+# barra por ser commit na principal, não por parecer push.
+fora    0 'git commit -m "git push origin main"'
+em_main 2 'git commit -m "git push origin main"'
+
+echo
+echo '6.17 O programa que RODA o argumento continua entregando o push'
+#
+# A contrapartida da 6.16: o embrulho de verdade não pode voltar a ser bypass.
+# `bash -c`, `sh -c` e `eval` rodam o que está no argumento, e o `/bin/sh` é o
+# mesmo programa que o `sh` — o que decide é o nome do programa, não o caminho
+# onde ele mora. O prefixo de ambiente também não esconde nada: `VAR=x git
+# push` é um push com uma variável na frente.
+fora    2 'bash -c "git push origin main"'
+fora    2 'sh -c "git push origin main"'
+fora    2 'eval "git push origin main"'
+fora    2 '/bin/sh -c "git push origin main"'
+fora    2 '/bin/bash -c "git push --mirror origin"'
+fora    2 '/usr/bin/env bash -c "git push origin main"'
+fora    2 'sudo git push origin main'
+fora    2 'xargs git push origin main'
+fora    2 'GIT_DIR=/tmp/m4a-outro/.git git push origin main'
+em_main 2 'GIT_SSH_COMMAND="ssh -v" git push'
+fora    2 'GIT_SSH_COMMAND="ssh -v" git push origin main'
+fora    2 'eval "git push --force origin feature/x"'
+# E o embrulho não inventa perigo onde não há.
+fora    0 'GIT_SSH_COMMAND="ssh -v" git push origin feature/x'
+fora    0 '/bin/sh -c "git push origin feature/x"'
+fora    0 'bash -c "git status"'
+
+echo
+echo '6.18 A quebra em segmentos não depende do sed do GNU'
+#
+# O contrato do repositório é bash 3.2 e utilitários POSIX — macOS incluído.
+# `s/X/\n/` com QUEBRA DE LINHA no lado direito é extensão GNU: no sed do BSD
+# esse `\n` é a letra `n`. Os segmentos saíam grudados numa linha só, `git
+# status; git push origin main` virava `git statusngit push origin main`, o
+# `push` deixava de ser lido — e o hook falhava ABERTO exatamente na cadeia
+# que ele existe para barrar.
+#
+# A prova é dupla, e nenhuma delas depende de rodar num macOS: um sed que se
+# comporta como o do BSD, e nenhum sed no PATH. Se o resultado é o mesmo nos
+# dois, a quebra não é do sed.
+SED_REAL="$(command -v sed)"
+SED_BSD="$D/bin-sed-bsd"; mkdir -p "$SED_BSD"
+{ printf '#!/usr/bin/env bash\n'
+  printf '# sed "BSD": a unica divergencia emulada e a que importa — `\\n` no lado\n'
+  printf '# direito do s/// e a LETRA n, nao uma quebra de linha.\n'
+  printf 'a=()\n'
+  printf 'for x in "$@"; do a+=( "${x//\\\\n/n}" ); done\n'
+  printf 'exec %s "${a[@]}"\n' "$SED_REAL"
+} > "$SED_BSD/sed"; chmod +x "$SED_BSD/sed"
+SED_SEM="$D/bin-sed-ausente"; mkdir -p "$SED_SEM"
+{ printf '#!/bin/sh\n'; printf 'printf "sed indisponivel\\n" >&2\n'; printf 'exit 127\n'; } \
+  > "$SED_SEM/sed"; chmod +x "$SED_SEM/sed"
+
+igual 'shim: o sed BSD não produz quebra de linha no s///' 'anb' \
+  "$(printf 'a;b\n' | PATH="$SED_BSD:$PATH" sed -e 's/;/\n/g')"
+if PATH="$SED_SEM:$PATH" sed -e 's/a/b/' </dev/null >/dev/null 2>&1; then
+  falha 'shim: o PATH de prova ainda enxerga um sed que funciona'
+else
+  ok 'shim: PATH de prova sem sed utilizável'
+fi
+# O hook não chama sed em lugar nenhum: a quebra é do próprio bash. Comentário
+# não conta — só linha de código.
+igual 'o hook não invoca sed' 0 \
+  "$(grep -v '^[[:space:]]*#' "$HOOK" | grep -Ec '(^|[^[:alnum:]_./-])sed([^[:alnum:]_]|$)')"
+
+com_sed() { # <rc esperado> <dir> <rótulo do dir> <comando>
+  roda "$HOOK" "$(carga "$4" "$2")" "$2" "$SHIM:$PATH"
+  igual "$ROT/$3: $4" "$1" "$RC"
+}
+for SHIM in "$SED_BSD" "$SED_SEM"; do
+  ROT="${SHIM##*/}"
+  com_sed 2 "$EM_MAIN" 'em main' 'git status; git push'
+  com_sed 2 "$FORA"    'fora'    'git status; git push origin main'
+  com_sed 2 "$FORA"    'fora'    'git fetch origin && git push --force origin feature/x'
+  com_sed 2 "$FORA"    'fora'    'git fetch origin || git push origin main'
+  com_sed 2 "$FORA"    'fora'    'git status | cat; git push origin :main'
+  com_sed 2 "$EM_MAIN" 'em main' 'git push origin feature/x && git push origin main'
+  com_sed 2 "$FORA"    'fora'    'git push origin feature/x; git push --mirror origin'
+  com_sed 2 "$EM_MAIN" 'em main' 'git push > /tmp/m4a-push.log'
+  com_sed 2 "$EM_MAIN" 'em main' 'git push 2>/tmp/m4a-push.log'
+  com_sed 2 "$EM_MAIN" 'em main' 'git push | tee /tmp/m4a-push.log'
+  com_sed 2 "$EM_MAIN" 'em main' 'git push'
+  # O lado seguro não muda de lado por causa do sed.
+  com_sed 0 "$FORA"    'fora'    'git status; git push origin feature/x'
+  com_sed 0 "$EM_MAIN" 'em main' 'git push origin feature/x | tee /tmp/m4a-push.log'
+  com_sed 0 "$EM_MAIN" 'em main' 'echo inicio && git push origin feature/x'
+done
+
+echo
+echo '6.19 A barra invertida escapada não emenda a quebra de linha'
+#
+# A barra que continua a linha é a que NÃO está escapada. Barras andam em
+# pares: `\\` é UMA barra literal, e a quebra depois dela continua sendo fim de
+# comando — o push escrito na linha seguinte é um push por si e tem de ser
+# lido. Apagar todo par barra+quebra sem contar a corrida de barras fundia dois
+# comandos que o shell mantém separados: a palavra da linha de cima colava no
+# `git` da linha de baixo e o push da segunda linha sumia do segmento. Falha
+# ABERTA do mesmo tamanho da que a emenda veio consertar.
+#
+# Quem decide é a paridade: ímpar emenda, par separa.
+B1='\'      # uma barra: continua a linha
+B2='\\'     # duas barras: uma barra literal, a quebra separa
+fora    2 "echo a${B2}${NL}git push origin main"
+em_main 2 "echo a${B2}${NL}git push"
+fora    2 "echo a${B2}${NL}git push --force origin feature/x"
+fora    2 "echo a${B2}${NL}git push --mirror origin"
+em_main 2 "echo a${B2}${B2}${NL}git push origin main"
+fora    2 "echo a${B2}${B2}${NL}git push origin :main"
+# Par com push inofensivo na linha de baixo continua passando.
+fora    0 "echo a${B2}${NL}git push origin feature/x"
+em_main 0 "echo a${B2}${NL}git push origin feature/x"
+# Ímpar continua emendando — o outro lado da mesma conta.
+fora    2 "git push origin ${B1}${NL}main"
+fora    2 "git push origin ${B2}${B1}${NL}main"
+em_main 0 "echo ini${B1}${NL}git push"
+fora    0 "git push origin ${B1}${NL}feature/x"
+
+echo
+echo '6.20 O descritor do redirecionamento é palavra inteira, não fim de nome'
+#
+# Em `2>/tmp/log` o `2` é descritor porque é uma palavra SÓ de dígitos. Em
+# `main2>/tmp/log` o `2` é a última letra do destino `main2` — outra branch,
+# que não é a principal. Descartar o dígito colado no nome transformava `main2`
+# em `main` e barrava um push legítimo, e o mesmo corte comia o fim de
+# qualquer destino terminado em número.
+fora    0 'git push origin main2>/tmp/m4a-push.log'
+em_main 0 'git push origin main2>/tmp/m4a-push.log'
+fora    0 'git push origin release2>>/tmp/m4a-push.log'
+em_main 0 'git push origin feature/x2>/tmp/m4a-push.log'
+fora    0 'git push origin main2'
+# O descritor de verdade continua sendo descritor, e o destino continua sendo
+# lido por inteiro. Se ele não for reconhecido, o número sobra como palavra e
+# ocupa o lugar de um refspec: o push implícito na principal deixa de parecer
+# implícito e sai livre — falha ABERTA por um `2>` escrito depois do remoto.
+em_main 2 'git push origin 2>/tmp/m4a-push.log'
+em_main 2 'git push origin 1>>/tmp/m4a-push.log'
+em_main 2 'git push origin 2>&1'
+fora    0 'git push origin 2>/tmp/m4a-push.log'
+fora    2 'git push origin main 2>/tmp/m4a-push.log'
+em_main 2 'git push origin main 2>/tmp/m4a-push.log'
+fora    2 'git push origin :main 2>/tmp/m4a-push.log'
+em_main 2 'git push 2>/tmp/m4a-push.log'
+em_main 2 'git push 2>&1 | tee /tmp/m4a-push.log'
+fora    2 'git push --force origin feature/x2>/tmp/m4a-push.log'
+fora    2 'git push origin main2 main'
+fora    2 'git push --mirror origin 2>/tmp/m4a-push.log'
+
+echo
 echo '---------------------------------------------'
 printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADO"
 [ "$FALHOU" = 0 ]
