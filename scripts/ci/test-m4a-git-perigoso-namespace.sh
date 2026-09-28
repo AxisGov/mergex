@@ -268,6 +268,9 @@ fora 2 'git push origin --delete main'
 fora 2 'git push origin -d main'
 fora 2 'git push --force origin feature/x'
 fora 2 'git push origin +feature/x:feature/x'
+# Sem refspec, a única palavra solta é o REMOTO. Um remoto que se chama como a
+# principal continua barrado, como já era antes desta correção.
+fora 2 'git push main'
 
 echo
 echo '6.4 Fora de main, o trabalho normal não é incomodado'
@@ -287,6 +290,191 @@ em_main 0 'git push origin :domain'
 fora 0 'git push origin domain'
 fora 0 'git push origin feature/main-menu'
 fora 0 'git push origin :feature/main-menu'
+
+echo
+echo '6.6 Em main, push implícito segue implícito com redirecionamento e opções'
+#
+# "Sem destino" não pode ser uma FORMA de linha reconhecida por enumeração: o
+# que decide é a ausência de refspec, não o que vem depois dela. Redirecionar a
+# saída, encanar num tee ou escrever uma opção DEPOIS do remoto não transforma
+# um push implícito em push com destino — e enquanto transformava, `git push`
+# em main saía por qualquer um desses acessórios.
+em_main 2 'git push > /tmp/m4a-push.log'
+em_main 2 'git push 2>/tmp/m4a-push.log'
+em_main 2 'git push origin > /tmp/m4a-push.log'
+em_main 2 'git push origin --all'
+em_main 2 'git push origin --mirror'
+em_main 2 'git push origin -v'
+em_main 2 'git push -v origin -v'
+em_main 2 'git push --receive-pack /usr/bin/git-receive-pack origin'
+em_main 2 'git push --repo=origin'
+em_main 2 'git push --mirror'
+em_main 2 'git push | tee /tmp/m4a-push.log'
+
+echo
+echo '6.7 --all e --mirror alcançam a principal de qualquer branch'
+#
+# Os dois empurram refs que o comando não nomeia — entre elas a principal.
+# Ficar fora de main não torna nenhum deles seguro.
+em_main 2 'git push --all'
+em_main 2 'git push --mirror origin'
+fora 2 'git push --all'
+fora 2 'git push --all origin'
+fora 2 'git push --mirror origin'
+fora 2 'git push origin --all'
+fora 2 'git push origin --mirror'
+
+echo
+echo '6.8 Destino entre aspas continua sendo destino'
+#
+# O hook recebe a string do comando como ela foi escrita: as aspas chegam
+# dentro do token. Reconhecer a principal só quando ela vem crua deixava
+# `origin "main"` passar.
+em_main 2 'git push origin "main"'
+fora 2 'git push origin "main"'
+fora 2 "git push origin 'refs/heads/main'"
+fora 2 'git push origin "HEAD:main"'
+fora 2 'git push origin ":main"'
+em_main 0 'git push origin "feature/x"'
+fora 0 "git push origin 'feature/x'"
+
+echo
+echo '6.9 Opção global do git antes do push não esconde o push'
+#
+# `git -C <path> push` e `git -c <k>=<v> push` têm o VALOR numa palavra
+# separada. Toda a seção de push era casada por uma regex que só admitia
+# opções sem valor entre `git` e `push`: com o valor solto no meio, o comando
+# deixava de ser reconhecido como push e saía inteiro — inclusive forçado.
+em_main 2 'git -C /tmp/m4a-outro push'
+em_main 2 'git -c push.default=simple push'
+em_main 2 'git --git-dir /tmp/m4a-outro/.git push origin main'
+fora 2 'git -C /tmp/m4a-outro push origin main'
+fora 2 'git -c user.name=x push --force origin feature/x'
+fora 2 'git -C /tmp/m4a-outro push --mirror origin'
+fora 2 'git --work-tree /tmp/m4a-outro push origin :main'
+em_main 0 'git -C /tmp/m4a-outro push origin feature/x'
+fora 0 'git -c core.pager=cat push origin feature/x'
+
+echo
+echo '6.10 Destino explícito de trabalho tolera opção e cano seguros ao redor'
+em_main 0 'git push origin feature/x --quiet'
+em_main 0 'git push --quiet origin feature/x'
+em_main 0 'git push -u origin feature/x 2>/dev/null'
+em_main 0 'git push origin feature/x | tee /tmp/m4a-push.log'
+em_main 0 'git push -o ci.skip origin feature/x'
+em_main 0 'git push origin HEAD:feature/x'
+fora 0 'git push origin feature/x --quiet'
+fora 0 'git push origin feature/x:feature/x'
+fora 0 'git push origin feature/x | tee /tmp/m4a-push.log'
+
+echo
+echo '6.11 Destino que o hook não consegue classificar falha fechado'
+#
+# Variável, substituição de comando e curinga só têm valor na hora em que o
+# shell roda; o hook vê o texto. Não dá para provar que o destino não é a
+# principal, e um hook de segurança não passa o que não provou.
+em_main 2 'git push origin "$RAMO"'
+em_main 2 'git push origin ${RAMO}'
+fora 2 'git push origin "$RAMO"'
+fora 2 'git push origin $(cat /tmp/m4a-ramo)'
+fora 2 "git push origin 'refs/heads/*:refs/heads/*'"
+
+echo
+echo '6.12 Num encadeamento, o push perigoso continua sendo visto'
+em_main 2 'git push origin feature/x && git push origin main'
+fora 2 'git push origin feature/x; git push --force origin feature/y'
+fora 2 'git push -fu origin feature/x'
+fora 2 'git push --force-if-includes origin feature/x'
+em_main 0 'echo inicio && git push origin feature/x'
+
+echo
+echo '6.13 O push embrulhado por outro programa continua sendo um push'
+#
+# `bash -c`, `sh -c` e `eval` colocam o comando dentro de um argumento. O `git`
+# deixa de ser a primeira palavra do segmento, mas continua sendo o programa
+# que vai rodar — e a regra antiga, que varria a linha inteira, já enxergava
+# esse push. Procurar o `git` dentro do segmento é o que impede a correção de
+# devolver essa cobertura para trás.
+em_main 2 'bash -c "git push"'
+em_main 2 'bash -c "git push origin main"'
+fora 2 'bash -c "git push origin main"'
+fora 2 'sh -c "git push origin :main"'
+fora 2 'eval "git push --mirror origin"'
+fora 2 'bash -c "git push --force origin feature/x"'
+em_main 0 'bash -c "git push origin feature/x"'
+# A aspa simples embrulha igual à dupla.
+fora 2 "sh -c 'git push origin main'"
+em_main 2 "bash -c 'git push'"
+# Embrulhar um comando inofensivo não inventa perigo.
+em_main 0 'bash -c "git status"'
+fora 0 'bash -c "git log --oneline"'
+
+echo
+echo '6.14 A aspa de fechamento anda com o último token, e ele ainda é uma opção'
+#
+# Embrulhar o comando cola a aspa de fechamento na ÚLTIMA palavra: `bash -c
+# "git push --all"` dá o token `--all"`, não `--all`. O reconhecimento das
+# opções compara o token inteiro, então `--all"`, `--mirror"` e `--force"`
+# deixavam de ser reconhecidos — e o push escapava por fora da principal,
+# justamente onde a branch ativa não salva. É o mesmo bypass do embrulho: só
+# muda de qual palavra a aspa sobrou.
+fora 2 'bash -c "git push --all"'
+fora 2 'eval "git push --all"'
+fora 2 "eval 'git push --all'"
+fora 2 'bash -c "git push origin --all"'
+fora 2 'bash -c "git push origin --mirror"'
+fora 2 'sh -c "git push --mirror"'
+fora 2 'bash -c "git push origin feature/x --force"'
+fora 2 'bash -c "git push origin feature/x --force-with-lease"'
+em_main 2 'bash -c "git push origin feature/x --force"'
+# O lado seguro continua seguro: opção inofensiva na ponta não barra nada.
+fora 0 'bash -c "git push origin feature/x --quiet"'
+em_main 0 'bash -c "git push origin feature/x --quiet"'
+
+echo
+echo '6.15 A continuação de linha não parte o push em dois comandos'
+#
+# A barra invertida no fim da linha não separa nada: o shell EMENDA as duas
+# linhas antes de decidir o que é programa e o que é argumento. `git push \` com
+# `origin main` na linha seguinte é UM push com destino nomeado — não um push
+# implícito seguido de outra coisa.
+#
+# A leitura por segmento quebra o comando nos separadores, e a quebra de linha
+# está entre eles: a segunda linha ia embora, e o `main` escrito nela deixava de
+# ser visto. Fora da principal, onde a branch ativa não segura nada, o push para
+# main passava. A regra antiga, que varria a linha inteira, já o barrava — a
+# emenda da continuação é o que impede a correção de perder essa cobertura.
+#
+# Emendar é só do par barra-invertida+quebra. A quebra de linha solta continua
+# separando comandos, porque é o que ela faz no shell.
+NL='
+'
+fora    2 "git push \\$NL  origin main"
+em_main 2 "git push \\$NL  origin main"
+fora    2 "git push origin \\$NL  main"
+em_main 2 "git push origin \\$NL  main"
+fora    2 "git \\$NL  push origin main"
+em_main 2 "git \\$NL  push origin main"
+fora    2 "git push origin \\$NL  HEAD:main"
+fora    2 "git push origin \\$NL  :main"
+fora    2 "git push origin \\$NL  feature/x:main"
+fora    2 "git push \\$NL  --all"
+em_main 2 "git push \\$NL  --all"
+fora    2 "git push \\$NL  --mirror origin"
+fora    2 "git push --force \\$NL  origin feature/x"
+fora    2 "git push \\$NL  origin \\$NL  main"
+# A linha emendada também não inventa perigo: destino de trabalho segue passando.
+fora    0 "git push origin \\$NL  feature/x"
+em_main 0 "git push origin \\$NL  feature/x"
+fora    0 "git push -u \\$NL  origin feature/x"
+fora    0 "git push origin \\$NL  :refs/heads/feature/x"
+fora    0 "git push origin \\$NL  feature/main-menu"
+# Sem a barra invertida, a quebra de linha continua sendo fim de comando: o push
+# escrito na segunda linha é lido por si, e é ele que decide.
+em_main 2 "echo ini${NL}git push"
+em_main 2 "echo ini${NL}git push origin main"
+fora    2 "echo ini${NL}git push origin main"
+fora    0 "echo ini${NL}git push origin feature/x"
 
 echo
 echo '---------------------------------------------'
