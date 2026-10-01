@@ -249,7 +249,9 @@ alguém trocou a branch por fora — as duas coisas são decisão humana.
 
 O procedimento é o de `10-estado.md`: só se `.expx/` existir, alterando apenas estes dois
 campos e preservando os das outras skills, com gravação em temporário e renomeação. Falha de
-gravação vai para o rastro e **não interrompe o E0** — a barra nunca barra trabalho.
+gravação é **silenciosa** e **não interrompe o E0** — a barra nunca barra trabalho. Ela não vira
+linha de rastro: o contrato não tem evento para isso, e a lacuna está registrada em
+`10-estado.md`, "A lacuna".
 
 ## Critério de saída
 
@@ -281,4 +283,4 @@ Devolva ao chamador uma linha só: `mergex E0 OK — branch <nome> (base <base>,
 | Sem trabalho planejado | Diz o que falta (F4 da sprintx / E2 da runx) e encerra |
 | Pasta do trabalho em formato antigo | Trabalha nela onde está; **nunca move**, e registra qual pasta usou |
 | `.expx/` não existe | Segue sem gravar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
-| Gravação do `estado.json` falhou | Registra no rastro e segue; o E0 continua OK |
+| Gravação do `estado.json` falhou | Segue **em silêncio**, sem rastro (`10-estado.md`, "A lacuna"); o E0 continua OK |

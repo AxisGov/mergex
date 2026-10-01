@@ -620,12 +620,18 @@ Acrescente uma linha em `docs/eventos/<trabalho_id>.jsonl`, no formato do
 contrato `expx-eventos` v1:
 
 ```json
-{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"commit_criado","fase":"e1","task":"T-01.02","agente":null,"resultado":"ok","detalhe":"<tipo>(<escopo>): <título>","arquivos":["<caminhos do commit>"]}
+{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"commit_criado","fase":"e1","task":"T-01.02","agente":"principal","resultado":"ok","detalhe":"<tipo>(<escopo>): <título>","arquivos":["<caminhos do commit>"]}
 ```
 
 É com `commit_criado` que o painel mostra, por trabalho, a branch, os commits e
 a task de cada um — sem tocar no versionador. **Chave nunca omitida:** valor que
 não se aplica é `null`.
+
+**`agente` é onde isso não vale**, e não é exceção à regra: nenhum valor dele
+"não se aplica". O E1 roda no modelo principal, e o valor disso é `principal` —
+"foi o principal" é informação, não ausência. `null` ali é linha fora do
+contrato, que o painel reprova. `agente` só leva outro valor quando quem
+grava é um subagente do enum (`revisor-diff` no E3, `analista-de-conflito` no E9).
 
 O arquivo é append-only e ignorado pelo versionador (é local da máquina de quem
 executou). Ninguém o edita à mão.

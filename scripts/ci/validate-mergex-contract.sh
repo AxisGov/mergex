@@ -1273,4 +1273,43 @@ for f in scripts/ci/test-d04-historico-yaml-escalar.sh scripts/ci/mutacao-d04-hi
   [ -f "$f" ] || fail "D-04: missing $f"
 done
 
+# ---------------------------------------------------------------------------
+# P0.2 / D-07 — exemplo normativo de rastro e a lacuna do `estado.json` (DM-177)
+# ---------------------------------------------------------------------------
+grep -Fq '| DM-177 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-177'
+estado='.claude/skills/mergex/references/10-estado.md'
+[ -f "$estado" ] || fail "D-07: missing $estado"
+# `agente` é enum e nunca é null: sem subagente, `principal`.
+for f in "$commits" '.claude/skills/mergex/references/07-abertura-pr.md'; do
+  grep -Fq '"agente":"principal"' "$f" \
+    || fail "D-07: $f lost the canonical agente:\"principal\" in its trace example"
+done
+grep -Fq 'agente:"principal"' "$base_sh" \
+  || fail 'D-07: the hook trace writer no longer records agente:"principal"'
+# O vocabulário não foi ampliado, e a ocorrência sem evento é silenciosa.
+grep -Fq 'LACUNA REGISTRADA' "$estado" \
+  || fail 'D-07: the estado.json gap is no longer registered for the contract owner'
+grep -Fq 'nunca interrompe' "$estado" \
+  || fail 'D-07: the reference dropped the rule that a write failure never interrupts'
+for f in scripts/ci/test-d07-contrato-de-evento.sh scripts/ci/mutacao-d07-contrato-de-evento.sh; do
+  [ -f "$f" ] || fail "D-07: missing $f"
+done
+# Comentário #1 do CodeAnt: no E0 e no E7 o `ENTREGA.md` está só na árvore — o
+# commit que o leva ao histórico é o fechamento final do E8. A justificativa da
+# passagem silenciosa não pode prometer esse commit.
+if grep -Fq 'foi gravado e commitado de todo modo' "$estado"; then
+  fail 'D-07: the silent-pass rationale claims a ENTREGA.md commit that E0 and E7 do not make'
+fi
+grep -Fq 'fechamento final do E8' "$estado" \
+  || fail 'D-07: the rationale no longer names the E8 closing as what carries ENTREGA.md to history'
+# Comentário #2 do CodeAnt: a bancada de mutação é o que sustenta a regressão
+# D-07, e ela só vale se cada cópia estiver inteira. Sem este guarda, `copia()`
+# devolve diretório utilizável depois de um pipeline que falhou, e o relatório
+# de mutantes mortos passa a afirmar o que não foi medido. A bancada de mutação não pode
+# provar a si mesma de dentro das próprias cópias — por isso o guarda é ancorado
+# aqui, fora do círculo, e o M15 morre por esta linha.
+grep -Fq 'cópia da árvore falhou' scripts/ci/mutacao-d07-contrato-de-evento.sh \
+  || fail 'D-07: mutation harness copia() no longer aborts on a failed tree copy'
+
 printf 'contract checks passed\n'
