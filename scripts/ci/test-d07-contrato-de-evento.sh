@@ -37,9 +37,10 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO" || exit 1
 
-OK=0; FALHOU=0
+OK=0; FALHOU=0; PULADOS=0
 ok()    { OK=$((OK+1));         printf '  ok    %s\n' "$1"; }
 falha() { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; }
+pula()  { PULADOS=$((PULADOS+1)); printf '  pulado %s\n' "$1"; }
 
 # As doze chaves obrigatórias, na ordem do contrato.
 CHAVES='ts expx_eventos trabalho_id ferramenta origem evento fase task agente resultado detalhe arquivos'
@@ -252,6 +253,26 @@ grep -Fq 'silenciosa' "$estado" \
   && ok "$estado — a passagem é declarada silenciosa" \
   || falha "$estado — o texto não declara a passagem silenciosa"
 
+# A justificativa da passagem silenciosa não pode afirmar o que o fluxo não
+# garante no instante da falha. O `estado.json` é gravado no E0, no E7, no E8 e
+# no E9; nos dois primeiros o `ENTREGA.md` está **só na árvore de trabalho** —
+# quem o leva ao histórico é o fechamento final do E8 (`07-abertura-pr.md`:
+# "O E7 não commita e não faz push"; `08-registro.md`, passo 2). Dizer ali que
+# ele "já foi commitado" troca a razão verdadeira — derivado nunca é entrada de
+# decisão nenhuma — por uma garantia que o E0 e o E7 não dão.
+if grep -Fq 'foi gravado e commitado de todo modo' "$estado"; then
+  falha "$estado — a justificativa afirma commit do ENTREGA.md que o E0 e o E7 não fizeram"
+else
+  ok "$estado — a justificativa não inventa commit do ENTREGA.md no E0 nem no E7"
+fi
+grep -Fq 'fechamento final do E8' "$estado" \
+  && ok "$estado — a justificativa nomeia quem leva o ENTREGA.md ao histórico" \
+  || falha "$estado — a justificativa não nomeia o fechamento final do E8"
+# E a razão que sustenta a passagem silenciosa continua sendo a do derivado.
+grep -Fq 'saída derivada' "$estado" \
+  && ok "$estado — a razão da passagem silenciosa continua sendo o derivado" \
+  || falha "$estado — o texto perdeu a razão de que o estado.json é saída derivada"
+
 # A lacuna do hook (DM-43) não foi apagada nem reaproveitada.
 grep -Fq 'LACUNA REGISTRADA' '.claude/hooks/comum/base.sh' \
   && ok 'base.sh — a lacuna da passagem limpa do hook continua registrada' \
@@ -292,7 +313,97 @@ else
   ok 'nenhuma instrução manda a falha do estado.json para o rastro'
 fi
 
+# ---------------------------------------------------------------------------
+# 6. O arranjo da bancada de mutação não mede mutante em cópia parcial
+# ---------------------------------------------------------------------------
+# `copia()` monta cada cópia com `git ls-files | tar | tar`. Se esse pipeline
+# falhar, a cópia sai incompleta — e aí o mutante morre por arquivo faltando,
+# não pela mutação, ou sobrevive porque a bancada não encontrou o que conferir.
+# Mutante medido em cópia parcial não é evidência de nada, e o relatório
+# o relatório de mutantes mortos passaria a afirmar o que não foi verificado.
+#
+# O caso é real, não hipotético: o `tar` sai 1 em aviso ("file changed as we
+# read it") com o arquivo já gravado por inteiro. O arranjo abaixo reproduz
+# exatamente isso — árvore completa, status de falha — e a bancada de mutação
+# tem que abortar em vez de relatar mutante.
+#
+# Esta seção não roda dentro das cópias (MERGEX_D07_EM_COPIA): ela invoca a
+# própria bancada de mutação, e sem o guarda a recursão não teria fundo.
+echo
+echo 'Arranjo: a bancada de mutação aborta quando a cópia da árvore falha'
+mutacao='scripts/ci/mutacao-d07-contrato-de-evento.sh'
+
+# Antes do arranjo executável, uma conferência estática sobre o mutante M15.
+# O que o M15 faz é apagar do arranjo a âncora de diagnóstico do aborto da
+# cópia — e só ela: `copia()` continua abortando pelos dois `return 1`, e o
+# mutante morre na âncora que o validador de contrato exige. Quem mede o aborto
+# de verdade é o arranjo executável logo abaixo. Um M15 que se anuncie como
+# "volta a mascarar falha do pipeline" descreve um defeito que ele não produz, e
+# o relatório de mutantes mortos passa a prometer cobertura que vem de outro
+# lugar — exatamente o tipo de alegação a mais que esta bancada existe para
+# barrar no texto da skill.
+if grep -Fq 'volta a mascarar falha do pipeline' "$mutacao"; then
+  falha "$mutacao — M15 alega restaurar o mascaramento, mas a mutação só remove a âncora de diagnóstico"
+else
+  ok "$mutacao — M15 anuncia o que a mutação faz: remover a âncora, não o aborto"
+fi
+grep -Fq 'M15|a âncora do aborto da cópia' "$mutacao" \
+  && ok "$mutacao — M15 nomeia a âncora do aborto da cópia como o que ele mede" \
+  || falha "$mutacao — M15 não nomeia a âncora do aborto da cópia como o que ele mede"
+
+tar_real="$(command -v tar 2>/dev/null || true)"
+if [ -n "${MERGEX_D07_EM_COPIA:-}" ]; then
+  pula "$mutacao — arranjo não é medido dentro da cópia da própria bancada"
+elif [ -z "$tar_real" ]; then
+  pula "$mutacao — sem tar nesta máquina, o arranjo não pode ser reproduzido"
+else
+  stub_dir="$(mktemp -d)"
+  cat > "$stub_dir/tar" <<STUB
+#!/bin/sh
+# tar que faz o trabalho inteiro e ainda assim sai 1, como no aviso do GNU tar.
+"$tar_real" "\$@"
+exit 1
+STUB
+  chmod +x "$stub_dir/tar"
+  if PATH="$stub_dir:$PATH" bash "$mutacao" M1 >/dev/null 2>&1; then
+    falha "$mutacao — copia() mascara falha do pipeline: mutante relatado sobre cópia suspeita"
+  else
+    ok "$mutacao — copia() aborta quando o pipeline git ls-files | tar falha"
+  fi
+  rm -rf "$stub_dir"
+
+  # O outro caminho da cópia parcial: árvore incompleta com status ZERO, que é o
+  # que `xargs` partindo a lista em várias chamadas de `tar` produz. O arranjo
+  # tem que poupar a PRIMEIRA extração — a do controle —, senão o controle
+  # reprova e o arranjo passaria por ele, não por `copia()`. Poupado o controle,
+  # a cópia do mutante sai sem o arquivo que a bancada lê: sem o guarda, o M1 é
+  # declarado "morto" porque a bancada não achou o que conferir, e o relatório
+  # "mutantes mortos" afirma o que não foi medido.
+  stub_dir="$(mktemp -d)"
+  cat > "$stub_dir/tar" <<STUB
+#!/bin/sh
+"$tar_real" "\$@"
+st=\$?
+case " \$* " in
+  *" -xf "*)
+    n=0
+    [ -f "$stub_dir/n" ] && n=\$(cat "$stub_dir/n")
+    n=\$((n + 1)); printf '%s' "\$n" > "$stub_dir/n"
+    [ "\$n" -ge 2 ] && rm -f .claude/skills/mergex/references/10-estado.md
+    ;;
+esac
+exit \$st
+STUB
+  chmod +x "$stub_dir/tar"
+  if PATH="$stub_dir:$PATH" bash "$mutacao" M1 >/dev/null 2>&1; then
+    falha "$mutacao — copia() aceita cópia incompleta com status zero: o mutante seria medido sem o arquivo que ele muta"
+  else
+    ok "$mutacao — copia() aborta quando a cópia sai incompleta com status zero"
+  fi
+  rm -rf "$stub_dir"
+fi
+
 echo
 echo '---------------------------------------------'
-printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
+printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADOS"
 [ "$FALHOU" = "0" ]

@@ -19,14 +19,35 @@ DECISOES='.claude/skills/mergex/DECISOES-DA-SKILL.md'
 BASE_SH='.claude/hooks/comum/base.sh'
 BANCADA='scripts/ci/test-d07-contrato-de-evento.sh'
 CONTRATO='scripts/ci/validate-mergex-contract.sh'
+MUTACAO='scripts/ci/mutacao-d07-contrato-de-evento.sh'
 TMPS=""
 trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
 
 copia() {
-  local d
+  local d obrigatorio
   d="$(mktemp -d)"; TMPS="$TMPS $d"
-  ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
-    | ( cd "$d" && tar -xf - )
+  # `pipefail` torna o status do pipeline o da primeira etapa que falhou, mas
+  # quem o lê tem que ser o `if`: um `printf` depois do pipeline devolveria
+  # sucesso e a cópia parcial seguiria para a medição do mutante.
+  if ! ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
+       | ( cd "$d" && tar -xf - ); then
+    printf 'FALHA cópia da árvore falhou: git ls-files | tar (%s)\n' "$d" >&2
+    return 1
+  fi
+  # Nem toda cópia parcial vem com status de falha: `xargs` pode partir a lista
+  # em várias chamadas de `tar`, e o `tar -xf` para no primeiro fim de arquivo
+  # do fluxo concatenado — árvore incompleta, status zero. Conferir os arquivos
+  # de que o mutante e a medição dependem fecha esse caminho também. Não é
+  # contagem exata de propósito: `tar` de macOS acrescenta membros `._*` ao
+  # arquivar, e um total comparado quebraria a bancada lá sem haver defeito.
+  for obrigatorio in "$COMMITS" "$PR" "$ESTADO" "$ABERTURA" "$DECISOES" \
+                     "$BASE_SH" "$BANCADA" "$CONTRATO" "$MUTACAO"; do
+    if [ ! -s "$d/$obrigatorio" ]; then
+      printf 'FALHA cópia da árvore falhou: %s ausente ou vazio em %s\n' \
+        "$obrigatorio" "$d" >&2
+      return 1
+    fi
+  done
   printf '%s\n' "$d"
 }
 
@@ -89,6 +110,21 @@ M12() { # o escritor em disco dos hooks volta a agente null
 M13() { # a bancada deixa de enxergar os exemplos (varredura vazia passa calada)
   troca_trecho "$BANCADA" "grep -n '\"expx_eventos\":1'" "grep -n 'ZZZ_NAO_EXISTE'"
 }
+M14() { # a justificativa volta a afirmar o commit que o E0 e o E7 não fizeram
+  troca_trecho "$ESTADO" 'histórico pelo fechamento final do E8' \
+    'histórico, e foi gravado e commitado de todo modo'
+}
+M15() { # a âncora do aborto da cópia sai do arranjo, e o aborto fica sem diagnóstico
+  # Este mutante apaga as duas linhas de diagnóstico de `copia()` — e só elas.
+  # `copia()` continua abortando pelos dois `return 1`: o que cai é a âncora
+  # estática que o validador de contrato exige, e é por ela que o M15 morre.
+  # Quem mede o aborto em si é o arranjo executável da bancada D-07 (a seção
+  # "a bancada de mutação aborta quando a cópia da árvore falha"), não aqui.
+  # O literal vem partido (`falh''ou`) para o `remove_linha` não apagar também
+  # esta linha, o que deixaria a cópia do arranjo sem sintaxe e mataria o
+  # mutante por um motivo que não é o medido.
+  remove_linha "$MUTACAO" 'cópia da árvore falh''ou'
+}
 
 LISTA='M1|exemplo do E1 volta a agente:null
 M2|exemplo do E7 volta a agente:null
@@ -102,10 +138,15 @@ M9|regra de que a falha não interrompe é perdida
 M10|uma etapa volta a mandar a falha para o rastro
 M11|DM-177 sai do registro de decisões
 M12|escritor dos hooks volta a agente null
-M13|a varredura da bancada deixa de ver os exemplos'
+M13|a varredura da bancada deixa de ver os exemplos
+M14|a justificativa volta a afirmar commit do ENTREGA.md
+M15|a âncora do aborto da cópia sai do arranjo da mutação'
 
 verifica() { # <dir> — 0 só se a bancada D-07 e o contrato passam
-  ( cd "$1" && bash "$BANCADA" && bash "$CONTRATO" )
+  # MERGEX_D07_EM_COPIA avisa a bancada de que ela está rodando dentro de uma
+  # cópia: a seção que invoca esta bancada de mutação se cala ali, e a recursão
+  # fica com fundo.
+  ( cd "$1" && MERGEX_D07_EM_COPIA=1 bash "$BANCADA" && MERGEX_D07_EM_COPIA=1 bash "$CONTRATO" )
 }
 
 FILTRAR=" $* "
@@ -114,7 +155,7 @@ TMPS="$TMPS $FALHAS"
 TOTAL=0
 
 printf 'Controle — cópia SEM mutação: a bancada D-07 e o contrato têm que passar\n'
-controle="$(copia)"
+controle="$(copia)" || exit 1
 if verifica "$controle" > "$controle/controle.log" 2>&1; then
   printf 'ok    controle verde\n\n'
 else
@@ -126,7 +167,10 @@ fi
 while IFS='|' read -r id desc; do
   if [ "$FILTRAR" != '  ' ]; then case "$FILTRAR" in *" $id "*) ;; *) continue ;; esac; fi
   TOTAL=$((TOTAL + 1))
-  d="$(copia)"
+  if ! d="$(copia)"; then
+    printf 'FALHA %-4s cópia da árvore não pôde ser montada — %s\n' "$id" "$desc" >&2
+    exit 1
+  fi
   if ! ( cd "$d" && "$id" ); then
     printf 'FALHA %-4s mutação não aplicada — %s\n' "$id" "$desc"
     printf '%s\n' "$id" >> "$FALHAS"

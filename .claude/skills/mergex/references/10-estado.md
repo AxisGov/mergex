@@ -219,9 +219,21 @@ Por isso, **a passagem é silenciosa**. As duas saídas que pareciam alternativa
   gravação de barra, e o dado deixaria de significar o que diz.
 
 Nada se perde para o propósito declarado do rastro: o `estado.json` é **saída derivada**,
-nunca entrada de decisão nenhuma (ver "O que NÃO fazer"), e o `ENTREGA.md` — que é a fonte de
-verdade — foi gravado e commitado de todo modo. A informação que a falha carregava é sobre a
-máquina de quem executou, não sobre a entrega.
+nunca entrada de decisão nenhuma (ver "O que NÃO fazer"). A informação que a falha carregava é
+sobre a máquina de quem executou, não sobre a entrega.
+
+A fonte de verdade continua sendo o `ENTREGA.md`, e a gravação dele não depende desta falha:
+no E0 e no E7 ele está **gravado na árvore de trabalho, ainda não commitado** — é levado ao
+histórico pelo fechamento final do E8 (`07-abertura-pr.md`, "O E7 não commita e não faz push";
+`08-registro.md`, passo 2). Como a falha de gravação do `estado.json` **nunca interrompe** a
+etapa, ela não é o que impede esse fechamento de acontecer.
+
+**O que o silêncio aqui não cobre:** uma interrupção entre o E0/E7 e o fechamento do E8 — queda
+de energia, sessão morta, processo derrubado — deixa o `ENTREGA.md` fora do histórico. Isso vale
+com ou sem falha no `estado.json`: é risco da janela entre gravar e commitar, não consequência
+desta lacuna, e quem o endereça é o E8 ("O fechamento final — a entrega precisa sobreviver ao
+worktree", em `08-registro.md`). Não o confunda com a passagem silenciosa, e não leia esta seção
+como garantia de que o registro da entrega já está no histórico.
 
 É a mesma política da passagem limpa dos hooks (DM-43, `.claude/hooks/README.md`): quando o
 contrato não nomeia a ocorrência, a skill **não** inventa o nome e **não** empresta outro.
