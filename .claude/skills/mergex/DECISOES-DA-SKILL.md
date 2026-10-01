@@ -514,3 +514,24 @@ evidência completa mora no frontmatter, e esta decisão não amplia a comparaç
 **O que invalidaria esta decisão:** a sprintx publicar campo de texto multilinha em
 `estimativa_historico` (aí `\n` deixaria de violar o contrato), ou passar a gravar escapes Unicode
 — o que pede decodificação `\u`/`\U` portátil, com bancada própria, em vez de barrar.
+
+## P0.2 / D-07 — exemplo normativo de rastro e a lacuna do `estado.json`
+
+| # | Ambiguidade | Decisão tomada | Motivo |
+|---|---|---|---|
+| DM-177 | Três exemplos normativos de linha de rastro gravavam `agente: null`, e o de `10-estado.md` inventava `evento: "artefato_gravado"`. O certo é afrouxar o contrato `expx-eventos` para aceitar as duas coisas, ou corrigir os exemplos? | **Corrigir os exemplos; o contrato não se move.** `agente` é enum e **nunca** é `null`: sem subagente o valor é `principal`, porque "foi o principal" é informação, não ausência — e por R6 a chave já está sempre lá. Os dois exemplos válidos (`commit_criado` no E1, `pr_aberto` no E7) passaram a `agente: "principal"`. O exemplo de falha de gravação do `estado.json` **deixou de existir**: `artefato_gravado` não está no vocabulário, nenhum evento existente descreve a ocorrência, e a passagem ficou **silenciosa**, com a lacuna escrita em `10-estado.md`, "A lacuna", para o dono do contrato — exatamente a política da DM-43 para a passagem limpa dos hooks. A regra de que a falha **não interrompe** o fluxo foi preservada nos oito lugares que a enunciam | Exemplo em arquivo de instrução é normativo: é dele que quem executa copia a linha. `agente: null` e um `evento` fora do enum não são imprecisão de documentação — são a skill mandando gravar rastro que o painel reprova, e que o `doctor` conta como fora do contrato. Afrouxar o enum resolveria pelo lado errado: o `780cc5cc` da ExpxDev reconciliou o vocabulário com o que as skills **realmente** gravam e manteve `artefato_gravado` reprovando de propósito; alargá-lo para caber um exemplo errado desfaria esse trabalho. Reusar um evento existente seria pior que inventar: `commit_criado` ou `veredito_emitido` numa falha de gravação de barra dá semântica falsa a um dado que o painel filtra |
+
+**O que esta decisão não é, de propósito:** uma ampliação do vocabulário de `evento` nem do enum
+`Agente`. A fonte dos dois é a ExpxDev (`src/parser/esquema/evento.ts`, conferida contra
+`docs/contrato/CONTRATO-expx-eventos.md`); este repositório **consome** o contrato e não legisla
+sobre ele. A bancada `scripts/ci/test-d07-contrato-de-evento.sh` carrega uma cópia das duas listas
+só para poder reprovar — ampliar a cópia é a primeira coisa que ela mesma barra.
+
+**O que esta decisão não resolve:** a ausência de evento para artefato derivado que falhou ao ser
+gravado. Ela fica registrada como lacuna, não contornada. Enquanto o dono do contrato não
+acrescentar algo como `artefato_nao_gravado`, a mergex perde esse sinal — e perder um sinal sobre a
+máquina de quem executou é mais barato que publicar rastro que o painel não sabe ler.
+
+**O que invalidaria esta decisão:** o contrato `expx-eventos` nomear o evento. Aí `10-estado.md`
+volta a trazer o exemplo da linha, com `resultado: falha` e `agente: "principal"` — e a lacuna sai
+do texto no mesmo commit em que o enum ganha o nome.

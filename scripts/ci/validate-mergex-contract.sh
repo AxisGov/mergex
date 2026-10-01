@@ -1273,4 +1273,27 @@ for f in scripts/ci/test-d04-historico-yaml-escalar.sh scripts/ci/mutacao-d04-hi
   [ -f "$f" ] || fail "D-04: missing $f"
 done
 
+# ---------------------------------------------------------------------------
+# P0.2 / D-07 — exemplo normativo de rastro e a lacuna do `estado.json` (DM-177)
+# ---------------------------------------------------------------------------
+grep -Fq '| DM-177 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-177'
+estado='.claude/skills/mergex/references/10-estado.md'
+[ -f "$estado" ] || fail "D-07: missing $estado"
+# `agente` é enum e nunca é null: sem subagente, `principal`.
+for f in "$commits" '.claude/skills/mergex/references/07-abertura-pr.md'; do
+  grep -Fq '"agente":"principal"' "$f" \
+    || fail "D-07: $f lost the canonical agente:\"principal\" in its trace example"
+done
+grep -Fq 'agente:"principal"' "$base_sh" \
+  || fail 'D-07: the hook trace writer no longer records agente:"principal"'
+# O vocabulário não foi ampliado, e a ocorrência sem evento é silenciosa.
+grep -Fq 'LACUNA REGISTRADA' "$estado" \
+  || fail 'D-07: the estado.json gap is no longer registered for the contract owner'
+grep -Fq 'nunca interrompe' "$estado" \
+  || fail 'D-07: the reference dropped the rule that a write failure never interrupts'
+for f in scripts/ci/test-d07-contrato-de-evento.sh scripts/ci/mutacao-d07-contrato-de-evento.sh; do
+  [ -f "$f" ] || fail "D-07: missing $f"
+done
+
 printf 'contract checks passed\n'

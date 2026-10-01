@@ -119,19 +119,24 @@ Na retomada de um PR que já existia ("PR já existe para esta branch"), grave o
 que a ferramenta devolveu — é retomada, não abertura nova.
 
 O procedimento é o de `10-estado.md`: só se `.expx/` existir, preservando os campos das
-outras skills, com gravação em temporário e renomeação. Falha de gravação vai para o rastro
-e **não interrompe o E7**.
+outras skills, com gravação em temporário e renomeação. Falha de gravação é **silenciosa** e
+**não interrompe o E7** — sem linha de rastro, pela lacuna registrada em `10-estado.md`,
+"A lacuna".
 
 ### Grave o evento no rastro
 
 Acrescente uma linha em `docs/eventos/<trabalho_id>.jsonl`:
 
 ```json
-{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"pr_aberto","fase":"e7","task":null,"agente":null,"resultado":"ok","detalhe":"<url do PR>","arquivos":[]}
+{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"pr_aberto","fase":"e7","task":null,"agente":"principal","resultado":"ok","detalhe":"<url do PR>","arquivos":[]}
 ```
 
 É o `pr_aberto` que permite ao painel mostrar o que aguarda revisão e há quanto
 tempo. PR não aberto (ferramenta ausente): não grave `pr_aberto` — não houve.
+
+**`agente` nunca é `null`**: o E7 roda no modelo principal, e o valor é
+`principal`. A chave `task` é que vai `null` aqui — a abertura do PR é do
+trabalho, não de uma task.
 
 ## Critério de saída
 
@@ -154,4 +159,4 @@ Siga para o E8.
 | Sem push | O E7 não roda; siga para o E8 |
 | Alguém pediu para forçar a abertura com credencial | Recuse: a skill nunca configura credencial nem armazena segredo |
 | `.expx/` não existe | Segue sem gravar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
-| Gravação do `estado.json` falhou | Registra no rastro e segue; o E7 continua OK e o PR continua aberto |
+| Gravação do `estado.json` falhou | Segue **em silêncio**, sem rastro (`10-estado.md`, "A lacuna"); o E7 continua OK e o PR continua aberto |

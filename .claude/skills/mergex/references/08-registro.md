@@ -386,8 +386,9 @@ estado de quem ainda está trabalhando.
 
 Repositório sem versionador: os dois campos já são `null` desde o E0 e nada é gravado.
 
-O procedimento é o de `10-estado.md`. Falha de gravação vai para o rastro e **não interrompe
-o E8** — a entrega já está registrada no `ENTREGA.md`, que é a fonte de verdade.
+O procedimento é o de `10-estado.md`. Falha de gravação é **silenciosa** e **não interrompe
+o E8** — a entrega já está registrada no `ENTREGA.md`, que é a fonte de verdade. Sem linha de
+rastro, pela lacuna registrada em `10-estado.md`, "A lacuna".
 
 ## Entrega ao usuário
 
@@ -445,7 +446,7 @@ Avisos: <lista, ou "nenhum">
 | Reindexação falha | Aviso na prosa e siga; o índice é reconstruível com `/memox-indexar` |
 | E3 não rodou (portão barrou) | `faixa_atencao: []` e `atencao` zerado; `arquivos_alterados` continua sendo o diff real |
 | `.expx/` não existe | Segue sem limpar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
-| Gravação do `estado.json` falhou | Registra no rastro e segue; a entrega continua concluída |
+| Gravação do `estado.json` falhou | Segue **em silêncio**, sem rastro (`10-estado.md`, "A lacuna"); a entrega continua concluída |
 | Nada deste trabalho está sujo no fechamento | O checkpoint devolve `noop=true`; nunca cria commit vazio |
 | Segredo no artefato do fechamento | Aborta o commit final, mascara o trecho, e a entrega fica sem o registro publicado até a pessoa resolver |
 | Remoto à frente na publicação final | Não publica, não reconcilia, não força; relata literal; branch local guarda o registro final |
