@@ -7,6 +7,8 @@
 #         minúsculo); nenhum Task, nenhum Metodo. Com --commit, o commit tem
 #         exatamente dois pais e o segundo é o Integra-base.
 #
+# --arquivo valida só a gramática da mensagem; as checagens de pais exigem --commit.
+#
 # Outros trailers descritivos continuam permitidos. As quatro chaves de controle
 # acima são case-sensitive e nunca podem formar uma classe híbrida.
 
@@ -108,7 +110,7 @@ case "$ACAO" in
       PAIS="$(git rev-list --parents -n1 "$COMMIT" 2>/dev/null)" \
         || uso "commit inexistente ou ilegível: $COMMIT"
       set -- $PAIS
-      [ "$#" = 3 ] || invalido "integração exige exatamente dois pais; encontrou $(($# - 1))"
+      [ "$#" = 3 ] || invalido "integração exige exatamente dois pais; encontrou $(($# - 1))" # guarda:INT
       [ "$3" = "$V_INTEGRA" ] \
         || invalido "Integra-base diverge do segundo pai: mensagem=$V_INTEGRA pai=$3" # guarda:INT
     fi
