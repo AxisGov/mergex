@@ -24,6 +24,20 @@
 #   caminho_especial      a base cria FX_ESPECIAL (espaço, acento e apóstrofo),
 #                         ajustado no merge; o repositório usa core.quotepath true
 #   base_alterou          a base altera README.md (existia em B0); ajustado no merge
+#   diretorio             a base cria tests/base/{x,y,z}.ts; o merge ajusta x e y
+#   substring_declarado   o merge cria tests/ui/ft-rec.test (prefixo de um
+#                         caminho declarado, sem ser declarado)
+#   tipo_mudou            a base troca README.md por link simbólico (status T);
+#                         o merge muda o alvo do link
+#   b0_fora_b1            o merge grava base_validada_sha = commit do plano
+#   b0_fora_p1            o merge grava base_validada_sha = B1
+#   b0_ref                o merge grava base_validada_sha = main (nome de ref)
+#   entrega_kind          o merge grava kind: outro no ENTREGA.md
+#   entrega_trabalho      o merge grava trabalho_id: outro no ENTREGA.md
+#   entrega_sem_branch_base  o merge remove branch_base do ENTREGA.md
+#   entrega_symlink       o merge troca o ENTREGA.md por link para ENTREGA-real.md
+# As variantes de ENTREGA.md e de B0 alteram o ENTREGA.md DENTRO do merge
+# (é artefato de método), para que a árvore continue limpa.
 #
 # Só comandos Git reais. Nenhum SHA é fixo: tudo é lido com `git rev-parse`.
 # Não depende do cwd do chamador além do diretório alvo; ao final, o repositório
@@ -120,7 +134,13 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink "
+
+# Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
+_fx_entrega_sed() { # <expressão>
+  local e=docs/entregas/ft-rec/ENTREGA.md
+  sed "$1" "$e" > "$e.tmp" && mv "$e.tmp" "$e" && git add "$e"
+}
 
 # Commita a árvore do índice com os pais dados, sem passar pelo `git commit`
 # (que faria um merge de dois pais). Encerra o merge em andamento.
@@ -217,6 +237,15 @@ _fx_corpo() {
       base_alterou)
         printf '# Projeto\n\nSeção da base.\n' > README.md
         git add README.md ;;
+      diretorio)
+        mkdir -p tests/base
+        printf 'export const x = 1;\n' > tests/base/x.ts
+        printf 'export const y = 1;\n' > tests/base/y.ts
+        printf 'export const z = 1;\n' > tests/base/z.ts
+        git add tests/base ;;
+      tipo_mudou)
+        rm -f README.md; ln -s src/painel.ts README.md
+        git add README.md ;;
     esac
     _fx_msg "$msg" "feat: primitivas ksmv e titulo da base"
     _fx_commit "$msg"
@@ -245,6 +274,26 @@ _fx_corpo() {
       base_alterou)
         printf '# Projeto\n\nSeção da base, ajustada para a feature.\n' > README.md
         git add README.md ;;
+      diretorio)
+        printf 'export const x = 2;\n' > tests/base/x.ts
+        printf 'export const y = 2;\n' > tests/base/y.ts
+        git add tests/base/x.ts tests/base/y.ts ;;
+      substring_declarado)
+        printf 'prefixo de um caminho declarado\n' > tests/ui/ft-rec.test
+        git add tests/ui/ft-rec.test ;;
+      tipo_mudou)
+        rm -f README.md; ln -s tests/ui/ft-rec.test.ts README.md
+        git add README.md ;;
+      b0_fora_b1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" ;;
+      b0_fora_p1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $FX_B1/" ;;
+      b0_ref) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha: main/' ;;
+      entrega_kind) _fx_entrega_sed 's/^kind: entrega$/kind: outro/' ;;
+      entrega_trabalho) _fx_entrega_sed 's/^trabalho_id: ft-rec$/trabalho_id: outro/' ;;
+      entrega_sem_branch_base) _fx_entrega_sed '/^branch_base:/d' ;;
+      entrega_symlink)
+        git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
+        ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md
+        git add docs/entregas/ft-rec/ENTREGA.md ;;
     esac
     [ -z "$(git diff --name-only --diff-filter=U)" ]
 
@@ -301,8 +350,11 @@ _fx_monta() {
   FX_LISTA_VARIANTE="$FX_NOVO1
 $FX_NOVO2"
   case "$var" in
-    base_removeu|renomeado|base_alterou) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
+    base_removeu|renomeado|base_alterou|tipo_mudou) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
 README.md" ;;
+    diretorio) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
+tests/base/x.ts
+tests/base/y.ts" ;;
     caminho_especial) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
 $FX_ESPECIAL"
       git -C "$dir" config core.quotepath true ;;

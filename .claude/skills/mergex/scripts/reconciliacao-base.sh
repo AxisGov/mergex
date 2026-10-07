@@ -50,6 +50,7 @@ set +e
 # Caminho exatamente como no Git, qualquer que seja a configuração do
 # repositório: sem escape de nome (quotepath) e pathspec sempre literal. Vale
 # também para o rb_diff_sha da biblioteca, que roda neste processo.
+unset GIT_GLOB_PATHSPECS GIT_ICASE_PATHSPECS GIT_NOGLOB_PATHSPECS
 export GIT_LITERAL_PATHSPECS=1
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false
 g() { git -c core.quotepath=false "$@"; }
@@ -174,6 +175,15 @@ BRANCH="$(g branch --show-current 2>/dev/null)" || BRANCH=""
 BRANCH_BASE="$(fm branch_base)"
 [ -n "$BRANCH_BASE" ] || para 5 'ENTREGA.branch_base ausente'
 
+# União e catálogo são lidos do disco: a pasta do trabalho e a da entrega têm
+# de estar iguais a HEAD (= M), sem alteração nem arquivo não rastreado. Assim
+# nenhum estado não versionado entra na prova 3 nem no inventário.
+PASTA="$(catalogo_pasta_do_trabalho "$RAIZ" "$ORIGEM" "$TRABALHO")" \
+  || para 4 "prova 3: pasta do trabalho não determinável: $CATALOGO_ERRO"
+g status --porcelain=v1 --untracked-files=all -- "$PASTA" "docs/entregas/$TRABALHO" > "$TMP_DIR/sujo" 2>/dev/null \
+  || para 3 'não foi possível verificar se a pasta do trabalho está limpa'
+[ ! -s "$TMP_DIR/sujo" ] || para 3 "pasta do trabalho com alteração não commitada: $(head -n 3 "$TMP_DIR/sujo" | tr '\n' ' ')" # guarda:LIMPA
+
 for existente in "docs/entregas/$TRABALHO"/RECONCILIACAO-BASE-*.md; do
   [ -e "$existente" ] || continue
   para 5 "já existe reconciliação registrada ($existente); encadear reconciliações ainda não é suportado"
@@ -209,8 +219,6 @@ UNIAO="$TMP_DIR/uniao"
 CATALOGO="$TMP_DIR/catalogo"
 bash "$OWNERSHIP_SH" --uniao "$RAIZ" "$ORIGEM" "$TRABALHO" > "$UNIAO" 2>"$TMP_DIR/uniao.err" \
   || para 4 "prova 3: união das tasks não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")"
-PASTA="$(catalogo_pasta_do_trabalho "$RAIZ" "$ORIGEM" "$TRABALHO")" \
-  || para 4 "prova 3: pasta do trabalho não determinável: $CATALOGO_ERRO"
 catalogo_metodo "$RAIZ" "$ORIGEM" "$TRABALHO" "$PASTA" e8 > "$CATALOGO" \
   || para 4 "prova 3: catálogo de método não calculável: $CATALOGO_ERRO"
 
@@ -223,12 +231,17 @@ contem() { grep -Fxq -e "$2" "$1"; }
 INICIO="$B0"
 SAIDA="$TMP_DIR/saida"
 while IFS= read -r f <&3; do
+  # o caminho é de arquivo (blob), nunca de diretório nem submódulo
+  case "$f" in */) reprova "arquivo: $f: caminho com barra final não é arquivo"; continue ;; esac # guarda:BLOB
+  tb="$(g cat-file -t "$B1:$f" 2>/dev/null)"; tm="$(g cat-file -t "$M:$f" 2>/dev/null)"
+  { [ -z "$tb" ] || [ "$tb" = blob ]; } && { [ -z "$tm" ] || [ "$tm" = blob ]; } || reprova "arquivo: $f: não é arquivo (blob) em B1 (${tb:--}) ou em M (${tm:--})" # guarda:BLOB
+
   # prova 1: f nasceu ou mudou na base entre B0 e B1
   if g diff --no-renames --name-status -z "$B0" "$B1" -- "$f" > "$SAIDA" 2>/dev/null; then
     st="$(tr '\0' '\n' < "$SAIDA" | sed -n 1p)"
     [ -n "$st" ] || reprova "prova 1: $f: a base não criou nem alterou o caminho entre B0 e B1" # guarda:P1
     [ "$st" != D ] || reprova "prova 1: $f: a base removeu o caminho (status D); ressurreição não é ajuste" # guarda:P1D
-    case "$st" in A|M|D|'') ;; *) reprova "prova 1: $f: status $st na base fora de A|M" ;; esac
+    case "$st" in A|M|D|'') ;; *) reprova "prova 1: $f: status $st na base fora de A|M (mudança de tipo também reprova)" ;; esac # guarda:P1T
   else
     reprova "prova 1: $f: diff B0..B1 não calculável"
   fi

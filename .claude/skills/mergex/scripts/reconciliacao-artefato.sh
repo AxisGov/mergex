@@ -5,8 +5,8 @@
 # Funções (todas retornam 0/1 e preenchem RB_ERRO em falha; chame SEM subshell
 # para ler RB_ERRO):
 #   rb_sha256                         sha256 de stdin (sha256sum ou shasum -a 256)
-#   rb_diff_sha <b1> <m> <caminho>    sha256 de `git diff --no-ext-diff --no-color
-#                                     --binary --no-renames <b1> <m> -- <caminho>`
+#   rb_diff_sha <b1> <m> <caminho>    sha256 do diff canônico (spec 7.1; ver a
+#                                     função), da raiz, independente do cwd
 #   rb_emitir <saida> <tsv-escalares> <tsv-arquivos>
 #   rb_ler <arquivo>                  escalar<TAB>chave<TAB>valor
 #                                     arquivo<TAB>caminho<TAB>status_base<TAB>blob_b1
@@ -44,11 +44,27 @@ rb_sha256() {
   printf '%s\n' "$h"
 }
 
+# Forma canônica (spec 7.1): flags explícitas tornam o valor independente da
+# configuração local e do clone (prefixos, algoritmo, contexto, textconv,
+# abreviação — a linha `index` sai com SHA completo), da raiz do repositório,
+# com pathspec literal e sem variáveis de ambiente de diff ou de pathspec do
+# chamador. Limitação conhecida: o atributo `-diff`/`binary` não tem flag que
+# o desligue.
 rb_diff_sha() { # <b1> <m> <caminho>
   [ "$#" -eq 3 ] || { RB_ERRO="rb_diff_sha: uso <b1> <m> <caminho>"; return 1; }
-  local tmp h
+  local tmp h raiz
+  raiz="$(git rev-parse --show-toplevel 2>/dev/null)" || { RB_ERRO="rb_diff_sha: fora de um repositório Git"; return 1; }
+  [ -n "$raiz" ] || { RB_ERRO="rb_diff_sha: fora de uma árvore de trabalho Git"; return 1; }
   tmp="$(mktemp)" || { RB_ERRO="mktemp falhou"; return 1; }
-  if ! git diff --no-ext-diff --no-color --binary --no-renames "$1" "$2" -- "$3" > "$tmp" 2>/dev/null; then
+  if ! (
+    unset GIT_DIFF_OPTS GIT_EXTERNAL_DIFF GIT_GLOB_PATHSPECS GIT_ICASE_PATHSPECS GIT_NOGLOB_PATHSPECS
+    GIT_LITERAL_PATHSPECS=1; export GIT_LITERAL_PATHSPECS
+    git -C "$raiz" -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false \
+      -c diff.suppressBlankEmpty=false -c diff.relative=false \
+      diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames --no-relative \
+      --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 --diff-algorithm=myers \
+      --indent-heuristic "$1" "$2" -- "$3"
+  ) > "$tmp" 2>/dev/null; then
     rm -f "$tmp"; RB_ERRO="git diff falhou para $1 $2 -- $3"; return 1
   fi
   rb_sha256 < "$tmp" > "$tmp.h" || { rm -f "$tmp" "$tmp.h"; return 1; }

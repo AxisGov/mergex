@@ -156,7 +156,7 @@ Para cada caminho `f` declarado na reconciliação, com renomeação desligada (
 
 | # | Prova | Comando de referência | Reprova quando |
 |---|---|---|---|
-| 1 | `f` nasceu ou mudou na base entre `B0` e `B1` | `git diff --no-renames --name-status B0 B1 -- f` | vazio; ou status `D` (a base removeu `f`) |
+| 1 | `f` nasceu ou mudou na base entre `B0` e `B1` | `git diff --no-renames --name-status B0 B1 -- f` | vazio; ou status `D` (a base removeu `f`); ou mudança de tipo (`T`), que também reprova |
 | 2 | A feature não tocou `f` antes do merge | `git rev-list --first-parent P1 ^<início> -- f` | não vazio, salvo merges de reconciliações anteriores que já listam `f` |
 | 3 | `f` não consta das tasks | união de `arquivos.cria` + `arquivos.altera` do plano corrente, e catálogo de método | `f` está na união ou é artefato de método |
 | 4 | Existe diferença real entre `B1` e `M` | `git diff --quiet --no-renames B1 M -- f` | sem diferença; ou `f` ausente em `M` (a integração removeu `f`) |
@@ -214,7 +214,9 @@ Regras:
 - `motivo` é texto de uma linha, não vazio, sem marcador de template; é para o revisor, não entra
   em prova.
 - `diff_b1_m_sha256` é o sha256 da saída de
-  `git diff --no-ext-diff --no-color --binary --no-renames B1 M -- <caminho>`.
+  `git -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false -c diff.suppressBlankEmpty=false -c diff.relative=false diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames --no-relative --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 --diff-algorithm=myers --indent-heuristic B1 M -- <caminho>`,
+  rodado da raiz do repositório, com pathspec literal. As flags explícitas tornam o valor
+  independente da configuração local e do clone (a linha `index` sai com SHA completo).
 - `assinatura` é o sha256 das linhas canônicas, em ordem de byte:
   `numero`, `anterior`, `trabalho_id`, `b0_sha`, `p1_sha`, `b1_sha`, `m_sha`, e uma linha por
   arquivo `caminho\tstatus_base\tblob_b1\tblob_m\tdiff_b1_m_sha256`. Editar o artefato à mão quebra

@@ -269,8 +269,22 @@ grupo_artefato() {
     && git add . && git -c user.name=t -c user.email=t@t commit -q -m a \
     && printf 'dois\n' > "f g.txt" && git -c user.name=t -c user.email=t@t commit -q -am b ) >/dev/null 2>&1
   ret1="$(cd "$d/g" && rb_diff_sha HEAD~1 HEAD "f g.txt")"
-  ret2="$(cd "$d/g" && git diff --no-ext-diff --no-color --binary --no-renames HEAD~1 HEAD -- "f g.txt" | sha256sum | cut -d' ' -f1)"
-  { [ -n "$ret1" ] && [ "$ret1" = "$ret2" ]; } && ok "rb_diff_sha é o sha256 do diff do Git" || falha "rb_diff_sha divergente ($ret1 / $ret2)"
+  ret2="$(cd "$d/g" && GIT_LITERAL_PATHSPECS=1 git -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false \
+    -c diff.suppressBlankEmpty=false -c diff.relative=false diff --no-ext-diff --no-textconv --no-color --binary \
+    --full-index --no-renames --no-relative --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 \
+    --diff-algorithm=myers --indent-heuristic HEAD~1 HEAD -- "f g.txt" | sha256sum | cut -d' ' -f1)"
+  { [ -n "$ret1" ] && [ "$ret1" = "$ret2" ]; } && ok "rb_diff_sha é o sha256 do diff canônico (spec 7.1)" || falha "rb_diff_sha divergente ($ret1 / $ret2)"
+  # independente de configuração local e do cwd
+  local ret3 ret4
+  ( cd "$d/g" && git config diff.noprefix true && git config diff.algorithm histogram && git config core.abbrev 12 \
+    && git config diff.srcPrefix x/ && git config diff.dstPrefix y/ && git config diff.suppressBlankEmpty true \
+    && mkdir -p sub ) >/dev/null 2>&1
+  ret3="$(cd "$d/g" && rb_diff_sha HEAD~1 HEAD "f g.txt")"
+  [ "$ret3" = "$ret1" ] && ok "rb_diff_sha ignora noprefix/algorithm/abbrev/srcPrefix locais" || falha "rb_diff_sha mudou com config local ($ret3 / $ret1)"
+  ret4="$(cd "$d/g/sub" && GIT_ICASE_PATHSPECS=1 GIT_DIFF_OPTS=--unified=10 rb_diff_sha HEAD~1 HEAD "f g.txt")"
+  [ "$ret4" = "$ret1" ] && ok "rb_diff_sha é da raiz, sem env de diff/pathspec do chamador" || falha "rb_diff_sha mudou no subdiretório ($ret4 / $ret1)"
+  ( cd "$d/g" && git config --unset diff.noprefix && git config --unset diff.algorithm && git config --unset core.abbrev \
+    && git config --unset diff.srcPrefix && git config --unset diff.dstPrefix && git config --unset diff.suppressBlankEmpty ) >/dev/null 2>&1
   printf 'x' | rb_sha256 | grep -Eq '^[0-9a-f]{64}$' && ok "rb_sha256 devolve 64 hex" || falha "rb_sha256 sem 64 hex"
 
   # rb_diff_sha falha fechado: ref inexistente não vira "sem diferença"
@@ -370,6 +384,14 @@ rc_motivo() {
   esac
 }
 
+# o diff canônico da spec 7.1, escrito por extenso (não pela biblioteca)
+_diff_canonico() { # <b1> <m> <caminho>
+  GIT_LITERAL_PATHSPECS=1 git -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false \
+    -c diff.suppressBlankEmpty=false -c diff.relative=false diff --no-ext-diff --no-textconv --no-color --binary \
+    --full-index --no-renames --no-relative --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 \
+    --diff-algorithm=myers --indent-heuristic "$1" "$2" -- "$3"
+}
+
 # foto da árvore: status, conteúdo não commitado e HEAD
 _foto() {
   git status --porcelain=v1 --untracked-files=all
@@ -415,7 +437,7 @@ m=$FX_M"
     [ -n "$f" ] || continue
     [ "$st" = "$(git -c core.quotepath=false diff --no-renames --name-status -z "$FX_B0" "$FX_B1" -- ":(literal)$f" | tr '\0' '\n' | head -n1)" ] \
       && [ "$bb" = "$(git rev-parse "$FX_B1:$f")" ] && [ "$bm" = "$(git rev-parse "$FX_M:$f")" ] \
-      && [ "$ds" = "$(git -c core.quotepath=false diff --no-ext-diff --no-color --binary --no-renames "$FX_B1" "$FX_M" -- ":(literal)$f" | rb_sha256)" ] \
+      && [ "$ds" = "$(_diff_canonico "$FX_B1" "$FX_M" "$f" | rb_sha256)" ] \
       && ok "$desc: status, blobs e diff de '$f' conferem com o Git" || falha "$desc: provas gravadas de '$f' divergem do Git"
   done <<EOF
 $(printf '%s\n' "$lido" | grep '^arquivo	')
@@ -426,7 +448,7 @@ EOF
 }
 
 grupo_provas() {
-  local d r variante lista l antes c
+  local d t r variante lista l antes c
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   . "$S/catalogo-de-metodo.sh" || { falha "catálogo ausente"; return; }
 
@@ -456,14 +478,39 @@ grupo_provas() {
   reprova "prova 1: arquivo que a base não tocou" 4 "prova 1: README.md" "$FX_NOVO1" "$FX_NOVO2" README.md
   reprova "prova 2: arquivo tocado pela feature" 4 "prova 2: tests/ui/ft-rec.test.ts" "$FX_NOVO1" "$FX_NOVO2" tests/ui/ft-rec.test.ts
 
-  # B0 fora da ancestralidade (ENTREGA.md editado na árvore; o stage segue vazio)
-  sed -i "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" "$FX_ENTREGA"
-  reprova "estrutura: B0 não ancestral de B1" 4 "estrutura[b0_b1]" "$FX_NOVO1" "$FX_NOVO2"
-  sed -i "s/^base_validada_sha: .*/base_validada_sha: $FX_B1/" "$FX_ENTREGA"
-  reprova "estrutura: B0 não ancestral de P1" 4 "estrutura[b0_p1]" "$FX_NOVO1" "$FX_NOVO2"
-  sed -i "s/^base_validada_sha: .*/base_validada_sha: main/" "$FX_ENTREGA"
-  reprova "base_validada_sha com nome de ref" 5 "base_validada_sha" "$FX_NOVO1" "$FX_NOVO2"
-  git restore -- "$FX_ENTREGA"
+  # pathspec literal: um glob não casa os dois testes da base
+  reprova "glob na lista é caminho literal" 4 "prova 1: tests/ui/*-ksmv-primitives.test.tsx:" \
+    "$FX_NOVO1" "$FX_NOVO2" 'tests/ui/*-ksmv-primitives.test.tsx'
+
+  # plano e entrega lidos do disco: têm de estar iguais a HEAD
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  awk -v nova="      altera: [src/painel.ts, $FX_NOVO2]" '/^      altera: / { print nova; next } { print }' \
+    docs/sprintx/features/ft-rec/sprint-01/tasks.md > "$t/tasks.md" && cat "$t/tasks.md" > docs/sprintx/features/ft-rec/sprint-01/tasks.md
+  grep -Fq "$FX_NOVO2" docs/sprintx/features/ft-rec/sprint-01/tasks.md || falha "tasks.md não foi editado"
+  reprova "tasks.md editado sem commit declarando NOVO2" 3 "pasta do trabalho com alteração não commitada" "$FX_NOVO1"
+  git restore -- docs/sprintx/features/ft-rec/sprint-01/tasks.md
+  printf 'rascunho\n' > docs/sprintx/features/ft-rec/RASCUNHO.md
+  reprova "arquivo não rastreado na pasta do trabalho" 3 "pasta do trabalho com alteração não commitada" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f docs/sprintx/features/ft-rec/RASCUNHO.md
+  printf 'rascunho\n' > docs/entregas/ft-rec/NOTAS.md
+  reprova "arquivo não rastreado na pasta da entrega" 3 "pasta do trabalho com alteração não commitada" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f docs/entregas/ft-rec/NOTAS.md
+
+  # prova 4 com o git falhando no diff --quiet: erro nunca vira diferença
+  mkdir -p "$t/shim"
+  printf '#!/usr/bin/env bash\nq=0; c=0\nfor a in "$@"; do case "$a" in --quiet) q=1 ;; --cached) c=1 ;; esac; done\n[ "$q" = 1 ] && [ "$c" = 0 ] && exit 128\nexec %s "$@"\n' \
+    "$(command -v git)" > "$t/shim/git"
+  chmod +x "$t/shim/git"
+  rc_motivo "prova 4: erro do git no diff não aprova" 4 "prova 4: $FX_NOVO1: sem diferença entre B1 e M (ou diff não calculável, rc=128)" \
+    env PATH="$t/shim:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1 && falha "erro do git gravou" || ok "erro do git: nada gravado"
+
+  # pathspec do chamador não muda o registro válido
+  local r_orig; r_orig=("${r[@]}")
+  r=(env GIT_ICASE_PATHSPECS=1 GIT_GLOB_PATHSPECS=1 "${r_orig[@]}")
+  registra_ok "GIT_ICASE_PATHSPECS/GIT_GLOB_PATHSPECS do chamador" "$FX_NOVO1" "$FX_NOVO2"
+  r=("${r_orig[@]}")
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
 
   # contexto explícito, uso e pré-condições
   rc_motivo "origem divergente do ENTREGA.md" 5 "expx_tool" \
@@ -486,24 +533,47 @@ grupo_provas() {
   [ "$(_foto)" = "$antes" ] && ok "fixture intacta depois dos casos de reprovação" || falha "fixture alterada"
   cd "$REPO" || return
 
+  local rce
   for variante in base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados \
-    fora_primeiro_pai m_sem_integra_base m_com_metodo; do
+    fora_primeiro_pai m_sem_integra_base m_com_metodo substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 \
+    b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
     lista=(); while IFS= read -r l; do lista+=("$l"); done <<EOF
 $FX_LISTA_VARIANTE
 EOF
+    rce=4
     case "$variante" in
       base_removeu|renomeado) c="prova 1: README.md" ;;
       integracao_removeu|resolucao_igual_base) c="prova 4: $FX_NOVO2" ;;
       m_um_pai) c="estrutura[pais]" ;;
       fora_primeiro_pai) c="estrutura[base]" ;;
+      substring_declarado) c="inventário: tests/ui/ft-rec.test: " ;;
+      tipo_mudou) c="prova 1: README.md: status T" ;;
+      b0_fora_b1) c="estrutura[b0_b1]" ;;
+      b0_fora_p1) c="estrutura[b0_p1]" ;;
+      b0_ref) rce=5; c="base_validada_sha não é SHA" ;;
+      entrega_kind) rce=5; c="não declara kind: entrega" ;;
+      entrega_trabalho) rce=5; c="diverge de ENTREGA.trabalho_id" ;;
+      entrega_sem_branch_base) rce=5; c="ENTREGA.branch_base ausente" ;;
+      entrega_symlink) rce=5; c="não é arquivo regular" ;;
       *) c="estrutura[contrato]" ;;
     esac
-    reprova "variante $variante reprova" 4 "$c" "${lista[@]}"
+    reprova "variante $variante reprova" "$rce" "$c" "${lista[@]}"
     cd "$REPO" || return
   done
+
+  # diretório nunca é caminho reconciliado
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=diretorio fx_cenario "$d" || { falha "variante diretorio não montou"; return; }
+  cd "$d" || return
+  reprova "diretório na lista reprova" 4 "arquivo: tests/base: não é arquivo (blob)" \
+    "$FX_NOVO1" "$FX_NOVO2" tests/base/x.ts tests/base/y.ts tests/base
+  reprova "caminho com barra final reprova" 4 "arquivo: tests/base/: caminho com barra final" \
+    "$FX_NOVO1" "$FX_NOVO2" tests/base/x.ts tests/base/y.ts tests/base/
+  registra_ok "controle: só os arquivos do diretório registram" "$FX_NOVO1" "$FX_NOVO2" tests/base/x.ts tests/base/y.ts
+  cd "$REPO" || return
   for variante in caminho_especial base_alterou; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
