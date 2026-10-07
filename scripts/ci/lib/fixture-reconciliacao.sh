@@ -36,6 +36,8 @@
 #   entrega_trabalho      o merge grava trabalho_id: outro no ENTREGA.md
 #   entrega_sem_branch_base  o merge remove branch_base do ENTREGA.md
 #   entrega_symlink       o merge troca o ENTREGA.md por link para ENTREGA-real.md
+#   plano_symlink         o merge cria um link simbólico na pasta do trabalho
+#   merge_area_base       o merge cria docs/sprintx/features/ft-rec/base/notas.md
 # As variantes de ENTREGA.md e de B0 alteram o ENTREGA.md DENTRO do merge
 # (é artefato de método), para que a árvore continue limpa.
 #
@@ -134,7 +136,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink merge_area_base "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão>
@@ -294,6 +296,13 @@ _fx_corpo() {
         git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
         ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md
         git add docs/entregas/ft-rec/ENTREGA.md ;;
+      plano_symlink)
+        ln -s sprint-01/tasks.md docs/sprintx/features/ft-rec/LINK.md
+        git add docs/sprintx/features/ft-rec/LINK.md ;;
+      merge_area_base)
+        mkdir -p docs/sprintx/features/ft-rec/base
+        printf '# Notas\n' > docs/sprintx/features/ft-rec/base/notas.md
+        git add docs/sprintx/features/ft-rec/base/notas.md ;;
     esac
     [ -z "$(git diff --name-only --diff-filter=U)" ]
 

@@ -521,6 +521,36 @@ grupo_provas() {
     reprova "$c não rastreado na pasta da entrega" 3 "$c" "$FX_NOVO1" "$FX_NOVO2"
     rm -f "docs/entregas/ft-rec/$c"
   done
+  # artefato existente como link simbólico quebrado também é reconciliação existente
+  ln -s /nao/existe docs/entregas/ft-rec/RECONCILIACAO-BASE-007.md
+  reprova "RECONCILIACAO-BASE-007.md link quebrado" 5 "já existe reconciliação" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-007.md
+
+  # plano escondido do status (ignorado, skip-worktree, assume-unchanged): a
+  # união vem de M, então NOVO2 continua fora e o inventário reprova
+  local tk; tk=docs/sprintx/features/ft-rec/sprint-01/tasks.md
+  mkdir -p docs/sprintx/features/ft-rec/sprint-02
+  sed -e "s|altera: \[src/painel.ts\]|altera: [src/painel.ts, $FX_NOVO2]|" -e 's/T-01\.01/T-02.01/g' "$tk" \
+    > docs/sprintx/features/ft-rec/sprint-02/tasks.md
+  cp .git/info/exclude "$t/exclude.bak" 2>/dev/null || : > "$t/exclude.bak"
+  printf 'docs/sprintx/features/ft-rec/sprint-02/\n' >> .git/info/exclude
+  [ -z "$(git status --porcelain --untracked-files=all -- docs/sprintx/features/ft-rec)" ] || falha "sprint-02 não ficou ignorada"
+  reprova "tasks.md ignorado (.git/info/exclude) declarando NOVO2" 4 "inventário: $FX_NOVO2" "$FX_NOVO1"
+  rm -rf docs/sprintx/features/ft-rec/sprint-02; cat "$t/exclude.bak" > .git/info/exclude
+  for c in skip-worktree assume-unchanged; do
+    git update-index "--$c" "$tk"
+    sed "s|altera: \[src/painel.ts\]|altera: [src/painel.ts, $FX_NOVO2]|" "$tk" > "$t/tasks.md" && cat "$t/tasks.md" > "$tk"
+    [ -z "$(git status --porcelain --untracked-files=all -- docs/sprintx/features/ft-rec)" ] || falha "$c: tasks.md visível no status"
+    reprova "tasks.md com --$c declarando NOVO2" 4 "inventário: $FX_NOVO2" "$FX_NOVO1"
+    git update-index "--no-$c" "$tk"; git restore -- "$tk"
+  done
+
+  # ENTREGA.md sujo (tolerado) não entra nas provas: vale a versão de M
+  sed 's/^branch_base: main$/branch_base: HEAD/' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
+  sed "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
+  registra_ok "ENTREGA.md sujo (branch_base HEAD, B0 do plano): registra com a versão de M" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
+  git restore -- "$FX_ENTREGA"
 
   # prova 4 com o git falhando no diff --quiet: erro nunca vira diferença
   mkdir -p "$t/shim"
@@ -562,7 +592,7 @@ grupo_provas() {
   local rce
   for variante in base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados \
     fora_primeiro_pai m_sem_integra_base m_com_metodo substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 \
-    b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink; do
+    b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
@@ -584,11 +614,42 @@ EOF
       entrega_trabalho) rce=5; c="diverge de ENTREGA.trabalho_id" ;;
       entrega_sem_branch_base) rce=5; c="ENTREGA.branch_base ausente" ;;
       entrega_symlink) rce=5; c="não é arquivo regular" ;;
+      plano_symlink) rce=5; c="link simbólico ou submódulo" ;;
       *) c="estrutura[contrato]" ;;
     esac
     reprova "variante $variante reprova" "$rce" "$c" "${lista[@]}"
     cd "$REPO" || return
   done
+
+  # catálogo vem de M: um 00-INDICE.md só no disco (ignorado) não transforma
+  # em método a área que o merge criou
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=merge_area_base fx_cenario "$d" || { falha "variante merge_area_base não montou"; return; }
+  cd "$d" || return
+  printf -- '---\nexpx_schema: 1\nkind: base_indice\ntrabalho_id: ft-rec\nareas:\n  - arquivo: notas.md\n---\n' \
+    > docs/sprintx/features/ft-rec/base/00-INDICE.md
+  printf 'docs/sprintx/features/ft-rec/base/00-INDICE.md\n' >> .git/info/exclude
+  [ -z "$(git status --porcelain --untracked-files=all -- docs/sprintx/features/ft-rec)" ] || falha "00-INDICE.md não ficou ignorado"
+  reprova "00-INDICE.md só no disco não vira catálogo" 4 "inventário: docs/sprintx/features/ft-rec/base/notas.md" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # a pasta do trabalho é resolvida em M: uma pasta legada só no disco
+  # (ignorada) não cria a ambiguidade "duas pastas"
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  mkdir -p docs/ft-rec; printf 'x\n' > docs/ft-rec/rascunho.md
+  printf 'docs/ft-rec/\n' >> .git/info/exclude
+  registra_ok "pasta legada só no disco não muda a resolução" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # branch_base sujo no disco não afrouxa a condição estrutural da base
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=fora_primeiro_pai fx_cenario "$d" || { falha "variante fora_primeiro_pai não montou"; return; }
+  cd "$d" || return
+  sed 's|^branch_base: main$|branch_base: feature/ft-rec|' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
+  grep -q '^branch_base: feature/ft-rec$' "$FX_ENTREGA" || falha "branch_base não foi editado"
+  reprova "fora_primeiro_pai com branch_base sujo = feature/ft-rec" 4 "estrutura[base]"
+  cd "$REPO" || return
 
   # diretório nunca é caminho reconciliado
   d="$(mktemp -d)"; TMPS="$TMPS $d"

@@ -161,11 +161,24 @@ fi
 g diff --cached --quiet 2>/dev/null || para 3 'o stage não está vazio; nada foi limpo ou adotado'
 
 # ---------------------------------------------------------------------------
-# ENTREGA.md: contexto explícito igual ao registrado.
+# M e o que alimenta as provas. Nada que esteja só no disco entra numa prova:
+# o ENTREGA.md, a pasta do trabalho (plano e catálogo) são lidos do commit M.
 # ---------------------------------------------------------------------------
-fm() { catalogo_fm "$RAIZ/$ENTREGA" "$1"; }
+M="$(g rev-parse --verify -q HEAD)" || estrutura m 'HEAD ilegível'
 
-[ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] || para 5 "$ENTREGA não é arquivo regular"
+# modo_em_m <caminho> — o modo do caminho na árvore de M (vazio se ausente)
+modo_em_m() { g ls-tree -z "$M" -- "$1" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .*//p'; }
+
+# ---------------------------------------------------------------------------
+# ENTREGA.md (versão de M): contexto explícito igual ao registrado.
+# ---------------------------------------------------------------------------
+ENTREGA_M="$TMP_DIR/entrega-m.md"
+MODO_ENTREGA="$(modo_em_m "$ENTREGA")"
+[ -n "$MODO_ENTREGA" ] || para 5 "$ENTREGA ausente no commit M $M"
+case "$MODO_ENTREGA" in 100644|100755) ;; *) para 5 "$ENTREGA não é arquivo regular em M (modo $MODO_ENTREGA)" ;; esac
+g cat-file blob "$M:$ENTREGA" > "$ENTREGA_M" 2>/dev/null || para 5 "$ENTREGA ilegível em M"
+fm() { catalogo_fm "$ENTREGA_M" "$1"; }
+
 [ "$(fm kind)" = entrega ] || para 5 "$ENTREGA não declara kind: entrega"
 [ "$(fm trabalho_id)" = "$TRABALHO" ] || para 5 'trabalho explícito diverge de ENTREGA.trabalho_id'
 [ "$(fm expx_tool)" = "$ORIGEM" ] || para 5 'origem explícita diverge de ENTREGA.expx_tool'
@@ -175,11 +188,27 @@ BRANCH="$(g branch --show-current 2>/dev/null)" || BRANCH=""
 BRANCH_BASE="$(fm branch_base)"
 [ -n "$BRANCH_BASE" ] || para 5 'ENTREGA.branch_base ausente'
 
-# União e catálogo são lidos do disco: a pasta do trabalho tem de estar igual
-# a HEAD (= M), sem alteração nem arquivo não rastreado. Assim nenhum estado
-# não versionado entra na prova 3 nem no inventário.
-PASTA="$(catalogo_pasta_do_trabalho "$RAIZ" "$ORIGEM" "$TRABALHO")" \
-  || para 4 "prova 3: pasta do trabalho não determinável: $CATALOGO_ERRO"
+# Árvore de M materializada só no necessário para resolver a pasta do trabalho
+# e ler o plano: as três pastas candidatas, blob por blob. Link simbólico ou
+# submódulo dentro delas: o plano não é lido, o registro para (rc 5).
+RAIZ_M="$TMP_DIR/arvore-m"
+mkdir -p "$RAIZ_M" || para 1 'não foi possível criar a árvore temporária de M'
+g ls-tree -r -z --full-tree "$M" -- "docs/sprintx/features/$TRABALHO" "docs/$TRABALHO" "docs/manutencao/$TRABALHO" \
+  > "$TMP_DIR/arvore-m.lista" 2>/dev/null || para 4 "prova 3: árvore de M ilegível"
+while IFS= read -r -d '' item <&3; do
+  modo="${item%% *}"; caminho="${item#*	}"
+  case "$modo" in
+    100644|100755) ;;
+    *) para 5 "pasta do trabalho em M tem link simbólico ou submódulo (modo $modo): $caminho" ;;
+  esac
+  mkdir -p "$RAIZ_M/$(dirname "$caminho")" && g cat-file blob "$M:$caminho" > "$RAIZ_M/$caminho" 2>/dev/null \
+    || para 4 "prova 3: não foi possível ler $caminho de M"
+done 3< "$TMP_DIR/arvore-m.lista"
+
+# A pasta do trabalho resolvida em M; no disco ela tem de estar igual a M, sem
+# alteração nem arquivo não rastreado (defesa em profundidade).
+PASTA="$(catalogo_pasta_do_trabalho "$RAIZ_M" "$ORIGEM" "$TRABALHO")" \
+  || para 4 "prova 3: pasta do trabalho não determinável em M: $CATALOGO_ERRO"
 g status --porcelain=v1 -z --untracked-files=all -- "$PASTA" > "$TMP_DIR/sujo" 2>/dev/null \
   || para 3 'não foi possível verificar se a pasta do trabalho está limpa'
 [ ! -s "$TMP_DIR/sujo" ] || para 3 "pasta do trabalho com alteração não commitada: $(tr '\0' ' ' < "$TMP_DIR/sujo" | cut -c1-200)" # guarda:LIMPA
@@ -198,7 +227,7 @@ while IFS= read -r -d '' registro <&3; do
 done 3< "$TMP_DIR/sujo-entrega"
 
 for existente in "docs/entregas/$TRABALHO"/RECONCILIACAO-BASE-*.md; do
-  [ -e "$existente" ] || continue
+  [ -e "$existente" ] || [ -L "$existente" ] || continue
   para 5 "já existe reconciliação registrada ($existente); encadear reconciliações ainda não é suportado"
 done
 
@@ -210,7 +239,6 @@ g cat-file -e "$B0^{commit}" 2>/dev/null || estrutura b0 "B0 $B0 não é commit 
 # ---------------------------------------------------------------------------
 # Condições estruturais (seção 5). M = HEAD.
 # ---------------------------------------------------------------------------
-M="$(g rev-parse --verify -q HEAD)" || estrutura m 'HEAD ilegível'
 PAIS="$(g rev-list --parents -n1 "$M" 2>/dev/null)" || estrutura m "pais de M ilegíveis"
 NPAIS=$(( $(printf '%s\n' "$PAIS" | wc -w) - 1 ))
 [ "$NPAIS" = 2 ] || estrutura pais "M $M tem $NPAIS pai(s); o commit de integração tem exatamente dois" # guarda:EST
@@ -226,14 +254,13 @@ PONTA_BASE="$(g rev-parse --verify -q "$BRANCH_BASE^{commit}")" || estrutura bas
 g merge-base --is-ancestor "$B1" "$PONTA_BASE" 2>/dev/null || estrutura base "B1 $B1 não é ancestral da ponta de $BRANCH_BASE ($PONTA_BASE)" # guarda:EST
 
 # ---------------------------------------------------------------------------
-# União das tasks e catálogo de método (prova 3 e inventário).
+# União das tasks e catálogo de método (prova 3 e inventário), sobre a árvore
+# de M, nunca sobre o disco.
 # ---------------------------------------------------------------------------
 UNIAO="$TMP_DIR/uniao"
 CATALOGO="$TMP_DIR/catalogo"
-bash "$OWNERSHIP_SH" --uniao "$RAIZ" "$ORIGEM" "$TRABALHO" > "$UNIAO" 2>"$TMP_DIR/uniao.err" \
-  || para 4 "prova 3: união das tasks não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")"
-catalogo_metodo "$RAIZ" "$ORIGEM" "$TRABALHO" "$PASTA" e8 > "$CATALOGO" \
-  || para 4 "prova 3: catálogo de método não calculável: $CATALOGO_ERRO"
+bash "$OWNERSHIP_SH" --uniao "$RAIZ_M" "$ORIGEM" "$TRABALHO" > "$UNIAO" 2>"$TMP_DIR/uniao.err" || para 4 "prova 3: união das tasks não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")" # guarda:P3
+catalogo_metodo "$RAIZ_M" "$ORIGEM" "$TRABALHO" "$PASTA" e8 > "$CATALOGO" || para 4 "prova 3: catálogo de método não calculável: $CATALOGO_ERRO" # guarda:P3
 
 contem() { grep -Fxq -e "$2" "$1"; }
 
