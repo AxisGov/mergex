@@ -402,10 +402,11 @@ _foto() {
 # reprova <desc> <rc> <trecho> <caminho>... — registro reprovado não grava nada
 # e devolve a trava C5. Usa o array `r` do grupo.
 reprova() {
-  local desc="$1" esperado="$2" trecho="$3" antes; shift 3
+  local desc="$1" esperado="$2" trecho="$3" antes antes_rb; shift 3
   antes="$(_foto)"
+  antes_rb="$(ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md 2>/dev/null)"
   rc_motivo "$desc" "$esperado" "$trecho" "${r[@]}" "$@"
-  if [ "$(_foto)" = "$antes" ] && ! ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1; then
+  if [ "$(_foto)" = "$antes" ] && [ "$(ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md 2>/dev/null)" = "$antes_rb" ]; then
     ok "$desc: nada gravado"
   else falha "$desc: a árvore mudou"; fi
   bash "$TRAVA" --status >/dev/null 2>&1 && ok "$desc: trava livre" || falha "$desc: trava presa"
@@ -495,6 +496,31 @@ grupo_provas() {
   printf 'rascunho\n' > docs/entregas/ft-rec/NOTAS.md
   reprova "arquivo não rastreado na pasta da entrega" 3 "pasta do trabalho com alteração não commitada" "$FX_NOVO1" "$FX_NOVO2"
   rm -f docs/entregas/ft-rec/NOTAS.md
+
+  # pasta da entrega: só o que o próprio registro grava fica tolerado
+  printf '\nNota local.\n' >> "$FX_ENTREGA"
+  rc_igual "ENTREGA.md alterado não barra pela pasta limpa" 0 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
+  printf 'qualquer\n' > docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
+  local err_a
+  err_a="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1 >/dev/null)"; c=$?
+  { [ "$c" = 5 ] && case "$err_a" in *"já existe reconciliação"*) true ;; *) false ;; esac; } \
+    && ok "artefato não rastreado + ENTREGA.md alterado: segue para a regra seguinte (rc 5)" \
+    || falha "artefato não rastreado + ENTREGA.md alterado: rc=$c $err_a"
+  case "$err_a" in *"pasta do trabalho com alteração"*) falha "o motivo foi a pasta suja: $err_a" ;; *) ok "o motivo não é a pasta suja" ;; esac
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
+  printf 'pacote\n' > docs/entregas/ft-rec/QA.md
+  reprova "QA.md não rastreado na pasta da entrega" 3 "QA.md" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f docs/entregas/ft-rec/QA.md
+  git restore -- "$FX_ENTREGA"
+  printf '\nmais\n' >> docs/entregas/ft-rec/ATENCAO.md
+  reprova "ATENCAO.md alterado na pasta da entrega" 3 "ATENCAO.md" "$FX_NOVO1" "$FX_NOVO2"
+  git restore -- docs/entregas/ft-rec/ATENCAO.md
+  for c in RECONCILIACAO-BASE-001.md.bak RECONCILIACAO-BASE-x.md RECONCILIACAO-BASE-0001.md; do
+    printf 'x\n' > "docs/entregas/ft-rec/$c"
+    reprova "$c não rastreado na pasta da entrega" 3 "$c" "$FX_NOVO1" "$FX_NOVO2"
+    rm -f "docs/entregas/ft-rec/$c"
+  done
 
   # prova 4 com o git falhando no diff --quiet: erro nunca vira diferença
   mkdir -p "$t/shim"

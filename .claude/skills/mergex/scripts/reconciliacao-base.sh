@@ -175,14 +175,27 @@ BRANCH="$(g branch --show-current 2>/dev/null)" || BRANCH=""
 BRANCH_BASE="$(fm branch_base)"
 [ -n "$BRANCH_BASE" ] || para 5 'ENTREGA.branch_base ausente'
 
-# União e catálogo são lidos do disco: a pasta do trabalho e a da entrega têm
-# de estar iguais a HEAD (= M), sem alteração nem arquivo não rastreado. Assim
-# nenhum estado não versionado entra na prova 3 nem no inventário.
+# União e catálogo são lidos do disco: a pasta do trabalho tem de estar igual
+# a HEAD (= M), sem alteração nem arquivo não rastreado. Assim nenhum estado
+# não versionado entra na prova 3 nem no inventário.
 PASTA="$(catalogo_pasta_do_trabalho "$RAIZ" "$ORIGEM" "$TRABALHO")" \
   || para 4 "prova 3: pasta do trabalho não determinável: $CATALOGO_ERRO"
-g status --porcelain=v1 --untracked-files=all -- "$PASTA" "docs/entregas/$TRABALHO" > "$TMP_DIR/sujo" 2>/dev/null \
+g status --porcelain=v1 -z --untracked-files=all -- "$PASTA" > "$TMP_DIR/sujo" 2>/dev/null \
   || para 3 'não foi possível verificar se a pasta do trabalho está limpa'
-[ ! -s "$TMP_DIR/sujo" ] || para 3 "pasta do trabalho com alteração não commitada: $(head -n 3 "$TMP_DIR/sujo" | tr '\n' ' ')" # guarda:LIMPA
+[ ! -s "$TMP_DIR/sujo" ] || para 3 "pasta do trabalho com alteração não commitada: $(tr '\0' ' ' < "$TMP_DIR/sujo" | cut -c1-200)" # guarda:LIMPA
+
+# Na pasta da entrega, só o que o próprio registro grava pode estar pendente
+# (antes do checkpoint reconciliacao-base): ENTREGA.md alterado na árvore e
+# RECONCILIACAO-BASE-NNN.md não rastreado ou alterado. Caminho casado exato.
+ENTREGA_DIR="docs/entregas/$TRABALHO"
+g status --porcelain=v1 -z --untracked-files=all -- "$ENTREGA_DIR" > "$TMP_DIR/sujo-entrega" 2>/dev/null \
+  || para 3 'não foi possível verificar se a pasta da entrega está limpa'
+while IFS= read -r -d '' registro <&3; do
+  xy="${registro:0:2}"; p="${registro:3}"; tolerado=0
+  if [ "$xy" = ' M' ] && [ "$p" = "$ENTREGA_DIR/ENTREGA.md" ]; then tolerado=1; fi # guarda:LIMPA
+  case "$xy:$p" in "??:$ENTREGA_DIR/"RECONCILIACAO-BASE-[0-9][0-9][0-9].md|" M:$ENTREGA_DIR/"RECONCILIACAO-BASE-[0-9][0-9][0-9].md) tolerado=1 ;; esac # guarda:LIMPA
+  [ "$tolerado" = 1 ] || para 3 "pasta do trabalho com alteração não commitada (entrega, fora do que o registro grava): $xy $p" # guarda:LIMPA
+done 3< "$TMP_DIR/sujo-entrega"
 
 for existente in "docs/entregas/$TRABALHO"/RECONCILIACAO-BASE-*.md; do
   [ -e "$existente" ] || continue
