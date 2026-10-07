@@ -67,8 +67,11 @@
 #                         passa a ter a canônica e a legada
 #   runx                  o trabalho é RunX: plano em docs/manutencao/ft-rec e
 #                         ENTREGA.expx_tool runx
-# As variantes de ENTREGA.md e de B0 alteram o ENTREGA.md DENTRO do merge
-# (é artefato de método), para que a árvore continue limpa.
+#   entrega_no_merge      o PRÓPRIO merge reescreve base_validada_sha no
+#                         ENTREGA.md (M difere de P1 no ENTREGA.md)
+# As demais variantes de ENTREGA.md e de B0 alteram o ENTREGA.md num commit da
+# feature logo antes do merge (que passa a ser P1), porque o merge de
+# integração não pode mexer no ENTREGA.md; a árvore continua limpa.
 #
 # Só comandos Git reais. Nenhum SHA é fixo: tudo é lido com `git rev-parse`.
 # Não depende do cwd do chamador além do diretório alvo; ao final, o repositório
@@ -166,7 +169,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -300,8 +303,47 @@ _fx_corpo() {
     _fx_commit "$msg"
     FX_B1="$(git rev-parse HEAD)"
 
-    # merge com conflito em src/painel.ts
     fixture_switch_exato feature/ft-rec feature/ft-rec
+
+    # variantes do ENTREGA.md e de B0: num commit da feature ANTES do merge
+    # (passa a ser P1), porque o merge de integração não pode mexer no
+    # ENTREGA.md (guarda estrutura[entrega]); M herda o ENTREGA.md de P1
+    case "$var" in
+      b0_fora_b1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" ;;
+      b0_fora_p1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $FX_B1/" ;;
+      b0_ref) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha: main/' ;;
+      entrega_kind) _fx_entrega_sed 's/^kind: entrega$/kind: outro/' ;;
+      entrega_trabalho) _fx_entrega_sed 's/^trabalho_id: ft-rec$/trabalho_id: outro/' ;;
+      entrega_sem_branch_base) _fx_entrega_sed '/^branch_base:/d' ;;
+      entrega_sem_chaves)
+        _fx_entrega_sed -e '/^reconciliacoes:/d' -e '/^causa:/d' -e '/^push_feito:/d' -e '/^entregue_em:/d' \
+          -e '/^portao_sha:/d' -e '/^falhas_portao:/d' -e '/^atualizado_em:/d' \
+          -e 's/^  dispensavel: 0$/  dispensavel: 0\n  estado: interno\n  causa: aninhada\n  push_feito: aninhado/' ;;
+      entrega_dup) _fx_entrega_sed 's/^estado: .*/&\nestado: aberto/' ;;
+      entrega_reconc_cheia)
+        _fx_entrega_sed 's/^reconciliacoes: \[\]$/reconciliacoes:\n  - numero: 1\n    arquivo: RECONCILIACAO-BASE-001.md\n    b1_sha: 1111111111111111111111111111111111111111\n    m_sha: 2222222222222222222222222222222222222222/' ;;
+      entrega_bloco)
+        _fx_entrega_sed -e 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n  - v7/' -e 's/^causa: null$/causa:\n  - antiga/' ;;
+      entrega_crlf) _fx_entrega_sed 's/$/\r/' ;;
+      entrega_bloco_vazia) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n\n  - v7/' ;;
+      entrega_bloco_comentario) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n# comentario na coluna 0\n  - v7/' ;;
+      entrega_bloco_escalar) _fx_entrega_sed 's/^causa: null$/causa: |\n  primeira linha\n\n  terceira linha/' ;;
+      entrega_bloco_col0) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n- v1\n- v7/' ;;
+      entrega_bloco_estranho) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\nsolto sem indentacao/' ;;
+      entrega_aspas_d) _fx_entrega_sed 's/^estado: /"estado": /' ;;
+      entrega_aspas_s) _fx_entrega_sed "s/^portao: /'portao': /" ;;
+      entrega_symlink)
+        git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
+        ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md
+        git add docs/entregas/ft-rec/ENTREGA.md ;;
+    esac
+    if ! git diff --cached --quiet; then
+      _fx_msg "$msg" "docs(mergex): ajusta a entrega" "Trabalho: ft-rec"
+      _fx_commit "$msg"
+      FX_P1="$(git rev-parse HEAD)"
+    fi
+
+    # merge com conflito em src/painel.ts
     git merge --no-ff --no-commit main >/dev/null 2>&1 || true
     [ -f .git/MERGE_HEAD ]
     printf 'export const versao = 1;\nexport const titulo = "Painel da base e da feature";\nexport const rodape = "fim";\n' > src/painel.ts
@@ -333,33 +375,8 @@ _fx_corpo() {
       tipo_mudou)
         rm -f README.md; ln -s tests/ui/ft-rec.test.ts README.md
         git add README.md ;;
-      b0_fora_b1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" ;;
-      b0_fora_p1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $FX_B1/" ;;
-      b0_ref) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha: main/' ;;
-      entrega_kind) _fx_entrega_sed 's/^kind: entrega$/kind: outro/' ;;
-      entrega_trabalho) _fx_entrega_sed 's/^trabalho_id: ft-rec$/trabalho_id: outro/' ;;
-      entrega_sem_branch_base) _fx_entrega_sed '/^branch_base:/d' ;;
-      entrega_sem_chaves)
-        _fx_entrega_sed -e '/^reconciliacoes:/d' -e '/^causa:/d' -e '/^push_feito:/d' -e '/^entregue_em:/d' \
-          -e '/^portao_sha:/d' -e '/^falhas_portao:/d' -e '/^atualizado_em:/d' \
-          -e 's/^  dispensavel: 0$/  dispensavel: 0\n  estado: interno\n  causa: aninhada\n  push_feito: aninhado/' ;;
-      entrega_dup) _fx_entrega_sed 's/^estado: .*/&\nestado: aberto/' ;;
-      entrega_reconc_cheia)
-        _fx_entrega_sed 's/^reconciliacoes: \[\]$/reconciliacoes:\n  - numero: 1\n    arquivo: RECONCILIACAO-BASE-001.md\n    b1_sha: 1111111111111111111111111111111111111111\n    m_sha: 2222222222222222222222222222222222222222/' ;;
-      entrega_bloco)
-        _fx_entrega_sed -e 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n  - v7/' -e 's/^causa: null$/causa:\n  - antiga/' ;;
-      entrega_crlf) _fx_entrega_sed 's/$/\r/' ;;
-      entrega_bloco_vazia) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n\n  - v7/' ;;
-      entrega_bloco_comentario) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n# comentario na coluna 0\n  - v7/' ;;
-      entrega_bloco_escalar) _fx_entrega_sed 's/^causa: null$/causa: |\n  primeira linha\n\n  terceira linha/' ;;
-      entrega_bloco_col0) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n- v1\n- v7/' ;;
-      entrega_bloco_estranho) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\nsolto sem indentacao/' ;;
-      entrega_aspas_d) _fx_entrega_sed 's/^estado: /"estado": /' ;;
-      entrega_aspas_s) _fx_entrega_sed "s/^portao: /'portao': /" ;;
-      entrega_symlink)
-        git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
-        ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md
-        git add docs/entregas/ft-rec/ENTREGA.md ;;
+      # o próprio merge reescreve o ENTREGA.md (o que a guarda estrutura[entrega] barra)
+      entrega_no_merge) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" ;;
       plano_symlink)
         ln -s sprint-01/tasks.md docs/sprintx/features/ft-rec/LINK.md
         git add docs/sprintx/features/ft-rec/LINK.md ;;
@@ -456,16 +473,20 @@ _FXR_ARTEFATO="$(cd "$_FXR_LIB/../../.." && pwd)/.claude/skills/mergex/scripts/r
 
 _fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
   local dir="$1" ajusta="$2" msg="$3" shas="$4" b2
-  local novo3=tests/ui/frequency-ksmv-primitives.test.tsx
+  local novo3=tests/ui/frequency-ksmv-primitives.test.tsx m1
+  local novo1=tests/ui/compliance-ksmv-primitives.test.tsx novo2=tests/ui/attendance-ksmv-primitives.test.tsx
   cd "$dir"
+  m1="$(git rev-parse feature/ft-rec)"
   fixture_switch_exato main main
   mkdir -p tests/ui
   printf 'export const casoFrequency = "base";\n' > "$novo3"
   git add "$novo3"
-  if [ "$ajusta" = reajusta ]; then
-    printf 'export const casoCompliance = "base";\nexport const segundaBase = 2;\n' > tests/ui/compliance-ksmv-primitives.test.tsx
-    git add tests/ui/compliance-ksmv-primitives.test.tsx
-  fi
+  case "$ajusta" in
+    reajusta|descarta)
+      printf 'export const casoCompliance = "base";\nexport const segundaBase = 2;\n' > "$novo1"
+      git add "$novo1" ;;
+    ressuscita) git rm -q "$novo1" ;;
+  esac
   _fx_msg "$msg" "feat: primitiva ksmv de frequencia"
   _fx_commit "$msg"
   b2="$(git rev-parse HEAD)"
@@ -473,15 +494,21 @@ _fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
   git merge --no-ff --no-commit main >/dev/null 2>&1 || true
   [ -f .git/MERGE_HEAD ]
   case "$ajusta" in
-    ajusta|reajusta)
+    ajusta|reajusta|descarta|ressuscita|esconde)
       printf 'export const casoFrequency = "base";\nexport const ajusteFrequency = "ft-rec";\n' > "$novo3"
       git add "$novo3" ;;
   esac
-  if [ "$ajusta" = reajusta ]; then
-    printf 'export const casoCompliance = "base";\nexport const segundaBase = 2;\nexport const ajusteCompliance = "ft-rec";\n' \
-      > tests/ui/compliance-ksmv-primitives.test.tsx
-    git add tests/ui/compliance-ksmv-primitives.test.tsx
-  fi
+  case "$ajusta" in
+    reajusta)
+      printf 'export const casoCompliance = "base";\nexport const segundaBase = 2;\nexport const ajusteCompliance = "ft-rec";\n' > "$novo1"
+      git add "$novo1" ;;
+    # a resolução fica com a versão do M1: descarta a mudança (ou a remoção) da base
+    descarta|ressuscita) git show "$m1:$novo1" > "$novo1"; git add "$novo1" ;;
+    # o merge muda um caminho do 001 que a base não tocou
+    esconde)
+      printf 'export const casoAttendance = "base";\nexport const ajusteAttendance = "ft-rec";\nexport const produtoEscondido = 1;\n' > "$novo2"
+      git add "$novo2" ;;
+  esac
   [ -z "$(git diff --name-only --diff-filter=U)" ]
   _fx_msg "$msg" "merge: integra a main de novo na feature ft-rec" "Trabalho: ft-rec" "Integra-base: $b2"
   _fx_commit "$msg"
@@ -493,7 +520,10 @@ _fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
 # HEAD, com `Trabalho: ft-rec` e `Integra-base: B2`. Com `ajusta`, a resolução
 # ajusta FX_NOVO3; sem, M2 não muda nada do que veio da base. Com `reajusta`,
 # além disso B2 altera FX_NOVO1 (já reconciliado no 001) e M2 o ajusta de
-# novo (conflito resolvido pela fixture). Exporta FX_B2,
+# novo (conflito resolvido pela fixture). Com `descarta`, B2 altera FX_NOVO1 e
+# M2 fica com a versão do M1; com `ressuscita`, B2 remove FX_NOVO1 e M2 o traz
+# de volta com a versão do M1; com `esconde`, B2 não toca FX_NOVO2 e M2 o muda.
+# Nesses três, M2 também ajusta FX_NOVO3. Exporta FX_B2,
 # FX_M2 e FX_NOVO3. Só cria commits: arquivos não rastreados ficam onde estão.
 fx_segunda_base() {
   local dir="$1" ajusta="${2:-}" msg rc

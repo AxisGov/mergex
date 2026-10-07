@@ -613,7 +613,7 @@ grupo_provas() {
   local rce
   for variante in base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados \
     fora_primeiro_pai m_sem_integra_base m_com_metodo substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 \
-    b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink; do
+    b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink entrega_no_merge; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
@@ -630,6 +630,7 @@ EOF
       tipo_mudou) c="prova 1: README.md: status T" ;;
       b0_fora_b1) c="estrutura[b0_b1]" ;;
       b0_fora_p1) c="estrutura[b0_p1]" ;;
+      entrega_no_merge) c="estrutura[entrega]" ;;
       b0_ref) rce=5; c="base_validada_sha não é SHA" ;;
       entrega_kind) rce=5; c="não declara kind: entrega" ;;
       entrega_trabalho) rce=5; c="diverge de ENTREGA.trabalho_id" ;;
@@ -1176,6 +1177,12 @@ coberto	$FX_NOVO1	001"
   FX_B1_SHA="$FX_B0" fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja do b1_sha"
   v_motivo "b1_sha diferente do segundo pai de M reprova" 4 estrutura "estrutura[b1]"
   cp "$VT/bak.md" "$AR"; cp "$VT/entrega.md" "$FX_ENTREGA"
+
+  # cobertura por conteúdo E modo: virar executável depois de M descobre
+  git update-index --chmod=+x "$FX_NOVO1"; git commit -q -m "NOVO1 executável"
+  v_motivo "reconciliado com modo mudado depois de M deixa de estar coberto" 4 cobertura "$FX_NOVO1: o modo"
+  git update-index --chmod=-x "$FX_NOVO1"; git commit -q -m "NOVO1 volta a 100644"
+  v_ok "controle: modo de volta ao de M" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_NOVO1")"
   v_ok "controle: verifica de novo depois das reprovações" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_NOVO1")"
 
   # reconciliado alterado depois de M deixa de estar coberto
@@ -1186,12 +1193,13 @@ coberto	$FX_NOVO1	001"
   v_motivo "reconciliado ausente em HEAD não está coberto" 4 cobertura "$FX_NOVO1"
   cd "$REPO" || return
 
-  # âncora: o b0_sha do 001 é a base_validada_sha da entrega em M
+  # âncora: o b0_sha do 001 é a base_validada_sha da entrega em P1 (antes do
+  # merge; a variante grava B1 num commit da feature logo antes do merge)
   d="$(mktemp -d)"; TMPS="$TMPS $d"
   FX_VARIANTE=b0_fora_p1 fx_cenario "$d" || { falha "variante b0_fora_p1 não montou"; return; }
   cd "$d" || return
   fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja da âncora"
-  v_motivo "b0_sha do 001 diferente da base_validada_sha de M reprova" 5 ancora "base_validada_sha"
+  v_motivo "b0_sha do 001 diferente da base_validada_sha de P1 reprova" 5 ancora "base_validada_sha"
   cd "$REPO" || return
 
   # M fora da linha de primeiro pai de HEAD
@@ -1265,6 +1273,60 @@ coberto	$FX_NOVO1	001"
   fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "emissão do 002"
   fx_entrega_sincroniza "$d" || falha "sincronização do ENTREGA.md"
   v_motivo "cadeia: prova 3 do 002 usa o plano da árvore de M2" 4 prova "RECONCILIACAO-BASE-002.md: prova 3: $FX_NOVO3"
+  cd "$REPO" || return
+
+  # inventário da cadeia: caminho do 001 só passa sem relistagem se a base não
+  # o tocou entre b0 e b1 do 002 E M2 tem o blob_m do 001
+  local modo
+  for modo in descarta ressuscita esconde; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+    fx_segunda_base "$d" "$modo" || { falha "segunda base ($modo) não montou"; continue; }
+    cd "$d" || return
+    FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "$modo: emissão do 001"
+    fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "$modo: emissão do 002"
+    fx_entrega_sincroniza "$d" || falha "$modo: sincronização"
+    case "$modo" in
+      descarta)
+        v_motivo "cadeia: M2 descarta a mudança da base num caminho do 001 sem relistar" 4 inventario "RECONCILIACAO-BASE-002.md: inventário: $FX_NOVO1" ;;
+      ressuscita)
+        v_motivo "cadeia: M2 ressuscita caminho do 001 que a base removeu" 4 inventario "RECONCILIACAO-BASE-002.md: inventário: $FX_NOVO1" ;;
+      esconde)
+        # mesmo depois de HEAD voltar ao blob_m do 001, o M2 mudou o caminho sem declarar
+        git show "$FX_M:$FX_NOVO2" > "$FX_NOVO2"; git commit -q -m "volta NOVO2" -- "$FX_NOVO2"
+        v_motivo "cadeia: M2 muda caminho do 001 (base não tocou), revertido depois" 4 inventario "RECONCILIACAO-BASE-002.md: inventário: $FX_NOVO2" ;;
+    esac
+    cd "$REPO" || return
+  done
+
+  # o merge de integração não pode reescrever o ENTREGA.md (âncora em P1)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=entrega_no_merge fx_cenario "$d" || { falha "variante entrega_no_merge não montou"; return; }
+  cd "$d" || return
+  fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja entrega_no_merge"
+  v_motivo "merge que reescreve o ENTREGA.md reprova (estrutura[entrega])" 4 estrutura "estrutura[entrega]"
+  cd "$REPO" || return
+
+  # ordem dos M, isolada: 001 aponta m1 (posterior), 002 aponta m2 (anterior);
+  # tudo o mais confere (CAD, âncora, estrutura, inventário)
+  local idx tree0 m0 by m2o m1o
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  idx="$VT/idx-ordem"; rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git read-tree "$FX_M"
+  GIT_INDEX_FILE="$idx" git update-index --cacheinfo "100644,$(git rev-parse "$FX_B1:$FX_NOVO1"),$FX_NOVO1" \
+    --cacheinfo "100644,$(git rev-parse "$FX_B1:$FX_NOVO2"),$FX_NOVO2"
+  tree0="$(GIT_INDEX_FILE="$idx" git write-tree)"
+  m0="$(printf 'merge sem ajuste\n\nTrabalho: ft-rec\nIntegra-base: %s\n' "$FX_B1" | git commit-tree "$tree0" -p "$FX_P1" -p "$FX_B1")"
+  by="$(printf 'base sem mudanca\n' | git commit-tree "$FX_B1^{tree}" -p "$FX_B1")"
+  m2o="$(printf 'merge\n\nTrabalho: ft-rec\nIntegra-base: %s\n' "$by" | git commit-tree "$tree0" -p "$m0" -p "$by")"
+  m1o="$(printf 'merge de novo\n\nTrabalho: ft-rec\nIntegra-base: %s\n' "$FX_B1" | git commit-tree "$tree0" -p "$m2o" -p "$FX_B1")"
+  git update-ref refs/heads/feature/ft-rec "$m1o"
+  FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$m1o" || falha "ordem: emissão do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$m2o" || falha "ordem: emissão do 002"
+  fx_entrega_sincroniza "$d" || falha "ordem: sincronização"
+  v_motivo "cadeia fora de ordem na linha de primeiro pai reprova" 5 cadeia "não é posterior"
+  out="$("${v[@]}" 2>/dev/null)"
+  [ "$(printf '%s\n' "$out" | grep -c '^motivo')" = 1 ] && ok "ordem: é o único motivo" || falha "ordem: outros motivos: $(printf '%s' "$out" | tr '\n\t' '|>')"
   cd "$REPO" || return
 }
 

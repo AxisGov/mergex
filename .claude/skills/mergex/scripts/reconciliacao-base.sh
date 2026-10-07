@@ -34,13 +34,15 @@
 #   schema e assinatura; numeração contínua, `anterior`, `b0_sha` = `b1_sha`
 #   da anterior, estados (só a última `ativa`), M em ordem na linha de primeiro
 #   pai de HEAD; âncora (o `b0_sha` do 001 é o `base_validada_sha` do
-#   ENTREGA.md em M); estrutura; as quatro provas (plano e catálogo da árvore
-#   do M de cada uma, `<início>` da prova 2 = M anterior); status_base,
-#   blob_b1, blob_m e diff_b1_m_sha256 de cada caminho; inventário B1..M
-#   (aceitando também os caminhos das reconciliações anteriores); a lista
-#   `reconciliacoes` e o `base_validada_sha` do ENTREGA.md do disco; e, por
-#   caminho, `HEAD:<caminho>` igual ao `blob_m` da reconciliação mais recente
-#   que o lista. Nenhum campo do artefato é aceito sem recálculo.
+#   ENTREGA.md em P1, o de antes do merge); estrutura (inclusive: o merge não
+#   mexe no ENTREGA.md); as quatro provas (plano e catálogo da árvore do M de
+#   cada uma, `<início>` da prova 2 = M anterior); status_base, blob_b1,
+#   blob_m e diff_b1_m_sha256 de cada caminho; inventário B1..M (um caminho
+#   de reconciliação anterior só dispensa a relistagem se a base não o tocou
+#   entre b0 e b1 e M tem o blob_m da anterior mais recente que o lista); a
+#   lista `reconciliacoes` e o `base_validada_sha` do ENTREGA.md do disco; e,
+#   por caminho, `HEAD:<caminho>` com o blob_m e o modo em M da reconciliação
+#   mais recente que o lista. Nenhum campo do artefato é aceito sem recálculo.
 #   Saída (só stdout): `ok=true` e `coberto<TAB><caminho><TAB><NNN>` por
 #   caminho; ou `ok=false` e `motivo<TAB><código><TAB><detalhe>` por falha,
 #   todas relatadas. rc 5 se houver falha de contrato, senão 4.
@@ -391,6 +393,8 @@ estrutura_m() {
   bash "$CONTRATO_SH" --validar-integracao --trabalho "$TRABALHO" --commit "$m" >/dev/null 2>"$TMP_DIR/contrato.err" || { estrutura contrato "mensagem de M fora do contrato de integração: $(tr '\n' ' ' < "$TMP_DIR/contrato.err")"; return 1; } # guarda:EST
   g merge-base --is-ancestor "$b0" "$B1" 2>/dev/null || { estrutura b0_b1 "B0 $b0 não é ancestral de B1 $B1"; return 1; } # guarda:EST
   g merge-base --is-ancestor "$b0" "$P1" 2>/dev/null || { estrutura b0_p1 "B0 $b0 não é ancestral de P1 $P1"; return 1; } # guarda:EST
+  # o merge de integração não mexe no ENTREGA.md: o de M é o de P1 (modo e blob)
+  [ "$(modo_em "$m" "$ENTREGA") $(g rev-parse --verify -q "$m:$ENTREGA" 2>/dev/null)" = "$(modo_em "$P1" "$ENTREGA") $(g rev-parse --verify -q "$P1:$ENTREGA" 2>/dev/null)" ] || { estrutura entrega "o merge M $m alterou $ENTREGA (difere de P1 $P1)"; return 1; } # guarda:EST
 }
 
 # uniao_e_catalogo <raiz-de-M> <pasta> — união das tasks e catálogo de método
@@ -438,17 +442,31 @@ provas() {
   done 3< "$lista"
 }
 
-# inventario <B1> <M> <lista> <anteriores> — todo caminho que o merge alterou
-# em relação a B1 está na união, no catálogo, na lista ou entre os caminhos
-# de reconciliações anteriores da cadeia (cuja cobertura é conferida em HEAD).
-# Não existe registro parcial.
+# herdado_da_cadeia <B0> <B1> <M> <caminho> <anteriores> — o caminho, de uma
+# reconciliação anterior, foi só herdado por este merge: a base não o tocou
+# entre B0 e B1 (erro do git não aprova) e M tem exatamente o blob_m da
+# reconciliação anterior mais recente que o lista. <anteriores>:
+# `caminho<TAB>blob_m` (a mais recente por caminho).
+herdado_da_cadeia() {
+  local b0="$1" b1="$2" m="$3" p="$4" bm
+  bm="$(P="$p" awk -F'\t' '$1 == ENVIRON["P"] { b = $2 } END { print b }' "$5")"
+  [ -n "$bm" ] || return 1
+  g diff --quiet --no-renames "$b0" "$b1" -- "$p" >/dev/null 2>&1 || return 1 # guarda:INV
+  { [ "$(g cat-file -t "$m:$p" 2>/dev/null)" = blob ] && [ "$(g rev-parse --verify -q "$m:$p" 2>/dev/null)" = "$bm" ]; } || return 1 # guarda:INV
+}
+
+# inventario <B0> <B1> <M> <lista> <anteriores> — todo caminho que o merge
+# alterou em relação a B1 está na união, no catálogo, na lista, ou foi só
+# herdado de uma reconciliação anterior da cadeia (herdado_da_cadeia). Fora
+# disso, tem de estar na lista e passar nas quatro provas. Não existe registro
+# parcial.
 inventario() {
-  local b1="$1" m="$2" lista="$3" anteriores="$4" p
+  local b0="$1" b1="$2" m="$3" lista="$4" anteriores="$5" p
   g diff --name-only -z --no-renames "$b1" "$m" > "$INVENTARIO" 2>/dev/null \
     || { falha_dura 4 inventario 'inventário: diff B1..M não calculável'; return 1; }
   while IFS= read -r -d '' p <&3; do
     case "$p" in *"$NL"*) reprova "inventário: caminho com quebra de linha alterado pelo merge" inventario; continue ;; esac
-    contem "$UNIAO" "$p" || contem "$CATALOGO" "$p" || contem "$lista" "$p" || contem "$anteriores" "$p" || reprova "inventário: $p: alterado pelo merge e não declarado" inventario # guarda:INV
+    contem "$UNIAO" "$p" || contem "$CATALOGO" "$p" || contem "$lista" "$p" || herdado_da_cadeia "$b0" "$b1" "$m" "$p" "$anteriores" || reprova "inventário: $p: alterado pelo merge e não declarado" inventario # guarda:INV
   done 3< "$INVENTARIO"
 }
 
@@ -529,20 +547,20 @@ verificar() {
   PREFIXO=""
 
   # Cadeia e provas, reconciliação a reconciliação, com as funções do registro.
-  : > "$TMP_DIR/anteriores"
   : > "$TMP_DIR/cobertura"
   i=0
   while [ "$i" -lt "$n" ]; do
     i=$((i + 1)); j=$((i - 1))
-    # os caminhos das reconciliações anteriores (para o inventário desta)
-    [ ! -f "$TMP_DIR/lista$j" ] || cat "$TMP_DIR/lista$j" >> "$TMP_DIR/anteriores"
+    # os caminhos das reconciliações anteriores, com o blob_m da mais recente
+    # que os lista (para o inventário desta: herdado_da_cadeia)
+    awk -F'\t' '{ u[$1] = $3 } END { for (p in u) print p "\t" u[p] }' "$TMP_DIR/cobertura" > "$TMP_DIR/anteriores"
     [ -f "$TMP_DIR/r$i.lido" ] || continue
     nome="$(cat "$TMP_DIR/nome$i")"; PREFIXO="$nome: "
     nnn="$(printf '%s' "$nome" | sed 's/^RECONCILIACAO-BASE-\([0-9]*\)\.md$/\1/')"
     b0="$(_r "$i" b0_sha)"; p1="$(_r "$i" p1_sha)"; b1="$(_r "$i" b1_sha)"; m="$(_r "$i" m_sha)"
     ob="$(_r "$i" origem_base)"; est="$(_r "$i" estado)"; ant="$(_r "$i" anterior)"
     ex="$(_r "$i" expx_tool)"; br="$(_r "$i" branch)"
-    awk -F'\t' -v nnn="$nnn" '$1 == "arquivo" { print $2 "\t" nnn "\t" $5 }' "$TMP_DIR/r$i.lido" >> "$TMP_DIR/cobertura"
+    awk -F'\t' -v nnn="$nnn" -v m="$m" '$1 == "arquivo" { print $2 "\t" nnn "\t" $5 "\t" m }' "$TMP_DIR/r$i.lido" >> "$TMP_DIR/cobertura"
 
     [ "$ex" = "$ORIGEM" ] || motivo 5 contrato "expx_tool ($ex) diverge da origem $ORIGEM"
     if [ -n "$ENTREGA_D" ]; then
@@ -570,22 +588,26 @@ verificar() {
       inicio="$(_r "$j" m_sha)"
     fi
 
-    # o ENTREGA.md de M e a âncora da cadeia
+    # o ENTREGA.md de M (contexto)
     le_entrega_m "$m" "$TMP_DIR/entrega-m$i.md" || continue
-    if [ "$i" = 1 ]; then
-      bv="$(catalogo_fm "$TMP_DIR/entrega-m$i.md" base_validada_sha)"
-      [ "$b0" = "$bv" ] || motivo 5 ancora "b0_sha ($b0) diverge da base_validada_sha da entrega em M (${bv:-ausente})" # guarda:ANCORA
-    fi
 
-    # estrutura: os pais de M são os do artefato; M na linha de primeiro pai
-    # de HEAD, depois do M anterior
+    # estrutura: os pais de M são os do artefato; o merge não mexeu no
+    # ENTREGA.md; M na linha de primeiro pai de HEAD, depois do M anterior
     estrutura_m "$m" "$b0" HEAD || continue
     [ "$P1" = "$p1" ] || { estrutura p1 "p1_sha ($p1) não é o primeiro pai de M ($P1)"; continue; }
     [ "$B1" = "$b1" ] || { estrutura b1 "b1_sha ($b1) não é o segundo pai de M ($B1)"; continue; }
+
+    # âncora da cadeia: o base_validada_sha do ENTREGA.md de P1 (o de antes
+    # do merge), com P1 já conferido como M^1
+    if [ "$i" = 1 ]; then
+      g cat-file blob "$P1:$ENTREGA" > "$TMP_DIR/entrega-p1-$i.md" 2>/dev/null || : > "$TMP_DIR/entrega-p1-$i.md"
+      bv="$(catalogo_fm "$TMP_DIR/entrega-p1-$i.md" base_validada_sha)"
+      [ "$b0" = "$bv" ] || motivo 5 ancora "b0_sha ($b0) diverge da base_validada_sha da entrega em P1 (${bv:-ausente})" # guarda:ANCORA
+    fi
     if [ "$i" -gt 1 ]; then
       lm="$(grep -Fxn -e "$m" "$TMP_DIR/primeiro-pai" | sed -n '1s/:.*//p')"
       lp="$(grep -Fxn -e "$inicio" "$TMP_DIR/primeiro-pai" | sed -n '1s/:.*//p')"
-      { [ -n "$lp" ] && [ "$lm" -lt "$lp" ]; } || motivo 5 cadeia "M não é posterior ao M de $prev na linha de primeiro pai de HEAD"
+      { [ -n "$lp" ] && [ "$lm" -lt "$lp" ]; } || motivo 5 cadeia "M não é posterior ao M de $prev na linha de primeiro pai de HEAD" # guarda:CAD
     fi
 
     # as quatro provas, com o plano e o catálogo da árvore deste M
@@ -605,7 +627,7 @@ verificar() {
 $(awk -F'\t' '$1 == "arquivo" { print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 }' "$TMP_DIR/r$i.lido")
 EOF
 
-    inventario "$B1" "$m" "$TMP_DIR/lista$i" "$TMP_DIR/anteriores"
+    inventario "$b0" "$B1" "$m" "$TMP_DIR/lista$i" "$TMP_DIR/anteriores"
   done
   PREFIXO=""
 
@@ -632,13 +654,14 @@ EOF
   fi
 
   # Cobertura: por caminho, a reconciliação mais recente que o lista; o
-  # conteúdo em HEAD tem de ser o blob_m dela.
+  # conteúdo em HEAD tem de ser o blob_m dela, com o mesmo modo que em M.
   awk -F'\t' '{ if (!($1 in u)) o[++k] = $1; u[$1] = $0 } END { for (i = 1; i <= k; i++) print u[o[i]] }' \
     "$TMP_DIR/cobertura" > "$TMP_DIR/cobertura.ultima"
   : > "$TMP_DIR/cobertos"
-  while IFS="$TAB" read -r f nnn bm <&3; do
+  while IFS="$TAB" read -r f nnn bm mm <&3; do
     h="$(g rev-parse --verify -q "HEAD:$f" 2>/dev/null)" || h=""
     [ "$h" = "$bm" ] || { motivo 4 cobertura "$f: o conteúdo em HEAD (${h:-ausente}) não é o blob_m de RECONCILIACAO-BASE-$nnn.md ($bm)"; continue; } # guarda:BLOBM
+    [ "$(modo_em HEAD "$f")" = "$(modo_em "$mm" "$f")" ] || { motivo 4 cobertura "$f: o modo em HEAD ($(modo_em HEAD "$f")) não é o de M em RECONCILIACAO-BASE-$nnn.md ($(modo_em "$mm" "$f"))"; continue; } # guarda:BLOBM
     printf 'coberto\t%s\t%s\n' "$f" "$nnn" >> "$TMP_DIR/cobertos"
   done 3< "$TMP_DIR/cobertura.ultima"
 
@@ -768,7 +791,15 @@ for existente in "docs/entregas/$TRABALHO"/RECONCILIACAO-BASE-*.md; do
   para 5 "já existe reconciliação registrada ($existente); encadear reconciliações ainda não é suportado"
 done
 
-B0="$(fm base_validada_sha)"
+# B0 vem do ENTREGA.md de P1 (o de antes do merge): o próprio merge poderia
+# reescrevê-lo, e a estrutura exige depois que M e P1 tenham o mesmo.
+P1_ENTREGA="$(g rev-parse --verify -q "$M^1")" || estrutura m 'M^1 ilegível'
+ENTREGA_P1="$TMP_DIR/entrega-p1.md"
+# P1 sem o ENTREGA.md (pais trocados, por exemplo): B0 do de M só para as
+# condições estruturais, que reprovam de qualquer forma — no mínimo a guarda
+# estrutura[entrega], já que M tem o ENTREGA.md (le_entrega_m) e P1 não.
+g cat-file blob "$P1_ENTREGA:$ENTREGA" > "$ENTREGA_P1" 2>/dev/null || cp "$ENTREGA_M" "$ENTREGA_P1"
+B0="$(catalogo_fm "$ENTREGA_P1" base_validada_sha)"
 [ -n "$B0" ] || para 6 'ENTREGA.base_validada_sha ausente: base validada indeterminável'
 printf '%s' "$B0" | grep -Eq '^[0-9a-f]{40}$' || para 5 "ENTREGA.base_validada_sha não é SHA de 40 hex: $B0"
 
@@ -784,7 +815,7 @@ g merge-base --is-ancestor "$B1" "$PONTA_BASE" 2>/dev/null || estrutura base "B1
 uniao_e_catalogo "$RAIZ_M" "$PASTA" || exit 1
 provas "$LISTA" "$B0" "$B0" "$P1" "$B1" "$M"
 : > "$TMP_DIR/anteriores"
-inventario "$B1" "$M" "$LISTA" "$TMP_DIR/anteriores" || exit 1
+inventario "$B0" "$B1" "$M" "$LISTA" "$TMP_DIR/anteriores" || exit 1
 
 [ "$FALHAS" = 0 ] || para 4 "$FALHAS reprovação(ões); nada foi gravado"
 
