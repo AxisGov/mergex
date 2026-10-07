@@ -6,6 +6,12 @@
 #                               FX_B0 FX_P1 FX_B1 FX_M FX_TRAB FX_ENTREGA FX_NOVO1 FX_NOVO2
 #   fx_merge_sem_commit <dir>   o mesmo cenário, parado com o merge resolvido
 #                               e no índice, sem commit (MERGE_HEAD presente)
+#   fx_segunda_base <dir> [ajusta]  segunda base B2 integrada num merge M2
+#                               (HEAD): FX_B2 FX_M2 FX_NOVO3
+#   fx_emite_reconciliacao <dir> <n> <b0> <m> [caminho...]  artefato NNN
+#                               coerente e assinado (rb_emitir), sem provar nada
+#   fx_forja_artefato <dir> <caminho>...  o 001 (FX_B0, FX_M) com esses caminhos
+#   fx_entrega_sincroniza <dir> ENTREGA.md do disco com a lista dos artefatos
 #
 # Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
 # o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
@@ -439,4 +445,150 @@ fx_cenario() {
 fx_merge_sem_commit() {
   [ -n "${1:-}" ] || return 64
   _fx_monta "$1" 0 0
+}
+
+# ---------------------------------------------------------------------------
+# Segunda base e artefatos forjados (--verificar)
+# ---------------------------------------------------------------------------
+
+# Biblioteca do artefato da própria skill (rb_emitir, rb_diff_sha, rb_ler).
+_FXR_ARTEFATO="$(cd "$_FXR_LIB/../../.." && pwd)/.claude/skills/mergex/scripts/reconciliacao-artefato.sh"
+
+_fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
+  local dir="$1" ajusta="$2" msg="$3" shas="$4" b2
+  local novo3=tests/ui/frequency-ksmv-primitives.test.tsx
+  cd "$dir"
+  fixture_switch_exato main main
+  mkdir -p tests/ui
+  printf 'export const casoFrequency = "base";\n' > "$novo3"
+  git add "$novo3"
+  if [ "$ajusta" = reajusta ]; then
+    printf 'export const casoCompliance = "base";\nexport const segundaBase = 2;\n' > tests/ui/compliance-ksmv-primitives.test.tsx
+    git add tests/ui/compliance-ksmv-primitives.test.tsx
+  fi
+  _fx_msg "$msg" "feat: primitiva ksmv de frequencia"
+  _fx_commit "$msg"
+  b2="$(git rev-parse HEAD)"
+  fixture_switch_exato feature/ft-rec feature/ft-rec
+  git merge --no-ff --no-commit main >/dev/null 2>&1 || true
+  [ -f .git/MERGE_HEAD ]
+  case "$ajusta" in
+    ajusta|reajusta)
+      printf 'export const casoFrequency = "base";\nexport const ajusteFrequency = "ft-rec";\n' > "$novo3"
+      git add "$novo3" ;;
+  esac
+  if [ "$ajusta" = reajusta ]; then
+    printf 'export const casoCompliance = "base";\nexport const segundaBase = 2;\nexport const ajusteCompliance = "ft-rec";\n' \
+      > tests/ui/compliance-ksmv-primitives.test.tsx
+    git add tests/ui/compliance-ksmv-primitives.test.tsx
+  fi
+  [ -z "$(git diff --name-only --diff-filter=U)" ]
+  _fx_msg "$msg" "merge: integra a main de novo na feature ft-rec" "Trabalho: ft-rec" "Integra-base: $b2"
+  _fx_commit "$msg"
+  printf '%s %s\n' "$b2" "$(git rev-parse HEAD)" > "$shas"
+}
+
+# fx_segunda_base <dir> [ajusta] — depois de fx_cenario, a base avança de novo
+# (B2 cria FX_NOVO3) e é integrada à feature num segundo merge M2, que fica em
+# HEAD, com `Trabalho: ft-rec` e `Integra-base: B2`. Com `ajusta`, a resolução
+# ajusta FX_NOVO3; sem, M2 não muda nada do que veio da base. Com `reajusta`,
+# além disso B2 altera FX_NOVO1 (já reconciliado no 001) e M2 o ajusta de
+# novo (conflito resolvido pela fixture). Exporta FX_B2,
+# FX_M2 e FX_NOVO3. Só cria commits: arquivos não rastreados ficam onde estão.
+fx_segunda_base() {
+  local dir="$1" ajusta="${2:-}" msg rc
+  [ -n "$dir" ] || return 64
+  msg="$(mktemp)" || return 1
+  bash -c 'set -e; . "$1"; shift; _fx_segunda_corpo "$@"' _ \
+    "$_FXR_LIB/fixture-reconciliacao.sh" "$dir" "$ajusta" "$msg" "$msg.shas"
+  rc=$?
+  [ "$rc" -eq 0 ] || { rm -f "$msg" "$msg.shas"; return 1; }
+  read -r FX_B2 FX_M2 < "$msg.shas"
+  rm -f "$msg" "$msg.shas"
+  FX_NOVO3=tests/ui/frequency-ksmv-primitives.test.tsx
+  export FX_B2 FX_M2 FX_NOVO3
+}
+
+# fx_emite_reconciliacao <dir> <numero> <b0> <m> [caminho...] — grava
+# docs/entregas/ft-rec/RECONCILIACAO-BASE-<NNN>.md com rb_emitir: coerente e
+# assinado, com P1 = M^1, B1 = M^2 e os campos de cada caminho tirados do Git.
+# NÃO prova nada (é para forjar): status fora de A|M vira M, blob ausente vira
+# 40 zeros. `anterior` e `origem_base` seguem o número (null/registrada_e0 no
+# 001; o nome anterior/reconciliacao_anterior nos demais).
+# Ambiente opcional: FX_ESTADO (ativa), FX_ORIGEM_BASE, FX_P1_SHA e FX_B1_SHA
+# (só os escalares gravados; os campos seguem M^1/M^2), FX_FORJA_AWK (programa
+# awk, -F/OFS = TAB, aplicado ao TSV de arquivos antes da emissão: colunas
+# caminho status_base blob_b1 blob_m diff_b1_m_sha256 motivo).
+fx_emite_reconciliacao() {
+  local dir="$1" num="$2" b0="$3" m="$4"
+  shift 4
+  ( cd "$dir" || exit 1
+    . "$_FXR_ARTEFATO" || exit 1
+    t="$(mktemp -d)" || exit 1
+    p1="$(git rev-parse "$m^1")" && b1="$(git rev-parse "$m^2")" || { rm -rf "$t"; exit 1; }
+    nome="$(printf 'RECONCILIACAO-BASE-%03d.md' "$num")"
+    if [ "$num" = 1 ]; then ant=null; ob=registrada_e0
+    else ant="$(printf 'RECONCILIACAO-BASE-%03d.md' $((num - 1)))"; ob=reconciliacao_anterior; fi
+    ob="${FX_ORIGEM_BASE:-$ob}"
+    printf 'expx_tool\tsprintx\ntrabalho_id\tft-rec\nnumero\t%s\nanterior\t%s\nbranch\tfeature/ft-rec\nbranch_base\tmain\norigem_base\t%s\nb0_sha\t%s\np1_sha\t%s\nb1_sha\t%s\nm_sha\t%s\nestado\t%s\nregistrado_em\t2026-10-07\n' \
+      "$num" "$ant" "$ob" "$b0" "${FX_P1_SHA:-$p1}" "${FX_B1_SHA:-$b1}" "$m" "${FX_ESTADO:-ativa}" > "$t/esc"
+    : > "$t/arq"
+    for f in "$@"; do
+      st="$(git -c core.quotepath=false diff --no-renames --name-status -z "$b0" "$b1" -- ":(literal)$f" | tr '\0' '\n' | head -n1)"
+      case "$st" in A|M) ;; *) st=M ;; esac
+      bb="$(git rev-parse -q --verify "$b1:$f")" || bb=0000000000000000000000000000000000000000
+      bm="$(git rev-parse -q --verify "$m:$f")" || bm=0000000000000000000000000000000000000000
+      ds="$(rb_diff_sha "$b1" "$m" "$f")" || { rm -rf "$t"; exit 1; }
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$f" "$st" "$bb" "$bm" "$ds" "forjado pela fixture" >> "$t/arq"
+    done
+    if [ -n "${FX_FORJA_AWK:-}" ]; then
+      awk -F'\t' -v OFS='\t' "$FX_FORJA_AWK" "$t/arq" > "$t/arq2" && mv "$t/arq2" "$t/arq" || { rm -rf "$t"; exit 1; }
+    fi
+    mkdir -p docs/entregas/ft-rec
+    RB_ERRO=""
+    rb_emitir "docs/entregas/ft-rec/$nome" "$t/esc" "$t/arq" || { printf 'fixture: %s\n' "$RB_ERRO" >&2; rm -rf "$t"; exit 1; }
+    rm -rf "$t"
+  )
+}
+
+# fx_forja_artefato <dir> <caminho>... — reescreve o RECONCILIACAO-BASE-001.md
+# (B0 = FX_B0, M = FX_M) listando os caminhos dados, coerente e com assinatura
+# válida, mesmo que nenhum seja elegível.
+fx_forja_artefato() {
+  local dir="$1"; shift
+  fx_emite_reconciliacao "$dir" 1 "$FX_B0" "$FX_M" "$@"
+}
+
+# fx_entrega_sincroniza <dir> — reescreve, no ENTREGA.md do disco, a lista
+# `reconciliacoes` a partir dos artefatos RECONCILIACAO-BASE-NNN.md presentes
+# (na ordem do nome) e `base_validada_sha` com o b1_sha do último. Sem artefato:
+# `reconciliacoes: []` e a base fica como está.
+fx_entrega_sincroniza() {
+  ( cd "$1" || exit 1
+    . "$_FXR_ARTEFATO" || exit 1
+    e=docs/entregas/ft-rec/ENTREGA.md; bloco='reconciliacoes:'; ultimo=""; n=0
+    for a in docs/entregas/ft-rec/RECONCILIACAO-BASE-[0-9][0-9][0-9].md; do
+      [ -f "$a" ] || continue
+      lido="$(rb_ler "$a")" || exit 1
+      num="$(printf '%s\n' "$lido" | awk -F'\t' '$1 == "escalar" && $2 == "numero" { print $3 }')"
+      b1="$(printf '%s\n' "$lido" | awk -F'\t' '$1 == "escalar" && $2 == "b1_sha" { print $3 }')"
+      m="$(printf '%s\n' "$lido" | awk -F'\t' '$1 == "escalar" && $2 == "m_sha" { print $3 }')"
+      bloco="$bloco
+  - numero: $num
+    arquivo: ${a##*/}
+    b1_sha: $b1
+    m_sha: $m"
+      ultimo="$b1"; n=$((n + 1))
+    done
+    [ "$n" -gt 0 ] || bloco='reconciliacoes: []'
+    BLOCO="$bloco" B1="$ultimo" awk '
+      NR == 1 { print; fm = 1; next }
+      fm && /^---/ { fm = 0; print; next }
+      fm && /^reconciliacoes:/ { print ENVIRON["BLOCO"]; pula = 1; next }
+      fm && pula && /^[ \t-]/ { next }
+      { pula = 0 }
+      fm && /^base_validada_sha:/ && ENVIRON["B1"] != "" { print "base_validada_sha: " ENVIRON["B1"]; next }
+      { print }
+    ' "$e" > "$e.fx" && cat "$e.fx" > "$e" && rm -f "$e.fx"
+  )
 }

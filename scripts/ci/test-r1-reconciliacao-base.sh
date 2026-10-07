@@ -1028,6 +1028,246 @@ grupo_entrega() {
   cd "$REPO" || return
 }
 
+# --- apoio do grupo verificar ------------------------------------------------
+
+# v_ok <desc> <esperado> — `--verificar` (array `v`) com rc 0, stdout
+# exatamente <esperado> e stderr vazio.
+v_ok() {
+  local desc="$1" esperado="$2" out rc
+  out="$("${v[@]}" 2>"$VT/err")"; rc=$?
+  if [ "$rc" = 0 ] && [ "$out" = "$esperado" ] && [ ! -s "$VT/err" ]; then ok "$desc"
+  else falha "$desc — rc=$rc out=$(printf '%s' "$out" | tr '\n\t' '|>') err=$(tr '\n' ' ' < "$VT/err")"; fi
+}
+
+# v_motivo <desc> <rc> <código> <trecho> — `--verificar` com o rc, `ok=false`
+# na primeira linha, nenhuma linha `coberto`, uma linha
+# `motivo<TAB><código><TAB>...<trecho>...` e stderr vazio: um rc vindo da causa
+# errada não passa.
+v_motivo() {
+  local desc="$1" esperado="$2" cod="$3" trecho="$4" out rc
+  out="$("${v[@]}" 2>"$VT/err")"; rc=$?
+  if [ "$rc" != "$esperado" ]; then falha "$desc — rc=$rc, esperava $esperado: $(printf '%s' "$out" | tr '\n\t' '|>')"; return; fi
+  if [ "$(printf '%s\n' "$out" | sed -n 1p)" != ok=false ] || printf '%s\n' "$out" | grep -q '^coberto'; then
+    falha "$desc — saída sem ok=false ou com coberto: $(printf '%s' "$out" | tr '\n\t' '|>')"; return
+  fi
+  [ -s "$VT/err" ] && { falha "$desc — stderr não vazio: $(tr '\n' ' ' < "$VT/err")"; return; }
+  if printf '%s\n' "$out" | COD="$cod" TRECHO="$trecho" awk -F'\t' \
+      '$1 == "motivo" && $2 == ENVIRON["COD"] && index($3, ENVIRON["TRECHO"]) { f = 1 } END { exit !f }'; then
+    ok "$desc"
+  else falha "$desc — sem motivo $cod com '$trecho': $(printf '%s' "$out" | tr '\n\t' '|>')"; fi
+}
+
+# _leitura — foto do que o --verificar não pode mudar: status (sem refresh
+# oportunista do índice) e o índice byte a byte.
+_leitura() {
+  GIT_OPTIONAL_LOCKS=0 git status --porcelain=v1 -z --untracked-files=all | rb_sha256
+  rb_sha256 < "$(git rev-parse --git-path index)"
+}
+
+AR=docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
+AR2=docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
+
+grupo_verificar() {
+  local d v out rc antes tok campo valor esperado lateral VT
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  VT="$(mktemp -d)"; TMPS="$TMPS $VT"
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+
+  # sem reconciliação nenhuma: ok, nada coberto
+  v_ok "sem artefato e reconciliacoes []: ok=true sem coberto" "ok=true"
+  rc_igual "--verificar recusa lista de caminhos" 64 "${v[@]}" -- "$FX_NOVO1"
+  rc_igual "--verificar com --registrar é uso" 64 "${v[@]}" --registrar
+  rc_igual "--verificar recusa --force" 64 "${v[@]}" --force
+
+  bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null
+  rc_igual "verifica o registro" 0 "${v[@]}"
+  [ "$("${v[@]}" | grep -c '^coberto	')" = 2 ] && ok "dois cobertos" || falha "cobertura"
+  esperado="ok=true
+coberto	$FX_NOVO2	001
+coberto	$FX_NOVO1	001"
+  v_ok "saída exata: ok=true e um coberto por caminho, com o NNN" "$esperado"
+
+  # só leitura: nada muda (status, índice), com a trava C5 ocupada, e o
+  # temporário (fora do repositório) some
+  mkdir -p "$VT/tmpdir"
+  antes="$(_leitura)"
+  tok="$(bash "$TRAVA" --adquirir teste-r1 | sed -n 's/^token=//p')"
+  [ -n "$tok" ] || falha "trava não adquirida"
+  out="$(TMPDIR="$VT/tmpdir" "${v[@]}" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && ok "verifica com a trava C5 ocupada" || falha "trava ocupada: rc=$rc $out"
+  bash "$TRAVA" --conferir "$tok" >/dev/null 2>&1 && ok "a trava continua de quem a tinha" || falha "a verificação mexeu na trava"
+  bash "$TRAVA" --liberar "$tok" >/dev/null 2>&1
+  [ "$(_leitura)" = "$antes" ] && ok "só leitura: status e índice idênticos" || falha "a verificação mudou status ou índice"
+  [ -z "$(ls -A "$VT/tmpdir")" ] && ok "temporário removido (ok)" || falha "sobrou temporário: $(ls -A "$VT/tmpdir")"
+
+  # artefato forjado: coerente, assinado, listando um caminho inelegível
+  cp "$AR" "$VT/bak.md"
+  fx_forja_artefato "$d" README.md || falha "forja não emitiu"
+  rb_validar "$AR" ft-rec 1 && ok "forjado: assinatura e schema válidos" || falha "forjado inválido: $RB_ERRO"
+  rc_igual "artefato forjado com assinatura válida não passa: prova recalculada" 4 "${v[@]}"
+  v_motivo "forjado: o motivo cita a prova 1" 4 prova "prova 1: README.md"
+  v_motivo "forjado: o motivo cita o inventário" 4 inventario "inventário: $FX_NOVO1"
+  antes="$(_leitura)"
+  TMPDIR="$VT/tmpdir" "${v[@]}" >/dev/null 2>&1
+  [ "$(_leitura)" = "$antes" ] && [ -z "$(ls -A "$VT/tmpdir")" ] && ok "reprovação também é só leitura e sem temporário" || falha "reprovação deixou rastro"
+  cp "$VT/bak.md" "$AR"
+
+  # cada campo gravado é recalculado: adulterado e reassinado, reprova
+  for campo in status_base blob_b1 blob_m diff_b1_m_sha256; do
+    case "$campo" in
+      status_base) valor='$2 = "M"'; esperado="status_base" ;;
+      blob_b1) valor='$3 = "'"$(git rev-parse "$FX_M:$FX_NOVO1")"'"'; esperado="blob_b1" ;;
+      blob_m) valor='$4 = "'"$(git rev-parse "$FX_B1:$FX_NOVO1")"'"'; esperado="blob_m" ;;
+      diff_b1_m_sha256) valor='$5 = "'"$(printf 'outro' | rb_sha256)"'"'; esperado="diff_b1_m_sha256" ;;
+    esac
+    FX_FORJA_AWK='$1 == "'"$FX_NOVO1"'" { '"$valor"' } 1' fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" || falha "$campo: forja não emitiu"
+    rb_validar "$AR" ft-rec 1 || falha "$campo: forja inválida: $RB_ERRO"
+    if [ "$campo" = blob_m ]; then
+      # HEAD com o conteúdo forjado: a cobertura não denuncia, só o recálculo
+      git show "$FX_B1:$FX_NOVO1" > "$FX_NOVO1"; git commit -q -m "volta ao conteúdo da base" -- "$FX_NOVO1"
+    fi
+    v_motivo "$campo adulterado e reassinado reprova pelo recálculo" 4 campo "$FX_NOVO1: $esperado"
+    if [ "$campo" = blob_m ]; then
+      git show "$FX_M:$FX_NOVO1" > "$FX_NOVO1"; git commit -q -m "volta ao conteúdo de M" -- "$FX_NOVO1"
+    fi
+    cp "$VT/bak.md" "$AR"
+  done
+  v_ok "controle: o artefato registrado volta a verificar" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_NOVO1")"
+
+  # cadeia e contrato
+  mv "$AR" "$AR2"
+  v_motivo "numeração com lacuna reprova" 5 numeracao "RECONCILIACAO-BASE-001.md"
+  mv "$AR2" "$AR"
+  sed 's/^anterior: null$/anterior: "RECONCILIACAO-BASE-000.md"/' "$VT/bak.md" > "$AR"
+  v_motivo "anterior errado reprova" 5 contrato "anterior"
+  cp "$VT/bak.md" "$AR"
+  sed 's/^estado: ativa$/estado: superada/' "$VT/bak.md" > "$AR"
+  v_motivo "a última reconciliação superada reprova" 5 estado "ativa"
+  cp "$VT/bak.md" "$AR"
+  printf 'x\n' > docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md.bak
+  v_motivo "nome fora do padrão na pasta da entrega reprova" 5 contrato "RECONCILIACAO-BASE-001.md.bak"
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md.bak
+
+  # coerência com o ENTREGA.md do disco
+  cp "$FX_ENTREGA" "$VT/entrega.md"
+  git show "HEAD:$FX_ENTREGA" > "$FX_ENTREGA"
+  v_motivo "artefato fora de ENTREGA.reconciliacoes (registro interrompido) reprova" 5 orfao "artefato órfão: RECONCILIACAO-BASE-001.md"
+  cp "$VT/entrega.md" "$FX_ENTREGA"
+  mv "$AR" "$VT/fora.md"
+  v_motivo "item de ENTREGA.reconciliacoes sem artefato reprova" 5 ausente "artefato ausente: RECONCILIACAO-BASE-001.md"
+  mv "$VT/fora.md" "$AR"
+  sed "s/^base_validada_sha: .*/base_validada_sha: $FX_B0/" "$VT/entrega.md" > "$FX_ENTREGA"
+  v_motivo "base_validada_sha do disco diferente do b1_sha da última reprova" 5 entrega "base_validada_sha"
+  sed "s/^    m_sha: .*/    m_sha: $FX_P1/" "$VT/entrega.md" > "$FX_ENTREGA"
+  v_motivo "m_sha de ENTREGA.reconciliacoes diferente do artefato reprova" 5 entrega "m_sha"
+  sed "s/^    b1_sha: .*/    b1_sha: $FX_B0/" "$VT/entrega.md" > "$FX_ENTREGA"
+  v_motivo "b1_sha de ENTREGA.reconciliacoes diferente do artefato reprova" 5 entrega "b1_sha"
+  cp "$VT/entrega.md" "$FX_ENTREGA"
+  FX_ORIGEM_BASE=inferida_legado fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" || falha "forja legado não emitiu"
+  v_motivo "origem_base inferida_legado: ainda não suportada" 5 origem_base "origem_base inferida_legado ainda não suportada"
+  cp "$VT/bak.md" "$AR"
+
+  # p1_sha e b1_sha gravados são os pais de M (forjados e reassinados; a
+  # lista do ENTREGA.md acompanha o b1_sha forjado, para só a estrutura falar)
+  FX_P1_SHA="$FX_B0" fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" || falha "forja do p1_sha"
+  v_motivo "p1_sha diferente do primeiro pai de M reprova" 4 estrutura "estrutura[p1]"
+  FX_B1_SHA="$FX_B0" fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja do b1_sha"
+  v_motivo "b1_sha diferente do segundo pai de M reprova" 4 estrutura "estrutura[b1]"
+  cp "$VT/bak.md" "$AR"; cp "$VT/entrega.md" "$FX_ENTREGA"
+  v_ok "controle: verifica de novo depois das reprovações" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_NOVO1")"
+
+  # reconciliado alterado depois de M deixa de estar coberto
+  echo "// depois de M" >> "$FX_NOVO1"; git commit -qam "mexe depois de M"
+  rc_igual "reconciliado alterado depois de M deixa de estar coberto" 4 "${v[@]}"
+  v_motivo "alterado depois de M: o motivo é a cobertura" 4 cobertura "$FX_NOVO1"
+  git rm -q --cached "$FX_NOVO1" >/dev/null; rm -f "$FX_NOVO1"; git commit -q -m "remove o reconciliado"
+  v_motivo "reconciliado ausente em HEAD não está coberto" 4 cobertura "$FX_NOVO1"
+  cd "$REPO" || return
+
+  # âncora: o b0_sha do 001 é a base_validada_sha da entrega em M
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=b0_fora_p1 fx_cenario "$d" || { falha "variante b0_fora_p1 não montou"; return; }
+  cd "$d" || return
+  fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja da âncora"
+  v_motivo "b0_sha do 001 diferente da base_validada_sha de M reprova" 5 ancora "base_validada_sha"
+  cd "$REPO" || return
+
+  # M fora da linha de primeiro pai de HEAD
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=fora_primeiro_pai fx_cenario "$d" || { falha "variante fora_primeiro_pai não montou"; return; }
+  cd "$d" || return
+  lateral="$(git rev-parse HEAD^2)"
+  fx_emite_reconciliacao "$d" 1 "$FX_B0" "$lateral" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja do lateral"
+  v_motivo "m_sha fora da linha de primeiro pai de HEAD reprova" 4 estrutura "estrutura[primeiro_pai]"
+  git branch -q lateral "$lateral"
+  v_motivo "m_sha na linha de primeiro pai de outra ref (não HEAD) reprova" 4 estrutura "estrutura[primeiro_pai]"
+  cd "$REPO" || return
+
+  # caminho com espaço, acento e apóstrofo (core.quotepath true no repositório)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=caminho_especial fx_cenario "$d" || { falha "variante caminho_especial não montou"; return; }
+  cd "$d" || return
+  bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" "$FX_ESPECIAL" >/dev/null 2>&1 \
+    || falha "registro do caminho especial"
+  esperado="$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_ESPECIAL" "$FX_NOVO1")"
+  v_ok "caminho especial coberto exatamente, sem escape" "$esperado"
+  cd "$REPO" || return
+
+  # cadeia 001 -> 002 (dois merges de base)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "emissão do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "emissão do 002"
+  fx_entrega_sincroniza "$d" || falha "sincronização do ENTREGA.md"
+  esperado="$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001\ncoberto\t%s\t002' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3")"
+  v_ok "cadeia 001 -> 002 verifica; NOVO3 coberto pelo 002" "$esperado"
+  cp "$AR" "$VT/c1.md"; cp "$AR2" "$VT/c2.md"
+  sed 's/^estado: superada$/estado: ativa/' "$VT/c1.md" > "$AR"
+  v_motivo "cadeia: 001 ativa com 002 depois reprova" 5 estado "superada"
+  cp "$VT/c1.md" "$AR"
+  sed 's/^anterior: .*/anterior: null/' "$VT/c2.md" > "$AR2"
+  v_motivo "cadeia: anterior do 002 errado reprova" 5 contrato "anterior"
+  cp "$VT/c2.md" "$AR2"
+  fx_emite_reconciliacao "$d" 2 "$FX_B0" "$FX_M2" "$FX_NOVO3" || falha "emissão do 002 com b0 = B0"
+  v_motivo "cadeia: b0_sha do 002 diferente do b1_sha do 001 reprova" 5 cadeia "b0_sha"
+  cp "$VT/c2.md" "$AR2"
+  mv "$AR" "$VT/fora.md"
+  v_motivo "cadeia: sem o 001 a numeração tem lacuna" 5 numeracao "RECONCILIACAO-BASE-001.md"
+  mv "$VT/fora.md" "$AR"
+  v_ok "cadeia: controle depois das reprovações" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001\ncoberto\t%s\t002' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3")"
+  cd "$REPO" || return
+
+  # cadeia em que o 002 reconcilia de novo um caminho do 001: vale o blob_m da
+  # reconciliação mais recente que o lista
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" reajusta || { falha "segunda base (reajusta) não montou"; return; }
+  cd "$d" || return
+  FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "emissão do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" "$FX_NOVO1" || falha "emissão do 002"
+  fx_entrega_sincroniza "$d" || falha "sincronização do ENTREGA.md"
+  [ "$(git rev-parse "HEAD:$FX_NOVO1")" != "$(git rev-parse "$FX_M:$FX_NOVO1")" ] || falha "NOVO1 não mudou em M2"
+  esperado="$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t002\ncoberto\t%s\t002' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3")"
+  v_ok "cadeia: caminho reconciliado de novo é coberto pela mais recente" "$esperado"
+  cd "$REPO" || return
+
+  # o plano de cada reconciliação é o da árvore do M dela: um commit de plano
+  # entre M1 e M2 que declara NOVO3 vale para o 002
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  sed 's|altera: \[src/painel.ts\]|altera: [src/painel.ts, tests/ui/frequency-ksmv-primitives.test.tsx]|' \
+    docs/sprintx/features/ft-rec/sprint-01/tasks.md > "$VT/tasks.md" && cat "$VT/tasks.md" > docs/sprintx/features/ft-rec/sprint-01/tasks.md
+  git commit -q -m "docs: o plano declara a primitiva de frequencia" -- docs/sprintx/features/ft-rec/sprint-01/tasks.md
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "emissão do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "emissão do 002"
+  fx_entrega_sincroniza "$d" || falha "sincronização do ENTREGA.md"
+  v_motivo "cadeia: prova 3 do 002 usa o plano da árvore de M2" 4 prova "RECONCILIACAO-BASE-002.md: prova 3: $FX_NOVO3"
+  cd "$REPO" || return
+}
+
 # ---------------------------------------------------------------------------
 # Despacho
 # ---------------------------------------------------------------------------

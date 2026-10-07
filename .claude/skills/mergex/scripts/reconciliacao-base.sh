@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# reconciliacao-base — registra a reconciliação de base pós-E8.
+# reconciliacao-base — registra e verifica a reconciliação de base pós-E8.
 #
 # Contrato: docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md,
-# seções 5 (modelo Git), 6 (as quatro provas), 7 (artefato) e 8 (--registrar).
+# seções 5 (modelo Git), 6 (as quatro provas), 7 (artefato) e 8 (--registrar,
+# --verificar).
 #
 # Uso:
 #   reconciliacao-base.sh --registrar --entrega docs/entregas/<id>/ENTREGA.md \
 #     --origem <sprintx|runx> --trabalho <id> -- <caminho>...
+#   reconciliacao-base.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md \
+#     --origem <sprintx|runx> --trabalho <id>
 #
+# --registrar
 #   M é HEAD; P1 = M^1; B1 = M^2; B0 = base_validada_sha do ENTREGA.md.
 #   Calcula as condições estruturais, as quatro provas de cada caminho dado e o
 #   inventário completo do merge (`git diff --name-only B1 M` contido em união
@@ -23,14 +27,33 @@
 #   ENTREGA.md do disco só se ele for byte a byte o de M (senão rc 3), e é tudo
 #   ou nada: artefato e ENTREGA.md, ou nenhum dos dois.
 #
+# --verificar (só leitura: nunca grava, nunca adquire a trava C5, não exige
+#   stage vazio nem pasta limpa)
+#   Lê os RECONCILIACAO-BASE-NNN.md do disco e, para toda a cadeia, recalcula
+#   do Git o que eles afirmam, com as MESMAS funções de prova do registro:
+#   schema e assinatura; numeração contínua, `anterior`, `b0_sha` = `b1_sha`
+#   da anterior, estados (só a última `ativa`), M em ordem na linha de primeiro
+#   pai de HEAD; âncora (o `b0_sha` do 001 é o `base_validada_sha` do
+#   ENTREGA.md em M); estrutura; as quatro provas (plano e catálogo da árvore
+#   do M de cada uma, `<início>` da prova 2 = M anterior); status_base,
+#   blob_b1, blob_m e diff_b1_m_sha256 de cada caminho; inventário B1..M
+#   (aceitando também os caminhos das reconciliações anteriores); a lista
+#   `reconciliacoes` e o `base_validada_sha` do ENTREGA.md do disco; e, por
+#   caminho, `HEAD:<caminho>` igual ao `blob_m` da reconciliação mais recente
+#   que o lista. Nenhum campo do artefato é aceito sem recálculo.
+#   Saída (só stdout): `ok=true` e `coberto<TAB><caminho><TAB><NNN>` por
+#   caminho; ou `ok=false` e `motivo<TAB><código><TAB><detalhe>` por falha,
+#   todas relatadas. rc 5 se houver falha de contrato, senão 4.
+#
 #   Toda prova é recalculada do Git; nenhum caminho é aceito por estar listado.
 #   Não há opção de força, nem variável de ambiente que relaxe prova.
 #
-# Códigos: 0 registrado; 1 ambiente (fora de repositório, temporário, trava
-#   não criada); 2 trava C5 ocupada; 3 stage não vazio ou merge em andamento;
-#   4 prova reprovada (estrutura, uma das quatro provas, inventário);
-#   5 contrato do ENTREGA.md inválido ou reconciliação já registrada;
-#   6 base validada indeterminável; 64 uso.
+# Códigos: 0 registrado/verificado; 1 ambiente (fora de repositório,
+#   temporário, trava não criada); 2 trava C5 ocupada; 3 stage não vazio ou
+#   merge em andamento; 4 prova reprovada (estrutura, uma das quatro provas,
+#   inventário, campo recalculado, cobertura); 5 contrato do artefato, da cadeia
+#   ou do ENTREGA.md inválido, ou reconciliação já registrada; 6 base validada
+#   indeterminável; 64 uso.
 #
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
@@ -83,7 +106,8 @@ SEPARADOR=0
 uso() {
   [ -z "${1:-}" ] || printf 'reconciliacao-base: %s\n' "$1" >&2
   printf '%s\n' \
-    'uso: reconciliacao-base.sh --registrar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> -- <caminho>...' >&2
+    'uso: reconciliacao-base.sh --registrar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> -- <caminho>...' \
+    '     reconciliacao-base.sh --verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id>' >&2
   exit 64
 }
 
@@ -114,12 +138,38 @@ para() {
   exit "$1"
 }
 
+# ---------------------------------------------------------------------------
+# Falhas, nos dois modos. O registro para na primeira falha dura e relata
+# todas as reprovações de prova no stderr; a verificação acumula cada falha
+# como `motivo<TAB><código><TAB><detalhe>` e segue para a reconciliação
+# seguinte. Uma implementação de prova, dois modos.
+# ---------------------------------------------------------------------------
+PREFIXO=""   # (verificar) o artefato em exame, à frente de cada detalhe
+MOTIVOS=""   # (verificar) arquivo com as linhas `motivo`
+FALHA_5=0    # (verificar) houve falha de contrato
+FALHA_4=0    # (verificar) houve falha de prova, estrutura ou cobertura
+
+# motivo <rc> <código> <detalhe> — (verificar) acumula uma falha
+motivo() {
+  printf 'motivo\t%s\t%s\n' "$2" "$(printf '%s%s' "$PREFIXO" "$3" | tr '\t\n\r' '   ')" >> "$MOTIVOS"
+  if [ "$1" = 5 ]; then FALHA_5=1; else FALHA_4=1; fi
+}
+
+# falha_dura <rc> <código> <mensagem> — falha que impede seguir com a
+# reconciliação em exame: o registro encerra; a verificação acumula o motivo,
+# e quem chamou devolve 1.
+falha_dura() {
+  [ "$MODO" = verificar ] || para "$1" "$3"
+  motivo "$1" "$2" "$3"
+}
+
 # Condição estrutural reprovada: as provas não são calculáveis sobre ela.
-estrutura() { para 4 "estrutura[$1]: $2"; }
+estrutura() { falha_dura 4 estrutura "estrutura[$1]: $2"; }
 
 FALHAS=0
-reprova() {
-  printf 'reconciliacao-base: %s\n' "$1" >&2
+reprova() { # <mensagem> [código]
+  if [ "$MODO" = verificar ]; then motivo 4 "${2:-prova}" "$1"
+  else printf 'reconciliacao-base: %s\n' "$1" >&2; fi
   FALHAS=$((FALHAS + 1))
 }
 
@@ -228,6 +278,381 @@ _entrega_tem() {
   ' "$1"
 }
 
+# entrega_lista_reconciliacoes <arquivo> — a lista `reconciliacoes` do
+# frontmatter, na forma que entrega_reconciliacoes grava, como
+# `numero<TAB>arquivo<TAB>b1_sha<TAB>m_sha` por item (nada para `[]` ou chave
+# ausente). Qualquer outra forma: rc 1.
+entrega_lista_reconciliacoes() {
+  awk '
+    function fecha() {
+      if (!item) return
+      if (!("arquivo" in it) || !("b1_sha" in it) || !("m_sha" in it)) bad = 1
+      print n "\t" it["arquivo"] "\t" it["b1_sha"] "\t" it["m_sha"]
+      split("", it); item = 0
+    }
+    { sub(/\r$/, "") }
+    NR == 1 { if ($0 !~ /^---[ \t]*$/) { bad = 1; exit } next }
+    /^---[ \t]*$/ { fechou = 1; exit }
+    /^[A-Za-z_][A-Za-z0-9_]*:/ {
+      if (em) { fecha(); em = 0 }
+      if ($0 !~ /^reconciliacoes:/) next
+      if (visto) { bad = 1; exit }
+      visto = 1
+      v = $0; sub(/^reconciliacoes:[ \t]*/, "", v); sub(/[ \t]+$/, "", v)
+      if (v == "[]") next
+      if (v != "") { bad = 1; exit }
+      em = 1; next
+    }
+    em && /^  - numero: [^ \t]+[ \t]*$/ { fecha(); n = $0; sub(/^  - numero: /, "", n); sub(/[ \t]+$/, "", n); item = 1; next }
+    em && item && /^    (arquivo|b1_sha|m_sha): [^ \t]+[ \t]*$/ {
+      k = $0; sub(/^    /, "", k); v = k; sub(/:.*/, "", k); sub(/^[^:]*: /, "", v); sub(/[ \t]+$/, "", v)
+      if (k in it) { bad = 1; exit }
+      it[k] = v; next
+    }
+    em { bad = 1; exit }
+    END { if (em) fecha(); if (bad || !fechou) exit 1 }
+  ' "$1"
+}
+
+# ---------------------------------------------------------------------------
+# Funções de prova (seções 5 e 6), comuns aos dois modos. Nada que esteja só
+# no disco entra numa prova: o ENTREGA.md e a pasta do trabalho (plano e
+# catálogo) são lidos da árvore de M.
+# ---------------------------------------------------------------------------
+
+contem() { grep -Fxq -e "$2" "$1"; }
+
+# modo_em <commit> <caminho> — o modo do caminho na árvore do commit (vazio se ausente)
+modo_em() { g ls-tree -z "$1" -- "$2" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .*//p'; }
+
+# le_entrega_m <M> <destino> — o ENTREGA.md de M em <destino>, com o contexto
+# explícito (kind, trabalho, origem) igual ao registrado.
+le_entrega_m() {
+  local m="$1" dest="$2" modo
+  modo="$(modo_em "$m" "$ENTREGA")"
+  [ -n "$modo" ] || { falha_dura 5 entrega "$ENTREGA ausente no commit M $m"; return 1; }
+  case "$modo" in 100644|100755) ;; *) falha_dura 5 entrega "$ENTREGA não é arquivo regular em M (modo $modo)"; return 1 ;; esac
+  g cat-file blob "$m:$ENTREGA" > "$dest" 2>/dev/null || { falha_dura 5 entrega "$ENTREGA ilegível em M"; return 1; }
+  [ "$(catalogo_fm "$dest" kind)" = entrega ] || { falha_dura 5 entrega "$ENTREGA não declara kind: entrega"; return 1; }
+  [ "$(catalogo_fm "$dest" trabalho_id)" = "$TRABALHO" ] || { falha_dura 5 entrega 'trabalho explícito diverge de ENTREGA.trabalho_id'; return 1; }
+  [ "$(catalogo_fm "$dest" expx_tool)" = "$ORIGEM" ] || { falha_dura 5 entrega 'origem explícita diverge de ENTREGA.expx_tool'; return 1; }
+}
+
+# materializa_m <M> <dir> — a árvore de M materializada em <dir> só no
+# necessário para resolver a pasta do trabalho e ler o plano: as três pastas
+# candidatas, blob por blob. Link simbólico ou submódulo dentro delas: o plano
+# não é lido (rc 5). Define RAIZ_M (físico) e PASTA (resolvida em M).
+materializa_m() {
+  local m="$1" raiz item modo caminho destino
+  mkdir -p "$2" 2>/dev/null || { falha_dura 1 ambiente 'não foi possível criar a árvore temporária de M'; return 1; }
+  # caminho absoluto físico: é o prefixo que todo destino da materialização tem
+  raiz="$(cd "$2" && pwd -P)" || { falha_dura 1 ambiente 'árvore temporária de M inacessível'; return 1; }
+  g ls-tree -r -z --full-tree "$m" -- "docs/sprintx/features/$TRABALHO" "docs/$TRABALHO" "docs/manutencao/$TRABALHO" \
+    > "$raiz.lista" 2>/dev/null || { falha_dura 4 prova "prova 3: árvore de M ilegível"; return 1; }
+  while IFS= read -r -d '' item <&3; do
+    modo="${item%% *}"; caminho="${item#*	}"
+    # a união separa os tasks.md por linha: um nome com quebra de linha (ou
+    # outro caractere de controle) desviaria a leitura para o disco
+    case "$caminho" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) falha_dura 5 arvore "pasta do trabalho em M com caminho inválido: $(printf '%s' "$caminho" | tr '[:cntrl:]' '?')"; return 1 ;; esac # guarda:P3
+    # componente vazio, `.` ou `..` (árvore forjada com git mktree) escreveria
+    # fora da árvore temporária: recusado antes de qualquer escrita
+    case "/$caminho/" in */./*|*/../*|*//*) falha_dura 5 arvore "pasta do trabalho em M com caminho inválido (componente vazio, . ou ..): $caminho"; return 1 ;; esac # guarda:P3
+    case "$modo" in
+      100644|100755) ;;
+      *) falha_dura 5 arvore "pasta do trabalho em M tem link simbólico ou submódulo (modo $modo): $caminho"; return 1 ;;
+    esac
+    mkdir -p "$raiz/$(dirname "$caminho")" 2>/dev/null || { falha_dura 4 prova "prova 3: não foi possível materializar $caminho de M"; return 1; }
+    destino="$(cd "$raiz/$(dirname "$caminho")" && pwd -P)" || { falha_dura 4 prova "prova 3: não foi possível materializar $caminho de M"; return 1; }
+    # defesa em profundidade: o diretório de destino, resolvido, fica dentro do temporário
+    case "$destino/" in "$raiz"/*) ;; *) falha_dura 5 arvore "pasta do trabalho em M: destino fora da árvore temporária: $caminho"; return 1 ;; esac # guarda:P3
+    g cat-file blob "$m:$caminho" > "$destino/${caminho##*/}" 2>/dev/null \
+      || { falha_dura 4 prova "prova 3: não foi possível ler $caminho de M"; return 1; }
+  done 3< "$raiz.lista"
+  # Sem subshell: o CATALOGO_ERRO da função chega ao motivo.
+  catalogo_pasta_do_trabalho "$raiz" "$ORIGEM" "$TRABALHO" > "$raiz.pasta" \
+    || { falha_dura 4 prova "prova 3: pasta do trabalho não determinável em M: $CATALOGO_ERRO"; return 1; }
+  PASTA="$(cat "$raiz.pasta")"
+  RAIZ_M="$raiz"
+}
+
+# estrutura_m <M> <B0> <ref> — as condições estruturais (seção 5) que valem
+# para M em qualquer momento; <ref> dá a linha de primeiro pai. Define P1 e B1.
+# (A ponta da ref de base é condição do momento do registro: fica nele.)
+estrutura_m() {
+  local m="$1" b0="$2" ref="$3" pais npais
+  g cat-file -e "$b0^{commit}" 2>/dev/null || { estrutura b0 "B0 $b0 não é commit deste repositório"; return 1; }
+  pais="$(g rev-list --parents -n1 "$m" 2>/dev/null)" || { estrutura m "pais de M ilegíveis"; return 1; }
+  npais=$(( $(printf '%s\n' "$pais" | wc -w) - 1 ))
+  [ "$npais" = 2 ] || { estrutura pais "M $m tem $npais pai(s); o commit de integração tem exatamente dois"; return 1; } # guarda:EST
+  P1="$(g rev-parse --verify -q "$m^1")" || { estrutura m 'M^1 ilegível'; return 1; }
+  B1="$(g rev-parse --verify -q "$m^2")" || { estrutura m 'M^2 ilegível'; return 1; }
+  g rev-list --first-parent "$ref" > "$TMP_DIR/primeiro-pai" 2>/dev/null || { estrutura primeiro_pai "linha de primeiro pai de $ref ilegível"; return 1; }
+  grep -Fxq -e "$m" "$TMP_DIR/primeiro-pai" || { estrutura primeiro_pai "M $m fora da linha de primeiro pai de $ref"; return 1; } # guarda:EST
+  bash "$CONTRATO_SH" --validar-integracao --trabalho "$TRABALHO" --commit "$m" >/dev/null 2>"$TMP_DIR/contrato.err" || { estrutura contrato "mensagem de M fora do contrato de integração: $(tr '\n' ' ' < "$TMP_DIR/contrato.err")"; return 1; } # guarda:EST
+  g merge-base --is-ancestor "$b0" "$B1" 2>/dev/null || { estrutura b0_b1 "B0 $b0 não é ancestral de B1 $B1"; return 1; } # guarda:EST
+  g merge-base --is-ancestor "$b0" "$P1" 2>/dev/null || { estrutura b0_p1 "B0 $b0 não é ancestral de P1 $P1"; return 1; } # guarda:EST
+}
+
+# uniao_e_catalogo <raiz-de-M> <pasta> — união das tasks e catálogo de método
+# (prova 3 e inventário) em $UNIAO e $CATALOGO, sobre a árvore de M.
+uniao_e_catalogo() {
+  bash "$OWNERSHIP_SH" --uniao "$1" "$ORIGEM" "$TRABALHO" > "$UNIAO" 2>"$TMP_DIR/uniao.err" || { falha_dura 4 prova "prova 3: união das tasks não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")"; return 1; } # guarda:P3
+  catalogo_metodo "$1" "$ORIGEM" "$TRABALHO" "$2" e8 > "$CATALOGO" || { falha_dura 4 prova "prova 3: catálogo de método não calculável: $CATALOGO_ERRO"; return 1; } # guarda:P3
+}
+
+# provas <lista> <B0> <início> <P1> <B1> <M> — as quatro provas, para cada
+# caminho da lista (seção 6). Todas são calculadas e todas as reprovações são
+# relatadas; nenhuma falha de cálculo vira aprovação.
+provas() {
+  local lista="$1" b0="$2" inicio="$3" p1="$4" b1="$5" m="$6" f tb tm st rc_p4
+  while IFS= read -r f <&3; do
+    # o caminho é de arquivo (blob), nunca de diretório nem submódulo
+    case "$f" in */) reprova "arquivo: $f: caminho com barra final não é arquivo"; continue ;; esac # guarda:BLOB
+    tb="$(g cat-file -t "$b1:$f" 2>/dev/null)"; tm="$(g cat-file -t "$m:$f" 2>/dev/null)"
+    { [ -z "$tb" ] || [ "$tb" = blob ]; } && { [ -z "$tm" ] || [ "$tm" = blob ]; } || reprova "arquivo: $f: não é arquivo (blob) em B1 (${tb:--}) ou em M (${tm:--})" # guarda:BLOB
+
+    # prova 1: f nasceu ou mudou na base entre B0 e B1
+    if g diff --no-renames --name-status -z "$b0" "$b1" -- "$f" > "$SAIDA" 2>/dev/null; then
+      st="$(tr '\0' '\n' < "$SAIDA" | sed -n 1p)"
+      [ -n "$st" ] || reprova "prova 1: $f: a base não criou nem alterou o caminho entre B0 e B1" # guarda:P1
+      [ "$st" != D ] || reprova "prova 1: $f: a base removeu o caminho (status D); ressurreição não é ajuste" # guarda:P1D
+      case "$st" in A|M|D|'') ;; *) reprova "prova 1: $f: status $st na base fora de A|M (mudança de tipo também reprova)" ;; esac # guarda:P1T
+    else
+      reprova "prova 1: $f: diff B0..B1 não calculável"
+    fi
+
+    # prova 2: a feature não tocou f antes do merge
+    if g rev-list --first-parent "$p1" "^$inicio" -- "$f" > "$SAIDA" 2>/dev/null; then
+      [ ! -s "$SAIDA" ] || reprova "prova 2: $f: a feature tocou o caminho antes do merge ($(sed -n 1p "$SAIDA"))" # guarda:P2FP
+    else
+      reprova "prova 2: $f: histórico da feature não calculável"
+    fi
+
+    # prova 3: f não consta das tasks nem é artefato de método
+    if contem "$UNIAO" "$f" || contem "$CATALOGO" "$f"; then reprova "prova 3: $f: declarado em task ou artefato de método"; fi # guarda:P3
+
+    # prova 4: diferença real entre B1 e M, com f presente em M
+    g cat-file -e "$m:$f" 2>/dev/null || reprova "prova 4: $f: ausente em M (a integração removeu o caminho)" # guarda:P4
+    g diff --quiet --no-renames "$b1" "$m" -- "$f" >/dev/null 2>&1; rc_p4=$?
+    [ "$rc_p4" = 1 ] || reprova "prova 4: $f: sem diferença entre B1 e M (ou diff não calculável, rc=$rc_p4)" # guarda:P4
+  done 3< "$lista"
+}
+
+# inventario <B1> <M> <lista> <anteriores> — todo caminho que o merge alterou
+# em relação a B1 está na união, no catálogo, na lista ou entre os caminhos
+# de reconciliações anteriores da cadeia (cuja cobertura é conferida em HEAD).
+# Não existe registro parcial.
+inventario() {
+  local b1="$1" m="$2" lista="$3" anteriores="$4" p
+  g diff --name-only -z --no-renames "$b1" "$m" > "$INVENTARIO" 2>/dev/null \
+    || { falha_dura 4 inventario 'inventário: diff B1..M não calculável'; return 1; }
+  while IFS= read -r -d '' p <&3; do
+    case "$p" in *"$NL"*) reprova "inventário: caminho com quebra de linha alterado pelo merge" inventario; continue ;; esac
+    contem "$UNIAO" "$p" || contem "$CATALOGO" "$p" || contem "$lista" "$p" || contem "$anteriores" "$p" || reprova "inventário: $p: alterado pelo merge e não declarado" inventario # guarda:INV
+  done 3< "$INVENTARIO"
+}
+
+# campos_caminho <B0> <B1> <M> <caminho> — os campos do artefato para o
+# caminho, do Git: CAMPO_ST (status B0..B1), CAMPO_BB, CAMPO_BM, CAMPO_DS.
+# Todos são calculados; o que não se calcula fica vazio, e CAMPO_ERRO guarda o
+# primeiro problema (rc 1).
+campos_caminho() {
+  local b0="$1" b1="$2" m="$3" f="$4"
+  CAMPO_ERRO=""
+  CAMPO_ST="$(g diff --no-renames --name-status -z "$b0" "$b1" -- "$f" 2>/dev/null | tr '\0' '\n' | sed -n 1p)"
+  case "$CAMPO_ST" in A|M) ;; *) CAMPO_ERRO="status de $f mudou durante o registro" ;; esac
+  CAMPO_BB="$(g rev-parse --verify -q "$b1:$f" 2>/dev/null)" || { CAMPO_BB=""; [ -n "$CAMPO_ERRO" ] || CAMPO_ERRO="blob de $f em B1 ilegível"; }
+  CAMPO_BM="$(g rev-parse --verify -q "$m:$f" 2>/dev/null)" || { CAMPO_BM=""; [ -n "$CAMPO_ERRO" ] || CAMPO_ERRO="blob de $f em M ilegível"; }
+  RB_ERRO=""
+  if rb_diff_sha "$b1" "$m" "$f" > "$SAIDA"; then CAMPO_DS="$(cat "$SAIDA")"
+  else CAMPO_DS=""; [ -n "$CAMPO_ERRO" ] || CAMPO_ERRO="$RB_ERRO"; fi
+  [ -z "$CAMPO_ERRO" ]
+}
+
+# ---------------------------------------------------------------------------
+# --verificar
+# ---------------------------------------------------------------------------
+
+# _r <índice> <chave> — escalar do artefato lido
+_r() { awk -F'\t' -v k="$2" '$1 == "escalar" && $2 == k { print $3; exit }' "$TMP_DIR/r$1.lido"; }
+
+verificar() {
+  local dir="docs/entregas/$TRABALHO" nome arq n i j num nnn lido b0 p1 b1 m ob est ant ex br
+  local inicio prev bv lm lp f st bb bm ds h numero arquivo eb1 em idx ENTREGA_D=""
+  MOTIVOS="$TMP_DIR/motivos"; : > "$MOTIVOS"
+  # nem o refresh oportunista do índice: a verificação não grava nada
+  export GIT_OPTIONAL_LOCKS=0
+
+  # O ENTREGA.md do disco: contexto e a lista de reconciliações.
+  if [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cat "$ENTREGA" > "$TMP_DIR/entrega-disco.md" 2>/dev/null; then
+    ENTREGA_D="$TMP_DIR/entrega-disco.md"
+    [ "$(catalogo_fm "$ENTREGA_D" kind)" = entrega ] || motivo 5 entrega "$ENTREGA não declara kind: entrega"
+    [ "$(catalogo_fm "$ENTREGA_D" trabalho_id)" = "$TRABALHO" ] || motivo 5 entrega 'trabalho explícito diverge de ENTREGA.trabalho_id'
+    [ "$(catalogo_fm "$ENTREGA_D" expx_tool)" = "$ORIGEM" ] || motivo 5 entrega 'origem explícita diverge de ENTREGA.expx_tool'
+    if ! entrega_lista_reconciliacoes "$ENTREGA_D" > "$TMP_DIR/lista-entrega" 2>/dev/null; then
+      motivo 5 entrega "$ENTREGA: reconciliacoes fora da forma {numero, arquivo, b1_sha, m_sha}"
+      ENTREGA_D=""
+    fi
+  else
+    motivo 5 entrega "$ENTREGA ausente ou não é arquivo regular"
+  fi
+
+  # Os artefatos da pasta da entrega, em ordem de byte. Nome fora do padrão
+  # (inclusive sobra de gravação) é contrato inválido.
+  : > "$TMP_DIR/artefatos"
+  for arq in "$dir"/RECONCILIACAO-BASE-*; do
+    [ -e "$arq" ] || [ -L "$arq" ] || continue
+    nome="${arq##*/}"
+    case "$nome" in
+      RECONCILIACAO-BASE-[0-9][0-9][0-9].md) printf '%s\n' "$nome" >> "$TMP_DIR/artefatos" ;;
+      *) PREFIXO="$nome: "; motivo 5 contrato "nome fora do padrão RECONCILIACAO-BASE-NNN.md"; PREFIXO="" ;;
+    esac
+  done
+  LC_ALL=C sort -o "$TMP_DIR/artefatos" "$TMP_DIR/artefatos"
+
+  # Schema e assinatura de cada um; numeração contínua a partir de 001.
+  n=0
+  while IFS= read -r nome <&3; do
+    n=$((n + 1)); PREFIXO="$nome: "
+    printf '%s\n' "$nome" > "$TMP_DIR/nome$n"
+    [ "$nome" = "$(printf 'RECONCILIACAO-BASE-%03d.md' "$n")" ] \
+      || motivo 5 numeracao "numeração com lacuna: na posição $n esperava $(printf 'RECONCILIACAO-BASE-%03d.md' "$n")"
+    arq="$dir/$nome"
+    if [ ! -f "$arq" ] || [ -L "$arq" ]; then motivo 5 contrato "não é arquivo regular"; continue; fi
+    num="$(printf '%s' "$nome" | sed 's/^RECONCILIACAO-BASE-0*\([0-9][0-9]*\)\.md$/\1/')"
+    RB_ERRO=""
+    rb_validar "$arq" "$TRABALHO" "$num" || { motivo 5 contrato "$RB_ERRO"; continue; }
+    RB_ERRO=""
+    rb_ler "$arq" > "$TMP_DIR/r$n.lido" || { rm -f "$TMP_DIR/r$n.lido"; motivo 5 contrato "$RB_ERRO"; continue; }
+    awk -F'\t' '$1 == "arquivo" { print $2 }' "$TMP_DIR/r$n.lido" > "$TMP_DIR/lista$n"
+  done 3< "$TMP_DIR/artefatos"
+  PREFIXO=""
+
+  # Cadeia e provas, reconciliação a reconciliação, com as funções do registro.
+  : > "$TMP_DIR/anteriores"
+  : > "$TMP_DIR/cobertura"
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    i=$((i + 1)); j=$((i - 1))
+    # os caminhos das reconciliações anteriores (para o inventário desta)
+    [ ! -f "$TMP_DIR/lista$j" ] || cat "$TMP_DIR/lista$j" >> "$TMP_DIR/anteriores"
+    [ -f "$TMP_DIR/r$i.lido" ] || continue
+    nome="$(cat "$TMP_DIR/nome$i")"; PREFIXO="$nome: "
+    nnn="$(printf '%s' "$nome" | sed 's/^RECONCILIACAO-BASE-\([0-9]*\)\.md$/\1/')"
+    b0="$(_r "$i" b0_sha)"; p1="$(_r "$i" p1_sha)"; b1="$(_r "$i" b1_sha)"; m="$(_r "$i" m_sha)"
+    ob="$(_r "$i" origem_base)"; est="$(_r "$i" estado)"; ant="$(_r "$i" anterior)"
+    ex="$(_r "$i" expx_tool)"; br="$(_r "$i" branch)"
+    awk -F'\t' -v nnn="$nnn" '$1 == "arquivo" { print $2 "\t" nnn "\t" $5 }' "$TMP_DIR/r$i.lido" >> "$TMP_DIR/cobertura"
+
+    [ "$ex" = "$ORIGEM" ] || motivo 5 contrato "expx_tool ($ex) diverge da origem $ORIGEM"
+    if [ -n "$ENTREGA_D" ]; then
+      [ "$br" = "$(catalogo_fm "$ENTREGA_D" branch)" ] || motivo 5 contrato "branch ($br) diverge de ENTREGA.branch"
+    fi
+    if [ "$i" = "$n" ]; then
+      [ "$est" = ativa ] || motivo 5 estado "a última reconciliação da cadeia tem de estar ativa (está $est)"
+    else
+      [ "$est" = superada ] || motivo 5 estado "reconciliação seguida de outra tem de estar superada (está $est)"
+    fi
+
+    if [ "$i" = 1 ]; then
+      case "$ob" in
+        registrada_e0) ;;
+        inferida_legado) motivo 5 origem_base 'origem_base inferida_legado ainda não suportada'; continue ;;
+        *) motivo 5 origem_base "origem_base $ob não abre a cadeia"; continue ;;
+      esac
+      inicio="$b0"
+    else
+      [ "$ob" = reconciliacao_anterior ] || motivo 5 origem_base "origem_base $ob fora de reconciliacao_anterior"
+      [ -f "$TMP_DIR/r$j.lido" ] || continue
+      prev="$(cat "$TMP_DIR/nome$j")"
+      [ "$ant" = "$prev" ] || motivo 5 anterior "anterior ($ant) não é $prev"
+      [ "$b0" = "$(_r "$j" b1_sha)" ] || motivo 5 cadeia "b0_sha ($b0) diverge do b1_sha de $prev ($(_r "$j" b1_sha))" # guarda:CAD
+      inicio="$(_r "$j" m_sha)"
+    fi
+
+    # o ENTREGA.md de M e a âncora da cadeia
+    le_entrega_m "$m" "$TMP_DIR/entrega-m$i.md" || continue
+    if [ "$i" = 1 ]; then
+      bv="$(catalogo_fm "$TMP_DIR/entrega-m$i.md" base_validada_sha)"
+      [ "$b0" = "$bv" ] || motivo 5 ancora "b0_sha ($b0) diverge da base_validada_sha da entrega em M (${bv:-ausente})" # guarda:ANCORA
+    fi
+
+    # estrutura: os pais de M são os do artefato; M na linha de primeiro pai
+    # de HEAD, depois do M anterior
+    estrutura_m "$m" "$b0" HEAD || continue
+    [ "$P1" = "$p1" ] || { estrutura p1 "p1_sha ($p1) não é o primeiro pai de M ($P1)"; continue; }
+    [ "$B1" = "$b1" ] || { estrutura b1 "b1_sha ($b1) não é o segundo pai de M ($B1)"; continue; }
+    if [ "$i" -gt 1 ]; then
+      lm="$(grep -Fxn -e "$m" "$TMP_DIR/primeiro-pai" | sed -n '1s/:.*//p')"
+      lp="$(grep -Fxn -e "$inicio" "$TMP_DIR/primeiro-pai" | sed -n '1s/:.*//p')"
+      { [ -n "$lp" ] && [ "$lm" -lt "$lp" ]; } || motivo 5 cadeia "M não é posterior ao M de $prev na linha de primeiro pai de HEAD"
+    fi
+
+    # as quatro provas, com o plano e o catálogo da árvore deste M
+    materializa_m "$m" "$TMP_DIR/arvore-m$i" || continue
+    uniao_e_catalogo "$RAIZ_M" "$PASTA" || continue
+    provas "$TMP_DIR/lista$i" "$b0" "$inicio" "$P1" "$B1" "$m"
+
+    # cada campo gravado é recalculado do Git
+    while IFS="$TAB" read -r f st bb bm ds <&4; do
+      [ -n "$f" ] || continue
+      campos_caminho "$b0" "$B1" "$m" "$f"
+      [ "$st" = "$CAMPO_ST" ] || motivo 4 campo "$f: status_base registrado $st, recalculado ${CAMPO_ST:-vazio}" # guarda:CAMPO
+      [ "$bb" = "$CAMPO_BB" ] || motivo 4 campo "$f: blob_b1 registrado $bb, recalculado ${CAMPO_BB:-ilegível}" # guarda:CAMPO
+      [ "$bm" = "$CAMPO_BM" ] || motivo 4 campo "$f: blob_m registrado $bm, recalculado ${CAMPO_BM:-ilegível}" # guarda:CAMPO
+      [ "$ds" = "$CAMPO_DS" ] || motivo 4 campo "$f: diff_b1_m_sha256 registrado $ds, recalculado ${CAMPO_DS:-incalculável}" # guarda:CAMPO
+    done 4<<EOF
+$(awk -F'\t' '$1 == "arquivo" { print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 }' "$TMP_DIR/r$i.lido")
+EOF
+
+    inventario "$B1" "$m" "$TMP_DIR/lista$i" "$TMP_DIR/anteriores"
+  done
+  PREFIXO=""
+
+  # Coerência com o ENTREGA.md do disco: a lista é exatamente a cadeia.
+  if [ -n "$ENTREGA_D" ]; then
+    j=0
+    while IFS="$TAB" read -r numero arquivo eb1 em <&3; do
+      [ -n "$numero$arquivo" ] || continue
+      j=$((j + 1))
+      idx="$(grep -Fxn -e "$arquivo" "$TMP_DIR/artefatos" | sed -n '1s/:.*//p')"
+      if [ -z "$idx" ]; then motivo 5 ausente "artefato ausente: $arquivo (listado em ENTREGA.reconciliacoes)"; continue; fi # guarda:COERENCIA
+      { [ "$numero" = "$j" ] && [ "$idx" = "$j" ]; } || motivo 5 entrega "ENTREGA.reconciliacoes: o item $j ($numero, $arquivo) não segue a ordem da cadeia"
+      [ -f "$TMP_DIR/r$idx.lido" ] || continue
+      [ "$eb1" = "$(_r "$idx" b1_sha)" ] || motivo 5 entrega "ENTREGA.reconciliacoes: b1_sha de $arquivo diverge do artefato" # guarda:COERENCIA
+      [ "$em" = "$(_r "$idx" m_sha)" ] || motivo 5 entrega "ENTREGA.reconciliacoes: m_sha de $arquivo diverge do artefato" # guarda:COERENCIA
+    done 3< "$TMP_DIR/lista-entrega"
+    while IFS= read -r nome <&3; do
+      cut -f2 "$TMP_DIR/lista-entrega" | grep -Fxq -e "$nome" || motivo 5 orfao "artefato órfão: $nome (fora de ENTREGA.reconciliacoes)" # guarda:COERENCIA
+    done 3< "$TMP_DIR/artefatos"
+    if [ "$n" -gt 0 ] && [ -f "$TMP_DIR/r$n.lido" ]; then
+      bv="$(catalogo_fm "$ENTREGA_D" base_validada_sha)"
+      [ "$bv" = "$(_r "$n" b1_sha)" ] || motivo 5 entrega "ENTREGA.base_validada_sha (${bv:-ausente}) não é o b1_sha da última reconciliação" # guarda:COERENCIA
+    fi
+  fi
+
+  # Cobertura: por caminho, a reconciliação mais recente que o lista; o
+  # conteúdo em HEAD tem de ser o blob_m dela.
+  awk -F'\t' '{ if (!($1 in u)) o[++k] = $1; u[$1] = $0 } END { for (i = 1; i <= k; i++) print u[o[i]] }' \
+    "$TMP_DIR/cobertura" > "$TMP_DIR/cobertura.ultima"
+  : > "$TMP_DIR/cobertos"
+  while IFS="$TAB" read -r f nnn bm <&3; do
+    h="$(g rev-parse --verify -q "HEAD:$f" 2>/dev/null)" || h=""
+    [ "$h" = "$bm" ] || { motivo 4 cobertura "$f: o conteúdo em HEAD (${h:-ausente}) não é o blob_m de RECONCILIACAO-BASE-$nnn.md ($bm)"; continue; } # guarda:BLOBM
+    printf 'coberto\t%s\t%s\n' "$f" "$nnn" >> "$TMP_DIR/cobertos"
+  done 3< "$TMP_DIR/cobertura.ultima"
+
+  if [ "$FALHA_5" = 1 ] || [ "$FALHA_4" = 1 ]; then
+    printf 'ok=false\n'
+    cat "$MOTIVOS"
+    [ "$FALHA_5" = 1 ] && return 5
+    return 4
+  fi
+  printf 'ok=true\n'
+  LC_ALL=C sort "$TMP_DIR/cobertos"
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Argumentos. Os caminhos vêm depois de `--`, um por argumento, sem word
 # splitting; vão para um arquivo, um por linha, depois de recusar os que não
@@ -237,10 +662,15 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-reconciliacao.XXXXXX")" \
   || { printf 'reconciliacao-base: não foi possível criar diretório temporário\n' >&2; exit 1; }
 LISTA="$TMP_DIR/lista"
 : > "$LISTA"
+UNIAO="$TMP_DIR/uniao"
+CATALOGO="$TMP_DIR/catalogo"
+INVENTARIO="$TMP_DIR/inventario"
+SAIDA="$TMP_DIR/saida"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --registrar) [ -z "$MODO" ] || uso; MODO=registrar; shift ;;
+    --verificar) [ -z "$MODO" ] || uso; MODO=verificar; shift ;;
     --entrega) [ "$#" -ge 2 ] || uso; ENTREGA="$2"; shift 2 ;;
     --origem) [ "$#" -ge 2 ] || uso; ORIGEM="$2"; shift 2 ;;
     --trabalho) [ "$#" -ge 2 ] || uso; TRABALHO="$2"; shift 2 ;;
@@ -249,8 +679,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ "$MODO" = registrar ] || uso 'falta --registrar'
-[ "$SEPARADOR" = 1 ] || uso 'falta -- antes da lista de caminhos'
+case "$MODO" in
+  registrar) [ "$SEPARADOR" = 1 ] || uso 'falta -- antes da lista de caminhos' ;;
+  verificar) [ "$SEPARADOR" = 0 ] || uso '--verificar não recebe lista de caminhos' ;;
+  *) uso 'falta --registrar ou --verificar' ;;
+esac
 case "$ORIGEM" in sprintx|runx) ;; *) uso "origem inválida: ${ORIGEM:-ausente}" ;; esac
 case "$TRABALHO" in
   ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto)
@@ -272,8 +705,14 @@ RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || { printf 'reconciliacao-base: fora de um repositório Git\n' >&2; exit 1; }
 cd "$RAIZ" || { printf 'reconciliacao-base: raiz inacessível: %s\n' "$RAIZ" >&2; exit 1; }
 
+# Só leitura: nenhuma trava, nenhuma pré-condição de stage ou pasta limpa.
+if [ "$MODO" = verificar ]; then
+  verificar
+  exit $?
+fi
+
 # ---------------------------------------------------------------------------
-# Pré-condições: trava C5, stage vazio, nenhum merge em andamento.
+# --registrar. Pré-condições: trava C5, stage vazio, nenhum merge em andamento.
 # ---------------------------------------------------------------------------
 SAIDA_TRAVA="$(adquirir reconciliacao-base)"; RC_TRAVA=$?
 [ "$RC_TRAVA" != 2 ] || para 2 'índice ocupado pela trava C5'
@@ -293,63 +732,20 @@ g diff --cached --quiet 2>/dev/null || para 3 'o stage não está vazio; nada fo
 # ---------------------------------------------------------------------------
 M="$(g rev-parse --verify -q HEAD)" || estrutura m 'HEAD ilegível'
 
-# modo_em_m <caminho> — o modo do caminho na árvore de M (vazio se ausente)
-modo_em_m() { g ls-tree -z "$M" -- "$1" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .*//p'; }
-
-# ---------------------------------------------------------------------------
 # ENTREGA.md (versão de M): contexto explícito igual ao registrado.
-# ---------------------------------------------------------------------------
 ENTREGA_M="$TMP_DIR/entrega-m.md"
-MODO_ENTREGA="$(modo_em_m "$ENTREGA")"
-[ -n "$MODO_ENTREGA" ] || para 5 "$ENTREGA ausente no commit M $M"
-case "$MODO_ENTREGA" in 100644|100755) ;; *) para 5 "$ENTREGA não é arquivo regular em M (modo $MODO_ENTREGA)" ;; esac
-g cat-file blob "$M:$ENTREGA" > "$ENTREGA_M" 2>/dev/null || para 5 "$ENTREGA ilegível em M"
+le_entrega_m "$M" "$ENTREGA_M" || exit 1
 fm() { catalogo_fm "$ENTREGA_M" "$1"; }
-
-[ "$(fm kind)" = entrega ] || para 5 "$ENTREGA não declara kind: entrega"
-[ "$(fm trabalho_id)" = "$TRABALHO" ] || para 5 'trabalho explícito diverge de ENTREGA.trabalho_id'
-[ "$(fm expx_tool)" = "$ORIGEM" ] || para 5 'origem explícita diverge de ENTREGA.expx_tool'
 BRANCH="$(g branch --show-current 2>/dev/null)" || BRANCH=""
 [ -n "$BRANCH" ] || para 5 'HEAD destacado: a branch não prova o trabalho'
 [ "$(fm branch)" = "$BRANCH" ] || para 5 "branch ativa ($BRANCH) diverge de ENTREGA.branch"
 BRANCH_BASE="$(fm branch_base)"
 [ -n "$BRANCH_BASE" ] || para 5 'ENTREGA.branch_base ausente'
 
-# Árvore de M materializada só no necessário para resolver a pasta do trabalho
-# e ler o plano: as três pastas candidatas, blob por blob. Link simbólico ou
-# submódulo dentro delas: o plano não é lido, o registro para (rc 5).
-RAIZ_M="$TMP_DIR/arvore-m"
-mkdir -p "$RAIZ_M" || para 1 'não foi possível criar a árvore temporária de M'
-# caminho absoluto físico: é o prefixo que todo destino da materialização tem
-RAIZ_M="$(cd "$RAIZ_M" && pwd -P)" || para 1 'árvore temporária de M inacessível'
-g ls-tree -r -z --full-tree "$M" -- "docs/sprintx/features/$TRABALHO" "docs/$TRABALHO" "docs/manutencao/$TRABALHO" \
-  > "$TMP_DIR/arvore-m.lista" 2>/dev/null || para 4 "prova 3: árvore de M ilegível"
-while IFS= read -r -d '' item <&3; do
-  modo="${item%% *}"; caminho="${item#*	}"
-  # a união separa os tasks.md por linha: um nome com quebra de linha (ou
-  # outro caractere de controle) desviaria a leitura para o disco
-  case "$caminho" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) para 5 "pasta do trabalho em M com caminho inválido: $(printf '%s' "$caminho" | tr '[:cntrl:]' '?')" ;; esac # guarda:P3
-  # componente vazio, `.` ou `..` (árvore forjada com git mktree) escreveria
-  # fora da árvore temporária: recusado antes de qualquer escrita
-  case "/$caminho/" in */./*|*/../*|*//*) para 5 "pasta do trabalho em M com caminho inválido (componente vazio, . ou ..): $caminho" ;; esac # guarda:P3
-  case "$modo" in
-    100644|100755) ;;
-    *) para 5 "pasta do trabalho em M tem link simbólico ou submódulo (modo $modo): $caminho" ;;
-  esac
-  mkdir -p "$RAIZ_M/$(dirname "$caminho")" || para 4 "prova 3: não foi possível materializar $caminho de M"
-  destino="$(cd "$RAIZ_M/$(dirname "$caminho")" && pwd -P)" || para 4 "prova 3: não foi possível materializar $caminho de M"
-  # defesa em profundidade: o diretório de destino, resolvido, fica dentro do temporário
-  case "$destino/" in "$RAIZ_M"/*) ;; *) para 5 "pasta do trabalho em M: destino fora da árvore temporária: $caminho" ;; esac # guarda:P3
-  g cat-file blob "$M:$caminho" > "$destino/${caminho##*/}" 2>/dev/null \
-    || para 4 "prova 3: não foi possível ler $caminho de M"
-done 3< "$TMP_DIR/arvore-m.lista"
+materializa_m "$M" "$TMP_DIR/arvore-m" || exit 1
 
 # A pasta do trabalho resolvida em M; no disco ela tem de estar igual a M, sem
 # alteração nem arquivo não rastreado (defesa em profundidade).
-# Sem subshell: o CATALOGO_ERRO da função chega ao motivo.
-catalogo_pasta_do_trabalho "$RAIZ_M" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/pasta" \
-  || para 4 "prova 3: pasta do trabalho não determinável em M: $CATALOGO_ERRO"
-PASTA="$(cat "$TMP_DIR/pasta")"
 g status --porcelain=v1 -z --untracked-files=all -- "$PASTA" > "$TMP_DIR/sujo" 2>/dev/null \
   || para 3 'não foi possível verificar se a pasta do trabalho está limpa'
 [ ! -s "$TMP_DIR/sujo" ] || para 3 "pasta do trabalho com alteração não commitada: $(tr '\0' ' ' < "$TMP_DIR/sujo" | cut -c1-200)" # guarda:LIMPA
@@ -375,85 +771,20 @@ done
 B0="$(fm base_validada_sha)"
 [ -n "$B0" ] || para 6 'ENTREGA.base_validada_sha ausente: base validada indeterminável'
 printf '%s' "$B0" | grep -Eq '^[0-9a-f]{40}$' || para 5 "ENTREGA.base_validada_sha não é SHA de 40 hex: $B0"
-g cat-file -e "$B0^{commit}" 2>/dev/null || estrutura b0 "B0 $B0 não é commit deste repositório"
 
 # ---------------------------------------------------------------------------
-# Condições estruturais (seção 5). M = HEAD.
+# Condições estruturais (seção 5). M = HEAD; a linha de primeiro pai é a da
+# branch; a ponta da ref de base é condição do momento do registro.
 # ---------------------------------------------------------------------------
-PAIS="$(g rev-list --parents -n1 "$M" 2>/dev/null)" || estrutura m "pais de M ilegíveis"
-NPAIS=$(( $(printf '%s\n' "$PAIS" | wc -w) - 1 ))
-[ "$NPAIS" = 2 ] || estrutura pais "M $M tem $NPAIS pai(s); o commit de integração tem exatamente dois" # guarda:EST
-P1="$(g rev-parse --verify -q "$M^1")" || estrutura m 'M^1 ilegível'
-B1="$(g rev-parse --verify -q "$M^2")" || estrutura m 'M^2 ilegível'
-g rev-list --first-parent "$BRANCH" > "$TMP_DIR/primeiro-pai" 2>/dev/null || estrutura primeiro_pai "linha de primeiro pai de $BRANCH ilegível"
-grep -Fxq -e "$M" "$TMP_DIR/primeiro-pai" || estrutura primeiro_pai "M $M fora da linha de primeiro pai de $BRANCH" # guarda:EST
-CONTRATO_ERR="$TMP_DIR/contrato.err"
-bash "$CONTRATO_SH" --validar-integracao --trabalho "$TRABALHO" --commit "$M" >/dev/null 2>"$CONTRATO_ERR" || estrutura contrato "mensagem de M fora do contrato de integração: $(tr '\n' ' ' < "$CONTRATO_ERR")" # guarda:EST
-g merge-base --is-ancestor "$B0" "$B1" 2>/dev/null || estrutura b0_b1 "B0 $B0 não é ancestral de B1 $B1" # guarda:EST
-g merge-base --is-ancestor "$B0" "$P1" 2>/dev/null || estrutura b0_p1 "B0 $B0 não é ancestral de P1 $P1" # guarda:EST
+estrutura_m "$M" "$B0" "$BRANCH" || exit 1
 PONTA_BASE="$(g rev-parse --verify -q "$BRANCH_BASE^{commit}")" || estrutura base "ref de base $BRANCH_BASE ilegível"
 g merge-base --is-ancestor "$B1" "$PONTA_BASE" 2>/dev/null || estrutura base "B1 $B1 não é ancestral da ponta de $BRANCH_BASE ($PONTA_BASE)" # guarda:EST
 
-# ---------------------------------------------------------------------------
-# União das tasks e catálogo de método (prova 3 e inventário), sobre a árvore
-# de M, nunca sobre o disco.
-# ---------------------------------------------------------------------------
-UNIAO="$TMP_DIR/uniao"
-CATALOGO="$TMP_DIR/catalogo"
-bash "$OWNERSHIP_SH" --uniao "$RAIZ_M" "$ORIGEM" "$TRABALHO" > "$UNIAO" 2>"$TMP_DIR/uniao.err" || para 4 "prova 3: união das tasks não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")" # guarda:P3
-catalogo_metodo "$RAIZ_M" "$ORIGEM" "$TRABALHO" "$PASTA" e8 > "$CATALOGO" || para 4 "prova 3: catálogo de método não calculável: $CATALOGO_ERRO" # guarda:P3
-
-contem() { grep -Fxq -e "$2" "$1"; }
-
-# ---------------------------------------------------------------------------
-# As quatro provas, para cada caminho (seção 6). Todas são calculadas e todas
-# as reprovações são relatadas; nenhuma falha de cálculo vira aprovação.
-# ---------------------------------------------------------------------------
-INICIO="$B0"
-SAIDA="$TMP_DIR/saida"
-while IFS= read -r f <&3; do
-  # o caminho é de arquivo (blob), nunca de diretório nem submódulo
-  case "$f" in */) reprova "arquivo: $f: caminho com barra final não é arquivo"; continue ;; esac # guarda:BLOB
-  tb="$(g cat-file -t "$B1:$f" 2>/dev/null)"; tm="$(g cat-file -t "$M:$f" 2>/dev/null)"
-  { [ -z "$tb" ] || [ "$tb" = blob ]; } && { [ -z "$tm" ] || [ "$tm" = blob ]; } || reprova "arquivo: $f: não é arquivo (blob) em B1 (${tb:--}) ou em M (${tm:--})" # guarda:BLOB
-
-  # prova 1: f nasceu ou mudou na base entre B0 e B1
-  if g diff --no-renames --name-status -z "$B0" "$B1" -- "$f" > "$SAIDA" 2>/dev/null; then
-    st="$(tr '\0' '\n' < "$SAIDA" | sed -n 1p)"
-    [ -n "$st" ] || reprova "prova 1: $f: a base não criou nem alterou o caminho entre B0 e B1" # guarda:P1
-    [ "$st" != D ] || reprova "prova 1: $f: a base removeu o caminho (status D); ressurreição não é ajuste" # guarda:P1D
-    case "$st" in A|M|D|'') ;; *) reprova "prova 1: $f: status $st na base fora de A|M (mudança de tipo também reprova)" ;; esac # guarda:P1T
-  else
-    reprova "prova 1: $f: diff B0..B1 não calculável"
-  fi
-
-  # prova 2: a feature não tocou f antes do merge
-  if g rev-list --first-parent "$P1" "^$INICIO" -- "$f" > "$SAIDA" 2>/dev/null; then
-    [ ! -s "$SAIDA" ] || reprova "prova 2: $f: a feature tocou o caminho antes do merge ($(sed -n 1p "$SAIDA"))" # guarda:P2FP
-  else
-    reprova "prova 2: $f: histórico da feature não calculável"
-  fi
-
-  # prova 3: f não consta das tasks nem é artefato de método
-  if contem "$UNIAO" "$f" || contem "$CATALOGO" "$f"; then reprova "prova 3: $f: declarado em task ou artefato de método"; fi # guarda:P3
-
-  # prova 4: diferença real entre B1 e M, com f presente em M
-  g cat-file -e "$M:$f" 2>/dev/null || reprova "prova 4: $f: ausente em M (a integração removeu o caminho)" # guarda:P4
-  g diff --quiet --no-renames "$B1" "$M" -- "$f" >/dev/null 2>&1; rc_p4=$?
-  [ "$rc_p4" = 1 ] || reprova "prova 4: $f: sem diferença entre B1 e M (ou diff não calculável, rc=$rc_p4)" # guarda:P4
-done 3< "$LISTA"
-
-# ---------------------------------------------------------------------------
-# Inventário completo: todo caminho que o merge alterou em relação a B1 está
-# na união, no catálogo ou na lista. Não existe registro parcial.
-# ---------------------------------------------------------------------------
-INVENTARIO="$TMP_DIR/inventario"
-g diff --name-only -z --no-renames "$B1" "$M" > "$INVENTARIO" 2>/dev/null \
-  || para 4 'inventário: diff B1..M não calculável'
-while IFS= read -r -d '' p <&3; do
-  case "$p" in *"$NL"*) reprova "inventário: caminho com quebra de linha alterado pelo merge"; continue ;; esac
-  contem "$UNIAO" "$p" || contem "$CATALOGO" "$p" || contem "$LISTA" "$p" || reprova "inventário: $p: alterado pelo merge e não declarado" # guarda:INV
-done 3< "$INVENTARIO"
+# União das tasks e catálogo de método, as quatro provas e o inventário.
+uniao_e_catalogo "$RAIZ_M" "$PASTA" || exit 1
+provas "$LISTA" "$B0" "$B0" "$P1" "$B1" "$M"
+: > "$TMP_DIR/anteriores"
+inventario "$B1" "$M" "$LISTA" "$TMP_DIR/anteriores" || exit 1
 
 [ "$FALHAS" = 0 ] || para 4 "$FALHAS reprovação(ões); nada foi gravado"
 
@@ -482,14 +813,8 @@ ARQ="$TMP_DIR/arquivos.tsv"
 : > "$ARQ"
 LC_ALL=C sort "$LISTA" > "$TMP_DIR/lista.ord" || para 1 'não foi possível ordenar a lista'
 while IFS= read -r f <&3; do
-  st="$(g diff --no-renames --name-status -z "$B0" "$B1" -- "$f" 2>/dev/null | tr '\0' '\n' | sed -n 1p)"
-  case "$st" in A|M) ;; *) para 4 "artefato: status de $f mudou durante o registro" ;; esac
-  bb="$(g rev-parse --verify -q "$B1:$f")" || para 4 "artefato: blob de $f em B1 ilegível"
-  bm="$(g rev-parse --verify -q "$M:$f")" || para 4 "artefato: blob de $f em M ilegível"
-  RB_ERRO=""
-  rb_diff_sha "$B1" "$M" "$f" > "$SAIDA" || para 4 "artefato: $RB_ERRO"
-  ds="$(cat "$SAIDA")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$f" "$st" "$bb" "$bm" "$ds" \
+  campos_caminho "$B0" "$B1" "$M" "$f" || para 4 "artefato: $CAMPO_ERRO"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$f" "$CAMPO_ST" "$CAMPO_BB" "$CAMPO_BM" "$CAMPO_DS" \
     "ajuste exigido pela integração da base: ver o diff B1..M deste caminho" >> "$ARQ"
 done 3< "$TMP_DIR/lista.ord"
 
