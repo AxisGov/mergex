@@ -76,23 +76,27 @@ Mapa de execução da feature.
 EOF
 }
 
-_fx_entrega() { # <legado:0|1> <e1_sha> <b0_sha> <portao_sha>
-  local legado="$1" e1="$2" b0="$3" portao="$4"
+# Fases do ENTREGA: aberto (pre-e2: portao null), pronto (pre-e6: portao pronto
+# e portao_sha = pre-e2) e entregue (e8).
+_fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
+  local legado="$1" e1="$2" b0="$3" fase="$4" portao="$5" estado=aberto pg=pronto pushed=false ent=null
+  if [ "$fase" = aberto ]; then pg=null; fi
+  if [ "$fase" = entregue ]; then estado=entregue; pushed=true; ent=2026-10-02; fi
   mkdir -p docs/entregas/ft-rec || return 1
   {
     printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: ft-rec\n'
-    printf 'entregue_por: mergex\nestado: entregue\nversionado: true\n'
+    printf 'entregue_por: mergex\nestado: %s\nversionado: true\n' "$estado"
     printf 'branch: feature/ft-rec\nbranch_base: main\n'
     if [ "$legado" != 1 ]; then
       printf 'base_validada_sha: %s\norigem_base: registrada_e0\nreconciliacoes: []\n' "$b0"
-      printf 'portao_sha: %s\n' "$portao"
+      if [ "$fase" = aberto ]; then printf 'portao_sha: null\n'; else printf 'portao_sha: %s\n' "$portao"; fi
     fi
     printf 'commits:\n  - seq: 1\n    task: T-01.01\n    commit: %s\n' "$e1"
     printf 'modulo_afetado: []\narquivos_alterados: []\nfaixa_atencao: []\nraio: null\n'
     printf 'atencao:\n  olho_obrigatorio: 0\n  leitura_rapida: 0\n  dispensavel: 0\n'
-    printf 'portao: pronto\nfalhas_portao: []\ncausa: null\ndesvios: []\n'
-    printf 'push_feito: true\npr_url: null\npr_estado: null\n'
-    printf 'criado_em: 2026-10-01\natualizado_em: 2026-10-02\nentregue_em: 2026-10-02\n'
+    printf 'portao: %s\nfalhas_portao: []\ncausa: null\ndesvios: []\n' "$pg"
+    printf 'push_feito: %s\npr_url: null\npr_estado: null\n' "$pushed"
+    printf 'criado_em: 2026-10-01\natualizado_em: 2026-10-02\nentregue_em: %s\n' "$ent"
     printf -- '---\n\n# Entrega\n\nProsa da entrega.\n'
   } > docs/entregas/ft-rec/ENTREGA.md
 }
@@ -102,7 +106,7 @@ _fx_entrega() { # <legado:0|1> <e1_sha> <b0_sha> <portao_sha>
 # _fx_corpo <dir> <legado:0|1> <com_commit:0|1> <msg> <arquivo-de-shas>
 _fx_corpo() {
   local dir="$1" legado="$2" com_commit="$3" msg="$4" shas="$5"
-  local e1 FX_B0 FX_P1 FX_B1 FX_M
+  local e1 e1c pre2 FX_B0 FX_P1 FX_B1 FX_M
   {
     cd "$dir"
     git init -q -b main
@@ -138,16 +142,28 @@ _fx_corpo() {
     _fx_commit "$msg"
     e1="$(git rev-parse HEAD)"
 
-    # pre-e2: ENTREGA entregue; portao_sha é o HEAD que o E2 avaliou (o E1)
-    _fx_entrega "$legado" "$(git rev-parse --short "$e1")" "$FX_B0" "$e1"
+    # pre-e2: ENTREGA aberta, portao null. O E2 avalia este HEAD.
+    e1c="$(git rev-parse --short "$e1")"
+    _fx_entrega "$legado" "$e1c" "$FX_B0" aberto -
     git add docs/entregas/ft-rec/ENTREGA.md
-    _fx_msg "$msg" "docs(mergex): registra a entrega" "Trabalho: ft-rec" "Metodo: pre-e2"
+    _fx_msg "$msg" "docs(mergex): abre a entrega" "Trabalho: ft-rec" "Metodo: pre-e2"
     bash "$_FXR_CONTRATO" --validar-metodo --trabalho ft-rec --checkpoint pre-e2 --arquivo "$msg" >/dev/null
     _fx_commit "$msg"
+    pre2="$(git rev-parse HEAD)"
 
-    # e8: fechamento, só catálogo da entrega
-    printf '# QA\n\nRoteiro de teste.\n' > docs/entregas/ft-rec/QA.md
-    git add docs/entregas/ft-rec/QA.md
+    # pre-e6: portao pronto + portao_sha = pre-e2; ATENCAO, PR e QA-PACOTE
+    _fx_entrega "$legado" "$e1c" "$FX_B0" pronto "$pre2"
+    printf '# Atenção\n\nClassificação do diff.\n' > docs/entregas/ft-rec/ATENCAO.md
+    printf '# PR\n\nDescrição do pull request.\n' > docs/entregas/ft-rec/PR.md
+    printf '# QA\n\nPacote para o QA.\n' > docs/entregas/ft-rec/QA-PACOTE.md
+    git add docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ATENCAO.md docs/entregas/ft-rec/PR.md docs/entregas/ft-rec/QA-PACOTE.md
+    _fx_msg "$msg" "docs(mergex): registra o portao e o pacote" "Trabalho: ft-rec" "Metodo: pre-e6"
+    bash "$_FXR_CONTRATO" --validar-metodo --trabalho ft-rec --checkpoint pre-e6 --arquivo "$msg" >/dev/null
+    _fx_commit "$msg"
+
+    # e8: entrega fechada
+    _fx_entrega "$legado" "$e1c" "$FX_B0" entregue "$pre2"
+    git add docs/entregas/ft-rec/ENTREGA.md
     _fx_msg "$msg" "docs(mergex): fecha a entrega" "Trabalho: ft-rec" "Metodo: e8"
     bash "$_FXR_CONTRATO" --validar-metodo --trabalho ft-rec --checkpoint e8 --arquivo "$msg" >/dev/null
     _fx_commit "$msg"

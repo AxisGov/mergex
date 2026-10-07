@@ -47,19 +47,68 @@ rc_igual() {
 # ---------------------------------------------------------------------------
 
 grupo_reproducao() {
-  local d f; d="$(mktemp -d)"; TMPS="$TMPS $d"
+  local d dl f st rc cp c n catf
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  dl="$(mktemp -d)"; catf="$(mktemp)"; TMPS="$TMPS $dl $catf"
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  . "$S/catalogo-de-metodo.sh" || { falha "catálogo ausente"; return; }
   fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   [ "$(git rev-parse "$FX_M^1")" = "$FX_P1" ] && ok "M^1 é P1" || falha "M^1 diferente de P1"
   [ "$(git rev-parse "$FX_M^2")" = "$FX_B1" ] && ok "M^2 é B1" || falha "M^2 diferente de B1"
+  [ "$(git rev-list --parents -n1 "$FX_M" | wc -w)" = 3 ] && ok "M tem exatamente dois pais" || falha "M não tem dois pais"
+  git show -s --format=%B "$FX_M" | git interpret-trailers --parse | grep -Fxq 'Trabalho: ft-rec' \
+    && ok "M tem Trabalho: ft-rec" || falha "M sem Trabalho"
+  git show -s --format=%B "$FX_M" | git interpret-trailers --parse | grep -Fxq "Integra-base: $FX_B1" \
+    && ok "M tem Integra-base: B1 completo" || falha "M sem Integra-base correto"
   for f in "$FX_NOVO1" "$FX_NOVO2"; do
-    [ "$(git diff --no-renames --name-status "$FX_B0" "$FX_B1" -- "$f" | cut -f1)" = A ] \
-      && ok "$f nasceu na base" || falha "$f não nasceu na base"
-    git diff --quiet "$FX_B1" "$FX_M" -- "$f" && falha "$f sem ajuste no merge" || ok "$f ajustado no merge"
+    st="$(git diff --no-renames --name-status "$FX_B0" "$FX_B1" -- "$f" | cut -f1)"
+    [ "$st" = A ] && ok "$f nasceu na base" || falha "$f não nasceu na base (status '$st')"
+    git diff --quiet "$FX_B1" "$FX_M" -- "$f"; rc=$?
+    [ "$rc" = 1 ] && ok "$f ajustado no merge" || falha "$f sem ajuste no merge (rc=$rc)"
     git diff --name-only "$FX_B1...HEAD" | grep -Fxq "$f" \
       && ok "$f aparece no diff da V9 (defeito)" || falha "$f não aparece no diff da V9"
   done
+
+  # histórico E2-E8: portao_sha (não legado) e commits de método posteriores
+  local pg pre2
+  pg="$(git show "$FX_P1:$FX_ENTREGA" | sed -n 's/^portao_sha:[[:space:]]*//p')"
+  printf '%s' "$pg" | grep -Eq '^[0-9a-f]{40}$' && ok "portao_sha tem 40 hex" || falha "portao_sha não tem 40 hex ($pg)"
+  git merge-base --is-ancestor "$pg" "$FX_P1" && ok "portao_sha é ancestral de P1" || falha "portao_sha não é ancestral de P1"
+  pre2="$(git log --format=%H --grep='^Metodo: pre-e2' -n1 "$FX_P1")"
+  [ -n "$pre2" ] && [ "$pg" = "$pre2" ] && ok "portao_sha é o commit pre-e2" || falha "portao_sha diferente do pre-e2"
+  [ "$(git show "$FX_P1:$FX_ENTREGA" | sed -n 's/^portao:[[:space:]]*//p')" = pronto ] \
+    && ok "ENTREGA com portao pronto" || falha "ENTREGA sem portao pronto"
+  n=0
+  for c in $(git rev-list "$pg..$FX_P1"); do
+    n=$((n+1))
+    [ "$(git rev-list --parents -n1 "$c" | wc -w)" = 2 ] && ok "$n: commit de um pai" || falha "$n: commit com mais de um pai"
+    cp="$(git show -s --format=%B "$c" | git interpret-trailers --parse | sed -n 's/^Metodo:[[:space:]]*//p')"
+    case "$cp" in
+      pre-e6|e8) ok "$n: Metodo $cp" ;;
+      *) falha "$n: Metodo '$cp' fora de pre-e6|e8"; continue ;;
+    esac
+    bash "$CONTRATO" --validar-metodo --trabalho ft-rec --checkpoint "$cp" --commit "$c" >/dev/null 2>&1 \
+      && ok "$n: contrato de método válido" || falha "$n: contrato de método inválido"
+    catalogo_metodo "$d" sprintx ft-rec docs/sprintx/features/ft-rec "$cp" > "$catf" || { falha "$n: catálogo falhou"; continue; }
+    if git diff-tree --no-commit-id --name-only -r "$c" | grep -vxFf "$catf" | grep -q .; then
+      falha "$n: toca caminho fora do catálogo de $cp"
+    else ok "$n: só caminhos do catálogo de $cp"; fi
+  done
+  [ "$n" = 2 ] && ok "dois commits de método entre portao_sha e P1" || falha "esperava 2 commits em portao_sha..P1, achou $n"
+  git ls-tree -r --name-only "$FX_P1" | grep -Fxq docs/entregas/ft-rec/QA.md \
+    && falha "QA.md (só RunX) não deveria existir" || ok "sem QA.md"
+  cd "$REPO" || return
+
+  # variante legado: as quatro chaves ausentes do frontmatter
+  fx_cenario "$dl" legado || { falha "cenário legado não montou"; return; }
+  cd "$dl" || return
+  if git show "$FX_P1:$FX_ENTREGA" | awk 'NR>1 && /^---/ {exit} NR>1' \
+      | grep -Eq '^(base_validada_sha|origem_base|reconciliacoes|portao_sha):'; then
+    falha "legado: chave de base presente no ENTREGA"
+  else ok "legado: sem as quatro chaves"; fi
+  [ "$(git show "$FX_P1:$FX_ENTREGA" | sed -n 's/^portao:[[:space:]]*//p')" = pronto ] \
+    && ok "legado: portao pronto" || falha "legado: portao não é pronto"
   cd "$REPO" || return
 }
 
