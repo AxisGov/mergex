@@ -35,6 +35,14 @@
 #   entrega_kind          o merge grava kind: outro no ENTREGA.md
 #   entrega_trabalho      o merge grava trabalho_id: outro no ENTREGA.md
 #   entrega_sem_branch_base  o merge remove branch_base do ENTREGA.md
+#   entrega_sem_chaves    o merge tira do ENTREGA.md reconciliacoes, causa,
+#                         push_feito, entregue_em, portao_sha, falhas_portao e
+#                         atualizado_em, e põe chaves ANINHADAS com esses nomes
+#                         em atencao
+#   entrega_dup           o merge repete `estado:` no frontmatter do ENTREGA.md
+#   entrega_reconc_cheia  o merge grava uma reconciliação na lista do ENTREGA.md
+#   entrega_bloco         o merge grava falhas_portao e causa em forma de bloco
+#   entrega_crlf          o ENTREGA.md do merge usa CRLF
 #   entrega_symlink       o merge troca o ENTREGA.md por link para ENTREGA-real.md
 #   plano_symlink         o merge cria um link simbólico na pasta do trabalho
 #   merge_area_base       o merge cria docs/sprintx/features/ft-rec/base/notas.md
@@ -145,12 +153,12 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
-_fx_entrega_sed() { # <expressão>
+_fx_entrega_sed() { # <expressão> | -e <expressão>...
   local e=docs/entregas/ft-rec/ENTREGA.md
-  sed "$1" "$e" > "$e.tmp" && mv "$e.tmp" "$e" && git add "$e"
+  sed "$@" "$e" > "$e.tmp" && mv "$e.tmp" "$e" && git add "$e"
 }
 
 # Commita a árvore do índice com os pais dados, sem passar pelo `git commit`
@@ -318,6 +326,16 @@ _fx_corpo() {
       entrega_kind) _fx_entrega_sed 's/^kind: entrega$/kind: outro/' ;;
       entrega_trabalho) _fx_entrega_sed 's/^trabalho_id: ft-rec$/trabalho_id: outro/' ;;
       entrega_sem_branch_base) _fx_entrega_sed '/^branch_base:/d' ;;
+      entrega_sem_chaves)
+        _fx_entrega_sed -e '/^reconciliacoes:/d' -e '/^causa:/d' -e '/^push_feito:/d' -e '/^entregue_em:/d' \
+          -e '/^portao_sha:/d' -e '/^falhas_portao:/d' -e '/^atualizado_em:/d' \
+          -e 's/^  dispensavel: 0$/  dispensavel: 0\n  estado: interno\n  causa: aninhada\n  push_feito: aninhado/' ;;
+      entrega_dup) _fx_entrega_sed 's/^estado: .*/&\nestado: aberto/' ;;
+      entrega_reconc_cheia)
+        _fx_entrega_sed 's/^reconciliacoes: \[\]$/reconciliacoes:\n  - numero: 1\n    arquivo: RECONCILIACAO-BASE-001.md\n    b1_sha: 1111111111111111111111111111111111111111\n    m_sha: 2222222222222222222222222222222222222222/' ;;
+      entrega_bloco)
+        _fx_entrega_sed -e 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n  - v7/' -e 's/^causa: null$/causa:\n  - antiga/' ;;
+      entrega_crlf) _fx_entrega_sed 's/$/\r/' ;;
       entrega_symlink)
         git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
         ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md

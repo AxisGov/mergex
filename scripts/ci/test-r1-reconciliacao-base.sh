@@ -424,6 +424,12 @@ reprova() {
   bash "$TRAVA" --status >/dev/null 2>&1 && ok "$desc: trava livre" || falha "$desc: trava presa"
 }
 
+# desfaz — devolve a árvore ao estado anterior ao registro (sem git clean)
+desfaz() {
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
+  git restore -- "$FX_ENTREGA"
+}
+
 # registra_ok <desc> <caminho>... — rc 0, saída, artefato válido e provas no
 # artefato iguais às recalculadas do Git; só o artefato é gravado.
 registra_ok() {
@@ -455,8 +461,10 @@ m=$FX_M"
   done <<EOF
 $(printf '%s\n' "$lido" | grep '^arquivo	')
 EOF
-  [ "$(git status --porcelain=v1 --untracked-files=all)" = "$antes${antes:+
-}?? $a" ] && ok "$desc: só o artefato foi gravado (ENTREGA.md intacto)" || falha "$desc: gravou além do artefato"
+  # o registro grava o artefato e o ENTREGA.md, e mais nada
+  esperado="$(printf '%s\n %s\n?? %s\n' "$antes" "M $FX_ENTREGA" "$a" | sed '/^$/d' | LC_ALL=C sort -u)"
+  [ "$(git status --porcelain=v1 --untracked-files=all | LC_ALL=C sort -u)" = "$esperado" ] \
+    && ok "$desc: só o artefato e o ENTREGA.md foram gravados" || falha "$desc: gravou além do artefato e do ENTREGA.md"
   bash "$TRAVA" --status >/dev/null 2>&1 && ok "$desc: trava livre" || falha "$desc: trava presa"
 }
 
@@ -482,8 +490,8 @@ grupo_provas() {
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   antes="$(_foto)"
   registra_ok "registra os dois testes da base" "$FX_NOVO1" "$FX_NOVO2"
-  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
-  [ "$(_foto)" = "$antes" ] && ok "sem o artefato, a árvore volta ao estado anterior" || falha "árvore não voltou"
+  desfaz
+  [ "$(_foto)" = "$antes" ] && ok "sem o artefato e com o ENTREGA.md restaurado, a árvore volta ao estado anterior" || falha "árvore não voltou"
 
   reprova "inventário: falta um caminho alterado pelo merge" 4 "inventário: $FX_NOVO2" "$FX_NOVO1"
   reprova "prova 3: caminho das tasks" 4 "prova 3: src/painel.ts" "$FX_NOVO1" "$FX_NOVO2" src/painel.ts
@@ -511,8 +519,9 @@ grupo_provas() {
 
   # pasta da entrega: só o que o próprio registro grava fica tolerado
   printf '\nNota local.\n' >> "$FX_ENTREGA"
-  rc_igual "ENTREGA.md alterado não barra pela pasta limpa" 0 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
-  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
+  # a pasta limpa tolera o ENTREGA.md alterado; a gravação não: nunca se
+  # sobrescreve edição alheia (rc 3, nada gravado)
+  reprova "ENTREGA.md alterado: a pasta limpa tolera, a gravação recusa" 3 "ENTREGA.md com alteração não commitada" "$FX_NOVO1" "$FX_NOVO2"
   printf 'qualquer\n' > docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
   local err_a
   err_a="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1 >/dev/null)"; c=$?
@@ -560,8 +569,8 @@ grupo_provas() {
   # ENTREGA.md sujo (tolerado) não entra nas provas: vale a versão de M
   sed 's/^branch_base: main$/branch_base: HEAD/' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
   sed "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
-  registra_ok "ENTREGA.md sujo (branch_base HEAD, B0 do plano): registra com a versão de M" "$FX_NOVO1" "$FX_NOVO2"
-  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
+  reprova "ENTREGA.md sujo (branch_base HEAD, B0 do plano): vale a versão de M e a gravação recusa" 3 \
+    "ENTREGA.md com alteração não commitada" "$FX_NOVO1" "$FX_NOVO2"
   git restore -- "$FX_ENTREGA"
 
   # prova 4 com o git falhando no diff --quiet: erro nunca vira diferença
@@ -578,7 +587,7 @@ grupo_provas() {
   r=(env GIT_ICASE_PATHSPECS=1 GIT_GLOB_PATHSPECS=1 "${r_orig[@]}")
   registra_ok "GIT_ICASE_PATHSPECS/GIT_GLOB_PATHSPECS do chamador" "$FX_NOVO1" "$FX_NOVO2"
   r=("${r_orig[@]}")
-  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
+  desfaz
 
   # contexto explícito, uso e pré-condições
   rc_motivo "origem divergente do ENTREGA.md" 5 "expx_tool" \
@@ -794,6 +803,192 @@ EOF
   rc_motivo "trava C5 ocupada" 2 "trava" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
   ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1 && falha "trava ocupada gravou" || ok "trava ocupada: nada gravado"
   cd "$REPO" || return
+}
+
+# Frontmatter do ENTREGA.md, uma linha por chave de topo: `chave<TAB>bloco`,
+# com as linhas de continuação (aninhadas) coladas por \001. Linhas em ordem.
+_blocos() { # <arquivo>
+  awk '
+    NR == 1 { next }
+    /^---[ \t]*\r?$/ { exit }
+    /^[A-Za-z0-9_]+:/ { if (chave != "") print chave "\t" bloco; chave = $0; sub(/:.*/, "", chave); bloco = $0; next }
+    { bloco = bloco "\001" $0 }
+    END { if (chave != "") print chave "\t" bloco }
+  ' "$1"
+}
+
+# Corpo depois do `---` de fechamento, byte a byte.
+_corpo() { # <arquivo>
+  local n; n="$(awk 'NR == 1 { next } /^---[ \t]*\r?$/ { print NR; exit }' "$1")"
+  tail -n "+$((n + 1))" "$1"
+}
+
+# Linha de uma chave de topo (valor), sem CR.
+_chave() { # <arquivo> <chave>
+  awk -v c="$2" 'NR > 1 && /^---[ \t]*\r?$/ { exit } index($0, c ": ") == 1 { sub(/^[^:]*: */, ""); sub(/\r$/, ""); print; exit }' "$1"
+}
+
+# entrega_confere <desc> <antes.md> <depois.md> <chave-gravada>... — as chaves
+# de topo fora da lista ficam byte a byte iguais (mesma ordem, mesmo bloco
+# aninhado); o corpo depois do frontmatter também.
+entrega_confere() {
+  local desc="$1" antes="$2" depois="$3" k ka kd; shift 3
+  ka="$(_blocos "$antes" | cut -f1 | tr '\n' ' ')"; kd="$(_blocos "$depois" | cut -f1 | tr '\n' ' ')"
+  # as chaves que o registro insere entram antes do fechamento: a ordem das
+  # que já existiam não muda
+  for k in "$@"; do ka="$(printf '%s' "$ka" | sed "s/ $k / /; s/^$k //")"; kd="$(printf '%s' "$kd" | sed "s/ $k / /; s/^$k //")"; done
+  [ "$ka" = "$kd" ] && ok "$desc: mesmas chaves de topo, na mesma ordem" || falha "$desc: chaves de topo diferentes ($ka | $kd)"
+  local excl="" bad=""
+  for k in "$@"; do excl="$excl $k "; done
+  while IFS="$(printf '\t')" read -r k b; do
+    case "$excl" in *" $k "*) continue ;; esac
+    [ "$b" = "$(_blocos "$depois" | awk -F'\t' -v k="$k" '$1 == k { sub(/^[^\t]*\t/, ""); print; exit }')" ] || bad="$bad $k"
+  done <<EOF
+$(_blocos "$antes")
+EOF
+  [ -z "$bad" ] && ok "$desc: demais chaves intactas (inclusive commits, seq, branch, trabalho_id, kind, expx_tool)" || falha "$desc: chaves alteradas:$bad"
+  [ "$(_corpo "$antes" | rb_sha256)" = "$(_corpo "$depois" | rb_sha256)" ] && cmp -s <(_corpo "$antes") <(_corpo "$depois") \
+    && ok "$desc: corpo depois do frontmatter byte a byte igual" || falha "$desc: corpo alterado"
+}
+
+GRAVADAS="base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em atualizado_em reconciliacoes"
+
+grupo_entrega() {
+  local d t r variante hoje1 hoje2 esperado k out c modo_antes ls_antes antes antes_commits antes_tasks
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+
+  # ---- cenário padrão: reabertura e base validada --------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  cp "$FX_ENTREGA" "$t/antes.md"
+  # o estado de partida é uma entrega entregue, com portão pronto
+  [ "$(_chave "$t/antes.md" estado)" = entregue ] && [ "$(_chave "$t/antes.md" portao)" = pronto ] \
+    && [ "$(_chave "$t/antes.md" push_feito)" = true ] && ok "partida: entregue, portao pronto, push feito" || falha "estado de partida inesperado"
+  antes_commits="$(bash "$SEQ" --ler "$FX_ENTREGA")"
+  antes_tasks="$(git ls-files -z -- 'docs/sprintx/**/tasks.md' | xargs -0 cat | rb_sha256)"
+  modo_antes="$(stat -c %a "$FX_ENTREGA")"
+  ls_antes="$(ls -A docs/entregas/ft-rec)"
+  hoje1="$(date +%Y-%m-%d)"
+  out="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; c=$?
+  hoje2="$(date +%Y-%m-%d)"
+  [ "$c" = 0 ] && ok "registra" || { falha "registro rc=$c: $out"; cd "$REPO"; return; }
+  [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$FX_B1" ] && ok "base validada avança para B1" || falha "base_validada_sha"
+  [ "$FX_B1" != "$FX_B0" ] && [ "$(_chave "$t/antes.md" base_validada_sha)" = "$FX_B0" ] && ok "e antes era B0" || falha "B0 de partida"
+  [ "$(_chave "$FX_ENTREGA" estado)" = aberto ] && ok "estado: aberto" || falha "estado"
+  [ "$(_chave "$FX_ENTREGA" portao)" = null ] && [ "$(_chave "$FX_ENTREGA" portao_sha)" = null ] && ok "portao e portao_sha nulos" || falha "portão não zerado"
+  [ "$(_chave "$FX_ENTREGA" falhas_portao)" = '[]' ] && [ "$(_chave "$FX_ENTREGA" causa)" = null ] && ok "falhas_portao [] e causa null" || falha "falhas/causa"
+  [ "$(_chave "$FX_ENTREGA" push_feito)" = false ] && [ "$(_chave "$FX_ENTREGA" entregue_em)" = null ] && ok "push_feito false e entregue_em null" || falha "push/entregue_em"
+  case "$(_chave "$FX_ENTREGA" atualizado_em)" in "$hoje1"|"$hoje2") ok "atualizado_em é a data do sistema (AAAA-MM-DD)" ;; *) falha "atualizado_em: $(_chave "$FX_ENTREGA" atualizado_em)" ;; esac
+  esperado="reconciliacoes:
+  - numero: 1
+    arquivo: RECONCILIACAO-BASE-001.md
+    b1_sha: $FX_B1
+    m_sha: $FX_M"
+  [ "$(awk '/^reconciliacoes:/ { f = 1; print; next } f && /^[ \t]/ { print; next } f { exit }' "$FX_ENTREGA")" = "$esperado" ] \
+    && ok "reconciliacoes acrescida: {numero, arquivo, b1_sha, m_sha}" || falha "bloco reconciliacoes divergente"
+  [ "$(grep -c '^reconciliacoes:' "$FX_ENTREGA")" = 1 ] && ok "uma só chave reconciliacoes" || falha "reconciliacoes repetida"
+  entrega_confere "padrão" "$t/antes.md" "$FX_ENTREGA" $GRAVADAS
+  [ "$(bash "$SEQ" --ler "$FX_ENTREGA")" = "$antes_commits" ] && ok "commits e seq intactos (--ler)" || falha "seq mudou"
+  rc_igual "sequencia-de-commits --validar aceita o resultado" 0 bash "$SEQ" --validar "$FX_ENTREGA"
+  [ "$(git ls-files -z -- 'docs/sprintx/**/tasks.md' | xargs -0 cat | rb_sha256)" = "$antes_tasks" ] && ok "tasks.md intactos" || falha "tasks.md mudou"
+  rc_igual "causa-do-portao aceita a reabertura" 0 bash "$CAUSA" --validar "$FX_ENTREGA"
+  [ "$(bash "$CAUSA" --validar "$FX_ENTREGA" 2>&1)" = "causa=null" ] && ok "causa-do-portao lê causa=null" || falha "saída do causa-do-portao"
+  [ "$(stat -c %a "$FX_ENTREGA")" = "$modo_antes" ] && ok "modo do ENTREGA.md preservado" || falha "modo do ENTREGA.md mudou"
+  [ "$(ls -A docs/entregas/ft-rec)" = "$(printf '%s\nRECONCILIACAO-BASE-001.md\n' "$ls_antes" | LC_ALL=C sort)" ] \
+    && ok "pasta da entrega: só o artefato novo, nenhum temporário" || falha "sobra na pasta da entrega: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
+  [ "$(git status --porcelain=v1 --untracked-files=all | LC_ALL=C sort)" = " M $FX_ENTREGA
+?? docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md" ] && ok "só ENTREGA.md e artefato mudaram na árvore" || falha "status inesperado"
+  rb_validar docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md ft-rec 1 && ok "artefato válido" || falha "artefato inválido: $RB_ERRO"
+  cd "$REPO" || return
+
+  # ---- edição alheia no ENTREGA.md: nunca sobrescrita ----------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  printf '\nNota de quem editou.\n' >> "$FX_ENTREGA"
+  cp "$FX_ENTREGA" "$t/alheia.md"
+  reprova "ENTREGA.md com edição alheia" 3 "reconciliacao-base: ENTREGA.md com alteração não commitada" "$FX_NOVO1" "$FX_NOVO2"
+  cmp -s "$FX_ENTREGA" "$t/alheia.md" && ok "a edição alheia segue byte a byte" || falha "a edição alheia foi tocada"
+  ls "docs/entregas/ft-rec" | grep -q 'registro\|\.tmp\|\.novo' && falha "temporário deixado na pasta da entrega" || ok "sem temporário na pasta da entrega"
+  cd "$REPO" || return
+
+  # ---- tudo ou nada: a substituição do ENTREGA.md falha -------------------
+  # `mv` que recusa o destino ENTREGA.md (determinístico, vale também para root)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  mkdir -p "$t/shim-mv"
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */ENTREGA.md|ENTREGA.md) echo "mv: recusado de propósito" >&2; exit 1 ;; esac\nexec %s "$@"\n' \
+    "$(command -v mv)" > "$t/shim-mv/mv"
+  chmod +x "$t/shim-mv/mv"
+  cp "$FX_ENTREGA" "$t/antes-atomico.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"; antes="$(_foto)"
+  out="$(env PATH="$t/shim-mv:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1 >/dev/null)"; c=$?
+  [ "$c" = 1 ] && ok "falha na substituição do ENTREGA.md: rc 1" || falha "falha forçada: rc=$c, esperava 1 ($out)"
+  case "$out" in *"não foi possível atualizar o ENTREGA.md"*) ok "falha forçada: motivo" ;; *) falha "falha forçada: motivo '$out'" ;; esac
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1 && falha "ficou artefato depois da falha" || ok "falha forçada: nenhum artefato"
+  cmp -s "$FX_ENTREGA" "$t/antes-atomico.md" && ok "falha forçada: ENTREGA.md intacto" || falha "ENTREGA.md mudou na falha"
+  [ "$(ls -A docs/entregas/ft-rec)" = "$ls_antes" ] && ok "falha forçada: pasta da entrega como antes (sem temporário)" || falha "sobra na pasta: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
+  [ "$(_foto)" = "$antes" ] && ok "falha forçada: árvore como antes" || falha "árvore mudou na falha"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "falha forçada: trava livre" || falha "trava presa depois da falha"
+  # sem o impedimento, o mesmo registro passa
+  registra_ok "depois da falha, o registro volta a funcionar" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # ---- variantes do ENTREGA.md --------------------------------------------
+  for variante in entrega_sem_chaves entrega_bloco entrega_crlf; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
+    cd "$d" || return
+    r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+    cp "$FX_ENTREGA" "$t/v-antes.md"
+    out="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; c=$?
+    [ "$c" = 0 ] && ok "$variante: registra" || { falha "$variante: rc=$c $out"; cd "$REPO"; continue; }
+    entrega_confere "$variante" "$t/v-antes.md" "$FX_ENTREGA" $GRAVADAS
+    for k in base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em; do
+      case "$k" in
+        base_validada_sha) esperado="$FX_B1" ;; estado) esperado=aberto ;; falhas_portao) esperado='[]' ;;
+        push_feito) esperado=false ;; *) esperado=null ;;
+      esac
+      [ "$(_chave "$FX_ENTREGA" "$k")" = "$esperado" ] && [ "$(_blocos "$FX_ENTREGA" | awk -F'\t' -v k="$k" '$1 == k { n++ } END { print n }')" = 1 ] \
+        || falha "$variante: $k não ficou '$esperado' uma só vez"
+    done
+    [ "$(_blocos "$FX_ENTREGA" | awk -F'\t' '$1 == "reconciliacoes" { print $2 }' | tr '\001' '|')" \
+      = "reconciliacoes:|  - numero: 1|    arquivo: RECONCILIACAO-BASE-001.md|    b1_sha: $FX_B1|    m_sha: $FX_M" ] \
+      || [ "$variante" = entrega_crlf ] || falha "$variante: bloco reconciliacoes"
+    rc_igual "$variante: causa-do-portao aceita" 0 bash "$CAUSA" --validar "$FX_ENTREGA"
+    rc_igual "$variante: sequencia --validar aceita" 0 bash "$SEQ" --validar "$FX_ENTREGA"
+    case "$variante" in
+      entrega_sem_chaves)
+        # as chaves aninhadas homônimas ficam como estavam, e as de topo entram
+        grep -Fxq '  estado: interno' "$FX_ENTREGA" && grep -Fxq '  causa: aninhada' "$FX_ENTREGA" && grep -Fxq '  push_feito: aninhado' "$FX_ENTREGA" \
+          && ok "chaves aninhadas homônimas intactas" || falha "chave aninhada alterada"
+        [ "$(awk '/^---/ { n++ } n == 1 && /^(causa|push_feito|reconciliacoes|atualizado_em):/ { c++ } END { print c }' "$FX_ENTREGA")" = 4 ] \
+          && ok "chaves ausentes entram uma vez, no frontmatter" || falha "chaves ausentes não entraram"
+        [ "$(awk '/^---/ { n++ } n == 2 && /^(causa|push_feito):/ { c++ } END { print c + 0 }' "$FX_ENTREGA")" = 0 ] \
+          && ok "nada foi inserido no corpo" || falha "chave inserida depois do frontmatter" ;;
+      entrega_bloco)
+        grep -Fq -- '- v1' "$FX_ENTREGA" && falha "sobrou item do bloco antigo de falhas_portao" || ok "bloco antigo de falhas_portao substituído por inteiro"
+        grep -Fq -- '- antiga' "$FX_ENTREGA" && falha "sobrou item do bloco antigo de causa" || ok "bloco antigo de causa substituído por inteiro" ;;
+      entrega_crlf)
+        [ "$(grep -c $'\r$' "$FX_ENTREGA")" = "$(wc -l < "$FX_ENTREGA")" ] && ok "CRLF preservado em todas as linhas" || falha "linha sem CR no ENTREGA.md" ;;
+    esac
+    cd "$REPO" || return
+  done
+
+  # variantes que o registro recusa sem gravar nada
+  for variante in entrega_dup entrega_reconc_cheia; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
+    cd "$d" || return
+    r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+    case "$variante" in
+      entrega_dup) reprova "$variante" 5 "chave de topo repetida: estado" "$FX_NOVO1" "$FX_NOVO2" ;;
+      entrega_reconc_cheia) reprova "$variante" 5 "ENTREGA.reconciliacoes não está vazia" "$FX_NOVO1" "$FX_NOVO2" ;;
+    esac
+    cd "$REPO" || return
+  done
 }
 
 # ---------------------------------------------------------------------------

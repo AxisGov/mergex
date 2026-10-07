@@ -16,6 +16,13 @@
 #   `b0=`, `p1=`, `b1=`, `m=`. Qualquer reprovação: nada é gravado, e cada
 #   motivo sai no stderr como `reconciliacao-base: <motivo>`.
 #
+#   Aprovado, grava também o ENTREGA.md (seção 11): base_validada_sha = B1,
+#   reconciliacoes acrescida, e a entrega reaberta (estado aberto, portão e
+#   causa zerados, push_feito false, entregue_em null, atualizado_em de hoje).
+#   commits, seq e as demais chaves ficam intactos. A gravação parte do
+#   ENTREGA.md do disco só se ele for byte a byte o de M (senão rc 3), e é tudo
+#   ou nada: artefato e ENTREGA.md, ou nenhum dos dois.
+#
 #   Toda prova é recalculada do Git; nenhum caminho é aceito por estar listado.
 #   Não há opção de força, nem variável de ambiente que relaxe prova.
 #
@@ -83,9 +90,11 @@ uso() {
 TMP_DIR=""
 TOKEN=""
 LIBERAR_NA_SAIDA=0
+TMP_ENTREGA=""
 
 encerrar() {
   local rc="$1"
+  [ -z "$TMP_ENTREGA" ] || rm -f "$TMP_ENTREGA"
   [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
     liberar "$TOKEN" >/dev/null 2>&1
@@ -107,6 +116,96 @@ FALHAS=0
 reprova() {
   printf 'reconciliacao-base: %s\n' "$1" >&2
   FALHAS=$((FALHAS + 1))
+}
+
+# ---------------------------------------------------------------------------
+# Escrita do ENTREGA.md (spec, seção 11). Só mexem em chave de TOPO do
+# frontmatter; o corpo depois do `---` de fechamento é copiado byte a byte.
+# Trabalham sempre numa cópia (nunca no ENTREGA.md do repositório).
+# ---------------------------------------------------------------------------
+ENTREGA_ERRO=""
+
+# _entrega_fecha <arquivo> — número da linha do `---` de fechamento
+_entrega_fecha() {
+  awk '
+    NR == 1 { if ($0 !~ /^---[ \t]*\r?$/) exit 1; next }
+    /^---[ \t]*\r?$/ { print NR; achou = 1; exit }
+    END { exit !achou }
+  ' "$1"
+}
+
+# _entrega_troca <arquivo> <chave> <texto> — o texto (uma ou mais linhas,
+# inclusive a da própria chave) substitui a chave de topo e as linhas de
+# continuação dela (indentadas ou `- `); chave ausente: entra antes do `---`
+# de fechamento. Chave de topo repetida é recusada. Linha aninhada com o mesmo
+# nome não conta: só a coluna 0.
+_entrega_troca() {
+  local arq="$1" chave="$2" texto="$3" n fm novo
+  ENTREGA_ERRO=""
+  n="$(_entrega_fecha "$arq")" || { ENTREGA_ERRO="frontmatter ausente ou sem fechamento"; return 1; }
+  fm="$arq.fm.$$"; novo="$arq.novo.$$"
+  head -n "$n" "$arq" | NOVO="$texto" CHAVE="$chave" awk '
+    BEGIN { chave = ENVIRON["CHAVE"]; texto = ENVIRON["NOVO"]; estado = 0 }
+    function emite(   i, m, linhas) {
+      m = split(texto, linhas, "\n")
+      for (i = 1; i <= m; i++) print linhas[i] cr
+    }
+    NR == 1 { cr = ($0 ~ /\r$/) ? "\r" : ""; print; estado = 1; next }
+    estado == 1 && /^---[ \t]*\r?$/ { if (!feito) { emite(); feito = 1 } estado = 2; print; next }
+    estado == 1 {
+      if (pula) {
+        if ($0 ~ /^[ \t]/ || $0 ~ /^-([ \t]|\r?$)/) next
+        pula = 0
+      }
+      if (index($0, chave ":") == 1) {
+        if (feito) { erro = 1; exit 4 }
+        emite(); feito = 1; pula = 1; next
+      }
+      print; next
+    }
+    END { if (!erro && estado != 2) exit 5 }
+  ' > "$fm"
+  case $? in
+    0) ;;
+    4) rm -f "$fm"; ENTREGA_ERRO="chave de topo repetida: $chave"; return 1 ;;
+    *) rm -f "$fm"; ENTREGA_ERRO="não foi possível reescrever $chave"; return 1 ;;
+  esac
+  { cat "$fm"; tail -n "+$((n + 1))" "$arq"; } > "$novo" 2>/dev/null \
+    && cat "$novo" > "$arq" 2>/dev/null \
+    || { rm -f "$fm" "$novo"; ENTREGA_ERRO="não foi possível gravar $chave"; return 1; }
+  rm -f "$fm" "$novo"
+}
+
+# entrega_define <arquivo> <chave> <valor>
+entrega_define() {
+  case "$2" in ''|*[!a-z0-9_]*) ENTREGA_ERRO="chave inválida: $2"; return 1 ;; esac
+  case "$3" in *"$NL"*) ENTREGA_ERRO="valor com quebra de linha: $2"; return 1 ;; esac
+  _entrega_troca "$1" "$2" "$2: $3"
+}
+
+# entrega_reconciliacoes <arquivo> <tsv> — o bloco inteiro da lista. O tsv tem
+# `numero<TAB>arquivo<TAB>b1_sha<TAB>m_sha` por linha; vazio grava `[]`.
+entrega_reconciliacoes() {
+  local texto
+  if [ -s "$2" ]; then
+    texto="$(awk -F'\t' 'BEGIN { print "reconciliacoes:" }
+      NF != 4 { exit 1 }
+      { printf "  - numero: %s\n    arquivo: %s\n    b1_sha: %s\n    m_sha: %s\n", $1, $2, $3, $4 }' "$2")" \
+      || { ENTREGA_ERRO="reconciliacoes: o tsv exige quatro colunas"; return 1; }
+  else
+    texto='reconciliacoes: []'
+  fi
+  _entrega_troca "$1" reconciliacoes "$texto"
+}
+
+# _entrega_tem <arquivo> <chave> — a chave de topo existe no frontmatter
+_entrega_tem() {
+  awk -v c="$2" '
+    NR == 1 { next }
+    /^---[ \t]*\r?$/ { exit }
+    index($0, c ":") == 1 { achou = 1; exit }
+    END { exit !achou }
+  ' "$1"
 }
 
 # ---------------------------------------------------------------------------
@@ -375,8 +474,56 @@ while IFS= read -r f <&3; do
 done 3< "$TMP_DIR/lista.ord"
 
 [ -d "docs/entregas/$TRABALHO" ] || para 5 "pasta da entrega ausente: docs/entregas/$TRABALHO"
+
+# ---------------------------------------------------------------------------
+# ENTREGA.md novo (seção 11). A gravação parte do arquivo do disco, e só se ele
+# for byte a byte o de M: nunca se sobrescreve edição alheia. Tudo é montado
+# numa cópia; o repositório só muda no fim (artefato e ENTREGA.md, ou nada).
+# ---------------------------------------------------------------------------
+{ [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cmp -s "$ENTREGA" "$ENTREGA_M"; } \
+  || para 3 'ENTREGA.md com alteração não commitada' # guarda:DISCO
+
+# a lista de reconciliações do ENTREGA.md só pode estar vazia: não há o que
+# acrescentar a entradas sem artefato (a cadeia é de outra etapa)
+RECONC_ATUAL="$(fm reconciliacoes)"
+if [ -n "$RECONC_ATUAL" ] && [ "$RECONC_ATUAL" != '[]' ]; then
+  para 5 'ENTREGA.reconciliacoes não está vazia e não há artefato registrado'
+elif [ -z "$RECONC_ATUAL" ] && _entrega_tem "$ENTREGA_M" reconciliacoes; then
+  para 5 'ENTREGA.reconciliacoes não está vazia e não há artefato registrado'
+fi
+
+ENTREGA_NOVO="$TMP_DIR/entrega-novo.md"
+cp "$ENTREGA_M" "$ENTREGA_NOVO" || para 1 'não foi possível preparar o ENTREGA.md novo'
+# as únicas chaves de topo que o registro grava (seq e commits nunca entram)
+CHAVES_GRAVADAS='base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em atualizado_em' # guarda:SEQ
+for chave in $CHAVES_GRAVADAS; do
+  case "$chave" in
+    base_validada_sha) valor="$B1" ;;
+    estado) valor=aberto ;;
+    portao|portao_sha|causa|entregue_em) valor=null ;;
+    falhas_portao) valor='[]' ;;
+    push_feito) valor=false ;;
+    atualizado_em) valor="$(date +%Y-%m-%d)" ;;
+    *) para 5 "ENTREGA.md: chave fora da lista que o registro grava: $chave" ;;
+  esac
+  entrega_define "$ENTREGA_NOVO" "$chave" "$valor" || para 5 "ENTREGA.md: $ENTREGA_ERRO"
+done
+printf '1\t%s\t%s\t%s\n' "$NOME" "$B1" "$M" > "$TMP_DIR/reconciliacoes.tsv"
+entrega_reconciliacoes "$ENTREGA_NOVO" "$TMP_DIR/reconciliacoes.tsv" || para 5 "ENTREGA.md: $ENTREGA_ERRO"
+
+# Tudo ou nada: o ENTREGA.md novo fica ao lado do atual (mesma pasta, mesmo
+# modo), o artefato é emitido e só então o ENTREGA.md é substituído. Se a
+# substituição falhar, o artefato novo é removido e o ENTREGA.md fica intacto.
+TMP_ENTREGA="$ENTREGA.registro.$$"
+{ cp -p "$ENTREGA" "$TMP_ENTREGA" && cat "$ENTREGA_NOVO" > "$TMP_ENTREGA"; } 2>/dev/null \
+  || para 1 'não foi possível preparar o ENTREGA.md novo na pasta da entrega'
 RB_ERRO=""
 rb_emitir "$DESTINO" "$ESC" "$ARQ" || para 5 "artefato não emitido: $RB_ERRO"
+if ! mv "$TMP_ENTREGA" "$ENTREGA" 2>/dev/null; then
+  rm -f "$DESTINO" "$TMP_ENTREGA"
+  para 1 'não foi possível atualizar o ENTREGA.md; o artefato foi removido e nada foi gravado'
+fi
+TMP_ENTREGA=""
 
 printf 'registrado=%s\n' "$NOME"
 printf 'b0=%s\n' "$B0"
