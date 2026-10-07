@@ -52,9 +52,11 @@ set +e
 # também para o rb_diff_sha da biblioteca, que roda neste processo.
 unset GIT_GLOB_PATHSPECS GIT_ICASE_PATHSPECS GIT_NOGLOB_PATHSPECS
 export GIT_LITERAL_PATHSPECS=1
-# (advice.graftFileDeprecated: o GIT_GRAFT_FILE abaixo não polui o stderr)
-export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false \
-  GIT_CONFIG_KEY_1=advice.graftFileDeprecated GIT_CONFIG_VALUE_1=false
+# (advice.graftFileDeprecated: o GIT_GRAFT_FILE abaixo não polui o stderr;
+# core.commitGraph=false: os pais vêm dos objetos, não de um commit-graph local)
+export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=advice.graftFileDeprecated GIT_CONFIG_VALUE_1=false \
+  GIT_CONFIG_KEY_2=core.commitGraph GIT_CONFIG_VALUE_2=false
 # Ancestralidade e objetos só do Git, nunca de enxertos locais: refs/replace e
 # .git/info/grafts falsificariam os pais de M. Exportado, para que os filhos
 # (contrato-de-commit.sh, ownership-da-task.sh) herdem.
@@ -199,6 +201,8 @@ BRANCH_BASE="$(fm branch_base)"
 # submódulo dentro delas: o plano não é lido, o registro para (rc 5).
 RAIZ_M="$TMP_DIR/arvore-m"
 mkdir -p "$RAIZ_M" || para 1 'não foi possível criar a árvore temporária de M'
+# caminho absoluto físico: é o prefixo que todo destino da materialização tem
+RAIZ_M="$(cd "$RAIZ_M" && pwd -P)" || para 1 'árvore temporária de M inacessível'
 g ls-tree -r -z --full-tree "$M" -- "docs/sprintx/features/$TRABALHO" "docs/$TRABALHO" "docs/manutencao/$TRABALHO" \
   > "$TMP_DIR/arvore-m.lista" 2>/dev/null || para 4 "prova 3: árvore de M ilegível"
 while IFS= read -r -d '' item <&3; do
@@ -206,11 +210,18 @@ while IFS= read -r -d '' item <&3; do
   # a união separa os tasks.md por linha: um nome com quebra de linha (ou
   # outro caractere de controle) desviaria a leitura para o disco
   case "$caminho" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) para 5 "pasta do trabalho em M com caminho inválido: $(printf '%s' "$caminho" | tr '[:cntrl:]' '?')" ;; esac # guarda:P3
+  # componente vazio, `.` ou `..` (árvore forjada com git mktree) escreveria
+  # fora da árvore temporária: recusado antes de qualquer escrita
+  case "/$caminho/" in */./*|*/../*|*//*) para 5 "pasta do trabalho em M com caminho inválido (componente vazio, . ou ..): $caminho" ;; esac # guarda:P3
   case "$modo" in
     100644|100755) ;;
     *) para 5 "pasta do trabalho em M tem link simbólico ou submódulo (modo $modo): $caminho" ;;
   esac
-  mkdir -p "$RAIZ_M/$(dirname "$caminho")" && g cat-file blob "$M:$caminho" > "$RAIZ_M/$caminho" 2>/dev/null \
+  mkdir -p "$RAIZ_M/$(dirname "$caminho")" || para 4 "prova 3: não foi possível materializar $caminho de M"
+  destino="$(cd "$RAIZ_M/$(dirname "$caminho")" && pwd -P)" || para 4 "prova 3: não foi possível materializar $caminho de M"
+  # defesa em profundidade: o diretório de destino, resolvido, fica dentro do temporário
+  case "$destino/" in "$RAIZ_M"/*) ;; *) para 5 "pasta do trabalho em M: destino fora da árvore temporária: $caminho" ;; esac # guarda:P3
+  g cat-file blob "$M:$caminho" > "$destino/${caminho##*/}" 2>/dev/null \
     || para 4 "prova 3: não foi possível ler $caminho de M"
 done 3< "$TMP_DIR/arvore-m.lista"
 

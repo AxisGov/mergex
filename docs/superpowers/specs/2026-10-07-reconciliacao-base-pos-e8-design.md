@@ -216,7 +216,11 @@ Regras:
 - `diff_b1_m_sha256` é o sha256 da saída de
   `git -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false -c diff.suppressBlankEmpty=false -c diff.relative=false diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames --no-relative --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 --diff-algorithm=myers --indent-heuristic B1 M -- <caminho>`,
   rodado da raiz do repositório, com pathspec literal. As flags explícitas tornam o valor
-  independente da configuração local e do clone (a linha `index` sai com SHA completo).
+  independente da configuração local e do clone (a linha `index` sai com SHA completo). Limitação
+  conhecida: os atributos `-diff`/`binary` (de `.gitattributes`, `info/attributes` ou
+  `core.attributesFile`) não têm flag que os desligue e ainda alteram a saída, trocando o patch
+  textual por `GIT binary patch`. Isso muda o hash entre clones com atributos diferentes, e o
+  efeito só pode ser falhar fechado no `--verificar`.
 - `assinatura` é o sha256 das linhas canônicas, em ordem de byte:
   `numero`, `anterior`, `trabalho_id`, `b0_sha`, `p1_sha`, `b1_sha`, `m_sha`, e uma linha por
   arquivo `caminho\tstatus_base\tblob_b1\tblob_m\tdiff_b1_m_sha256`. Editar o artefato à mão quebra

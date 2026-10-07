@@ -61,7 +61,7 @@ rb_diff_sha() { # <b1> <m> <caminho>
     GIT_LITERAL_PATHSPECS=1; export GIT_LITERAL_PATHSPECS
     # objetos e pais só do Git, sem refs/replace nem .git/info/grafts locais
     GIT_NO_REPLACE_OBJECTS=1; GIT_GRAFT_FILE=/dev/null; export GIT_NO_REPLACE_OBJECTS GIT_GRAFT_FILE # guarda:EST
-    git -C "$raiz" -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false \
+    git -C "$raiz" -c core.commitGraph=false -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false \
       -c diff.suppressBlankEmpty=false -c diff.relative=false \
       diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames --no-relative \
       --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 --diff-algorithm=myers \

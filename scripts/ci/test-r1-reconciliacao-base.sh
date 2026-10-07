@@ -674,6 +674,45 @@ EOF
   reprova "caminho com TAB na pasta do trabalho em M" 5 "pasta do trabalho em M com caminho inválido" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
 
+  # componente `..` numa árvore de M (git mktree) nunca escreve fora do
+  # temporário. M' = M + ft-rec/<40 x ..>/<alvo>/escrito.txt; o índice esparso
+  # é ajustado para casar com M' (o índice comum recusa o caminho).
+  # O mesmo com componente `.` (fica dentro do temporário, mas também é recusado).
+  local fora cadeia comp i ftrec feat sx docs raiz mlinha osx odocs oraiz pontual
+  for pontual in .. .; do
+  fora="$(mktemp -d)"; TMPS="$TMPS $fora"
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  cadeia="$(printf 'escrito fora do temporário\n' | git hash-object -w --stdin)"
+  cadeia="$(printf '100644 blob %s\tescrito.txt\n' "$cadeia" | git mktree)"
+  comp="$fora"
+  while [ -n "$comp" ] && [ "$comp" != / ]; do
+    cadeia="$(printf '040000 tree %s\t%s\n' "$cadeia" "${comp##*/}" | git mktree)"
+    comp="${comp%/*}"
+  done
+  i=0; while [ "$i" -lt 40 ]; do cadeia="$(printf '040000 tree %s\t%s\n' "$cadeia" "$pontual" | git mktree)"; i=$((i + 1)); done
+  ftrec="$( { git ls-tree HEAD:docs/sprintx/features/ft-rec; printf '040000 tree %s\t%s\n' "$cadeia" "$pontual"; } | git mktree)"
+  feat="$( { git ls-tree HEAD:docs/sprintx/features | grep -v '	ft-rec$'; printf '040000 tree %s\tft-rec\n' "$ftrec"; } | git mktree)"
+  sx="$( { git ls-tree HEAD:docs/sprintx | grep -v '	features$'; printf '040000 tree %s\tfeatures\n' "$feat"; } | git mktree)"
+  docs="$( { git ls-tree HEAD:docs | grep -v '	sprintx$'; printf '040000 tree %s\tsprintx\n' "$sx"; } | git mktree)"
+  raiz="$( { git ls-tree HEAD | grep -v '	docs$'; printf '040000 tree %s\tdocs\n' "$docs"; } | git mktree)"
+  mlinha="$(git log -1 --format=%B HEAD | git commit-tree "$raiz" -p "$FX_P1" -p "$FX_B1")"
+  git config index.sparse true
+  git sparse-checkout set --cone src tests docs/entregas >/dev/null 2>&1 || falha "sparse-checkout falhou"
+  osx="$(git rev-parse HEAD:docs/sprintx)"; odocs="$(git rev-parse HEAD:docs)"; oraiz="$(git rev-parse 'HEAD^{tree}')"
+  git update-ref HEAD "$mlinha"
+  perl -e 'use Digest::SHA qw(sha1); my $p = shift; local $/; open(my $f, "<:raw", $p) or die; my $b = <$f>; close $f;
+    substr($b, -20) = ""; while (@ARGV) { my ($a, $n) = (pack("H*", shift), pack("H*", shift)); $b =~ s/\Q$a\E/$n/g; }
+    open($f, ">:raw", $p) or die; print $f $b, sha1($b); close $f' .git/index "$osx" "$sx" "$odocs" "$docs" "$oraiz" "$raiz" \
+    || falha "índice esparso não ajustado"
+  git ls-tree -r --name-only --full-tree HEAD -- docs/sprintx/features/ft-rec | grep -Fq "/$pontual/" || falha "M' sem componente $pontual"
+  git diff --cached --quiet || falha "o índice não casa com M' ($pontual)"
+  reprova "componente $pontual numa árvore de M" 5 "pasta do trabalho em M com caminho inválido (componente vazio, . ou ..)" \
+    "$FX_NOVO1" "$FX_NOVO2"
+  [ ! -e "$fora/escrito.txt" ] && ok "componente $pontual: nada escrito fora do temporário" || falha "componente $pontual: escreveu $fora/escrito.txt"
+  cd "$REPO" || return
+  done
+
   # canônica e legada em M: erro, com o motivo do catálogo no stderr
   d="$(mktemp -d)"; TMPS="$TMPS $d"
   FX_VARIANTE=duas_pastas fx_cenario "$d" || { falha "variante duas_pastas não montou"; return; }
