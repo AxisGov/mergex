@@ -7,6 +7,24 @@
 #   fx_merge_sem_commit <dir>   o mesmo cenário, parado com o merge resolvido
 #                               e no índice, sem commit (MERGE_HEAD presente)
 #
+# Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
+# o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
+# caminhos que o caso tenta registrar, UM POR LINHA (caminho com espaço chega
+# inteiro: leia com `while IFS= read -r`), e FX_ESPECIAL.
+#   base_removeu          a base remove README.md e a integração o mantém
+#   integracao_removeu    a integração remove FX_NOVO2
+#   renomeado             a base renomeia README.md para LEIAME.md
+#   resolucao_igual_base  FX_NOVO2 resolvido com o lado da base inteiro
+#   m_um_pai              M é um commit comum (um pai) com a árvore do merge
+#   pais_trocados         M^1 é a base e M^2 é a feature
+#   fora_primeiro_pai     a integração real fica num ramo lateral; HEAD é um
+#                         merge que a traz como segundo pai
+#   m_sem_integra_base    mensagem de M sem Integra-base:
+#   m_com_metodo          mensagem de M com Metodo: e8
+#   caminho_especial      a base cria FX_ESPECIAL (espaço, acento e apóstrofo),
+#                         ajustado no merge; o repositório usa core.quotepath true
+#   base_alterou          a base altera README.md (existia em B0); ajustado no merge
+#
 # Só comandos Git reais. Nenhum SHA é fixo: tudo é lido com `git rev-parse`.
 # Não depende do cwd do chamador além do diretório alvo; ao final, o repositório
 # alvo fica na branch feature/ft-rec e o cwd do chamador é restaurado.
@@ -62,7 +80,7 @@ tasks:
 
 Prosa do plano.
 EOF
-  cat > docs/sprintx/features/ft-rec/sprint-01/ORQUESTRADOR.md <<'EOF'
+  cat > docs/sprintx/features/ft-rec/ORQUESTRADOR.md <<'EOF'
 ---
 expx_schema: 1
 expx_tool: sprintx
@@ -101,12 +119,26 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
   } > docs/entregas/ft-rec/ENTREGA.md
 }
 
+FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou "
+
+# Commita a árvore do índice com os pais dados, sem passar pelo `git commit`
+# (que faria um merge de dois pais). Encerra o merge em andamento.
+# _fx_commit_arvore <msg> <pai>...
+_fx_commit_arvore() {
+  local msg="$1" arvore c; shift
+  arvore="$(git write-tree)"
+  git merge --quit
+  c="$(git commit-tree "$arvore" $(printf -- '-p %s ' "$@") -F "$msg")"
+  git update-ref HEAD "$c"
+}
+
 # Corpo da montagem. Roda num `bash` filho com `set -e` (ver _fx_monta): qualquer
 # comando que falhe aborta a fixture, mesmo quando o chamador usa `||`.
-# _fx_corpo <dir> <legado:0|1> <com_commit:0|1> <msg> <arquivo-de-shas>
+# _fx_corpo <dir> <legado:0|1> <com_commit:0|1> <msg> <arquivo-de-shas> [variante]
 _fx_corpo() {
-  local dir="$1" legado="$2" com_commit="$3" msg="$4" shas="$5"
-  local e1 e1c pre2 FX_B0 FX_P1 FX_B1 FX_M
+  local dir="$1" legado="$2" com_commit="$3" msg="$4" shas="$5" var="${6:-}"
+  local e1 e1c pre2 FX_B0 FX_P1 FX_B1 FX_M lateral
   {
     cd "$dir"
     git init -q -b main
@@ -128,7 +160,7 @@ _fx_corpo() {
     # feature: plano
     fixture_switch_exato feature/ft-rec -c feature/ft-rec
     _fx_plano
-    git add docs/sprintx/features/ft-rec/sprint-01/tasks.md docs/sprintx/features/ft-rec/sprint-01/ORQUESTRADOR.md
+    git add docs/sprintx/features/ft-rec/sprint-01/tasks.md docs/sprintx/features/ft-rec/ORQUESTRADOR.md
     _fx_msg "$msg" "docs: plano da feature ft-rec"
     _fx_commit "$msg"
 
@@ -176,6 +208,16 @@ _fx_corpo() {
     printf 'export const casoCompliance = "base";\n' > tests/ui/compliance-ksmv-primitives.test.tsx
     printf 'export const casoAttendance = "base";\n' > tests/ui/attendance-ksmv-primitives.test.tsx
     git add src/painel.ts tests/ui/compliance-ksmv-primitives.test.tsx tests/ui/attendance-ksmv-primitives.test.tsx
+    case "$var" in
+      base_removeu) git rm -q README.md ;;
+      renomeado) git mv README.md LEIAME.md ;;
+      caminho_especial)
+        printf 'export const casoEspecial = "base";\n' > "$FX_ESPECIAL"
+        git add -- "$FX_ESPECIAL" ;;
+      base_alterou)
+        printf '# Projeto\n\nSeção da base.\n' > README.md
+        git add README.md ;;
+    esac
     _fx_msg "$msg" "feat: primitivas ksmv e titulo da base"
     _fx_commit "$msg"
     FX_B1="$(git rev-parse HEAD)"
@@ -189,11 +231,44 @@ _fx_corpo() {
     printf 'export const casoCompliance = "base";\nexport const ajusteCompliance = "ft-rec";\n' > tests/ui/compliance-ksmv-primitives.test.tsx
     printf 'export const casoAttendance = "base";\nexport const ajusteAttendance = "ft-rec";\n' > tests/ui/attendance-ksmv-primitives.test.tsx
     git add src/painel.ts tests/ui/compliance-ksmv-primitives.test.tsx tests/ui/attendance-ksmv-primitives.test.tsx
+    case "$var" in
+      base_removeu)
+        git show "$FX_B0:README.md" > README.md
+        git add README.md ;;
+      integracao_removeu) git rm -q -f tests/ui/attendance-ksmv-primitives.test.tsx ;;
+      resolucao_igual_base)
+        git show "$FX_B1:tests/ui/attendance-ksmv-primitives.test.tsx" > tests/ui/attendance-ksmv-primitives.test.tsx
+        git add tests/ui/attendance-ksmv-primitives.test.tsx ;;
+      caminho_especial)
+        printf 'export const casoEspecial = "base";\nexport const ajusteEspecial = "ft-rec";\n' > "$FX_ESPECIAL"
+        git add -- "$FX_ESPECIAL" ;;
+      base_alterou)
+        printf '# Projeto\n\nSeção da base, ajustada para a feature.\n' > README.md
+        git add README.md ;;
+    esac
     [ -z "$(git diff --name-only --diff-filter=U)" ]
 
     if [ "$com_commit" = 1 ]; then
-      _fx_msg "$msg" "merge: integra a main na feature ft-rec" "Trabalho: ft-rec" "Integra-base: $FX_B1"
-      _fx_commit "$msg"
+      case "$var" in
+        m_sem_integra_base) _fx_msg "$msg" "merge: integra a main na feature ft-rec" "Trabalho: ft-rec" ;;
+        m_com_metodo) _fx_msg "$msg" "merge: integra a main na feature ft-rec" "Trabalho: ft-rec" "Integra-base: $FX_B1" "Metodo: e8" ;;
+        *) _fx_msg "$msg" "merge: integra a main na feature ft-rec" "Trabalho: ft-rec" "Integra-base: $FX_B1" ;;
+      esac
+      case "$var" in
+        m_um_pai) _fx_commit_arvore "$msg" "$FX_P1" ;;
+        pais_trocados) _fx_commit_arvore "$msg" "$FX_B1" "$FX_P1" ;;
+        fora_primeiro_pai)
+          # a integração válida (P1, B1) fica de lado; HEAD a traz como 2º pai
+          _fx_commit_arvore "$msg" "$FX_P1" "$FX_B1"
+          lateral="$(git rev-parse HEAD)"
+          git update-ref HEAD "$FX_P1"
+          _fx_msg "$msg" "merge: traz o ramo lateral" "Trabalho: ft-rec" "Integra-base: $lateral"
+          git commit-tree "$lateral^{tree}" -p "$FX_P1" -p "$lateral" -F "$msg" > "$msg.c"
+          git update-ref HEAD "$(cat "$msg.c")"
+          rm -f "$msg.c" ;;
+        *) _fx_commit "$msg" ;;
+      esac
+      [ -z "$(git status --porcelain)" ]
       FX_M="$(git rev-parse HEAD)"
       printf '%s %s %s %s\n' "$FX_B0" "$FX_P1" "$FX_B1" "$FX_M" > "$shas"
     else
@@ -204,11 +279,14 @@ _fx_corpo() {
 
 # _fx_monta <dir> <legado:0|1> <com_commit:0|1>
 _fx_monta() {
-  local dir="$1" legado="$2" com_commit="$3" msg rc
+  local dir="$1" legado="$2" com_commit="$3" msg rc var="${FX_VARIANTE:-}"
+  if [ -n "$var" ]; then
+    case "$_FX_VARIANTES" in *" $var "*) ;; *) printf 'fixture: variante desconhecida: %s\n' "$var" >&2; return 1 ;; esac
+  fi
   msg="$(mktemp)" || return 1
   mkdir -p "$dir" || return 1
   bash -c 'set -e; . "$1"; shift; _fx_corpo "$@"' _ \
-    "$_FXR_LIB/fixture-reconciliacao.sh" "$dir" "$legado" "$com_commit" "$msg" "$msg.shas"
+    "$_FXR_LIB/fixture-reconciliacao.sh" "$dir" "$legado" "$com_commit" "$msg" "$msg.shas" "$var"
   rc=$?
   [ "$rc" -eq 0 ] || { rm -f "$msg" "$msg.shas"; return 1; }
   # os SHAs voltam do processo filho por arquivo
@@ -220,7 +298,16 @@ _fx_monta() {
   FX_ENTREGA=docs/entregas/ft-rec/ENTREGA.md
   FX_NOVO1=tests/ui/compliance-ksmv-primitives.test.tsx
   FX_NOVO2=tests/ui/attendance-ksmv-primitives.test.tsx
-  export FX_TRAB FX_ENTREGA FX_NOVO1 FX_NOVO2
+  FX_LISTA_VARIANTE="$FX_NOVO1
+$FX_NOVO2"
+  case "$var" in
+    base_removeu|renomeado|base_alterou) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
+README.md" ;;
+    caminho_especial) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
+$FX_ESPECIAL"
+      git -C "$dir" config core.quotepath true ;;
+  esac
+  export FX_TRAB FX_ENTREGA FX_NOVO1 FX_NOVO2 FX_LISTA_VARIANTE FX_ESPECIAL
 }
 
 fx_cenario() {

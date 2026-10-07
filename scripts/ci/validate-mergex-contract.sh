@@ -1048,7 +1048,7 @@ fi
 # Call sites e provas que nomeiam o classificador formam uma lista fechada.
 own_chamadores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e 'ownership-da-task.sh' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-m4b-arvore-inteira.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./.claude/skills/mergex/scripts/reconciliacao-base.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-m4b-arvore-inteira.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$own_chamadores" = "$own_esperado" ] \
   || fail "unexpected caller of ownership-da-task.sh: $own_chamadores"
 

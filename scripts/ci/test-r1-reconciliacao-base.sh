@@ -356,6 +356,186 @@ grupo_artefato() {
   printf '%s' "$ferr" | grep -Eq '^[0-9a-f]{64}$' && ok "controle: com sha256sum no mesmo PATH o hash sai" || falha "controle sem hash falhou: $ferr"
 }
 
+# --- apoio do grupo provas ---------------------------------------------------
+
+# rc_motivo <desc> <rc> <trecho> <cmd...> — exige o rc e o trecho no stderr:
+# um rc 4 vindo da causa errada não passa.
+rc_motivo() {
+  local desc="$1" esperado="$2" trecho="$3" rc err; shift 3
+  err="$("$@" 2>&1 >/dev/null)"; rc=$?
+  if [ "$rc" != "$esperado" ]; then falha "$desc — rc=$rc, esperava $esperado: $err"; return; fi
+  case "$err" in
+    *"$trecho"*) ok "$desc" ;;
+    *) falha "$desc — stderr sem '$trecho': $err" ;;
+  esac
+}
+
+# foto da árvore: status, conteúdo não commitado e HEAD
+_foto() {
+  git status --porcelain=v1 --untracked-files=all
+  git diff | rb_sha256
+  git rev-parse HEAD
+}
+
+# reprova <desc> <rc> <trecho> <caminho>... — registro reprovado não grava nada
+# e devolve a trava C5. Usa o array `r` do grupo.
+reprova() {
+  local desc="$1" esperado="$2" trecho="$3" antes; shift 3
+  antes="$(_foto)"
+  rc_motivo "$desc" "$esperado" "$trecho" "${r[@]}" "$@"
+  if [ "$(_foto)" = "$antes" ] && ! ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1; then
+    ok "$desc: nada gravado"
+  else falha "$desc: a árvore mudou"; fi
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "$desc: trava livre" || falha "$desc: trava presa"
+}
+
+# registra_ok <desc> <caminho>... — rc 0, saída, artefato válido e provas no
+# artefato iguais às recalculadas do Git; só o artefato é gravado.
+registra_ok() {
+  local desc="$1" out a lido f st bb bm ds t antes esperado; shift
+  antes="$(git status --porcelain=v1 --untracked-files=all)"
+  out="$("${r[@]}" "$@" 2>&1)" || { falha "$desc — rc=$?: $out"; return; }
+  ok "$desc"
+  a=docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
+  esperado="registrado=RECONCILIACAO-BASE-001.md
+b0=$FX_B0
+p1=$FX_P1
+b1=$FX_B1
+m=$FX_M"
+  [ "$out" = "$esperado" ] && ok "$desc: saída registrado/b0/p1/b1/m" || falha "$desc: saída divergente: $out"
+  rb_validar "$a" ft-rec 1 && ok "$desc: artefato válido" || { falha "$desc: artefato inválido: $RB_ERRO"; return; }
+  lido="$(rb_ler "$a")"
+  for t in "anterior	null" "origem_base	registrada_e0" "estado	ativa" "b0_sha	$FX_B0" \
+           "p1_sha	$FX_P1" "b1_sha	$FX_B1" "m_sha	$FX_M" "branch	feature/ft-rec" "branch_base	main"; do
+    printf '%s\n' "$lido" | grep -Fxq "escalar	$t" && ok "$desc: $t" || falha "$desc: escalar ${t%%	*} divergente"
+  done
+  [ "$(printf '%s\n' "$lido" | awk -F'\t' '$1 == "arquivo" { print $2 }' | LC_ALL=C sort)" \
+    = "$(printf '%s\n' "$@" | LC_ALL=C sort)" ] && ok "$desc: caminhos exatamente os dados" || falha "$desc: caminhos divergentes"
+  while IFS=$'\t' read -r _ f st bb bm ds _; do
+    [ -n "$f" ] || continue
+    [ "$st" = "$(git -c core.quotepath=false diff --no-renames --name-status -z "$FX_B0" "$FX_B1" -- ":(literal)$f" | tr '\0' '\n' | head -n1)" ] \
+      && [ "$bb" = "$(git rev-parse "$FX_B1:$f")" ] && [ "$bm" = "$(git rev-parse "$FX_M:$f")" ] \
+      && [ "$ds" = "$(git -c core.quotepath=false diff --no-ext-diff --no-color --binary --no-renames "$FX_B1" "$FX_M" -- ":(literal)$f" | rb_sha256)" ] \
+      && ok "$desc: status, blobs e diff de '$f' conferem com o Git" || falha "$desc: provas gravadas de '$f' divergem do Git"
+  done <<EOF
+$(printf '%s\n' "$lido" | grep '^arquivo	')
+EOF
+  [ "$(git status --porcelain=v1 --untracked-files=all)" = "$antes${antes:+
+}?? $a" ] && ok "$desc: só o artefato foi gravado (ENTREGA.md intacto)" || falha "$desc: gravou além do artefato"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "$desc: trava livre" || falha "$desc: trava presa"
+}
+
+grupo_provas() {
+  local d r variante lista l antes c
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  . "$S/catalogo-de-metodo.sh" || { falha "catálogo ausente"; return; }
+
+  # catalogo_pasta_do_trabalho: as regras de persistir-metodo.sh
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  mkdir -p "$d/docs/sprintx/features/fc" "$d/docs/fl" "$d/docs/sprintx/features/fd" "$d/docs/fd" "$d/docs/manutencao/rx"
+  [ "$(catalogo_pasta_do_trabalho "$d" sprintx fc)" = docs/sprintx/features/fc ] && ok "pasta: SprintX canônica" || falha "pasta canônica"
+  [ "$(catalogo_pasta_do_trabalho "$d" sprintx fl)" = docs/fl ] && ok "pasta: SprintX legada" || falha "pasta legada"
+  if catalogo_pasta_do_trabalho "$d" sprintx fd >/dev/null; then falha "pasta: duas pastas passou"
+  else case "$CATALOGO_ERRO" in *"duas pastas"*) ok "pasta: duas pastas SprintX é erro" ;; *) falha "pasta: erro '$CATALOGO_ERRO'" ;; esac; fi
+  catalogo_pasta_do_trabalho "$d" sprintx nada >/dev/null && falha "pasta SprintX ausente passou" || ok "pasta: SprintX ausente é erro"
+  [ "$(catalogo_pasta_do_trabalho "$d" runx rx)" = docs/manutencao/rx ] && ok "pasta: RunX" || falha "pasta RunX"
+  catalogo_pasta_do_trabalho "$d" runx nada >/dev/null && falha "pasta RunX ausente passou" || ok "pasta: RunX ausente é erro"
+  catalogo_pasta_do_trabalho "$d" n/a fc >/dev/null && falha "pasta de origem n/a passou" || ok "pasta: origem sem pasta é erro"
+
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  antes="$(_foto)"
+  registra_ok "registra os dois testes da base" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md
+  [ "$(_foto)" = "$antes" ] && ok "sem o artefato, a árvore volta ao estado anterior" || falha "árvore não voltou"
+
+  reprova "inventário: falta um caminho alterado pelo merge" 4 "inventário: $FX_NOVO2" "$FX_NOVO1"
+  reprova "prova 3: caminho das tasks" 4 "prova 3: src/painel.ts" "$FX_NOVO1" "$FX_NOVO2" src/painel.ts
+  reprova "prova 3: artefato de método" 4 "prova 3: $FX_ENTREGA" "$FX_NOVO1" "$FX_NOVO2" "$FX_ENTREGA"
+  reprova "prova 1: arquivo que a base não tocou" 4 "prova 1: README.md" "$FX_NOVO1" "$FX_NOVO2" README.md
+  reprova "prova 2: arquivo tocado pela feature" 4 "prova 2: tests/ui/ft-rec.test.ts" "$FX_NOVO1" "$FX_NOVO2" tests/ui/ft-rec.test.ts
+
+  # B0 fora da ancestralidade (ENTREGA.md editado na árvore; o stage segue vazio)
+  sed -i "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" "$FX_ENTREGA"
+  reprova "estrutura: B0 não ancestral de B1" 4 "estrutura[b0_b1]" "$FX_NOVO1" "$FX_NOVO2"
+  sed -i "s/^base_validada_sha: .*/base_validada_sha: $FX_B1/" "$FX_ENTREGA"
+  reprova "estrutura: B0 não ancestral de P1" 4 "estrutura[b0_p1]" "$FX_NOVO1" "$FX_NOVO2"
+  sed -i "s/^base_validada_sha: .*/base_validada_sha: main/" "$FX_ENTREGA"
+  reprova "base_validada_sha com nome de ref" 5 "base_validada_sha" "$FX_NOVO1" "$FX_NOVO2"
+  git restore -- "$FX_ENTREGA"
+
+  # contexto explícito, uso e pré-condições
+  rc_motivo "origem divergente do ENTREGA.md" 5 "expx_tool" \
+    bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2"
+  rc_igual "--entrega de outro trabalho é uso" 64 bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho outro -- "$FX_NOVO1"
+  for c in --force --sem-prova --desconhecida; do
+    rc_igual "opção $c recusada" 64 bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec "$c" -- "$FX_NOVO1" "$FX_NOVO2"
+  done
+  rc_igual "sem --registrar é uso" 64 bash "$RB" --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2"
+  rc_igual "sem -- é uso" 64 bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  reprova "caminho repetido na lista é uso" 64 "repetido" "$FX_NOVO1" "$FX_NOVO2" "$FX_NOVO1"
+  reprova "caminho absoluto é uso" 64 "caminho" "$FX_NOVO1" "$FX_NOVO2" /etc/passwd
+  printf '\n' >> README.md; git add README.md
+  rc_motivo "stage não vazio" 3 "stage" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+  git restore --staged README.md; git restore README.md
+  git switch -q -c outra
+  reprova "branch ativa diverge de ENTREGA.branch" 5 "branch" "$FX_NOVO1" "$FX_NOVO2"
+  git switch -q feature/ft-rec
+  git branch -q -D outra
+  [ "$(_foto)" = "$antes" ] && ok "fixture intacta depois dos casos de reprovação" || falha "fixture alterada"
+  cd "$REPO" || return
+
+  for variante in base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados \
+    fora_primeiro_pai m_sem_integra_base m_com_metodo; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
+    cd "$d" || return
+    lista=(); while IFS= read -r l; do lista+=("$l"); done <<EOF
+$FX_LISTA_VARIANTE
+EOF
+    case "$variante" in
+      base_removeu|renomeado) c="prova 1: README.md" ;;
+      integracao_removeu|resolucao_igual_base) c="prova 4: $FX_NOVO2" ;;
+      m_um_pai) c="estrutura[pais]" ;;
+      fora_primeiro_pai) c="estrutura[base]" ;;
+      *) c="estrutura[contrato]" ;;
+    esac
+    reprova "variante $variante reprova" 4 "$c" "${lista[@]}"
+    cd "$REPO" || return
+  done
+  for variante in caminho_especial base_alterou; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
+    cd "$d" || return
+    lista=(); while IFS= read -r l; do lista+=("$l"); done <<EOF
+$FX_LISTA_VARIANTE
+EOF
+    registra_ok "variante $variante registra" "${lista[@]}"
+    case "$variante" in
+      caminho_especial)
+        { [ "${#lista[@]}" = 3 ] && [ "${lista[2]}" = "$FX_ESPECIAL" ]; } && ok "a lista traz o caminho especial inteiro" || falha "lista partida"
+        rb_ler docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md | awk -F'\t' '$1 == "arquivo" { print $2 }' \
+          | grep -Fxq -- "$FX_ESPECIAL" && ok "o artefato tem exatamente o caminho especial" || falha "caminho especial alterado no artefato" ;;
+      base_alterou)
+        rb_ler docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md | grep -q '^arquivo	README.md	M	' \
+          && ok "README.md registrado com status_base M" || falha "status_base de README.md" ;;
+    esac
+    cd "$REPO" || return
+  done
+
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
+  cd "$d" || return
+  reprova "merge em andamento" 3 "merge em andamento" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  bash "$TRAVA" --adquirir teste-r1 >/dev/null
+  rc_motivo "trava C5 ocupada" 2 "trava" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1 && falha "trava ocupada gravou" || ok "trava ocupada: nada gravado"
+  cd "$REPO" || return
+}
+
 # ---------------------------------------------------------------------------
 # Despacho
 # ---------------------------------------------------------------------------

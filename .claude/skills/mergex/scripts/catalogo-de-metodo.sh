@@ -26,6 +26,12 @@
 #   Retorna 1 com CATALOGO_ERRO preenchido quando o índice da base é inválido.
 #   Chame SEM subshell (`catalogo_metodo ... > arquivo`) para ler CATALOGO_ERRO.
 #
+#   catalogo_pasta_do_trabalho <raiz> <origem> <trabalho>
+#     A pasta do trabalho, relativa à raiz: SprintX canônica
+#     `docs/sprintx/features/<t>`, senão a legada `docs/<t>` (as duas ao mesmo
+#     tempo é erro); RunX `docs/manutencao/<t>`. Pasta ausente ou origem sem
+#     pasta: retorna 1 com CATALOGO_ERRO. Mesmas regras de persistir-metodo.sh.
+#
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
 CATALOGO_ERRO=""
@@ -45,6 +51,30 @@ catalogo_fm() { # <arquivo> <chave>
       }
     }
   ' "$1" 2>/dev/null
+}
+
+catalogo_pasta_do_trabalho() { # <raiz> <origem> <trabalho>
+  local raiz="$1" origem="$2" trabalho="$3" canonica legada pasta
+  CATALOGO_ERRO=""
+  case "$origem" in
+    sprintx)
+      canonica="docs/sprintx/features/$trabalho"
+      legada="docs/$trabalho"
+      if [ -d "$raiz/$canonica" ] && [ -d "$raiz/$legada" ]; then
+        CATALOGO_ERRO="há duas pastas SprintX para $trabalho"; return 1
+      elif [ -d "$raiz/$canonica" ]; then
+        pasta="$canonica"
+      elif [ -d "$raiz/$legada" ]; then
+        pasta="$legada"
+      else
+        CATALOGO_ERRO="pasta SprintX do trabalho não existe"; return 1
+      fi ;;
+    runx)
+      pasta="docs/manutencao/$trabalho"
+      [ -d "$raiz/$pasta" ] || { CATALOGO_ERRO="pasta RunX do trabalho não existe"; return 1; } ;;
+    *) CATALOGO_ERRO="origem sem pasta de trabalho: $origem"; return 1 ;;
+  esac
+  printf '%s\n' "$pasta"
 }
 
 catalogo_areas_do_indice() {
