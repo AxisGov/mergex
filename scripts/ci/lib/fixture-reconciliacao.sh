@@ -38,6 +38,14 @@
 #   entrega_symlink       o merge troca o ENTREGA.md por link para ENTREGA-real.md
 #   plano_symlink         o merge cria um link simbólico na pasta do trabalho
 #   merge_area_base       o merge cria docs/sprintx/features/ft-rec/base/notas.md
+#   plano_nl              a base cria, na pasta do trabalho, `foo` e
+#                         `foo<NL>$FX_NL_ALVO/tasks.md` (FX_NL_ALVO: diretório
+#                         absoluto, obrigatório nesta variante)
+#   plano_tab             a base cria `tab<TAB>no nome.md` na pasta do trabalho
+#   duas_pastas           a base cria docs/ft-rec/notas.md (pasta legada) e M
+#                         passa a ter a canônica e a legada
+#   runx                  o trabalho é RunX: plano em docs/manutencao/ft-rec e
+#                         ENTREGA.expx_tool runx
 # As variantes de ENTREGA.md e de B0 alteram o ENTREGA.md DENTRO do merge
 # (é artefato de método), para que a árvore continue limpa.
 #
@@ -63,12 +71,13 @@ _fx_msg() { # <arquivo> <assunto> [trailer...]
   } > "$arq"
 }
 
-_fx_plano() {
-  mkdir -p docs/sprintx/features/ft-rec/sprint-01 || return 1
-  cat > docs/sprintx/features/ft-rec/sprint-01/tasks.md <<'EOF'
+_fx_plano() { # <pasta do trabalho> <expx_tool>
+  local p="$1" ferramenta="$2"
+  mkdir -p "$p/sprint-01" || return 1
+  cat > "$p/sprint-01/tasks.md" <<EOF
 ---
 expx_schema: 1
-expx_tool: sprintx
+expx_tool: $ferramenta
 kind: plano
 trabalho_id: ft-rec
 sprint:
@@ -96,10 +105,10 @@ tasks:
 
 Prosa do plano.
 EOF
-  cat > docs/sprintx/features/ft-rec/ORQUESTRADOR.md <<'EOF'
+  cat > "$p/ORQUESTRADOR.md" <<EOF
 ---
 expx_schema: 1
-expx_tool: sprintx
+expx_tool: $ferramenta
 kind: orquestrador
 trabalho_id: ft-rec
 ---
@@ -118,7 +127,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
   if [ "$fase" = entregue ]; then estado=entregue; pushed=true; ent=2026-10-02; fi
   mkdir -p docs/entregas/ft-rec || return 1
   {
-    printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: ft-rec\n'
+    printf -- '---\nexpx_schema: 1\nexpx_tool: %s\nkind: entrega\ntrabalho_id: ft-rec\n' "${fx_ferramenta:-sprintx}"
     printf 'entregue_por: mergex\nestado: %s\nversionado: true\n' "$estado"
     printf 'branch: feature/ft-rec\nbranch_base: main\n'
     if [ "$legado" != 1 ]; then
@@ -136,7 +145,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink merge_area_base "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão>
@@ -161,6 +170,9 @@ _fx_commit_arvore() {
 _fx_corpo() {
   local dir="$1" legado="$2" com_commit="$3" msg="$4" shas="$5" var="${6:-}"
   local e1 e1c pre2 FX_B0 FX_P1 FX_B1 FX_M lateral
+  local fx_pasta=docs/sprintx/features/ft-rec fx_ferramenta=sprintx nl='
+' tab='	'
+  if [ "$var" = runx ]; then fx_pasta=docs/manutencao/ft-rec; fx_ferramenta=runx; fi
   {
     cd "$dir"
     git init -q -b main
@@ -181,8 +193,8 @@ _fx_corpo() {
 
     # feature: plano
     fixture_switch_exato feature/ft-rec -c feature/ft-rec
-    _fx_plano
-    git add docs/sprintx/features/ft-rec/sprint-01/tasks.md docs/sprintx/features/ft-rec/ORQUESTRADOR.md
+    _fx_plano "$fx_pasta" "$fx_ferramenta"
+    git add "$fx_pasta/sprint-01/tasks.md" "$fx_pasta/ORQUESTRADOR.md"
     _fx_msg "$msg" "docs: plano da feature ft-rec"
     _fx_commit "$msg"
 
@@ -248,6 +260,20 @@ _fx_corpo() {
       tipo_mudou)
         rm -f README.md; ln -s src/painel.ts README.md
         git add README.md ;;
+      # nomes que a base traz para a pasta do trabalho (fora do diff B1..M)
+      plano_nl)
+        mkdir -p "docs/sprintx/features/ft-rec/foo$nl${FX_NL_ALVO:?FX_NL_ALVO absoluto}"
+        printf 'nada\n' > docs/sprintx/features/ft-rec/foo
+        printf '# vazio\n' > "docs/sprintx/features/ft-rec/foo$nl$FX_NL_ALVO/tasks.md"
+        git add -A -- docs/sprintx/features/ft-rec ;;
+      plano_tab)
+        mkdir -p docs/sprintx/features/ft-rec
+        printf 'nada\n' > "docs/sprintx/features/ft-rec/tab${tab}no nome.md"
+        git add -A -- docs/sprintx/features/ft-rec ;;
+      duas_pastas)
+        mkdir -p docs/ft-rec
+        printf '# Notas\n' > docs/ft-rec/notas.md
+        git add docs/ft-rec/notas.md ;;
     esac
     _fx_msg "$msg" "feat: primitivas ksmv e titulo da base"
     _fx_commit "$msg"
@@ -343,7 +369,7 @@ _fx_monta() {
   fi
   msg="$(mktemp)" || return 1
   mkdir -p "$dir" || return 1
-  bash -c 'set -e; . "$1"; shift; _fx_corpo "$@"' _ \
+  FX_NL_ALVO="${FX_NL_ALVO:-}" bash -c 'set -e; . "$1"; shift; _fx_corpo "$@"' _ \
     "$_FXR_LIB/fixture-reconciliacao.sh" "$dir" "$legado" "$com_commit" "$msg" "$msg.shas" "$var"
   rc=$?
   [ "$rc" -eq 0 ] || { rm -f "$msg" "$msg.shas"; return 1; }

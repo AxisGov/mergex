@@ -52,7 +52,13 @@ set +e
 # também para o rb_diff_sha da biblioteca, que roda neste processo.
 unset GIT_GLOB_PATHSPECS GIT_ICASE_PATHSPECS GIT_NOGLOB_PATHSPECS
 export GIT_LITERAL_PATHSPECS=1
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false
+# (advice.graftFileDeprecated: o GIT_GRAFT_FILE abaixo não polui o stderr)
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=advice.graftFileDeprecated GIT_CONFIG_VALUE_1=false
+# Ancestralidade e objetos só do Git, nunca de enxertos locais: refs/replace e
+# .git/info/grafts falsificariam os pais de M. Exportado, para que os filhos
+# (contrato-de-commit.sh, ownership-da-task.sh) herdem.
+export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null # guarda:EST
 g() { git -c core.quotepath=false "$@"; }
 
 NL='
@@ -197,6 +203,9 @@ g ls-tree -r -z --full-tree "$M" -- "docs/sprintx/features/$TRABALHO" "docs/$TRA
   > "$TMP_DIR/arvore-m.lista" 2>/dev/null || para 4 "prova 3: árvore de M ilegível"
 while IFS= read -r -d '' item <&3; do
   modo="${item%% *}"; caminho="${item#*	}"
+  # a união separa os tasks.md por linha: um nome com quebra de linha (ou
+  # outro caractere de controle) desviaria a leitura para o disco
+  case "$caminho" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) para 5 "pasta do trabalho em M com caminho inválido: $(printf '%s' "$caminho" | tr '[:cntrl:]' '?')" ;; esac # guarda:P3
   case "$modo" in
     100644|100755) ;;
     *) para 5 "pasta do trabalho em M tem link simbólico ou submódulo (modo $modo): $caminho" ;;
@@ -207,8 +216,10 @@ done 3< "$TMP_DIR/arvore-m.lista"
 
 # A pasta do trabalho resolvida em M; no disco ela tem de estar igual a M, sem
 # alteração nem arquivo não rastreado (defesa em profundidade).
-PASTA="$(catalogo_pasta_do_trabalho "$RAIZ_M" "$ORIGEM" "$TRABALHO")" \
+# Sem subshell: o CATALOGO_ERRO da função chega ao motivo.
+catalogo_pasta_do_trabalho "$RAIZ_M" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/pasta" \
   || para 4 "prova 3: pasta do trabalho não determinável em M: $CATALOGO_ERRO"
+PASTA="$(cat "$TMP_DIR/pasta")"
 g status --porcelain=v1 -z --untracked-files=all -- "$PASTA" > "$TMP_DIR/sujo" 2>/dev/null \
   || para 3 'não foi possível verificar se a pasta do trabalho está limpa'
 [ ! -s "$TMP_DIR/sujo" ] || para 3 "pasta do trabalho com alteração não commitada: $(tr '\0' ' ' < "$TMP_DIR/sujo" | cut -c1-200)" # guarda:LIMPA

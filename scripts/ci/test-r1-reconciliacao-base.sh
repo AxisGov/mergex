@@ -285,6 +285,18 @@ grupo_artefato() {
   [ "$ret4" = "$ret1" ] && ok "rb_diff_sha é da raiz, sem env de diff/pathspec do chamador" || falha "rb_diff_sha mudou no subdiretório ($ret4 / $ret1)"
   ( cd "$d/g" && git config --unset diff.noprefix && git config --unset diff.algorithm && git config --unset core.abbrev \
     && git config --unset diff.srcPrefix && git config --unset diff.dstPrefix && git config --unset diff.suppressBlankEmpty ) >/dev/null 2>&1
+  # independente de enxertos locais: refs/replace e .git/info/grafts
+  local ret5 ret6 falso
+  ( cd "$d/g" && git replace "$(git rev-parse 'HEAD:f g.txt')" "$(printf 'tres\n' | git hash-object -w --stdin)" ) >/dev/null 2>&1
+  ret5="$(cd "$d/g" && rb_diff_sha HEAD~1 HEAD "f g.txt")"
+  [ "$ret5" = "$ret1" ] && ok "rb_diff_sha ignora refs/replace" || falha "rb_diff_sha seguiu refs/replace ($ret5 / $ret1)"
+  ( cd "$d/g" && git replace -d "$(git rev-parse 'HEAD:f g.txt')" ) >/dev/null 2>&1
+  falso="$(cd "$d/g" && printf '100644 blob %s\tf g.txt\n' "$(printf 'zero\n' | git hash-object -w --stdin)" | git mktree \
+    | xargs -I{} git -c user.name=t -c user.email=t@t commit-tree {} -m falso)"
+  printf '%s %s\n' "$(cd "$d/g" && git rev-parse HEAD)" "$falso" > "$d/g/.git/info/grafts"
+  ret6="$(cd "$d/g" && rb_diff_sha HEAD~1 HEAD "f g.txt" 2>/dev/null)"
+  [ "$ret6" = "$ret1" ] && ok "rb_diff_sha ignora .git/info/grafts" || falha "rb_diff_sha seguiu .git/info/grafts ($ret6 / $ret1)"
+  rm -f "$d/g/.git/info/grafts"
   printf 'x' | rb_sha256 | grep -Eq '^[0-9a-f]{64}$' && ok "rb_sha256 devolve 64 hex" || falha "rb_sha256 sem 64 hex"
 
   # rb_diff_sha falha fechado: ref inexistente não vira "sem diferença"
@@ -640,6 +652,58 @@ EOF
   mkdir -p docs/ft-rec; printf 'x\n' > docs/ft-rec/rascunho.md
   printf 'docs/ft-rec/\n' >> .git/info/exclude
   registra_ok "pasta legada só no disco não muda a resolução" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # nome com quebra de linha na pasta do trabalho em M: a lista de tasks.md da
+  # união é separada por linha, e `foo<NL>/abs/tasks.md` viraria um tasks.md
+  # do disco. A materialização recusa o nome (rc 5) antes de qualquer prova.
+  local alvo; alvo="$(mktemp -d)"; TMPS="$TMPS $alvo"
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_NL_ALVO="$alvo" FX_VARIANTE=plano_nl fx_cenario "$d" || { falha "variante plano_nl não montou"; return; }
+  cd "$d" || return
+  sed "s|altera: \[src/painel.ts\]|altera: [src/painel.ts, $FX_NOVO2]|" docs/sprintx/features/ft-rec/sprint-01/tasks.md > "$alvo/tasks.md"
+  grep -Fq "$FX_NOVO2" "$alvo/tasks.md" || falha "o tasks.md do disco não declara NOVO2"
+  [ "$(git ls-tree -r --name-only -z HEAD -- docs/sprintx/features/ft-rec | tr '\0' '\n' | grep -Fxc "$alvo/tasks.md")" = 1 ] \
+    || falha "M não tem o caminho com quebra de linha"
+  reprova "caminho com quebra de linha em M aponta para tasks.md do disco" 5 \
+    "pasta do trabalho em M com caminho inválido" "$FX_NOVO1"
+  cd "$REPO" || return
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=plano_tab fx_cenario "$d" || { falha "variante plano_tab não montou"; return; }
+  cd "$d" || return
+  reprova "caminho com TAB na pasta do trabalho em M" 5 "pasta do trabalho em M com caminho inválido" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # canônica e legada em M: erro, com o motivo do catálogo no stderr
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=duas_pastas fx_cenario "$d" || { falha "variante duas_pastas não montou"; return; }
+  cd "$d" || return
+  reprova "canônica e legada em M" 4 "pasta do trabalho não determinável em M: há duas pastas SprintX para ft-rec" \
+    "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # RunX: a pasta docs/manutencao/<t> de M é a pasta do trabalho
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=runx fx_cenario "$d" || { falha "variante runx não montou"; return; }
+  cd "$d" || return
+  r_orig=("${r[@]}")
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec --)
+  registra_ok "RunX com docs/manutencao/ft-rec em M registra" "$FX_NOVO1" "$FX_NOVO2"
+  r=("${r_orig[@]}")
+  cd "$REPO" || return
+
+  # enxertos locais (refs/replace e .git/info/grafts) não falsificam os pais de M
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=m_um_pai fx_cenario "$d" || { falha "variante m_um_pai não montou"; return; }
+  cd "$d" || return
+  git replace --graft "$FX_M" "$FX_P1" "$FX_B1"
+  [ "$(git rev-list --parents -n1 HEAD | wc -w)" = 3 ] || falha "replace --graft não enxertou dois pais"
+  reprova "m_um_pai com git replace --graft" 4 "estrutura[pais]" "$FX_NOVO1" "$FX_NOVO2"
+  git replace -d "$FX_M" >/dev/null
+  printf '%s %s %s\n' "$FX_M" "$FX_P1" "$FX_B1" > .git/info/grafts
+  [ "$(git rev-list --parents -n1 HEAD 2>/dev/null | wc -w)" = 3 ] || falha ".git/info/grafts não enxertou dois pais"
+  reprova "m_um_pai com .git/info/grafts" 4 "estrutura[pais]" "$FX_NOVO1" "$FX_NOVO2"
+  rm -f .git/info/grafts
   cd "$REPO" || return
 
   # branch_base sujo no disco não afrouxa a condição estrutural da base
