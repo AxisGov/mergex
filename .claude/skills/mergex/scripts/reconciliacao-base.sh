@@ -19,13 +19,26 @@
 #   m_sha dela; antes, a cadeia existente (os artefatos do disco, rastreados ou
 #   não) passa pela mesma verificação de contrato e de provas do --verificar
 #   (sem a cobertura em HEAD), e o ENTREGA.md do disco tem de listá-la.
-#   Ordem: M está na linha de primeiro pai de HEAD (rc 4); M^2 descende do
-#   b1_sha da última reconciliação e M é o merge mais antigo ainda não
-#   registrado nessa linha (rc 5). O mesmo M da última reconciliação, com a
-#   mesma lista (como conjunto), é reexecução: imprime `noop=true` e não grava
-#   nada (rc 0); com outra lista, ou o M de uma reconciliação anterior à
-#   última, rc 5. Artefato não rastreado e fora da lista do ENTREGA.md (sobra
-#   de registro interrompido) é órfão: rc 5.
+#   Ordem: M está na linha de primeiro pai de HEAD (rc 4; com --merge, antes
+#   de ler o ENTREGA.md de M); M^2 descende do b1_sha da última reconciliação
+#   e M é o merge mais antigo ainda não registrado nessa linha (rc 5; um merge
+#   que não é de integração e trava a fila é citado pelo SHA). O mesmo M da
+#   última reconciliação, com a mesma lista (como conjunto), é reexecução:
+#   depois da mesma guarda do ENTREGA.md do disco (rc 3), não grava nada e
+#   imprime, no stdout:
+#     noop=true
+#     [completado=superada|sobra]   (só quando completou um registro interrompido)
+#     registrado=<RECONCILIACAO-BASE-NNN.md>  b0=  p1=  b1=  m=   (da última)
+#   Com outra lista, ou o M de uma reconciliação anterior à última, rc 5.
+#   Artefato não rastreado e fora da lista do ENTREGA.md (sobra de registro
+#   interrompido antes do ponto de commit) é órfão: rc 5.
+#   Registro interrompido depois do ponto de commit (o ENTREGA.md já lista o
+#   novo artefato, mas o anterior ainda está `ativa`, talvez com a sobra
+#   RECONCILIACAO-BASE-NNN.md.superada.<pid>): o --verificar dá rc 5
+#   `registro interrompido: rode --registrar de novo com o mesmo --merge/M`; o
+#   --registrar com o mesmo M e a mesma lista verifica a cadeia inteira de
+#   novo, marca o anterior `superada` (estado não é assinado), remove a sobra
+#   e devolve rc 0 com `noop=true` e `completado=`.
 #   Calcula as condições estruturais, as quatro provas de cada caminho dado e o
 #   inventário completo do merge (`git diff --name-only B1 M` contido em união
 #   das tasks ∪ catálogo de método ∪ lista ∪ caminho herdado da cadeia ∪ os
@@ -41,8 +54,11 @@
 #   commits, seq e as demais chaves ficam intactos. A gravação parte do
 #   ENTREGA.md de M, e só se o do disco for byte a byte o de M (senão rc 3);
 #   com cadeia, o do disco pode diferir do de M só nas chaves que o registro
-#   grava, com exatamente os valores que a cadeia verificada implica. É tudo
-#   ou nada: artefato novo, anterior `superada` e ENTREGA.md, ou nenhum.
+#   grava, com exatamente os valores que a cadeia verificada implica.
+#   Gravação: artefato novo; `mv` do ENTREGA.md, que é o ponto de commit; o
+#   anterior `superada` por último. Interrompido antes do ponto de commit
+#   (o ENTREGA.md no lugar não é o novo), o artefato novo é removido e nada
+#   fica; depois dele, o registro está efetivado e só os temporários saem.
 #
 # --verificar (só leitura: nunca grava, nunca adquire a trava C5, não exige
 #   stage vazio nem pasta limpa)
@@ -136,20 +152,25 @@ TOKEN=""
 LIBERAR_NA_SAIDA=0
 TMP_ENTREGA=""
 DESTINO=""
-ARTEFATO_NOVO=0 # 1 enquanto o artefato recém-criado depende da troca do ENTREGA.md
-ANT_ARQ=""      # (cadeia) o artefato anterior, que passa a `superada`
-ANT_ORIG=""     # (cadeia) cópia do conteúdo original do anterior
+ARTEFATO_NOVO=0 # 1 depois de emitido o artefato novo, até o fim da gravação
+ENTREGA_NOVO="" # o ENTREGA.md que o registro grava (o ponto de commit)
 TMP_ANT=""      # (cadeia) o anterior `superada`, ao lado dele, antes da troca
-ANT_TROCADO=0   # 1 enquanto o anterior pode estar trocado sem o ENTREGA.md
+
+# As únicas chaves de topo do ENTREGA.md que o registro grava (seq e commits
+# nunca entram).
+CHAVES_GRAVADAS='base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em atualizado_em' # guarda:SEQ
 
 encerrar() {
   local rc="$1"
-  # saída (inclusive por sinal) antes da troca do ENTREGA.md: nem artefato nem
-  # temporários ficam; o ENTREGA.md original não foi tocado
-  if [ "$ARTEFATO_NOVO" = 1 ] && [ -n "$DESTINO" ]; then rm -f "$DESTINO" "$DESTINO.tmp.$$"; fi # guarda:JANELA
-  # o anterior já marcado `superada` volta ao conteúdo original (idempotente:
-  # se a troca nem ocorreu, regrava o mesmo conteúdo)
-  if [ "$ANT_TROCADO" = 1 ] && [ -n "$ANT_ARQ" ] && [ -f "$ANT_ORIG" ]; then cat "$ANT_ORIG" > "$ANT_ARQ"; fi # guarda:JANELA
+  # Saída (inclusive por sinal) com o artefato novo emitido: decide o
+  # CONTEÚDO do ENTREGA.md no lugar. Se ele já é o novo, o ponto de commit
+  # passou e o registro está efetivado (o anterior ainda `ativa` é resíduo que
+  # o --registrar completa); senão, o artefato novo sai e nada fica.
+  if [ "$ARTEFATO_NOVO" = 1 ] && [ -n "$DESTINO" ]; then
+    if [ -n "$ENTREGA_NOVO" ] && [ -f "$ENTREGA_NOVO" ] && cmp -s "$ENTREGA" "$ENTREGA_NOVO"; then : # guarda:JANELA
+    else rm -f "$DESTINO"; fi
+    rm -f "$DESTINO.tmp.$$"
+  fi
   [ -z "$TMP_ANT" ] || rm -f "$TMP_ANT"
   [ -z "$TMP_ENTREGA" ] || rm -f "$TMP_ENTREGA"
   [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
@@ -178,6 +199,15 @@ FALHA_5=0    # (verificar) houve falha de contrato
 FALHA_4=0    # (verificar) houve falha de prova, estrutura ou cobertura
 ENTREGA_D="" # cópia do ENTREGA.md do disco (contexto e lista da cadeia)
 CAD_N=0      # número de artefatos da cadeia lida do disco
+INTERROMPIDO='registro interrompido: rode --registrar de novo com o mesmo --merge/M'
+
+# sobra_superada <nome> — RECONCILIACAO-BASE-NNN.md.superada.<pid>: o anterior
+# `superada` preparado por um registro interrompido depois do ponto de commit
+sobra_superada() {
+  case "$1" in RECONCILIACAO-BASE-[0-9][0-9][0-9].md.superada.[0-9]*) ;; *) return 1 ;; esac
+  case "${1##*.superada.}" in *[!0-9]*) return 1 ;; esac
+  return 0
+}
 
 # motivo <rc> <código> <detalhe> — (verificar) acumula uma falha
 motivo() {
@@ -596,6 +626,9 @@ cadeia_le() {
   for arq in "$dir"/RECONCILIACAO-BASE-*; do
     [ -e "$arq" ] || [ -L "$arq" ] || continue
     nome="${arq##*/}"
+    if sobra_superada "$nome"; then
+      PREFIXO="$nome: "; motivo 5 contrato "sobra do anterior superada; $INTERROMPIDO"; PREFIXO=""; continue
+    fi
     case "$nome" in
       RECONCILIACAO-BASE-[0-9][0-9][0-9].md) printf '%s\n' "$nome" >> "$TMP_DIR/artefatos" ;;
       *) PREFIXO="$nome: "; motivo 5 contrato "nome fora do padrão RECONCILIACAO-BASE-NNN.md"; PREFIXO="" ;;
@@ -650,6 +683,11 @@ cadeia_provas() {
     fi
     if [ "$i" = "$n" ]; then
       [ "$est" = ativa ] || motivo 5 estado "a última reconciliação da cadeia tem de estar ativa (está $est)"
+    elif [ "$i" = $((n - 1)) ] && [ "$est" = ativa ]; then
+      # a penúltima ainda ativa: o registro da última passou do ponto de
+      # commit (o ENTREGA.md já a lista) e foi interrompido antes de marcar
+      # esta `superada`
+      motivo 5 estado "reconciliação seguida de outra tem de estar superada (está ativa); $INTERROMPIDO"
     else
       [ "$est" = superada ] || motivo 5 estado "reconciliação seguida de outra tem de estar superada (está $est)"
     fi
@@ -820,6 +858,54 @@ entrega_disco_tolerado() {
   done
 }
 
+# confere_disco_cadeia — (registro com cadeia) o ENTREGA.md do disco é o de M,
+# ou difere dele só na reabertura que a cadeia verificada implica; senão rc 3.
+confere_disco_cadeia() {
+  { [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ]; } || para 3 'ENTREGA.md com alteração não commitada'
+  cmp -s "$ENTREGA" "$ENTREGA_M" || entrega_disco_tolerado "$ULT_B1" \
+    || para 3 "ENTREGA.md com alteração não commitada ($ENTREGA_ERRO)" # guarda:DISCO
+}
+
+# prepara_superada <artefato> <numero> — o artefato com `estado: superada` em
+# TMP_ANT, ao lado dele (mesmo modo): só a linha `estado: ativa` de topo muda;
+# `estado` não entra na assinatura, que continua a mesma e válida.
+prepara_superada() {
+  local arq="$1" num="$2" nome="${1##*/}"
+  awk '
+    NR == 1 { print; fm = 1; next }
+    fm && /^---[ \t]*\r?$/ { fm = 0 }
+    fm && /^estado: ativa\r?$/ { sub(/ativa/, "superada"); n++ }
+    { print }
+    END { exit (n != 1) }
+  ' "$arq" > "$TMP_DIR/anterior-superada.md" 2>/dev/null || para 5 "$nome: estado ativa não encontrado uma vez só"
+  RB_ERRO=""
+  _rb_validar_conteudo "$TMP_DIR/anterior-superada.md" "$TRABALHO" "$num" || para 5 "$nome superada não valida: $RB_ERRO"
+  [ "$(sed -n 's/^assinatura: //p' "$arq")" = "$(sed -n 's/^assinatura: //p' "$TMP_DIR/anterior-superada.md")" ] \
+    || para 5 "$nome: a assinatura mudaria ao marcar superada"
+  TMP_ANT="$arq.superada.$$"
+  { cp -p "$arq" "$TMP_ANT" && cat "$TMP_DIR/anterior-superada.md" > "$TMP_ANT"; } 2>/dev/null \
+    || para 1 'não foi possível preparar o anterior superada na pasta da entrega'
+}
+
+# completa_interrompido — (reexecução do mesmo M, cadeia só com o resíduo de
+# um registro interrompido depois do ponto de commit) marca a penúltima
+# `superada` e remove as sobras `.superada.<pid>`. Define COMPLETADO.
+completa_interrompido() {
+  local k=$((N_CAD - 1)) arq sobra
+  if [ "$k" -ge 1 ] && [ "$(_r "$k" estado)" = ativa ]; then
+    arq="$ENTREGA_DIR/$(cat "$TMP_DIR/nome$k")"
+    prepara_superada "$arq" "$k"
+    mv "$TMP_ANT" "$arq" 2>/dev/null || para 1 "não foi possível marcar ${arq##*/} como superada; $INTERROMPIDO" # guarda:COMPLETA
+    TMP_ANT=""
+    COMPLETADO=superada
+  fi
+  for sobra in "$ENTREGA_DIR"/RECONCILIACAO-BASE-*; do
+    sobra_superada "${sobra##*/}" || continue
+    rm -f "$sobra" || para 1 "não foi possível remover a sobra ${sobra##*/}"
+    [ -n "$COMPLETADO" ] || COMPLETADO=sobra
+  done
+}
+
 # ---------------------------------------------------------------------------
 # Argumentos. Os caminhos vêm depois de `--`, um por argumento, sem word
 # splitting; vão para um arquivo, um por linha, depois de recusar os que não
@@ -908,6 +994,12 @@ g diff --cached --quiet 2>/dev/null || para 3 'o stage não está vazio; nada fo
 # ---------------------------------------------------------------------------
 if [ -n "$MERGE_ARG" ]; then
   M="$(g rev-parse --verify -q "$MERGE_ARG^{commit}")" || estrutura m "M $MERGE_ARG não é commit deste repositório (ou é ambíguo)"
+  # a linha de primeiro pai de HEAD fala antes de qualquer leitura de M (um
+  # commit da base ou um merge de PR nem tem o ENTREGA.md)
+  g rev-list --first-parent HEAD > "$TMP_DIR/primeiro-pai-head" 2>/dev/null \
+    || estrutura primeiro_pai 'linha de primeiro pai de HEAD ilegível'
+  grep -Fxq -e "$M" "$TMP_DIR/primeiro-pai-head" \
+    || estrutura primeiro_pai "M $M fora da linha de primeiro pai de HEAD" # guarda:EST
 else
   M="$(g rev-parse --verify -q HEAD)" || estrutura m 'HEAD ilegível'
 fi
@@ -940,6 +1032,9 @@ while IFS= read -r -d '' registro <&3; do
   xy="${registro:0:2}"; p="${registro:3}"; tolerado=0
   if [ "$xy" = ' M' ] && [ "$p" = "$ENTREGA_DIR/ENTREGA.md" ]; then tolerado=1; fi # guarda:LIMPA
   case "$xy:$p" in "??:$ENTREGA_DIR/"RECONCILIACAO-BASE-[0-9][0-9][0-9].md|" M:$ENTREGA_DIR/"RECONCILIACAO-BASE-[0-9][0-9][0-9].md) tolerado=1 ;; esac # guarda:LIMPA
+  # a sobra do anterior `superada` de um registro interrompido depois do ponto
+  # de commit: só o --registrar do mesmo M a remove (a cadeia a reprova antes)
+  if [ "$xy" = '??' ] && [ "${p%/*}" = "$ENTREGA_DIR" ] && sobra_superada "${p##*/}"; then tolerado=1; fi # guarda:LIMPA
   [ "$tolerado" = 1 ] || para 3 "pasta do trabalho com alteração não commitada (entrega, fora do que o registro grava): $xy $p" # guarda:LIMPA
 done 3< "$TMP_DIR/sujo-entrega"
 
@@ -967,6 +1062,7 @@ if [ "$TEM_ARTEFATO" = 1 ]; then
   for existente in "$ENTREGA_DIR"/RECONCILIACAO-BASE-*; do
     [ -e "$existente" ] || [ -L "$existente" ] || continue
     nome="${existente##*/}"
+    sobra_superada "$nome" && continue
     cut -f2 "$TMP_DIR/lista-entrega" | grep -Fxq -e "$nome" && continue
     [ -n "$(g ls-files -z -- "$existente" 2>/dev/null)" ] && continue
     para 5 "artefato órfão de registro interrompido: $nome; remova-o e registre de novo" # guarda:ORFAO
@@ -979,26 +1075,45 @@ if [ "$TEM_ARTEFATO" = 1 ]; then
   cadeia_provas
   cadeia_coerencia
   MODO=registrar; FALHAS=0; RAIZ_M="$RAIZ_M_REG"; PASTA="$PASTA_REG"
+  # Registro interrompido depois do ponto de commit: a ÚNICA falha da cadeia é
+  # o resíduo (penúltima ainda `ativa`, sobra `.superada.<pid>`), e o M é o da
+  # última. Então a reexecução completa o registro; qualquer outra falha, ou
+  # outro M, para aqui.
+  COMPLETAR=0
   if [ "$FALHA_5" = 1 ] || [ "$FALHA_4" = 1 ]; then
-    while IFS="$TAB" read -r _ codigo detalhe; do
-      printf 'reconciliacao-base: cadeia existente: %s (%s)\n' "$detalhe" "$codigo" >&2
-    done < "$MOTIVOS"
-    [ "$FALHA_5" = 1 ] && para 5 'a cadeia de reconciliações existente não verifica; nada foi gravado' # guarda:CAD
-    para 4 'a cadeia de reconciliações existente não verifica; nada foi gravado' # guarda:CAD
+    if [ "$FALHA_4" = 0 ] && [ "$CAD_N" -ge 1 ] && [ -f "$TMP_DIR/r$CAD_N.lido" ] \
+       && [ "$(_r "$CAD_N" m_sha)" = "$M" ] \
+       && [ "$(grep -c '' "$MOTIVOS")" = "$(grep -cF -e "$INTERROMPIDO" "$MOTIVOS")" ]; then
+      COMPLETAR=1 # guarda:COMPLETA
+    else
+      while IFS="$TAB" read -r _ codigo detalhe; do
+        printf 'reconciliacao-base: cadeia existente: %s (%s)\n' "$detalhe" "$codigo" >&2
+      done < "$MOTIVOS"
+      [ "$FALHA_5" = 1 ] && para 5 'a cadeia de reconciliações existente não verifica; nada foi gravado' # guarda:CAD
+      para 4 'a cadeia de reconciliações existente não verifica; nada foi gravado' # guarda:CAD
+    fi
   fi
   N_CAD="$CAD_N"
   ULT_NOME="$(cat "$TMP_DIR/nome$N_CAD")"
   ULT_B1="$(_r "$N_CAD" b1_sha)"
   ULT_M="$(_r "$N_CAD" m_sha)"
 
+  # O ENTREGA.md do disco: igual ao de M, ou diferente só na reabertura que a
+  # cadeia implica. Antes do noop, para que ele nunca mascare edição alheia.
+  confere_disco_cadeia
+
   # Reexecução: o mesmo M da última, com a mesma lista (como conjunto), não
-  # grava nada; com outra lista, ou o M de uma anterior à última, rc 5.
+  # grava nada (salvo completar um registro interrompido); com outra lista, ou
+  # o M de uma anterior à última, rc 5.
   if [ "$M" = "$ULT_M" ]; then
     LC_ALL=C sort "$LISTA" > "$TMP_DIR/lista.noop"
     LC_ALL=C sort "$TMP_DIR/lista$N_CAD" > "$TMP_DIR/lista.ultima"
     cmp -s "$TMP_DIR/lista.noop" "$TMP_DIR/lista.ultima" \
       || para 5 "reconciliação já registrada para M $M em $ULT_NOME, com outra lista de caminhos; nada foi gravado" # guarda:NOOP
+    COMPLETADO=""
+    if [ "$COMPLETAR" = 1 ]; then completa_interrompido; fi
     printf 'noop=true\n'
+    [ -z "$COMPLETADO" ] || printf 'completado=%s\n' "$COMPLETADO"
     printf 'registrado=%s\n' "$ULT_NOME"
     printf 'b0=%s\n' "$(_r "$N_CAD" b0_sha)"
     printf 'p1=%s\n' "$(_r "$N_CAD" p1_sha)"
@@ -1051,8 +1166,13 @@ fi
 g rev-list --first-parent --merges --reverse "$LIMITE..HEAD" > "$TMP_DIR/merges" 2>/dev/null \
   || estrutura ordem "merges da linha de primeiro pai de HEAD ilegíveis"
 PROXIMO="$(sed -n 1p "$TMP_DIR/merges")"
-[ "$PROXIMO" = "$M" ] \
-  || para 5 "ordem: M $M não é o merge mais antigo ainda não registrado na linha de primeiro pai de HEAD (o próximo é ${PROXIMO:-nenhum}); registre os merges um por vez, do mais antigo, com --merge" # guarda:ORDEM
+if [ "$PROXIMO" != "$M" ]; then
+  # o que trava a fila é um merge que não é de integração da base: nomeá-lo
+  if [ -n "$PROXIMO" ] && ! bash "$CONTRATO_SH" --validar-integracao --trabalho "$TRABALHO" --commit "$PROXIMO" >/dev/null 2>&1; then
+    para 5 "ordem: o merge $PROXIMO, anterior a M $M na linha de primeiro pai de HEAD, não é um commit de integração da base (Trabalho:/Integra-base:); ele precisa ser registrado ou resolvido antes de M" # guarda:ORDEM
+  fi
+  para 5 "ordem: M $M não é o merge mais antigo ainda não registrado na linha de primeiro pai de HEAD (o próximo é ${PROXIMO:-nenhum}); registre os merges um por vez, do mais antigo, com --merge" # guarda:ORDEM
+fi
 estrutura_resto "$M" "$B0" || exit 1
 PONTA_BASE="$(g rev-parse --verify -q "$BRANCH_BASE^{commit}")" || estrutura base "ref de base $BRANCH_BASE ilegível"
 g merge-base --is-ancestor "$B1" "$PONTA_BASE" 2>/dev/null || estrutura base "B1 $B1 não é ancestral da ponta de $BRANCH_BASE ($PONTA_BASE)" # guarda:EST
@@ -1106,15 +1226,10 @@ done 3< "$TMP_DIR/lista.ord"
 # se sobrescreve edição alheia. Tudo é montado numa cópia; o repositório só
 # muda no fim (artefato, anterior e ENTREGA.md, ou nada).
 # ---------------------------------------------------------------------------
-# as únicas chaves de topo que o registro grava (seq e commits nunca entram)
-CHAVES_GRAVADAS='base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em atualizado_em' # guarda:SEQ
+# (com cadeia, o ENTREGA.md do disco já passou por confere_disco_cadeia)
 if [ "$N_CAD" = 0 ]; then
   { [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cmp -s "$ENTREGA" "$ENTREGA_M"; } \
     || para 3 'ENTREGA.md com alteração não commitada' # guarda:DISCO
-else
-  { [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ]; } || para 3 'ENTREGA.md com alteração não commitada'
-  cmp -s "$ENTREGA" "$ENTREGA_M" || entrega_disco_tolerado "$ULT_B1" \
-    || para 3 "ENTREGA.md com alteração não commitada ($ENTREGA_ERRO)"
 fi
 
 # sem cadeia, a lista de reconciliações do ENTREGA.md só pode estar vazia: não
@@ -1152,50 +1267,31 @@ done
 printf '%s\t%s\t%s\t%s\n' "$NUM" "$NOME" "$B1" "$M" >> "$TMP_DIR/reconciliacoes.tsv"
 entrega_reconciliacoes "$ENTREGA_NOVO" "$TMP_DIR/reconciliacoes.tsv" || para 5 "ENTREGA.md: $ENTREGA_ERRO"
 
-# O anterior passa a `superada`: só a linha `estado` de topo muda; `estado`
-# não entra na assinatura, que tem de continuar a mesma e válida.
-if [ "$N_CAD" -gt 0 ]; then
-  ANT_ARQ="$ENTREGA_DIR/$ULT_NOME"
-  ANT_ORIG="$TMP_DIR/anterior-original.md"
-  cat "$ANT_ARQ" > "$ANT_ORIG" 2>/dev/null || para 1 "não foi possível ler $ULT_NOME"
-  awk '
-    NR == 1 { print; fm = 1; next }
-    fm && /^---[ \t]*\r?$/ { fm = 0 }
-    fm && /^estado: ativa\r?$/ { sub(/ativa/, "superada"); n++ }
-    { print }
-    END { exit (n != 1) }
-  ' "$ANT_ORIG" > "$TMP_DIR/anterior-superada.md" || para 5 "$ULT_NOME: estado ativa não encontrado uma vez só"
-  RB_ERRO=""
-  _rb_validar_conteudo "$TMP_DIR/anterior-superada.md" "$TRABALHO" "$N_CAD" || para 5 "$ULT_NOME superada não valida: $RB_ERRO"
-  [ "$(sed -n 's/^assinatura: //p' "$ANT_ORIG")" = "$(sed -n 's/^assinatura: //p' "$TMP_DIR/anterior-superada.md")" ] \
-    || para 5 "$ULT_NOME: a assinatura mudaria ao marcar superada"
-  TMP_ANT="$ANT_ARQ.superada.$$"
-  { cp -p "$ANT_ARQ" "$TMP_ANT" && cat "$TMP_DIR/anterior-superada.md" > "$TMP_ANT"; } 2>/dev/null \
-    || para 1 'não foi possível preparar o anterior superada na pasta da entrega'
-fi
+# O anterior `superada` fica preparado ao lado dele antes de qualquer troca.
+[ "$N_CAD" = 0 ] || prepara_superada "$ENTREGA_DIR/$ULT_NOME" "$N_CAD"
 
-# Tudo ou nada: o ENTREGA.md novo (e o anterior superada) ficam ao lado dos
-# atuais (mesma pasta, mesmo modo); o artefato é emitido, o anterior trocado e
-# só então o ENTREGA.md é substituído. Se algo falhar (ou um sinal chegar)
-# antes do fim, o artefato novo é removido, o anterior volta ao original e o
-# ENTREGA.md fica intacto.
+# Gravação: o ENTREGA.md novo fica ao lado do atual (mesma pasta, mesmo modo);
+# o artefato é emitido; o `mv` do ENTREGA.md é o PONTO DE COMMIT; o anterior
+# `superada` vem por último. Antes do ponto de commit, qualquer falha ou sinal
+# remove o artefato novo e nada fica (encerrar decide pelo conteúdo do
+# ENTREGA.md no lugar). Depois dele, o registro está efetivado: um anterior
+# ainda `ativa` é resíduo que o --registrar do mesmo M completa.
 TMP_ENTREGA="$ENTREGA.registro.$$"
 { cp -p "$ENTREGA" "$TMP_ENTREGA" && cat "$ENTREGA_NOVO" > "$TMP_ENTREGA"; } 2>/dev/null \
   || para 1 'não foi possível preparar o ENTREGA.md novo na pasta da entrega'
 RB_ERRO=""
 ARTEFATO_NOVO=1 # guarda:JANELA
 rb_emitir "$DESTINO" "$ESC" "$ARQ" || para 5 "artefato não emitido: $RB_ERRO"
-if [ -n "$TMP_ANT" ]; then
-  ANT_TROCADO=1 # guarda:JANELA
-  mv "$TMP_ANT" "$ANT_ARQ" 2>/dev/null \
-    || para 1 "não foi possível marcar $ULT_NOME como superada; o artefato foi removido e nada foi gravado"
-  TMP_ANT=""
-fi
 if ! mv "$TMP_ENTREGA" "$ENTREGA" 2>/dev/null; then
   para 1 'não foi possível atualizar o ENTREGA.md; o artefato foi removido e nada foi gravado'
 fi
-ARTEFATO_NOVO=0; ANT_TROCADO=0 # guarda:JANELA
 TMP_ENTREGA=""
+if [ -n "$TMP_ANT" ]; then
+  mv "$TMP_ANT" "$ENTREGA_DIR/$ULT_NOME" 2>/dev/null \
+    || para 1 "registro efetivado ($NOME), mas não foi possível marcar $ULT_NOME como superada; $INTERROMPIDO"
+  TMP_ANT=""
+fi
+ARTEFATO_NOVO=0 # guarda:JANELA
 
 printf 'registrado=%s\n' "$NOME"
 printf 'b0=%s\n' "$B0"
