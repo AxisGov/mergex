@@ -8,6 +8,10 @@
 #                               e no índice, sem commit (MERGE_HEAD presente)
 #   fx_segunda_base <dir> [ajusta]  segunda base B2 integrada num merge M2
 #                               (HEAD): FX_B2 FX_M2 FX_NOVO3
+#   fx_terceira_base <dir>      terceira base B3 integrada num merge M3 (HEAD),
+#                               que ajusta FX_NOVO4: FX_B3 FX_M3 FX_NOVO4
+#   fx_persiste_reconciliacao <dir>  commita ENTREGA.md e os artefatos
+#                               (checkpoint de método reconciliacao-base)
 #   fx_emite_reconciliacao <dir> <n> <b0> <m> [caminho...]  artefato NNN
 #                               coerente e assinado (rb_emitir), sem provar nada
 #   fx_forja_artefato <dir> <caminho>...  o 001 (FX_B0, FX_M) com esses caminhos
@@ -537,6 +541,62 @@ fx_segunda_base() {
   rm -f "$msg" "$msg.shas"
   FX_NOVO3=tests/ui/frequency-ksmv-primitives.test.tsx
   export FX_B2 FX_M2 FX_NOVO3
+}
+
+_fx_terceira_corpo() { # <dir> <msg> <arquivo-de-shas>
+  local dir="$1" msg="$2" shas="$3" b3 novo4=tests/ui/schedule-ksmv-primitives.test.tsx
+  cd "$dir"
+  fixture_switch_exato main main
+  mkdir -p tests/ui
+  printf 'export const casoSchedule = "base";\n' > "$novo4"
+  git add "$novo4"
+  _fx_msg "$msg" "feat: primitiva ksmv de agenda"
+  _fx_commit "$msg"
+  b3="$(git rev-parse HEAD)"
+  fixture_switch_exato feature/ft-rec feature/ft-rec
+  git merge --no-ff --no-commit main >/dev/null 2>&1 || true
+  [ -f .git/MERGE_HEAD ]
+  printf 'export const casoSchedule = "base";\nexport const ajusteSchedule = "ft-rec";\n' > "$novo4"
+  git add "$novo4"
+  [ -z "$(git diff --name-only --diff-filter=U)" ]
+  _fx_msg "$msg" "merge: integra a main pela terceira vez na feature ft-rec" "Trabalho: ft-rec" "Integra-base: $b3"
+  _fx_commit "$msg"
+  printf '%s %s\n' "$b3" "$(git rev-parse HEAD)" > "$shas"
+}
+
+# fx_terceira_base <dir> — depois de fx_segunda_base, a base avança mais uma
+# vez (B3 cria FX_NOVO4) e é integrada num terceiro merge M3, que fica em HEAD
+# e ajusta FX_NOVO4; os demais caminhos ficam como em M2. Exporta FX_B3, FX_M3
+# e FX_NOVO4. Só cria commits.
+fx_terceira_base() {
+  local dir="$1" msg rc
+  [ -n "$dir" ] || return 64
+  msg="$(mktemp)" || return 1
+  bash -c 'set -e; . "$1"; shift; _fx_terceira_corpo "$@"' _ \
+    "$_FXR_LIB/fixture-reconciliacao.sh" "$dir" "$msg" "$msg.shas"
+  rc=$?
+  [ "$rc" -eq 0 ] || { rm -f "$msg" "$msg.shas"; return 1; }
+  read -r FX_B3 FX_M3 < "$msg.shas"
+  rm -f "$msg" "$msg.shas"
+  FX_NOVO4=tests/ui/schedule-ksmv-primitives.test.tsx
+  export FX_B3 FX_M3 FX_NOVO4
+}
+
+# fx_persiste_reconciliacao <dir> — o checkpoint de método reconciliacao-base:
+# commita o ENTREGA.md e os RECONCILIACAO-BASE-NNN.md da pasta da entrega, com
+# a mensagem do contrato (Trabalho: + Metodo: reconciliacao-base).
+fx_persiste_reconciliacao() {
+  local dir="$1" msg rc
+  [ -n "$dir" ] || return 64
+  msg="$(mktemp)" || return 1
+  ( cd "$dir" || exit 1
+    git add -- docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/RECONCILIACAO-BASE-[0-9][0-9][0-9].md || exit 1
+    _fx_msg "$msg" "chore(mergex): persiste metodo reconciliacao-base" "Trabalho: ft-rec" "Metodo: reconciliacao-base"
+    bash "$_FXR_CONTRATO" --validar-metodo --trabalho ft-rec --checkpoint reconciliacao-base --arquivo "$msg" >/dev/null || exit 1
+    git commit -q -F "$msg" )
+  rc=$?
+  rm -f "$msg"
+  return "$rc"
 }
 
 # fx_emite_reconciliacao <dir> <numero> <b0> <m> [caminho...] — grava

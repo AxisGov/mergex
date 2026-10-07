@@ -7,25 +7,42 @@
 #
 # Uso:
 #   reconciliacao-base.sh --registrar --entrega docs/entregas/<id>/ENTREGA.md \
-#     --origem <sprintx|runx> --trabalho <id> -- <caminho>...
+#     --origem <sprintx|runx> --trabalho <id> [--merge <sha>] -- <caminho>...
 #   reconciliacao-base.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md \
 #     --origem <sprintx|runx> --trabalho <id>
 #
 # --registrar
-#   M é HEAD; P1 = M^1; B1 = M^2; B0 = base_validada_sha do ENTREGA.md.
+#   M é HEAD, ou o commit dado em --merge (SHA hex, 7 a 40 dígitos, resolvido
+#   para o SHA completo); P1 = M^1; B1 = M^2. Na primeira reconciliação, B0 é o
+#   base_validada_sha do ENTREGA.md de P1. Com reconciliações já gravadas (a
+#   cadeia, seção 14), B0 é o b1_sha da última e o <início> da prova 2 é o
+#   m_sha dela; antes, a cadeia existente (os artefatos do disco, rastreados ou
+#   não) passa pela mesma verificação de contrato e de provas do --verificar
+#   (sem a cobertura em HEAD), e o ENTREGA.md do disco tem de listá-la.
+#   Ordem: M está na linha de primeiro pai de HEAD (rc 4); M^2 descende do
+#   b1_sha da última reconciliação e M é o merge mais antigo ainda não
+#   registrado nessa linha (rc 5). O mesmo M da última reconciliação, com a
+#   mesma lista (como conjunto), é reexecução: imprime `noop=true` e não grava
+#   nada (rc 0); com outra lista, ou o M de uma reconciliação anterior à
+#   última, rc 5. Artefato não rastreado e fora da lista do ENTREGA.md (sobra
+#   de registro interrompido) é órfão: rc 5.
 #   Calcula as condições estruturais, as quatro provas de cada caminho dado e o
 #   inventário completo do merge (`git diff --name-only B1 M` contido em união
-#   das tasks ∪ catálogo de método ∪ lista). Tudo aprovado: grava
-#   docs/entregas/<id>/RECONCILIACAO-BASE-001.md e imprime `registrado=`,
-#   `b0=`, `p1=`, `b1=`, `m=`. Qualquer reprovação: nada é gravado, e cada
-#   motivo sai no stderr como `reconciliacao-base: <motivo>`.
+#   das tasks ∪ catálogo de método ∪ lista ∪ caminho herdado da cadeia ∪ os
+#   próprios RECONCILIACAO-BASE-NNN.md da entrega). Tudo aprovado: grava
+#   docs/entregas/<id>/RECONCILIACAO-BASE-<NNN>.md (o seguinte da cadeia),
+#   marca o anterior como `superada` e imprime `registrado=`, `b0=`, `p1=`,
+#   `b1=`, `m=`. Qualquer reprovação: nada é gravado, e cada motivo sai no
+#   stderr como `reconciliacao-base: <motivo>`.
 #
 #   Aprovado, grava também o ENTREGA.md (seção 11): base_validada_sha = B1,
 #   reconciliacoes acrescida, e a entrega reaberta (estado aberto, portão e
 #   causa zerados, push_feito false, entregue_em null, atualizado_em de hoje).
 #   commits, seq e as demais chaves ficam intactos. A gravação parte do
-#   ENTREGA.md do disco só se ele for byte a byte o de M (senão rc 3), e é tudo
-#   ou nada: artefato e ENTREGA.md, ou nenhum dos dois.
+#   ENTREGA.md de M, e só se o do disco for byte a byte o de M (senão rc 3);
+#   com cadeia, o do disco pode diferir do de M só nas chaves que o registro
+#   grava, com exatamente os valores que a cadeia verificada implica. É tudo
+#   ou nada: artefato novo, anterior `superada` e ENTREGA.md, ou nenhum.
 #
 # --verificar (só leitura: nunca grava, nunca adquire a trava C5, não exige
 #   stage vazio nem pasta limpa)
@@ -104,11 +121,12 @@ ENTREGA=""
 ORIGEM=""
 TRABALHO=""
 SEPARADOR=0
+MERGE_ARG=""
 
 uso() {
   [ -z "${1:-}" ] || printf 'reconciliacao-base: %s\n' "$1" >&2
   printf '%s\n' \
-    'uso: reconciliacao-base.sh --registrar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> -- <caminho>...' \
+    'uso: reconciliacao-base.sh --registrar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> [--merge <sha>] -- <caminho>...' \
     '     reconciliacao-base.sh --verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id>' >&2
   exit 64
 }
@@ -119,12 +137,20 @@ LIBERAR_NA_SAIDA=0
 TMP_ENTREGA=""
 DESTINO=""
 ARTEFATO_NOVO=0 # 1 enquanto o artefato recém-criado depende da troca do ENTREGA.md
+ANT_ARQ=""      # (cadeia) o artefato anterior, que passa a `superada`
+ANT_ORIG=""     # (cadeia) cópia do conteúdo original do anterior
+TMP_ANT=""      # (cadeia) o anterior `superada`, ao lado dele, antes da troca
+ANT_TROCADO=0   # 1 enquanto o anterior pode estar trocado sem o ENTREGA.md
 
 encerrar() {
   local rc="$1"
   # saída (inclusive por sinal) antes da troca do ENTREGA.md: nem artefato nem
   # temporários ficam; o ENTREGA.md original não foi tocado
   if [ "$ARTEFATO_NOVO" = 1 ] && [ -n "$DESTINO" ]; then rm -f "$DESTINO" "$DESTINO.tmp.$$"; fi # guarda:JANELA
+  # o anterior já marcado `superada` volta ao conteúdo original (idempotente:
+  # se a troca nem ocorreu, regrava o mesmo conteúdo)
+  if [ "$ANT_TROCADO" = 1 ] && [ -n "$ANT_ARQ" ] && [ -f "$ANT_ORIG" ]; then cat "$ANT_ORIG" > "$ANT_ARQ"; fi # guarda:JANELA
+  [ -z "$TMP_ANT" ] || rm -f "$TMP_ANT"
   [ -z "$TMP_ENTREGA" ] || rm -f "$TMP_ENTREGA"
   [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
@@ -150,6 +176,8 @@ PREFIXO=""   # (verificar) o artefato em exame, à frente de cada detalhe
 MOTIVOS=""   # (verificar) arquivo com as linhas `motivo`
 FALHA_5=0    # (verificar) houve falha de contrato
 FALHA_4=0    # (verificar) houve falha de prova, estrutura ou cobertura
+ENTREGA_D="" # cópia do ENTREGA.md do disco (contexto e lista da cadeia)
+CAD_N=0      # número de artefatos da cadeia lida do disco
 
 # motivo <rc> <código> <detalhe> — (verificar) acumula uma falha
 motivo() {
@@ -379,8 +407,13 @@ materializa_m() {
 
 # estrutura_m <M> <B0> <ref> — as condições estruturais (seção 5) que valem
 # para M em qualquer momento; <ref> dá a linha de primeiro pai. Define P1 e B1.
-# (A ponta da ref de base é condição do momento do registro: fica nele.)
-estrutura_m() {
+# (A ponta da ref de base é condição do momento do registro: fica nele.) São
+# duas metades: o registro confere a ordem da cadeia entre elas.
+estrutura_m() { estrutura_pais "$1" "$2" "$3" && estrutura_resto "$1" "$2"; }
+
+# estrutura_pais <M> <B0> <ref> — B0 é commit; M tem dois pais (P1, B1) e está
+# na linha de primeiro pai de <ref>.
+estrutura_pais() {
   local m="$1" b0="$2" ref="$3" pais npais
   g cat-file -e "$b0^{commit}" 2>/dev/null || { estrutura b0 "B0 $b0 não é commit deste repositório"; return 1; }
   pais="$(g rev-list --parents -n1 "$m" 2>/dev/null)" || { estrutura m "pais de M ilegíveis"; return 1; }
@@ -390,6 +423,12 @@ estrutura_m() {
   B1="$(g rev-parse --verify -q "$m^2")" || { estrutura m 'M^2 ilegível'; return 1; }
   g rev-list --first-parent "$ref" > "$TMP_DIR/primeiro-pai" 2>/dev/null || { estrutura primeiro_pai "linha de primeiro pai de $ref ilegível"; return 1; }
   grep -Fxq -e "$m" "$TMP_DIR/primeiro-pai" || { estrutura primeiro_pai "M $m fora da linha de primeiro pai de $ref"; return 1; } # guarda:EST
+}
+
+# estrutura_resto <M> <B0> — contrato de integração, ancestralidade de B0 e o
+# ENTREGA.md intocado pelo merge (P1 e B1 já definidos por estrutura_pais).
+estrutura_resto() {
+  local m="$1" b0="$2"
   bash "$CONTRATO_SH" --validar-integracao --trabalho "$TRABALHO" --commit "$m" >/dev/null 2>"$TMP_DIR/contrato.err" || { estrutura contrato "mensagem de M fora do contrato de integração: $(tr '\n' ' ' < "$TMP_DIR/contrato.err")"; return 1; } # guarda:EST
   g merge-base --is-ancestor "$b0" "$B1" 2>/dev/null || { estrutura b0_b1 "B0 $b0 não é ancestral de B1 $B1"; return 1; } # guarda:EST
   g merge-base --is-ancestor "$b0" "$P1" 2>/dev/null || { estrutura b0_p1 "B0 $b0 não é ancestral de P1 $P1"; return 1; } # guarda:EST
@@ -444,29 +483,45 @@ provas() {
 
 # herdado_da_cadeia <B0> <B1> <M> <caminho> <anteriores> — o caminho, de uma
 # reconciliação anterior, foi só herdado por este merge: a base não o tocou
-# entre B0 e B1 (erro do git não aprova) e M tem exatamente o blob_m da
-# reconciliação anterior mais recente que o lista. <anteriores>:
-# `caminho<TAB>blob_m` (a mais recente por caminho).
+# entre B0 e B1 (erro do git não aprova) e M tem exatamente o blob_m e o modo
+# (o do m_sha) da reconciliação anterior mais recente que o lista.
+# <anteriores>: `caminho<TAB>blob_m<TAB>m_sha` (a mais recente por caminho).
 herdado_da_cadeia() {
-  local b0="$1" b1="$2" m="$3" p="$4" bm
+  local b0="$1" b1="$2" m="$3" p="$4" bm mant
   bm="$(P="$p" awk -F'\t' '$1 == ENVIRON["P"] { b = $2 } END { print b }' "$5")"
-  [ -n "$bm" ] || return 1
+  mant="$(P="$p" awk -F'\t' '$1 == ENVIRON["P"] { c = $3 } END { print c }' "$5")"
+  { [ -n "$bm" ] && [ -n "$mant" ]; } || return 1
   g diff --quiet --no-renames "$b0" "$b1" -- "$p" >/dev/null 2>&1 || return 1 # guarda:INV
   { [ "$(g cat-file -t "$m:$p" 2>/dev/null)" = blob ] && [ "$(g rev-parse --verify -q "$m:$p" 2>/dev/null)" = "$bm" ]; } || return 1 # guarda:INV
+  [ "$(modo_em "$m" "$p")" = "$(modo_em "$mant" "$p")" ] || return 1 # guarda:INV
+}
+
+# anteriores_da_cadeia <cobertura> — `caminho<TAB>blob_m<TAB>m_sha` da
+# reconciliação mais recente (a última linha) que lista cada caminho.
+anteriores_da_cadeia() {
+  awk -F'\t' '{ u[$1] = $3 "\t" $4 } END { for (p in u) print p "\t" u[p] }' "$1"
+}
+
+# artefato_da_entrega <caminho> — um RECONCILIACAO-BASE-NNN.md da própria
+# entrega (commitado pelo checkpoint reconciliacao-base antes do merge
+# seguinte); é artefato de método, não produto.
+artefato_da_entrega() {
+  case "$1" in "docs/entregas/$TRABALHO/"RECONCILIACAO-BASE-[0-9][0-9][0-9].md) return 0 ;; esac
+  return 1
 }
 
 # inventario <B0> <B1> <M> <lista> <anteriores> — todo caminho que o merge
-# alterou em relação a B1 está na união, no catálogo, na lista, ou foi só
-# herdado de uma reconciliação anterior da cadeia (herdado_da_cadeia). Fora
-# disso, tem de estar na lista e passar nas quatro provas. Não existe registro
-# parcial.
+# alterou em relação a B1 está na união, no catálogo, na lista, é artefato de
+# reconciliação da entrega, ou foi só herdado de uma reconciliação anterior da
+# cadeia (herdado_da_cadeia). Fora disso, tem de estar na lista e passar nas
+# quatro provas. Não existe registro parcial.
 inventario() {
   local b0="$1" b1="$2" m="$3" lista="$4" anteriores="$5" p
   g diff --name-only -z --no-renames "$b1" "$m" > "$INVENTARIO" 2>/dev/null \
     || { falha_dura 4 inventario 'inventário: diff B1..M não calculável'; return 1; }
   while IFS= read -r -d '' p <&3; do
     case "$p" in *"$NL"*) reprova "inventário: caminho com quebra de linha alterado pelo merge" inventario; continue ;; esac
-    contem "$UNIAO" "$p" || contem "$CATALOGO" "$p" || contem "$lista" "$p" || herdado_da_cadeia "$b0" "$b1" "$m" "$p" "$anteriores" || reprova "inventário: $p: alterado pelo merge e não declarado" inventario # guarda:INV
+    contem "$UNIAO" "$p" || contem "$CATALOGO" "$p" || contem "$lista" "$p" || artefato_da_entrega "$p" || herdado_da_cadeia "$b0" "$b1" "$m" "$p" "$anteriores" || reprova "inventário: $p: alterado pelo merge e não declarado" inventario # guarda:INV
   done 3< "$INVENTARIO"
 }
 
@@ -495,13 +550,12 @@ campos_caminho() {
 _r() { awk -F'\t' -v k="$2" '$1 == "escalar" && $2 == k { print $3; exit }' "$TMP_DIR/r$1.lido"; }
 
 verificar() {
-  local dir="docs/entregas/$TRABALHO" nome arq n i j num nnn lido b0 p1 b1 m ob est ant ex br
-  local inicio prev bv lm lp f st bb bm ds h numero arquivo eb1 em idx ENTREGA_D=""
   MOTIVOS="$TMP_DIR/motivos"; : > "$MOTIVOS"
   # nem o refresh oportunista do índice: a verificação não grava nada
   export GIT_OPTIONAL_LOCKS=0
 
   # O ENTREGA.md do disco: contexto e a lista de reconciliações.
+  ENTREGA_D=""
   if [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cat "$ENTREGA" > "$TMP_DIR/entrega-disco.md" 2>/dev/null; then
     ENTREGA_D="$TMP_DIR/entrega-disco.md"
     [ "$(catalogo_fm "$ENTREGA_D" kind)" = entrega ] || motivo 5 entrega "$ENTREGA não declara kind: entrega"
@@ -515,8 +569,29 @@ verificar() {
     motivo 5 entrega "$ENTREGA ausente ou não é arquivo regular"
   fi
 
-  # Os artefatos da pasta da entrega, em ordem de byte. Nome fora do padrão
-  # (inclusive sobra de gravação) é contrato inválido.
+  cadeia_le
+  cadeia_provas
+  [ -z "$ENTREGA_D" ] || cadeia_coerencia
+  cadeia_cobertura
+
+  if [ "$FALHA_5" = 1 ] || [ "$FALHA_4" = 1 ]; then
+    printf 'ok=false\n'
+    cat "$MOTIVOS"
+    [ "$FALHA_5" = 1 ] && return 5
+    return 4
+  fi
+  printf 'ok=true\n'
+  LC_ALL=C sort "$TMP_DIR/cobertos"
+  return 0
+}
+
+# cadeia_le — os artefatos da pasta da entrega, do disco, em ordem de byte:
+# nome no padrão (fora dele, inclusive sobra de gravação, é contrato
+# inválido), numeração contínua a partir de 001, schema e assinatura. Define
+# CAD_N e, por posição i: $TMP_DIR/nome<i>, $TMP_DIR/r<i>.lido (só se válido)
+# e $TMP_DIR/lista<i>.
+cadeia_le() {
+  local dir="docs/entregas/$TRABALHO" nome arq n num
   : > "$TMP_DIR/artefatos"
   for arq in "$dir"/RECONCILIACAO-BASE-*; do
     [ -e "$arq" ] || [ -L "$arq" ] || continue
@@ -545,15 +620,22 @@ verificar() {
     awk -F'\t' '$1 == "arquivo" { print $2 }' "$TMP_DIR/r$n.lido" > "$TMP_DIR/lista$n"
   done 3< "$TMP_DIR/artefatos"
   PREFIXO=""
+  CAD_N="$n"
+}
 
-  # Cadeia e provas, reconciliação a reconciliação, com as funções do registro.
+# cadeia_provas — a cadeia lida por cadeia_le, reconciliação a reconciliação,
+# com as funções do registro: contrato da cadeia, estrutura, âncora, ordem,
+# quatro provas, campos recalculados e inventário. Acumula
+# $TMP_DIR/cobertura (`caminho<TAB>NNN<TAB>blob_m<TAB>m_sha`, em ordem).
+cadeia_provas() {
+  local n="$CAD_N" i j nome nnn b0 p1 b1 m ob est ant ex br inicio prev bv lm lp f st bb bm ds
   : > "$TMP_DIR/cobertura"
   i=0
   while [ "$i" -lt "$n" ]; do
     i=$((i + 1)); j=$((i - 1))
-    # os caminhos das reconciliações anteriores, com o blob_m da mais recente
-    # que os lista (para o inventário desta: herdado_da_cadeia)
-    awk -F'\t' '{ u[$1] = $3 } END { for (p in u) print p "\t" u[p] }' "$TMP_DIR/cobertura" > "$TMP_DIR/anteriores"
+    # os caminhos das reconciliações anteriores, com o blob_m e o m_sha da mais
+    # recente que os lista (para o inventário desta: herdado_da_cadeia)
+    anteriores_da_cadeia "$TMP_DIR/cobertura" > "$TMP_DIR/anteriores"
     [ -f "$TMP_DIR/r$i.lido" ] || continue
     nome="$(cat "$TMP_DIR/nome$i")"; PREFIXO="$nome: "
     nnn="$(printf '%s' "$nome" | sed 's/^RECONCILIACAO-BASE-\([0-9]*\)\.md$/\1/')"
@@ -630,31 +712,38 @@ EOF
     inventario "$b0" "$B1" "$m" "$TMP_DIR/lista$i" "$TMP_DIR/anteriores"
   done
   PREFIXO=""
+}
 
-  # Coerência com o ENTREGA.md do disco: a lista é exatamente a cadeia.
-  if [ -n "$ENTREGA_D" ]; then
-    j=0
-    while IFS="$TAB" read -r numero arquivo eb1 em <&3; do
-      [ -n "$numero$arquivo" ] || continue
-      j=$((j + 1))
-      idx="$(grep -Fxn -e "$arquivo" "$TMP_DIR/artefatos" | sed -n '1s/:.*//p')"
-      if [ -z "$idx" ]; then motivo 5 ausente "artefato ausente: $arquivo (listado em ENTREGA.reconciliacoes)"; continue; fi # guarda:COERENCIA
-      { [ "$numero" = "$j" ] && [ "$idx" = "$j" ]; } || motivo 5 entrega "ENTREGA.reconciliacoes: o item $j ($numero, $arquivo) não segue a ordem da cadeia"
-      [ -f "$TMP_DIR/r$idx.lido" ] || continue
-      [ "$eb1" = "$(_r "$idx" b1_sha)" ] || motivo 5 entrega "ENTREGA.reconciliacoes: b1_sha de $arquivo diverge do artefato" # guarda:COERENCIA
-      [ "$em" = "$(_r "$idx" m_sha)" ] || motivo 5 entrega "ENTREGA.reconciliacoes: m_sha de $arquivo diverge do artefato" # guarda:COERENCIA
-    done 3< "$TMP_DIR/lista-entrega"
-    while IFS= read -r nome <&3; do
-      cut -f2 "$TMP_DIR/lista-entrega" | grep -Fxq -e "$nome" || motivo 5 orfao "artefato órfão: $nome (fora de ENTREGA.reconciliacoes)" # guarda:COERENCIA
-    done 3< "$TMP_DIR/artefatos"
-    if [ "$n" -gt 0 ] && [ -f "$TMP_DIR/r$n.lido" ]; then
-      bv="$(catalogo_fm "$ENTREGA_D" base_validada_sha)"
-      [ "$bv" = "$(_r "$n" b1_sha)" ] || motivo 5 entrega "ENTREGA.base_validada_sha (${bv:-ausente}) não é o b1_sha da última reconciliação" # guarda:COERENCIA
-    fi
+# cadeia_coerencia — o ENTREGA.md do disco ($ENTREGA_D, com a lista em
+# $TMP_DIR/lista-entrega) lista exatamente a cadeia, e o base_validada_sha
+# dele é o b1_sha da última.
+cadeia_coerencia() {
+  local n="$CAD_N" j numero arquivo eb1 em idx nome bv
+  j=0
+  while IFS="$TAB" read -r numero arquivo eb1 em <&3; do
+    [ -n "$numero$arquivo" ] || continue
+    j=$((j + 1))
+    idx="$(grep -Fxn -e "$arquivo" "$TMP_DIR/artefatos" | sed -n '1s/:.*//p')"
+    if [ -z "$idx" ]; then motivo 5 ausente "artefato ausente: $arquivo (listado em ENTREGA.reconciliacoes)"; continue; fi # guarda:COERENCIA
+    { [ "$numero" = "$j" ] && [ "$idx" = "$j" ]; } || motivo 5 entrega "ENTREGA.reconciliacoes: o item $j ($numero, $arquivo) não segue a ordem da cadeia"
+    [ -f "$TMP_DIR/r$idx.lido" ] || continue
+    [ "$eb1" = "$(_r "$idx" b1_sha)" ] || motivo 5 entrega "ENTREGA.reconciliacoes: b1_sha de $arquivo diverge do artefato" # guarda:COERENCIA
+    [ "$em" = "$(_r "$idx" m_sha)" ] || motivo 5 entrega "ENTREGA.reconciliacoes: m_sha de $arquivo diverge do artefato" # guarda:COERENCIA
+  done 3< "$TMP_DIR/lista-entrega"
+  while IFS= read -r nome <&3; do
+    cut -f2 "$TMP_DIR/lista-entrega" | grep -Fxq -e "$nome" || motivo 5 orfao "artefato órfão: $nome (fora de ENTREGA.reconciliacoes)" # guarda:COERENCIA
+  done 3< "$TMP_DIR/artefatos"
+  if [ "$n" -gt 0 ] && [ -f "$TMP_DIR/r$n.lido" ]; then
+    bv="$(catalogo_fm "$ENTREGA_D" base_validada_sha)"
+    [ "$bv" = "$(_r "$n" b1_sha)" ] || motivo 5 entrega "ENTREGA.base_validada_sha (${bv:-ausente}) não é o b1_sha da última reconciliação" # guarda:COERENCIA
   fi
+}
 
-  # Cobertura: por caminho, a reconciliação mais recente que o lista; o
-  # conteúdo em HEAD tem de ser o blob_m dela, com o mesmo modo que em M.
+# cadeia_cobertura — por caminho, a reconciliação mais recente que o lista; o
+# conteúdo em HEAD tem de ser o blob_m dela, com o mesmo modo que em M.
+# Grava $TMP_DIR/cobertos.
+cadeia_cobertura() {
+  local f nnn bm mm h
   awk -F'\t' '{ if (!($1 in u)) o[++k] = $1; u[$1] = $0 } END { for (i = 1; i <= k; i++) print u[o[i]] }' \
     "$TMP_DIR/cobertura" > "$TMP_DIR/cobertura.ultima"
   : > "$TMP_DIR/cobertos"
@@ -664,16 +753,71 @@ EOF
     [ "$(modo_em HEAD "$f")" = "$(modo_em "$mm" "$f")" ] || { motivo 4 cobertura "$f: o modo em HEAD ($(modo_em HEAD "$f")) não é o de M em RECONCILIACAO-BASE-$nnn.md ($(modo_em "$mm" "$f"))"; continue; } # guarda:BLOBM
     printf 'coberto\t%s\t%s\n' "$f" "$nnn" >> "$TMP_DIR/cobertos"
   done 3< "$TMP_DIR/cobertura.ultima"
+}
 
-  if [ "$FALHA_5" = 1 ] || [ "$FALHA_4" = 1 ]; then
-    printf 'ok=false\n'
-    cat "$MOTIVOS"
-    [ "$FALHA_5" = 1 ] && return 5
-    return 4
-  fi
-  printf 'ok=true\n'
-  LC_ALL=C sort "$TMP_DIR/cobertos"
-  return 0
+# ---------------------------------------------------------------------------
+# ENTREGA.md do disco no encadeamento (--registrar com cadeia)
+# ---------------------------------------------------------------------------
+
+# _entrega_sem_gravadas <arquivo> — o arquivo sem os blocos (linha da chave e
+# as seguintes até a próxima chave de topo) das chaves que o registro grava;
+# o resto do frontmatter e o corpo, byte a byte.
+_entrega_sem_gravadas() {
+  CHS=" $CHAVES_GRAVADAS reconciliacoes " awk '
+    BEGIN { chs = ENVIRON["CHS"] }
+    NR == 1 { print; fm = 1; next }
+    fm && /^---[ \t]*\r?$/ { fm = 0; print; next }
+    fm && /^[A-Za-z_][A-Za-z0-9_]*:/ { k = $0; sub(/:.*/, "", k); pula = (index(chs, " " k " ") > 0); if (pula) next; print; next }
+    fm && pula { next }
+    { print }
+  ' "$1"
+}
+
+# _entrega_bloco <arquivo> <chave> — o bloco da chave de topo (linha da chave
+# e as seguintes até a próxima chave), sem CR; rc 1 se a chave não aparece
+# exatamente uma vez no frontmatter.
+_entrega_bloco() {
+  awk -v c="$2" '
+    { sub(/\r$/, "") }
+    NR == 1 { next }
+    /^---[ \t]*$/ { exit }
+    /^[A-Za-z_][A-Za-z0-9_]*:/ { k = $0; sub(/:.*/, "", k); em = (k == c); if (em) { n++; b = $0 } next }
+    em { b = b "\n" $0 }
+    END { if (n != 1) exit 1; print b }
+  ' "$1"
+}
+
+# entrega_disco_tolerado <b1-da-última> — o ENTREGA.md do disco difere do de M
+# só nas chaves que o registro grava (resto do frontmatter e corpo byte a
+# byte iguais), e cada uma delas, uma vez só, tem o valor que a cadeia
+# verificada implica: a reabertura de um registro anterior, nada mais. A
+# lista `reconciliacoes` e a base são conferidas contra a cadeia antes
+# (cadeia_coerencia). Falha: ENTREGA_ERRO.
+entrega_disco_tolerado() {
+  local b1u="$1" chave esperado bloco
+  ENTREGA_ERRO=""
+  _entrega_sem_gravadas "$ENTREGA" > "$TMP_DIR/disco.resto" 2>/dev/null \
+    && _entrega_sem_gravadas "$ENTREGA_M" > "$TMP_DIR/m.resto" 2>/dev/null \
+    || { ENTREGA_ERRO='não foi possível comparar com o de M'; return 1; }
+  cmp -s "$TMP_DIR/disco.resto" "$TMP_DIR/m.resto" || { ENTREGA_ERRO='difere do de M fora das chaves que o registro grava'; return 1; } # guarda:DISCO
+  for chave in $CHAVES_GRAVADAS; do
+    case "$chave" in
+      base_validada_sha) esperado="$b1u" ;;
+      estado) esperado=aberto ;;
+      portao|portao_sha|causa|entregue_em) esperado=null ;;
+      falhas_portao) esperado='[]' ;;
+      push_feito) esperado=false ;;
+      atualizado_em) esperado='' ;;
+      *) ENTREGA_ERRO="chave fora da lista que o registro grava: $chave"; return 1 ;;
+    esac
+    bloco="$(_entrega_bloco "$ENTREGA" "$chave")" || { ENTREGA_ERRO="$chave ausente ou repetida"; return 1; }
+    if [ "$chave" = atualizado_em ]; then
+      case "$bloco" in *"$NL"*) ENTREGA_ERRO="atualizado_em em mais de uma linha"; return 1 ;; esac
+      printf '%s' "$bloco" | grep -Eqx 'atualizado_em: [0-9]{4}-[0-9]{2}-[0-9]{2}' || { ENTREGA_ERRO="atualizado_em fora de AAAA-MM-DD"; return 1; } # guarda:DISCO
+    else
+      [ "$bloco" = "$chave: $esperado" ] || { ENTREGA_ERRO="$chave não tem o valor que a cadeia implica ($esperado)"; return 1; } # guarda:DISCO
+    fi
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -697,6 +841,7 @@ while [ "$#" -gt 0 ]; do
     --entrega) [ "$#" -ge 2 ] || uso; ENTREGA="$2"; shift 2 ;;
     --origem) [ "$#" -ge 2 ] || uso; ORIGEM="$2"; shift 2 ;;
     --trabalho) [ "$#" -ge 2 ] || uso; TRABALHO="$2"; shift 2 ;;
+    --merge) [ "$#" -ge 2 ] && [ -n "$2" ] && [ -z "$MERGE_ARG" ] || uso '--merge exige um SHA, uma vez só'; MERGE_ARG="$2"; shift 2 ;;
     --) SEPARADOR=1; shift; break ;;
     *) uso "opção desconhecida: $1" ;;
   esac
@@ -704,9 +849,16 @@ done
 
 case "$MODO" in
   registrar) [ "$SEPARADOR" = 1 ] || uso 'falta -- antes da lista de caminhos' ;;
-  verificar) [ "$SEPARADOR" = 0 ] || uso '--verificar não recebe lista de caminhos' ;;
+  verificar)
+    [ "$SEPARADOR" = 0 ] || uso '--verificar não recebe lista de caminhos'
+    [ -z "$MERGE_ARG" ] || uso '--verificar não recebe --merge' ;;
   *) uso 'falta --registrar ou --verificar' ;;
 esac
+# --merge é um SHA (nunca nome de ref): hex, de 7 a 40 dígitos
+if [ -n "$MERGE_ARG" ]; then
+  case "$MERGE_ARG" in *[!0-9a-f]*) uso "--merge exige um SHA hexadecimal: $MERGE_ARG" ;; esac
+  { [ "${#MERGE_ARG}" -ge 7 ] && [ "${#MERGE_ARG}" -le 40 ]; } || uso "--merge exige um SHA de 7 a 40 dígitos: $MERGE_ARG"
+fi
 case "$ORIGEM" in sprintx|runx) ;; *) uso "origem inválida: ${ORIGEM:-ausente}" ;; esac
 case "$TRABALHO" in
   ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto)
@@ -752,8 +904,13 @@ g diff --cached --quiet 2>/dev/null || para 3 'o stage não está vazio; nada fo
 # ---------------------------------------------------------------------------
 # M e o que alimenta as provas. Nada que esteja só no disco entra numa prova:
 # o ENTREGA.md, a pasta do trabalho (plano e catálogo) são lidos do commit M.
+# M é HEAD ou o commit de --merge, sempre como SHA completo.
 # ---------------------------------------------------------------------------
-M="$(g rev-parse --verify -q HEAD)" || estrutura m 'HEAD ilegível'
+if [ -n "$MERGE_ARG" ]; then
+  M="$(g rev-parse --verify -q "$MERGE_ARG^{commit}")" || estrutura m "M $MERGE_ARG não é commit deste repositório (ou é ambíguo)"
+else
+  M="$(g rev-parse --verify -q HEAD)" || estrutura m 'HEAD ilegível'
+fi
 
 # ENTREGA.md (versão de M): contexto explícito igual ao registrado.
 ENTREGA_M="$TMP_DIR/entrega-m.md"
@@ -786,35 +943,123 @@ while IFS= read -r -d '' registro <&3; do
   [ "$tolerado" = 1 ] || para 3 "pasta do trabalho com alteração não commitada (entrega, fora do que o registro grava): $xy $p" # guarda:LIMPA
 done 3< "$TMP_DIR/sujo-entrega"
 
-for existente in "docs/entregas/$TRABALHO"/RECONCILIACAO-BASE-*.md; do
+# ---------------------------------------------------------------------------
+# A cadeia já gravada (seção 14, múltiplas reconciliações). Os artefatos do
+# disco, rastreados ou não, são a cadeia; antes de servirem de B0 eles passam
+# pela mesma verificação de contrato e de provas do --verificar (sem a
+# cobertura em HEAD), e o ENTREGA.md do disco tem de listá-los. Nada do disco
+# entra sem esse recálculo.
+# ---------------------------------------------------------------------------
+N_CAD=0
+TEM_ARTEFATO=0
+for existente in "$ENTREGA_DIR"/RECONCILIACAO-BASE-*; do
   [ -e "$existente" ] || [ -L "$existente" ] || continue
-  para 5 "já existe reconciliação registrada ($existente); encadear reconciliações ainda não é suportado"
+  TEM_ARTEFATO=1
 done
 
-# B0 vem do ENTREGA.md de P1 (o de antes do merge): o próprio merge poderia
-# reescrevê-lo, e a estrutura exige depois que M e P1 tenham o mesmo.
-P1_ENTREGA="$(g rev-parse --verify -q "$M^1")" || estrutura m 'M^1 ilegível'
-ENTREGA_P1="$TMP_DIR/entrega-p1.md"
-# P1 sem o ENTREGA.md (pais trocados, por exemplo): B0 do de M só para as
-# condições estruturais, que reprovam de qualquer forma — no mínimo a guarda
-# estrutura[entrega], já que M tem o ENTREGA.md (le_entrega_m) e P1 não.
-g cat-file blob "$P1_ENTREGA:$ENTREGA" > "$ENTREGA_P1" 2>/dev/null || cp "$ENTREGA_M" "$ENTREGA_P1"
-B0="$(catalogo_fm "$ENTREGA_P1" base_validada_sha)"
-[ -n "$B0" ] || para 6 'ENTREGA.base_validada_sha ausente: base validada indeterminável'
-printf '%s' "$B0" | grep -Eq '^[0-9a-f]{40}$' || para 5 "ENTREGA.base_validada_sha não é SHA de 40 hex: $B0"
+if [ "$TEM_ARTEFATO" = 1 ]; then
+  { [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cat "$ENTREGA" > "$TMP_DIR/entrega-disco.md"; } 2>/dev/null \
+    || para 3 'ENTREGA.md com alteração não commitada'
+  ENTREGA_D="$TMP_DIR/entrega-disco.md"
+  entrega_lista_reconciliacoes "$ENTREGA_D" > "$TMP_DIR/lista-entrega" 2>/dev/null \
+    || para 5 "$ENTREGA: reconciliacoes fora da forma {numero, arquivo, b1_sha, m_sha}"
+  # sobra de registro interrompido: não rastreado e fora da lista do disco
+  for existente in "$ENTREGA_DIR"/RECONCILIACAO-BASE-*; do
+    [ -e "$existente" ] || [ -L "$existente" ] || continue
+    nome="${existente##*/}"
+    cut -f2 "$TMP_DIR/lista-entrega" | grep -Fxq -e "$nome" && continue
+    [ -n "$(g ls-files -z -- "$existente" 2>/dev/null)" ] && continue
+    para 5 "artefato órfão de registro interrompido: $nome; remova-o e registre de novo" # guarda:ORFAO
+  done
+
+  # a mesma verificação do --verificar, acumulando os motivos
+  RAIZ_M_REG="$RAIZ_M"; PASTA_REG="$PASTA"
+  MODO=verificar; MOTIVOS="$TMP_DIR/motivos"; : > "$MOTIVOS"; FALHA_4=0; FALHA_5=0
+  cadeia_le
+  cadeia_provas
+  cadeia_coerencia
+  MODO=registrar; FALHAS=0; RAIZ_M="$RAIZ_M_REG"; PASTA="$PASTA_REG"
+  if [ "$FALHA_5" = 1 ] || [ "$FALHA_4" = 1 ]; then
+    while IFS="$TAB" read -r _ codigo detalhe; do
+      printf 'reconciliacao-base: cadeia existente: %s (%s)\n' "$detalhe" "$codigo" >&2
+    done < "$MOTIVOS"
+    [ "$FALHA_5" = 1 ] && para 5 'a cadeia de reconciliações existente não verifica; nada foi gravado' # guarda:CAD
+    para 4 'a cadeia de reconciliações existente não verifica; nada foi gravado' # guarda:CAD
+  fi
+  N_CAD="$CAD_N"
+  ULT_NOME="$(cat "$TMP_DIR/nome$N_CAD")"
+  ULT_B1="$(_r "$N_CAD" b1_sha)"
+  ULT_M="$(_r "$N_CAD" m_sha)"
+
+  # Reexecução: o mesmo M da última, com a mesma lista (como conjunto), não
+  # grava nada; com outra lista, ou o M de uma anterior à última, rc 5.
+  if [ "$M" = "$ULT_M" ]; then
+    LC_ALL=C sort "$LISTA" > "$TMP_DIR/lista.noop"
+    LC_ALL=C sort "$TMP_DIR/lista$N_CAD" > "$TMP_DIR/lista.ultima"
+    cmp -s "$TMP_DIR/lista.noop" "$TMP_DIR/lista.ultima" \
+      || para 5 "reconciliação já registrada para M $M em $ULT_NOME, com outra lista de caminhos; nada foi gravado" # guarda:NOOP
+    printf 'noop=true\n'
+    printf 'registrado=%s\n' "$ULT_NOME"
+    printf 'b0=%s\n' "$(_r "$N_CAD" b0_sha)"
+    printf 'p1=%s\n' "$(_r "$N_CAD" p1_sha)"
+    printf 'b1=%s\n' "$ULT_B1"
+    printf 'm=%s\n' "$ULT_M"
+    exit 0
+  fi
+  i=0
+  while [ "$i" -lt "$N_CAD" ]; do
+    i=$((i + 1))
+    [ "$(_r "$i" m_sha)" != "$M" ] \
+      || para 5 "reconciliação já registrada: M $M é o de $(cat "$TMP_DIR/nome$i"), anterior à última ($ULT_NOME); só a última pode ser reexecutada" # guarda:NOOP
+  done
+
+  # B0 é o b1_sha da última (verificada), nunca o ENTREGA.md do disco; o
+  # <início> da prova 2 e o limite da ordem são o M dela.
+  B0="$ULT_B1"
+  INICIO="$ULT_M"
+  LIMITE="$ULT_M"
+  anteriores_da_cadeia "$TMP_DIR/cobertura" > "$TMP_DIR/anteriores"
+else
+  # B0 vem do ENTREGA.md de P1 (o de antes do merge): o próprio merge poderia
+  # reescrevê-lo, e a estrutura exige depois que M e P1 tenham o mesmo.
+  P1_ENTREGA="$(g rev-parse --verify -q "$M^1")" || estrutura m 'M^1 ilegível'
+  ENTREGA_P1="$TMP_DIR/entrega-p1.md"
+  # P1 sem o ENTREGA.md (pais trocados, por exemplo): B0 do de M só para as
+  # condições estruturais, que reprovam de qualquer forma — no mínimo a guarda
+  # estrutura[entrega], já que M tem o ENTREGA.md (le_entrega_m) e P1 não.
+  g cat-file blob "$P1_ENTREGA:$ENTREGA" > "$ENTREGA_P1" 2>/dev/null || cp "$ENTREGA_M" "$ENTREGA_P1"
+  B0="$(catalogo_fm "$ENTREGA_P1" base_validada_sha)"
+  [ -n "$B0" ] || para 6 'ENTREGA.base_validada_sha ausente: base validada indeterminável'
+  printf '%s' "$B0" | grep -Eq '^[0-9a-f]{40}$' || para 5 "ENTREGA.base_validada_sha não é SHA de 40 hex: $B0"
+  INICIO="$B0"
+  LIMITE="$B0"
+  : > "$TMP_DIR/anteriores"
+fi
 
 # ---------------------------------------------------------------------------
-# Condições estruturais (seção 5). M = HEAD; a linha de primeiro pai é a da
-# branch; a ponta da ref de base é condição do momento do registro.
+# Condições estruturais (seção 5). A linha de primeiro pai é a da branch (a
+# ativa, HEAD); a ponta da ref de base é condição do momento do registro.
+# Entre as duas metades, a ordem da cadeia (rc 5): M^2 descende do b1_sha da
+# última reconciliação, e M é o merge mais antigo ainda não registrado na
+# linha de primeiro pai de HEAD (depois do M da última, ou de B0 no 001).
 # ---------------------------------------------------------------------------
-estrutura_m "$M" "$B0" "$BRANCH" || exit 1
+estrutura_pais "$M" "$B0" "$BRANCH" || exit 1
+if [ "$N_CAD" -gt 0 ]; then
+  g merge-base --is-ancestor "$B0" "$B1" 2>/dev/null \
+    || para 5 "ordem: o segundo pai de M ($B1) não descende do b1_sha da última reconciliação, $ULT_NOME ($B0)" # guarda:ORDEM
+fi
+g rev-list --first-parent --merges --reverse "$LIMITE..HEAD" > "$TMP_DIR/merges" 2>/dev/null \
+  || estrutura ordem "merges da linha de primeiro pai de HEAD ilegíveis"
+PROXIMO="$(sed -n 1p "$TMP_DIR/merges")"
+[ "$PROXIMO" = "$M" ] \
+  || para 5 "ordem: M $M não é o merge mais antigo ainda não registrado na linha de primeiro pai de HEAD (o próximo é ${PROXIMO:-nenhum}); registre os merges um por vez, do mais antigo, com --merge" # guarda:ORDEM
+estrutura_resto "$M" "$B0" || exit 1
 PONTA_BASE="$(g rev-parse --verify -q "$BRANCH_BASE^{commit}")" || estrutura base "ref de base $BRANCH_BASE ilegível"
 g merge-base --is-ancestor "$B1" "$PONTA_BASE" 2>/dev/null || estrutura base "B1 $B1 não é ancestral da ponta de $BRANCH_BASE ($PONTA_BASE)" # guarda:EST
 
 # União das tasks e catálogo de método, as quatro provas e o inventário.
 uniao_e_catalogo "$RAIZ_M" "$PASTA" || exit 1
-provas "$LISTA" "$B0" "$B0" "$P1" "$B1" "$M"
-: > "$TMP_DIR/anteriores"
+provas "$LISTA" "$B0" "$INICIO" "$P1" "$B1" "$M"
 inventario "$B0" "$B1" "$M" "$LISTA" "$TMP_DIR/anteriores" || exit 1
 
 [ "$FALHAS" = 0 ] || para 4 "$FALHAS reprovação(ões); nada foi gravado"
@@ -822,18 +1067,21 @@ inventario "$B0" "$B1" "$M" "$LISTA" "$TMP_DIR/anteriores" || exit 1
 # ---------------------------------------------------------------------------
 # Artefato (seção 7). Só depois de tudo aprovado.
 # ---------------------------------------------------------------------------
-NOME="RECONCILIACAO-BASE-001.md"
+NUM=$((N_CAD + 1))
+NOME="$(printf 'RECONCILIACAO-BASE-%03d.md' "$NUM")"
 DESTINO="docs/entregas/$TRABALHO/$NOME"
+if [ "$N_CAD" -gt 0 ]; then ANTERIOR="$ULT_NOME"; ORIGEM_BASE=reconciliacao_anterior
+else ANTERIOR=null; ORIGEM_BASE=registrada_e0; fi
 ESC="$TMP_DIR/escalares.tsv"
 ARQ="$TMP_DIR/arquivos.tsv"
 {
   printf 'expx_tool\t%s\n' "$ORIGEM"
   printf 'trabalho_id\t%s\n' "$TRABALHO"
-  printf 'numero\t1\n'
-  printf 'anterior\tnull\n'
+  printf 'numero\t%s\n' "$NUM"
+  printf 'anterior\t%s\n' "$ANTERIOR"
   printf 'branch\t%s\n' "$BRANCH"
   printf 'branch_base\t%s\n' "$BRANCH_BASE"
-  printf 'origem_base\tregistrada_e0\n'
+  printf 'origem_base\t%s\n' "$ORIGEM_BASE"
   printf 'b0_sha\t%s\n' "$B0"
   printf 'p1_sha\t%s\n' "$P1"
   printf 'b1_sha\t%s\n' "$B1"
@@ -852,26 +1100,36 @@ done 3< "$TMP_DIR/lista.ord"
 [ -d "docs/entregas/$TRABALHO" ] || para 5 "pasta da entrega ausente: docs/entregas/$TRABALHO"
 
 # ---------------------------------------------------------------------------
-# ENTREGA.md novo (seção 11). A gravação parte do arquivo do disco, e só se ele
-# for byte a byte o de M: nunca se sobrescreve edição alheia. Tudo é montado
-# numa cópia; o repositório só muda no fim (artefato e ENTREGA.md, ou nada).
+# ENTREGA.md novo (seção 11). A gravação parte do ENTREGA.md de M, e só se o do
+# disco for byte a byte o de M — ou, com cadeia, se diferir dele só nas chaves
+# que o registro grava, com os valores que a cadeia verificada implica: nunca
+# se sobrescreve edição alheia. Tudo é montado numa cópia; o repositório só
+# muda no fim (artefato, anterior e ENTREGA.md, ou nada).
 # ---------------------------------------------------------------------------
-{ [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cmp -s "$ENTREGA" "$ENTREGA_M"; } \
-  || para 3 'ENTREGA.md com alteração não commitada' # guarda:DISCO
+# as únicas chaves de topo que o registro grava (seq e commits nunca entram)
+CHAVES_GRAVADAS='base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em atualizado_em' # guarda:SEQ
+if [ "$N_CAD" = 0 ]; then
+  { [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cmp -s "$ENTREGA" "$ENTREGA_M"; } \
+    || para 3 'ENTREGA.md com alteração não commitada' # guarda:DISCO
+else
+  { [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ]; } || para 3 'ENTREGA.md com alteração não commitada'
+  cmp -s "$ENTREGA" "$ENTREGA_M" || entrega_disco_tolerado "$ULT_B1" \
+    || para 3 "ENTREGA.md com alteração não commitada ($ENTREGA_ERRO)"
+fi
 
-# a lista de reconciliações do ENTREGA.md só pode estar vazia: não há o que
-# acrescentar a entradas sem artefato (a cadeia é de outra etapa)
-RECONC_ATUAL="$(fm reconciliacoes)"
-if [ -n "$RECONC_ATUAL" ] && [ "$RECONC_ATUAL" != '[]' ]; then
-  para 5 'ENTREGA.reconciliacoes não está vazia e não há artefato registrado'
-elif [ -z "$RECONC_ATUAL" ] && _entrega_tem "$ENTREGA_M" reconciliacoes; then
-  para 5 'ENTREGA.reconciliacoes não está vazia e não há artefato registrado'
+# sem cadeia, a lista de reconciliações do ENTREGA.md só pode estar vazia: não
+# há o que acrescentar a entradas sem artefato
+if [ "$N_CAD" = 0 ]; then
+  RECONC_ATUAL="$(fm reconciliacoes)"
+  if [ -n "$RECONC_ATUAL" ] && [ "$RECONC_ATUAL" != '[]' ]; then
+    para 5 'ENTREGA.reconciliacoes não está vazia e não há artefato registrado'
+  elif [ -z "$RECONC_ATUAL" ] && _entrega_tem "$ENTREGA_M" reconciliacoes; then
+    para 5 'ENTREGA.reconciliacoes não está vazia e não há artefato registrado'
+  fi
 fi
 
 ENTREGA_NOVO="$TMP_DIR/entrega-novo.md"
 cp "$ENTREGA_M" "$ENTREGA_NOVO" || para 1 'não foi possível preparar o ENTREGA.md novo'
-# as únicas chaves de topo que o registro grava (seq e commits nunca entram)
-CHAVES_GRAVADAS='base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em atualizado_em' # guarda:SEQ
 for chave in $CHAVES_GRAVADAS; do
   case "$chave" in
     base_validada_sha) valor="$B1" ;;
@@ -884,22 +1142,59 @@ for chave in $CHAVES_GRAVADAS; do
   esac
   entrega_define "$ENTREGA_NOVO" "$chave" "$valor" || para 5 "ENTREGA.md: $ENTREGA_ERRO"
 done
-printf '1\t%s\t%s\t%s\n' "$NOME" "$B1" "$M" > "$TMP_DIR/reconciliacoes.tsv"
+# a lista inteira: a cadeia verificada, na ordem, e a reconciliação nova
+: > "$TMP_DIR/reconciliacoes.tsv"
+i=0
+while [ "$i" -lt "$N_CAD" ]; do
+  i=$((i + 1))
+  printf '%s\t%s\t%s\t%s\n' "$i" "$(cat "$TMP_DIR/nome$i")" "$(_r "$i" b1_sha)" "$(_r "$i" m_sha)" >> "$TMP_DIR/reconciliacoes.tsv"
+done
+printf '%s\t%s\t%s\t%s\n' "$NUM" "$NOME" "$B1" "$M" >> "$TMP_DIR/reconciliacoes.tsv"
 entrega_reconciliacoes "$ENTREGA_NOVO" "$TMP_DIR/reconciliacoes.tsv" || para 5 "ENTREGA.md: $ENTREGA_ERRO"
 
-# Tudo ou nada: o ENTREGA.md novo fica ao lado do atual (mesma pasta, mesmo
-# modo), o artefato é emitido e só então o ENTREGA.md é substituído. Se a
-# substituição falhar, o artefato novo é removido e o ENTREGA.md fica intacto.
+# O anterior passa a `superada`: só a linha `estado` de topo muda; `estado`
+# não entra na assinatura, que tem de continuar a mesma e válida.
+if [ "$N_CAD" -gt 0 ]; then
+  ANT_ARQ="$ENTREGA_DIR/$ULT_NOME"
+  ANT_ORIG="$TMP_DIR/anterior-original.md"
+  cat "$ANT_ARQ" > "$ANT_ORIG" 2>/dev/null || para 1 "não foi possível ler $ULT_NOME"
+  awk '
+    NR == 1 { print; fm = 1; next }
+    fm && /^---[ \t]*\r?$/ { fm = 0 }
+    fm && /^estado: ativa\r?$/ { sub(/ativa/, "superada"); n++ }
+    { print }
+    END { exit (n != 1) }
+  ' "$ANT_ORIG" > "$TMP_DIR/anterior-superada.md" || para 5 "$ULT_NOME: estado ativa não encontrado uma vez só"
+  RB_ERRO=""
+  _rb_validar_conteudo "$TMP_DIR/anterior-superada.md" "$TRABALHO" "$N_CAD" || para 5 "$ULT_NOME superada não valida: $RB_ERRO"
+  [ "$(sed -n 's/^assinatura: //p' "$ANT_ORIG")" = "$(sed -n 's/^assinatura: //p' "$TMP_DIR/anterior-superada.md")" ] \
+    || para 5 "$ULT_NOME: a assinatura mudaria ao marcar superada"
+  TMP_ANT="$ANT_ARQ.superada.$$"
+  { cp -p "$ANT_ARQ" "$TMP_ANT" && cat "$TMP_DIR/anterior-superada.md" > "$TMP_ANT"; } 2>/dev/null \
+    || para 1 'não foi possível preparar o anterior superada na pasta da entrega'
+fi
+
+# Tudo ou nada: o ENTREGA.md novo (e o anterior superada) ficam ao lado dos
+# atuais (mesma pasta, mesmo modo); o artefato é emitido, o anterior trocado e
+# só então o ENTREGA.md é substituído. Se algo falhar (ou um sinal chegar)
+# antes do fim, o artefato novo é removido, o anterior volta ao original e o
+# ENTREGA.md fica intacto.
 TMP_ENTREGA="$ENTREGA.registro.$$"
 { cp -p "$ENTREGA" "$TMP_ENTREGA" && cat "$ENTREGA_NOVO" > "$TMP_ENTREGA"; } 2>/dev/null \
   || para 1 'não foi possível preparar o ENTREGA.md novo na pasta da entrega'
 RB_ERRO=""
 ARTEFATO_NOVO=1 # guarda:JANELA
 rb_emitir "$DESTINO" "$ESC" "$ARQ" || para 5 "artefato não emitido: $RB_ERRO"
+if [ -n "$TMP_ANT" ]; then
+  ANT_TROCADO=1 # guarda:JANELA
+  mv "$TMP_ANT" "$ANT_ARQ" 2>/dev/null \
+    || para 1 "não foi possível marcar $ULT_NOME como superada; o artefato foi removido e nada foi gravado"
+  TMP_ANT=""
+fi
 if ! mv "$TMP_ENTREGA" "$ENTREGA" 2>/dev/null; then
   para 1 'não foi possível atualizar o ENTREGA.md; o artefato foi removido e nada foi gravado'
 fi
-ARTEFATO_NOVO=0 # guarda:JANELA
+ARTEFATO_NOVO=0; ANT_TROCADO=0 # guarda:JANELA
 TMP_ENTREGA=""
 
 printf 'registrado=%s\n' "$NOME"

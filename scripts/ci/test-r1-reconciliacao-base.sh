@@ -525,7 +525,7 @@ grupo_provas() {
   printf 'qualquer\n' > docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
   local err_a
   err_a="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1 >/dev/null)"; c=$?
-  { [ "$c" = 5 ] && case "$err_a" in *"já existe reconciliação"*) true ;; *) false ;; esac; } \
+  { [ "$c" = 5 ] && case "$err_a" in *"artefato órfão de registro interrompido: RECONCILIACAO-BASE-001.md"*) true ;; *) false ;; esac; } \
     && ok "artefato não rastreado + ENTREGA.md alterado: segue para a regra seguinte (rc 5)" \
     || falha "artefato não rastreado + ENTREGA.md alterado: rc=$c $err_a"
   case "$err_a" in *"pasta do trabalho com alteração"*) falha "o motivo foi a pasta suja: $err_a" ;; *) ok "o motivo não é a pasta suja" ;; esac
@@ -544,7 +544,7 @@ grupo_provas() {
   done
   # artefato existente como link simbólico quebrado também é reconciliação existente
   ln -s /nao/existe docs/entregas/ft-rec/RECONCILIACAO-BASE-007.md
-  reprova "RECONCILIACAO-BASE-007.md link quebrado" 5 "já existe reconciliação" "$FX_NOVO1" "$FX_NOVO2"
+  reprova "RECONCILIACAO-BASE-007.md link quebrado" 5 "artefato órfão de registro interrompido: RECONCILIACAO-BASE-007.md" "$FX_NOVO1" "$FX_NOVO2"
   rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-007.md
 
   # plano escondido do status (ignorado, skip-worktree, assume-unchanged): a
@@ -1067,6 +1067,7 @@ _leitura() {
 
 AR=docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
 AR2=docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
+AR3=docs/entregas/ft-rec/RECONCILIACAO-BASE-003.md
 
 grupo_verificar() {
   local d v out rc antes tok campo valor esperado lateral VT
@@ -1327,6 +1328,277 @@ coberto	$FX_NOVO1	001"
   v_motivo "cadeia fora de ordem na linha de primeiro pai reprova" 5 cadeia "não é posterior"
   out="$("${v[@]}" 2>/dev/null)"
   [ "$(printf '%s\n' "$out" | grep -c '^motivo')" = 1 ] && ok "ordem: é o único motivo" || falha "ordem: outros motivos: $(printf '%s' "$out" | tr '\n\t' '|>')"
+  cd "$REPO" || return
+}
+
+# --- apoio do grupo cadeia ---------------------------------------------------
+
+# _sem_estado <artefato> — o artefato sem a linha `estado:` de topo
+_sem_estado() { grep -v '^estado: ' "$1"; }
+
+# _instantaneo — bytes, inode e mtime (ns) do ENTREGA.md e dos artefatos, e a
+# lista da pasta da entrega: uma reexecução noop não pode mudar nada disso.
+_instantaneo() {
+  ls -A docs/entregas/ft-rec
+  for f in "$FX_ENTREGA" docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md; do
+    [ -e "$f" ] || continue
+    printf '%s %s %s\n' "$(rb_sha256 < "$f")" "$(stat -c '%i %y' "$f")" "$f"
+  done
+}
+
+grupo_cadeia() {
+  local d r v out c t lido tt esperado caso antes ls_antes x m2x lateral pid i
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+
+  # ---- cadeia 001 -> 002 sem commit entre os registros (brief) -------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d"; fx_segunda_base "$d"; cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+  v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+  rc_igual "registra M1 com HEAD em M2" 0 "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2"
+  { grep -q "^m_sha: $FX_M\$" "$AR" && grep -q "^b1_sha: $FX_B1\$" "$AR"; } \
+    && ok "o 001 registra o M informado (M1), não HEAD" || falha "001: m_sha/b1_sha não são os de M1"
+  cp "$AR" "$t/a1.md"; cp "$FX_ENTREGA" "$t/e1.md"
+
+  # o ENTREGA.md do disco só pode diferir do de M nas chaves que o registro
+  # grava, e com os valores que a cadeia verificada implica
+  for caso in pr_url corpo portao atualizado base; do
+    case "$caso" in
+      pr_url) sed 's|^pr_url: null$|pr_url: https://exemplo.invalid/pr/1|' "$t/e1.md" > "$FX_ENTREGA" ;;
+      corpo) { cat "$t/e1.md"; printf '\nNota local.\n'; } > "$FX_ENTREGA" ;;
+      portao) sed 's/^portao: null$/portao: pronto/' "$t/e1.md" > "$FX_ENTREGA" ;;
+      atualizado) sed 's/^atualizado_em: .*/atualizado_em: ontem/' "$t/e1.md" > "$FX_ENTREGA" ;;
+      base) sed "s/^base_validada_sha: .*/base_validada_sha: $FX_B0/" "$t/e1.md" > "$FX_ENTREGA" ;;
+    esac
+    cmp -s "$FX_ENTREGA" "$t/e1.md" && falha "disco ($caso): a edição não pegou"
+    case "$caso" in
+      pr_url) reprova "disco: chave fora das gravadas difere de M" 3 "ENTREGA.md com alteração não commitada" --merge "$FX_M2" -- ;;
+      corpo) reprova "disco: corpo difere de M" 3 "ENTREGA.md com alteração não commitada" --merge "$FX_M2" -- ;;
+      portao) reprova "disco: portao com valor que a cadeia não implica" 3 "ENTREGA.md com alteração não commitada" --merge "$FX_M2" -- ;;
+      atualizado) reprova "disco: atualizado_em fora de AAAA-MM-DD" 3 "ENTREGA.md com alteração não commitada" --merge "$FX_M2" -- ;;
+      base) reprova "disco: base_validada_sha diferente do b1_sha da última" 5 "base_validada_sha" --merge "$FX_M2" -- ;;
+    esac
+  done
+  cp "$t/e1.md" "$FX_ENTREGA"
+
+  rc_igual "registra M2 sem arquivos" 0 "${r[@]}" --merge "$FX_M2" --
+  rc_igual "cadeia 001→002 verifica" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  grep -q '^estado: superada' docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md && ok "001 superada" || falha "001 não superada"
+  grep -q "^b0_sha: $FX_B1" docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md && ok "002 encadeia em B1" || falha "encadeamento"
+  grep -q '^arquivos: \[\]' docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md && ok "002 com arquivos: []" || falha "lista vazia"
+  lido="$(rb_ler "$AR2")"
+  for tt in "anterior	RECONCILIACAO-BASE-001.md" "origem_base	reconciliacao_anterior" "estado	ativa" "numero	2" \
+            "p1_sha	$FX_M" "b1_sha	$FX_B2" "m_sha	$FX_M2" "branch	feature/ft-rec"; do
+    printf '%s\n' "$lido" | grep -Fxq "escalar	$tt" && ok "002: $tt" || falha "002: escalar ${tt%%	*} divergente"
+  done
+  rb_validar "$AR2" ft-rec 2 && ok "002 válido" || falha "002 inválido: $RB_ERRO"
+  rb_validar "$AR" ft-rec 1 && ok "001 superada continua com assinatura válida" || falha "001 superada inválida: $RB_ERRO"
+  { grep -q '^estado: ativa$' "$t/a1.md" && [ "$(_sem_estado "$AR")" = "$(_sem_estado "$t/a1.md")" ]; } \
+    && ok "001: só a linha estado mudou (ativa -> superada)" || falha "001 mudou além do estado"
+  [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$FX_B2" ] && ok "ENTREGA: base validada avança para B2" || falha "ENTREGA: base_validada_sha"
+  esperado="reconciliacoes:
+  - numero: 1
+    arquivo: RECONCILIACAO-BASE-001.md
+    b1_sha: $FX_B1
+    m_sha: $FX_M
+  - numero: 2
+    arquivo: RECONCILIACAO-BASE-002.md
+    b1_sha: $FX_B2
+    m_sha: $FX_M2"
+  [ "$(awk '/^reconciliacoes:/ { f = 1; print; next } f && /^[ \t]/ { print; next } f { exit }' "$FX_ENTREGA")" = "$esperado" ] \
+    && ok "ENTREGA: reconciliacoes com 001 e 002, na ordem" || falha "ENTREGA: bloco reconciliacoes divergente"
+  entrega_confere "cadeia" "$t/e1.md" "$FX_ENTREGA" $GRAVADAS
+  [ "$(git status --porcelain=v1 --untracked-files=all | LC_ALL=C sort)" = " M $FX_ENTREGA
+?? $AR
+?? $AR2" ] && ok "cadeia: só ENTREGA.md e os dois artefatos na árvore" || falha "cadeia: status inesperado"
+  rc_igual "registrar M1 de novo depois de M2 reprova" 5 "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2"
+  rc_motivo "M1 depois de M2: o motivo é a reconciliação já registrada" 5 "anterior à última" \
+    "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2"
+
+  # reexecução idempotente do último M: noop, nada gravado
+  antes="$(_instantaneo)"
+  out="$("${r[@]}" --merge "$FX_M2" -- 2>&1)"; c=$?
+  { [ "$c" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n 1p)" = noop=true ]; } \
+    && ok "reexecução do último M com a mesma lista: rc 0 e noop=true" || falha "noop: rc=$c $out"
+  [ "$(_instantaneo)" = "$antes" ] && ok "noop: artefatos e ENTREGA.md intactos (bytes, inode, mtime)" || falha "noop gravou"
+  out="$("${r[@]}" -- 2>&1)"; c=$?
+  { [ "$c" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n 1p)" = noop=true ]; } \
+    && ok "sem --merge (M = HEAD = M2): noop" || falha "noop sem --merge: rc=$c $out"
+  [ "$(_instantaneo)" = "$antes" ] && ok "noop sem --merge: nada gravado" || falha "noop sem --merge gravou"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "noop: trava livre" || falha "noop: trava presa"
+  reprova "mesmo M com outra lista reprova" 5 "outra lista" --merge "$FX_M2" -- "$FX_NOVO3"
+
+  mv docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md docs/entregas/ft-rec/RECONCILIACAO-BASE-003.md
+  rc_igual "lacuna na numeração reprova" 5 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  mv docs/entregas/ft-rec/RECONCILIACAO-BASE-003.md docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
+  sed -i 's/^anterior: .*/anterior: null/' docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
+  rc_igual "anterior errado reprova" 5 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  cd "$REPO" || return
+
+  # ---- 001: a mesma lista em outra ordem é noop; outra lista, rc 5 ---------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
+  antes="$(_instantaneo)"
+  out="$("${r[@]}" -- "$FX_NOVO2" "$FX_NOVO1" 2>&1)"; c=$?
+  { [ "$c" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n 1p)" = noop=true ]; } \
+    && ok "001: mesma lista em outra ordem é noop" || falha "001 noop: rc=$c $out"
+  [ "$(_instantaneo)" = "$antes" ] && ok "001 noop: nada gravado" || falha "001 noop gravou"
+  reprova "001: mesmo M com lista menor reprova" 5 "outra lista" -- "$FX_NOVO1"
+  cd "$REPO" || return
+
+  # ---- ordem: o merge mais antigo ainda não registrado vem primeiro ---------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  reprova "M2 (--merge) antes de M1 reprova pela ordem" 5 "não é o merge mais antigo ainda não registrado" --merge "$FX_M2" -- "$FX_NOVO3"
+  reprova "M2 (HEAD) antes de M1 reprova pela ordem" 5 "não é o merge mais antigo ainda não registrado" -- "$FX_NOVO3"
+  rc_igual "--merge sem valor é uso" 64 "${r[@]}" --merge
+  rc_igual "--merge com nome de ref é uso" 64 "${r[@]}" --merge main -- "$FX_NOVO1" "$FX_NOVO2"
+  reprova "--merge com SHA inexistente" 4 "estrutura[m]" --merge 0000000000000000000000000000000000000000 -- "$FX_NOVO1" "$FX_NOVO2"
+  rc_igual "--verificar não aceita --merge" 64 "${v[@]}" --merge "$FX_M"
+  rc_igual "--merge abreviado registra o M1" 0 "${r[@]}" --merge "$(git rev-parse --short=12 "$FX_M")" -- "$FX_NOVO1" "$FX_NOVO2"
+  grep -q "^m_sha: $FX_M\$" "$AR" && ok "--merge abreviado: m_sha com 40 hex" || falha "--merge abreviado: m_sha"
+  rc_igual "depois do M1, o M2 (HEAD) registra" 0 "${r[@]}" -- "$FX_NOVO3"
+  esperado="$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001\ncoberto\t%s\t002' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3")"
+  [ "$("${v[@]}" 2>&1)" = "$esperado" ] && ok "cadeia em ordem verifica; NOVO3 coberto pelo 002" || falha "verificação da cadeia em ordem: $("${v[@]}" 2>&1 | tr '\n\t' '|>')"
+  cd "$REPO" || return
+
+  # --merge fora da linha de primeiro pai de HEAD (guarda EST)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=fora_primeiro_pai fx_cenario "$d" || { falha "variante fora_primeiro_pai não montou"; return; }
+  cd "$d" || return
+  lateral="$(git rev-parse HEAD^2)"
+  reprova "--merge fora da linha de primeiro pai de HEAD" 4 "estrutura[primeiro_pai]" --merge "$lateral" -- "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # M^2 do merge seguinte não descende do b1_sha da última reconciliação
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
+  x="$(printf 'base paralela\n' | git commit-tree "$FX_B0^{tree}" -p "$FX_B0")"
+  m2x="$(printf 'merge: integra a base paralela\n\nTrabalho: ft-rec\nIntegra-base: %s\n' "$x" | git commit-tree "$FX_M^{tree}" -p "$FX_M" -p "$x")"
+  git update-ref refs/heads/feature/ft-rec "$m2x"
+  reprova "M^2 que não descende do b1_sha da última reprova pela ordem" 5 "não descende do b1_sha" --
+  cd "$REPO" || return
+
+  # ---- órfão de registro interrompido -------------------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "emissão do órfão"
+  reprova "artefato órfão reprova com instrução" 5 \
+    "artefato órfão de registro interrompido: RECONCILIACAO-BASE-002.md; remova-o e registre de novo" -- "$FX_NOVO3"
+  rm -f "$AR2"
+  rc_igual "removido o órfão, o M2 registra" 0 "${r[@]}" -- "$FX_NOVO3"
+  cd "$REPO" || return
+
+  # ---- interrupção na janela: o anterior volta ao conteúdo original --------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
+  mkdir -p "$t/shim-lento"
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */ENTREGA.md|ENTREGA.md) sleep 8 ;; esac\nexec %s "$@"\n' \
+    "$(command -v mv)" > "$t/shim-lento/mv"
+  chmod +x "$t/shim-lento/mv"
+  cp "$AR" "$t/janela-a1.md"; cp "$FX_ENTREGA" "$t/janela-e.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"; antes="$(_foto)"
+  env PATH="$t/shim-lento:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
+  pid=$!; i=0
+  while [ "$i" -lt 150 ]; do
+    [ -e "$AR2" ] && grep -q '^estado: superada$' "$AR" && ls docs/entregas/ft-rec/ENTREGA.md.registro.* >/dev/null 2>&1 && break
+    sleep 0.1; i=$((i + 1))
+  done
+  { [ -e "$AR2" ] && grep -q '^estado: superada$' "$AR"; } && ok "janela: 002 emitido e 001 já superada" || falha "janela: o registro não chegou à janela"
+  kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  [ ! -e "$AR2" ] && ok "janela: nenhum 002" || falha "janela: ficou o 002"
+  cmp -s "$AR" "$t/janela-a1.md" && ok "janela: 001 restaurada byte a byte (ativa)" || falha "janela: 001 não restaurada"
+  cmp -s "$FX_ENTREGA" "$t/janela-e.md" && ok "janela: ENTREGA.md intacto" || falha "janela: ENTREGA.md mudou"
+  [ "$(ls -A docs/entregas/ft-rec)" = "$ls_antes" ] && ok "janela: nenhum temporário na pasta da entrega" || falha "janela: sobra: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
+  [ "$(_foto)" = "$antes" ] && ok "janela: árvore como antes" || falha "janela: árvore mudou"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "janela: trava livre" || falha "janela: trava presa"
+  rc_igual "janela: sem o shim, o M2 registra" 0 "${r[@]}" -- "$FX_NOVO3"
+  cd "$REPO" || return
+
+  # ---- falha ao trocar o anterior: tudo ou nada ----------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
+  mkdir -p "$t/shim-ant"
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */RECONCILIACAO-BASE-001.md) echo "mv: recusado de propósito" >&2; exit 1 ;; esac\nexec %s "$@"\n' \
+    "$(command -v mv)" > "$t/shim-ant/mv"
+  chmod +x "$t/shim-ant/mv"
+  cp "$AR" "$t/ant-a1.md"; cp "$FX_ENTREGA" "$t/ant-e.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"
+  out="$(env PATH="$t/shim-ant:$PATH" "${r[@]}" -- "$FX_NOVO3" 2>&1 >/dev/null)"; c=$?
+  { [ "$c" = 1 ] && case "$out" in *"superada"*) true ;; *) false ;; esac; } && ok "anterior não trocado: rc 1 e motivo" || falha "anterior não trocado: rc=$c $out"
+  [ ! -e "$AR2" ] && cmp -s "$AR" "$t/ant-a1.md" && cmp -s "$FX_ENTREGA" "$t/ant-e.md" \
+    && ok "anterior não trocado: nenhum 002, 001 e ENTREGA.md intactos" || falha "anterior não trocado: gravou algo"
+  [ "$(ls -A docs/entregas/ft-rec)" = "$ls_antes" ] && ok "anterior não trocado: nenhum temporário" || falha "anterior não trocado: sobra: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
+  cd "$REPO" || return
+
+  # ---- a cadeia existente é verificada antes de servir de base -------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" README.md && fx_entrega_sincroniza "$d" || falha "forja do 001"
+  rb_validar "$AR" ft-rec 1 || falha "001 forjado inválido: $RB_ERRO"
+  reprova "001 forjado (assinatura válida) com caminho inelegível: o 002 não registra" 4 "cadeia existente: RECONCILIACAO-BASE-001.md: prova 1: README.md" -- "$FX_NOVO3"
+  FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "forja do 001 superada"
+  reprova "001 superada como última: contrato da cadeia, o 002 não registra" 5 "cadeia existente: RECONCILIACAO-BASE-001.md: a última reconciliação da cadeia tem de estar ativa" -- "$FX_NOVO3"
+  cd "$REPO" || return
+
+  # ---- checkpoint commitado entre M1 e M2 (fluxo real) ---------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
+  fx_persiste_reconciliacao "$d" || falha "checkpoint reconciliacao-base"
+  [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] && ok "checkpoint: árvore limpa" || falha "checkpoint: árvore suja"
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  git diff --name-only "$FX_B2" "$FX_M2" | grep -Fxq "$AR" && ok "checkpoint: o 001 está no diff B2..M2" || falha "checkpoint: 001 fora do diff B2..M2"
+  out="$("${r[@]}" -- "$FX_NOVO3" 2>&1)"; c=$?
+  esperado="registrado=RECONCILIACAO-BASE-002.md
+b0=$FX_B1
+p1=$(git rev-parse "$FX_M2^1")
+b1=$FX_B2
+m=$FX_M2"
+  [ "$c" = 0 ] && ok "checkpoint: com o 001 commitado antes do M2, registra o 002" || falha "checkpoint: rc=$c $out"
+  [ "$out" = "$esperado" ] && ok "checkpoint: saída registrado/b0/p1/b1/m" || falha "checkpoint: saída $(printf '%s' "$out" | tr '\n' '|')"
+  rc_igual "checkpoint: a cadeia verifica" 0 "${v[@]}"
+  [ "$(git status --porcelain=v1 --untracked-files=all | LC_ALL=C sort)" = " M $FX_ENTREGA
+ M $AR
+?? $AR2" ] && ok "checkpoint: 001 e ENTREGA.md alterados, 002 novo" || falha "checkpoint: status inesperado"
+  cd "$REPO" || return
+
+  # ---- condição 2 da cadeia: M2 muda só o modo de um caminho do 001 --------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  git update-index --chmod=+x "$FX_NOVO2"; chmod +x "$FX_NOVO2"
+  m2x="$(git log -1 --format=%B HEAD | git commit-tree "$(git write-tree)" -p "$FX_M" -p "$FX_B2")"
+  git update-ref refs/heads/feature/ft-rec "$m2x"
+  [ "$(git ls-tree HEAD -- "$FX_NOVO2" | cut -c1-6)" = 100755 ] || falha "modo: M2 sem o modo trocado"
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "modo: registro do 001"
+  reprova "M2 muda só o modo de um caminho do 001: o inventário reprova" 4 "inventário: $FX_NOVO2" -- "$FX_NOVO3"
+  cd "$REPO" || return
+
+  # ---- três elos: 001 -> 002 (relista NOVO1) -> 003 ------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" reajusta || { falha "segunda base (reajusta) não montou"; return; }
+  fx_terceira_base "$d" || { falha "terceira base não montou"; return; }
+  cd "$d" || return
+  rc_igual "três elos: 001 (--merge M1)" 0 "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2"
+  rc_igual "três elos: 002 (--merge M2) relista NOVO1" 0 "${r[@]}" --merge "$FX_M2" -- "$FX_NOVO3" "$FX_NOVO1"
+  rc_igual "três elos: 003 (HEAD = M3)" 0 "${r[@]}" -- "$FX_NOVO4"
+  { grep -q "^b0_sha: $FX_B2\$" "$AR3" && grep -q '^anterior: "RECONCILIACAO-BASE-002.md"$' "$AR3" \
+    && grep -q '^estado: superada$' "$AR" && grep -q '^estado: superada$' "$AR2" && grep -q '^estado: ativa$' "$AR3"; } \
+    && ok "três elos: 003 encadeia em B2; 001 e 002 superadas" || falha "três elos: encadeamento ou estados"
+  [ "$(git rev-parse "$FX_M3:$FX_NOVO1")" = "$(git rev-parse "$FX_M2:$FX_NOVO1")" ] \
+    && [ "$(git rev-parse "$FX_M3:$FX_NOVO1")" != "$(git rev-parse "$FX_M:$FX_NOVO1")" ] \
+    || falha "três elos: M3 não herda NOVO1 do M2"
+  esperado="$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t002\ncoberto\t%s\t002\ncoberto\t%s\t003' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3" "$FX_NOVO4")"
+  [ "$("${v[@]}" 2>&1)" = "$esperado" ] && ok "três elos: verifica; NOVO1 coberto pelo 002 (o mais recente)" || falha "três elos: $("${v[@]}" 2>&1 | tr '\n\t' '|>')"
   cd "$REPO" || return
 }
 
