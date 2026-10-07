@@ -937,7 +937,7 @@ grupo_entrega() {
   cd "$REPO" || return
 
   # ---- variantes do ENTREGA.md --------------------------------------------
-  for variante in entrega_sem_chaves entrega_bloco entrega_crlf; do
+  for variante in entrega_sem_chaves entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
@@ -971,6 +971,14 @@ grupo_entrega() {
       entrega_bloco)
         grep -Fq -- '- v1' "$FX_ENTREGA" && falha "sobrou item do bloco antigo de falhas_portao" || ok "bloco antigo de falhas_portao substituído por inteiro"
         grep -Fq -- '- antiga' "$FX_ENTREGA" && falha "sobrou item do bloco antigo de causa" || ok "bloco antigo de causa substituído por inteiro" ;;
+      entrega_bloco_vazia|entrega_bloco_comentario|entrega_bloco_escalar|entrega_bloco_col0)
+        # o bloco antigo some por inteiro, como o leitor (sequencia/causa) o define:
+        # linha em branco, comentário e itens na coluna 0 pertencem a ele
+        if grep -Eq -- 'v1|v7|comentario|primeira linha|terceira linha' "$FX_ENTREGA"; then
+          falha "$variante: sobrou linha do bloco antigo: $(grep -En -- 'v1|v7|comentario|primeira linha|terceira linha' "$FX_ENTREGA" | tr '\n' '|')"
+        else ok "$variante: nenhuma linha órfã do bloco antigo"; fi
+        [ "$(awk '/^---/ { n++ } n == 1 && /^(falhas_portao|causa):/ { c++ } END { print c }' "$FX_ENTREGA")" = 2 ] \
+          && ok "$variante: falhas_portao e causa uma só vez" || falha "$variante: falhas_portao/causa repetidas ou ausentes" ;;
       entrega_crlf)
         [ "$(grep -c $'\r$' "$FX_ENTREGA")" = "$(wc -l < "$FX_ENTREGA")" ] && ok "CRLF preservado em todas as linhas" || falha "linha sem CR no ENTREGA.md" ;;
     esac
@@ -978,7 +986,7 @@ grupo_entrega() {
   done
 
   # variantes que o registro recusa sem gravar nada
-  for variante in entrega_dup entrega_reconc_cheia; do
+  for variante in entrega_dup entrega_reconc_cheia entrega_bloco_estranho entrega_aspas_d entrega_aspas_s; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
@@ -986,9 +994,38 @@ grupo_entrega() {
     case "$variante" in
       entrega_dup) reprova "$variante" 5 "chave de topo repetida: estado" "$FX_NOVO1" "$FX_NOVO2" ;;
       entrega_reconc_cheia) reprova "$variante" 5 "ENTREGA.reconciliacoes não está vazia" "$FX_NOVO1" "$FX_NOVO2" ;;
+      entrega_bloco_estranho) reprova "$variante" 5 "não se reconhece com segurança" "$FX_NOVO1" "$FX_NOVO2" ;;
+      entrega_aspas_d) reprova "$variante" 5 "chave de topo entre aspas: estado" "$FX_NOVO1" "$FX_NOVO2" ;;
+      entrega_aspas_s) reprova "$variante" 5 "chave de topo entre aspas: portao" "$FX_NOVO1" "$FX_NOVO2" ;;
     esac
     cd "$REPO" || return
   done
+
+  # ---- interrupção na janela entre o artefato e a troca do ENTREGA.md ------
+  # `mv` lento só para o destino ENTREGA.md; o teste mata o registro (SIGTERM)
+  # com o artefato já emitido e o temporário já ao lado do ENTREGA.md.
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  mkdir -p "$t/shim-lento"
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */ENTREGA.md|ENTREGA.md) sleep 8 ;; esac\nexec %s "$@"\n' \
+    "$(command -v mv)" > "$t/shim-lento/mv"
+  chmod +x "$t/shim-lento/mv"
+  cp "$FX_ENTREGA" "$t/antes-sinal.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"; antes="$(_foto)"
+  env PATH="$t/shim-lento:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 &
+  local pid=$! i=0
+  while [ "$i" -lt 100 ]; do
+    [ -e docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md ] && ls docs/entregas/ft-rec/ENTREGA.md.registro.* >/dev/null 2>&1 && break
+    sleep 0.1; i=$((i + 1))
+  done
+  [ -e docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md ] && ok "interrupção: artefato emitido e registro na janela" || falha "interrupção: o registro não chegou à janela"
+  kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1 && falha "interrupção: ficou artefato órfão" || ok "interrupção: nenhum artefato"
+  cmp -s "$FX_ENTREGA" "$t/antes-sinal.md" && ok "interrupção: ENTREGA.md original" || falha "interrupção: ENTREGA.md mudou"
+  [ "$(ls -A docs/entregas/ft-rec)" = "$ls_antes" ] && ok "interrupção: nenhum temporário na pasta da entrega" || falha "interrupção: sobra na pasta: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
+  [ "$(_foto)" = "$antes" ] && ok "interrupção: árvore como antes" || falha "interrupção: árvore mudou"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "interrupção: trava livre" || falha "interrupção: trava presa"
+  cd "$REPO" || return
 }
 
 # ---------------------------------------------------------------------------

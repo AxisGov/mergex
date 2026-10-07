@@ -43,6 +43,13 @@
 #   entrega_reconc_cheia  o merge grava uma reconciliação na lista do ENTREGA.md
 #   entrega_bloco         o merge grava falhas_portao e causa em forma de bloco
 #   entrega_crlf          o ENTREGA.md do merge usa CRLF
+#   entrega_bloco_vazia   falhas_portao em bloco com linha em branco no meio
+#   entrega_bloco_comentario  falhas_portao em bloco com `#` na coluna 0 no meio
+#   entrega_bloco_escalar causa como escalar `|` com linha vazia
+#   entrega_bloco_col0    falhas_portao com itens `- ` na coluna 0
+#   entrega_bloco_estranho  falhas_portao seguido de linha solta não reconhecível
+#   entrega_aspas_d       chave de topo "estado" entre aspas duplas
+#   entrega_aspas_s       chave de topo 'portao' entre aspas simples
 #   entrega_symlink       o merge troca o ENTREGA.md por link para ENTREGA-real.md
 #   plano_symlink         o merge cria um link simbólico na pasta do trabalho
 #   merge_area_base       o merge cria docs/sprintx/features/ft-rec/base/notas.md
@@ -153,7 +160,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -336,6 +343,13 @@ _fx_corpo() {
       entrega_bloco)
         _fx_entrega_sed -e 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n  - v7/' -e 's/^causa: null$/causa:\n  - antiga/' ;;
       entrega_crlf) _fx_entrega_sed 's/$/\r/' ;;
+      entrega_bloco_vazia) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n\n  - v7/' ;;
+      entrega_bloco_comentario) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\n# comentario na coluna 0\n  - v7/' ;;
+      entrega_bloco_escalar) _fx_entrega_sed 's/^causa: null$/causa: |\n  primeira linha\n\n  terceira linha/' ;;
+      entrega_bloco_col0) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n- v1\n- v7/' ;;
+      entrega_bloco_estranho) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\nsolto sem indentacao/' ;;
+      entrega_aspas_d) _fx_entrega_sed 's/^estado: /"estado": /' ;;
+      entrega_aspas_s) _fx_entrega_sed "s/^portao: /'portao': /" ;;
       entrega_symlink)
         git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
         ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md

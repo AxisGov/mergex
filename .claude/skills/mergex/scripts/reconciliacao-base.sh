@@ -91,9 +91,14 @@ TMP_DIR=""
 TOKEN=""
 LIBERAR_NA_SAIDA=0
 TMP_ENTREGA=""
+DESTINO=""
+ARTEFATO_NOVO=0 # 1 enquanto o artefato recém-criado depende da troca do ENTREGA.md
 
 encerrar() {
   local rc="$1"
+  # saída (inclusive por sinal) antes da troca do ENTREGA.md: nem artefato nem
+  # temporários ficam; o ENTREGA.md original não foi tocado
+  if [ "$ARTEFATO_NOVO" = 1 ] && [ -n "$DESTINO" ]; then rm -f "$DESTINO" "$DESTINO.tmp.$$"; fi # guarda:JANELA
   [ -z "$TMP_ENTREGA" ] || rm -f "$TMP_ENTREGA"
   [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
@@ -153,13 +158,26 @@ _entrega_troca() {
     NR == 1 { cr = ($0 ~ /\r$/) ? "\r" : ""; print; estado = 1; next }
     estado == 1 && /^---[ \t]*\r?$/ { if (!feito) { emite(); feito = 1 } estado = 2; print; next }
     estado == 1 {
-      if (pula) {
-        if ($0 ~ /^[ \t]/ || $0 ~ /^-([ \t]|\r?$)/) next
-        pula = 0
+      # chave de topo entre aspas: não é reconhecida como a chave, e inserir
+      # outra duplicaria a chave no YAML
+      if ($0 ~ /^["\047]/) {
+        q = $0; sub(/^["\047]/, "", q); sub(/["\047].*/, "", q)
+        if (q == chave) { erro = 1; exit 6 }
       }
-      if (index($0, chave ":") == 1) {
-        if (feito) { erro = 1; exit 4 }
-        emite(); feito = 1; pula = 1; next
+      # o bloco de uma chave (como em sequencia-de-commits.sh) só termina na
+      # próxima chave de topo ou no fechamento; linha vazia, comentário e linha
+      # indentada ou `- ` no meio pertencem a ele
+      if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*:/) {
+        pula = 0
+        if (index($0, chave ":") == 1) {
+          if (feito) { erro = 1; exit 4 }
+          emite(); feito = 1; pula = 1; next
+        }
+        print; next
+      }
+      if (pula) {
+        if ($0 ~ /^[ \t]/ || $0 ~ /^#/ || $0 ~ /^[ \t]*\r?$/ || $0 ~ /^-([ \t]|\r?$)/) next
+        erro = 1; exit 7
       }
       print; next
     }
@@ -168,6 +186,8 @@ _entrega_troca() {
   case $? in
     0) ;;
     4) rm -f "$fm"; ENTREGA_ERRO="chave de topo repetida: $chave"; return 1 ;;
+    6) rm -f "$fm"; ENTREGA_ERRO="chave de topo entre aspas: $chave"; return 1 ;;
+    7) rm -f "$fm"; ENTREGA_ERRO="o bloco de $chave tem linha que não se reconhece com segurança"; return 1 ;;
     *) rm -f "$fm"; ENTREGA_ERRO="não foi possível reescrever $chave"; return 1 ;;
   esac
   { cat "$fm"; tail -n "+$((n + 1))" "$arq"; } > "$novo" 2>/dev/null \
@@ -518,11 +538,12 @@ TMP_ENTREGA="$ENTREGA.registro.$$"
 { cp -p "$ENTREGA" "$TMP_ENTREGA" && cat "$ENTREGA_NOVO" > "$TMP_ENTREGA"; } 2>/dev/null \
   || para 1 'não foi possível preparar o ENTREGA.md novo na pasta da entrega'
 RB_ERRO=""
+ARTEFATO_NOVO=1 # guarda:JANELA
 rb_emitir "$DESTINO" "$ESC" "$ARQ" || para 5 "artefato não emitido: $RB_ERRO"
 if ! mv "$TMP_ENTREGA" "$ENTREGA" 2>/dev/null; then
-  rm -f "$DESTINO" "$TMP_ENTREGA"
   para 1 'não foi possível atualizar o ENTREGA.md; o artefato foi removido e nada foi gravado'
 fi
+ARTEFATO_NOVO=0 # guarda:JANELA
 TMP_ENTREGA=""
 
 printf 'registrado=%s\n' "$NOME"
