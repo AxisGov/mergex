@@ -273,10 +273,87 @@ grupo_artefato() {
   { [ -n "$ret1" ] && [ "$ret1" = "$ret2" ]; } && ok "rb_diff_sha é o sha256 do diff do Git" || falha "rb_diff_sha divergente ($ret1 / $ret2)"
   printf 'x' | rb_sha256 | grep -Eq '^[0-9a-f]{64}$' && ok "rb_sha256 devolve 64 hex" || falha "rb_sha256 sem 64 hex"
 
-  # sem ferramenta de hash: falha fechado
-  mkdir "$d/vazio"
-  ( PATH="$d/vazio"; printf x | rb_sha256 ) >/dev/null 2>&1 \
-    && falha "sem ferramenta de hash passou" || ok "sem ferramenta de hash falha fechado"
+  # rb_diff_sha falha fechado: ref inexistente não vira "sem diferença"
+  local out t ferr
+  cd "$d/g" || return
+  set +o pipefail   # a biblioteca não pode depender do pipefail do chamador
+  RB_ERRO=""; out="$(rb_diff_sha deadbeef HEAD "f g.txt" 2>/dev/null)"; rc=$?
+  RB_ERRO=""; rb_diff_sha deadbeef HEAD "f g.txt" >/dev/null 2>&1; rc=$?
+  [ "$rc" = 1 ] && ok "rb_diff_sha com ref inexistente retorna 1" || falha "rb_diff_sha com ref ruim: rc=$rc"
+  [ -z "$out" ] && ok "rb_diff_sha com ref ruim não imprime hash" || falha "rb_diff_sha com ref ruim imprimiu '$out'"
+  [ -n "$RB_ERRO" ] && ok "rb_diff_sha com ref ruim preenche RB_ERRO" || falha "RB_ERRO vazio com ref ruim"
+  RB_ERRO=""; rb_diff_sha HEAD~1 HEAD "f g.txt" >/dev/null 2>&1 && ok "rb_diff_sha com refs válidas retorna 0" || falha "rb_diff_sha válido falhou: $RB_ERRO"
+  RB_ERRO=""; ( cd "$d" && rb_diff_sha HEAD~1 HEAD x ) >/dev/null 2>&1 && falha "rb_diff_sha fora de repositório passou" || ok "rb_diff_sha fora de repositório retorna 1"
+  set -o pipefail
+  cd "$REPO" || return
+
+  # erro do parser chega ao chamador (não se perde em subshell)
+  mkdir "$d/p1" "$d/p2"
+  head -n 8 "$a" > "$d/p1/RECONCILIACAO-BASE-001.md"
+  sed 's/^branch: .*/&\nbranch: "outra"/' "$a" > "$d/p2/RECONCILIACAO-BASE-001.md"
+  for t in p1:fechamento p2:repetida; do
+    RB_ERRO=""; rb_validar "$d/${t%%:*}/RECONCILIACAO-BASE-001.md" ft-rec 1 >/dev/null 2>&1; rc=$?
+    { [ "$rc" = 1 ] && case "$RB_ERRO" in *frontmatter*${t##*:}*) true ;; *) false ;; esac; } \
+      && ok "rb_validar (${t%%:*}) devolve o erro do parser: $RB_ERRO" || falha "rb_validar (${t%%:*}): rc=$rc RB_ERRO='$RB_ERRO'"
+    RB_ERRO=""; rb_assinatura "$d/${t%%:*}/RECONCILIACAO-BASE-001.md" >/dev/null 2>&1; rc=$?
+    { [ "$rc" = 1 ] && [ -n "$RB_ERRO" ]; } && ok "rb_assinatura (${t%%:*}) devolve o erro do parser" || falha "rb_assinatura (${t%%:*}): rc=$rc RB_ERRO='$RB_ERRO'"
+    RB_ERRO=""; rb_ler "$d/${t%%:*}/RECONCILIACAO-BASE-001.md" >/dev/null 2>&1 && falha "rb_ler (${t%%:*}) passou" || { [ -n "$RB_ERRO" ] && ok "rb_ler (${t%%:*}) devolve o erro do parser" || falha "rb_ler sem RB_ERRO"; }
+  done
+
+  # SHA curto, maiúsculo e sha256 curto reprovam. Passam pela emissão, que assina
+  # o conteúdo: a assinatura confere, então só a checagem de formato pode barrar.
+  mkdir "$d/h"
+  for t in b0_sha:39 b1_sha:41 m_sha:39 p1_sha:40U; do
+    case "${t##*:}" in
+      *U) ferr="$(printf 'C%.0s' $(seq 1 40))" ;;
+      *) ferr="$(printf 'a%.0s' $(seq 1 "${t##*:}"))" ;;
+    esac
+    sed "s/^${t%%:*}\t.*/${t%%:*}\t$ferr/" "$esc" > "$d/h/esc.tsv"
+    RB_ERRO=""; rb_emitir "$d/h/RECONCILIACAO-BASE-001.md" "$d/h/esc.tsv" "$arq" >/dev/null 2>&1 && falha "${t%%:*} ${t##*:} foi emitido" || ok "${t%%:*} ${t##*:} não é emitido"
+    case "$RB_ERRO" in *"${t%%:*}"*SHA*) ok "o erro cita ${t%%:*}" ;; *) falha "erro não cita ${t%%:*}: $RB_ERRO" ;; esac
+  done
+  for t in 3:39 4:41 5:63 5:65 5:64U; do
+    case "${t##*:}" in
+      *U) ferr="$(printf 'D%.0s' $(seq 1 64))" ;;
+      *) ferr="$(printf '1%.0s' $(seq 1 "${t##*:}"))" ;;
+    esac
+    awk -F'\t' -v OFS='\t' -v c="${t%%:*}" -v v="$ferr" 'NR == 1 { $c = v } { print }' "$arq" > "$d/h/arq.tsv"
+    RB_ERRO=""; rb_emitir "$d/h/RECONCILIACAO-BASE-001.md" "$esc" "$d/h/arq.tsv" >/dev/null 2>&1 && falha "coluna ${t%%:*} tamanho ${t##*:} foi emitida" || ok "coluna ${t%%:*} com valor inválido (${t##*:}) não é emitida"
+  done
+
+  # nome 002 com número esperado 1: só o NNN do nome diverge
+  mkdir "$d/n2"; cp "$a" "$d/n2/RECONCILIACAO-BASE-002.md"
+  RB_ERRO=""; rb_validar "$d/n2/RECONCILIACAO-BASE-002.md" ft-rec 1 && falha "nome 002 com esperado 1 passou" || ok "NNN do nome diferente do esperado reprova"
+  case "$RB_ERRO" in *nome*|*NNN*) ok "o erro cita o nome" ;; *) falha "erro não cita o nome: $RB_ERRO" ;; esac
+
+  # caminho repetido e status_base fora do enum, na emissão
+  mkdir "$d/r1"
+  { sed -n 1p "$arq"; sed -n 1p "$arq"; } > "$d/r1.tsv"
+  RB_ERRO=""; rb_emitir "$d/r1/RECONCILIACAO-BASE-001.md" "$esc" "$d/r1.tsv" && falha "caminho repetido foi emitido" || ok "caminho repetido não é emitido"
+  case "$RB_ERRO" in *repetido*) ok "o erro cita o caminho repetido" ;; *) falha "erro não cita repetido: $RB_ERRO" ;; esac
+  sed 's/\tA\t/\tX\t/' "$arq" > "$d/r2.tsv"
+  RB_ERRO=""; rb_emitir "$d/r1/RECONCILIACAO-BASE-001.md" "$esc" "$d/r2.tsv" && falha "status_base X foi emitido" || ok "status_base fora do enum não é emitido"
+  case "$RB_ERRO" in *status_base*) ok "o erro cita status_base" ;; *) falha "erro não cita status_base: $RB_ERRO" ;; esac
+
+  # caminhos com ".." : só o segmento exato é recusado
+  for t in 'docs/v1..v2.md:0' 'a..b:0' '..x/y:0' '../x:1' 'a/../b:1' 'a/..:1' '..:1' '/abs/x:1'; do
+    printf '%s\tA\t%s\t%s\t%s\tmotivo\n' "${t%:*}" 1010101010101010101010101010101010101010 \
+      2020202020202020202020202020202020202020 1111111111111111111111111111111111111111111111111111111111111111 > "$d/dd.tsv"
+    RB_ERRO=""; rb_emitir "$d/r1/RECONCILIACAO-BASE-001.md" "$esc" "$d/dd.tsv" >/dev/null 2>&1; rc=$?
+    [ "$rc" = "${t##*:}" ] && ok "caminho '${t%:*}': rc=$rc" || falha "caminho '${t%:*}': rc=$rc, esperava ${t##*:}"
+  done
+
+  # sem ferramenta de hash: falha fechado, isolando só sha256sum/shasum
+  mkdir "$d/vazio" "$d/semhash"
+  for t in cut grep sed awk; do ln -s "$(command -v $t)" "$d/semhash/$t" 2>/dev/null; done
+  RB_ERRO=""; printf x > "$d/x.bin"; ferr="$( PATH="$d/semhash"; rb_sha256 < "$d/x.bin" >/dev/null 2>&1; echo "rc=$? ERRO=$RB_ERRO" )"
+  case "$ferr" in
+    "rc=1 ERRO="?*) ok "sem ferramenta de hash falha fechado com RB_ERRO ($ferr)" ;;
+    *) falha "sem ferramenta de hash: $ferr" ;;
+  esac
+  ln -s "$(command -v sha256sum)" "$d/semhash/sha256sum"
+  ferr="$( PATH="$d/semhash"; rb_sha256 < "$d/x.bin" )"
+  printf '%s' "$ferr" | grep -Eq '^[0-9a-f]{64}$' && ok "controle: com sha256sum no mesmo PATH o hash sai" || falha "controle sem hash falhou: $ferr"
 }
 
 # ---------------------------------------------------------------------------

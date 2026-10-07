@@ -46,9 +46,14 @@ rb_sha256() {
 
 rb_diff_sha() { # <b1> <m> <caminho>
   [ "$#" -eq 3 ] || { RB_ERRO="rb_diff_sha: uso <b1> <m> <caminho>"; return 1; }
-  local h
-  h="$(git diff --no-ext-diff --no-color --binary --no-renames "$1" "$2" -- "$3" | rb_sha256)" \
-    || { RB_ERRO="${RB_ERRO:-git diff falhou}"; return 1; }
+  local tmp h
+  tmp="$(mktemp)" || { RB_ERRO="mktemp falhou"; return 1; }
+  if ! git diff --no-ext-diff --no-color --binary --no-renames "$1" "$2" -- "$3" > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"; RB_ERRO="git diff falhou para $1 $2 -- $3"; return 1
+  fi
+  rb_sha256 < "$tmp" > "$tmp.h" || { rm -f "$tmp" "$tmp.h"; return 1; }
+  h="$(cat "$tmp.h")"; rm -f "$tmp.h"
+  rm -f "$tmp"
   printf '%s\n' "$h"
 }
 
@@ -128,18 +133,30 @@ _rb_ler_awk() {
   ' "$1"
 }
 
-rb_ler() { # <arquivo>
+# Lê o frontmatter para <destino>, sem subshell: RB_ERRO chega ao chamador.
+_rb_ler_arq() { # <arquivo> <destino>
   [ -r "${1:-}" ] || { RB_ERRO="artefato ilegível: ${1:-}"; return 1; }
-  local saida erro
-  saida="$(_rb_ler_awk "$1")"
-  erro="$(printf '%s\n' "$saida" | sed -n 's/^ERRO\t//p' | head -n1)"
+  local erro
+  _rb_ler_awk "$1" > "$2" 2>/dev/null
+  erro="$(sed -n 's/^ERRO	//p' "$2" | head -n1)"
   if [ -n "$erro" ]; then RB_ERRO="frontmatter inválido: $erro"; return 1; fi
-  [ -z "$saida" ] || printf '%s\n' "$saida"
+  return 0
 }
 
+rb_ler() { # <arquivo>
+  local tmp
+  tmp="$(mktemp)" || { RB_ERRO="mktemp falhou"; return 1; }
+  _rb_ler_arq "$1" "$tmp" || { rm -f "$tmp"; return 1; }
+  cat "$tmp"; rm -f "$tmp"
+}
+
+# Imprime a assinatura e a deixa em RB_ASSIN; chame sem subshell para ler RB_ERRO.
+RB_ASSIN=""
 rb_assinatura() { # <arquivo>
-  local lido cab arqs
-  lido="$(rb_ler "$1")" || return 1
+  local tmp lido cab arqs
+  tmp="$(mktemp)" || { RB_ERRO="mktemp falhou"; return 1; }
+  _rb_ler_arq "$1" "$tmp" || { rm -f "$tmp"; return 1; }
+  lido="$(cat "$tmp")"
   cab="$(printf '%s\n' "$lido" | awk -F'\t' '
     $1 == "escalar" { v[$2] = $3 }
     END {
@@ -147,7 +164,10 @@ rb_assinatura() { # <arquivo>
       for (i = 1; i <= m; i++) printf "%s=%s\n", ch[i], v[ch[i]]
     }')"
   arqs="$(printf '%s\n' "$lido" | awk -F'\t' '$1 == "arquivo" { print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 }' | LC_ALL=C sort)"
-  { printf '%s\n' "$cab"; [ -z "$arqs" ] || printf '%s\n' "$arqs"; } | rb_sha256
+  { printf '%s\n' "$cab"; [ -z "$arqs" ] || printf '%s\n' "$arqs"; } > "$tmp"
+  rb_sha256 < "$tmp" > "$tmp.h" || { rm -f "$tmp" "$tmp.h"; return 1; }
+  RB_ASSIN="$(cat "$tmp.h")"; rm -f "$tmp" "$tmp.h"
+  printf '%s\n' "$RB_ASSIN"
 }
 
 # Escapa \ e " e envolve em aspas duplas (stdin -> stdout, sem quebra final).
@@ -223,7 +243,8 @@ rb_emitir() { # <saida> <tsv-escalares> <tsv-arquivos>
       printf '\nA integração não exigiu ajuste em nenhum arquivo.\n'
     fi
   } > "$tmp" 2>/dev/null || { rm -f "$tmp"; RB_ERRO="não foi possível gravar $saida"; return 1; }
-  v="$(rb_assinatura "$tmp")" || { rm -f "$tmp"; return 1; }
+  rb_assinatura "$tmp" >/dev/null || { rm -f "$tmp"; return 1; }
+  v="$RB_ASSIN"
   sed -i.bak "s/^assinatura: .*/assinatura: $v/" "$tmp" && rm -f "$tmp.bak" \
     || { rm -f "$tmp" "$tmp.bak"; RB_ERRO="não foi possível gravar a assinatura"; return 1; }
   n="$(_rb_esc numero)"
@@ -237,8 +258,10 @@ _rb_hex() { printf '%s' "$2" | grep -Eq "^[0-9a-f]{$1}\$"; }
 
 # Schema e assinatura; não olha o nome do arquivo.
 _rb_validar_conteudo() { # <arquivo> <trabalho> <numero>
-  local tipo arq="$1" trab="$2" num="$3" lido k v ant esperada n_arq l st bb bm ds mo caminho_vistos="" assin
-  lido="$(rb_ler "$arq")" || return 1
+  local tl tipo arq="$1" trab="$2" num="$3" lido k v ant esperada n_arq l st bb bm ds mo caminho_vistos="" assin
+  tl="$(mktemp)" || { RB_ERRO="mktemp falhou"; return 1; }
+  _rb_ler_arq "$arq" "$tl" || { rm -f "$tl"; return 1; }
+  lido="$(cat "$tl")"; rm -f "$tl"
   _rb_tem() { printf '%s\n' "$lido" | awk -F'\t' -v k="$1" '$1 == "escalar" && $2 == k { f = 1 } END { exit !f }'; }
   _rb_val() { printf '%s\n' "$lido" | awk -F'\t' -v k="$1" '$1 == "escalar" && $2 == k { print $3; exit }'; }
   for k in expx_schema expx_tool kind trabalho_id numero anterior branch branch_base origem_base \
@@ -278,7 +301,7 @@ _rb_validar_conteudo() { # <arquivo> <trabalho> <numero>
   while IFS=$'\t' read -r tipo caminho st bb bm ds mo; do
     [ "$tipo" = arquivo ] || continue
     [ -n "$caminho" ] || { RB_ERRO="arquivo sem caminho"; return 1; }
-    case "$caminho" in /*|*..*) RB_ERRO="caminho inválido: $caminho"; return 1 ;; esac
+    case "$caminho" in /*|..|../*|*/../*|*/..) RB_ERRO="caminho inválido: $caminho"; return 1 ;; esac
     case "
 $caminho_vistos
 " in *"
@@ -296,7 +319,8 @@ $caminho"
 $(printf '%s\n' "$lido" | grep '^arquivo	')
 EOF
   _rb_hex 64 "$(_rb_val assinatura)" || { RB_ERRO="assinatura não é sha256"; return 1; }
-  assin="$(rb_assinatura "$arq")" || return 1
+  rb_assinatura "$arq" >/dev/null || return 1
+  assin="$RB_ASSIN"
   [ "$assin" = "$(_rb_val assinatura)" ] || { RB_ERRO="assinatura não confere: o artefato foi editado depois de gravado"; return 1; } # guarda:ASS
   return 0
 }
