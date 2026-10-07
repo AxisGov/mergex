@@ -319,6 +319,37 @@ grep -q 'cabecalho-topo.test.tsx' "$R/docs/sprintx/features/ft-piloto/sprint-03/
   && ok "a T-03.01 permanece congelada, com o arquivo ainda declarado nela" \
   || falha "a task antiga foi alterada"
 
+# ---------------------------------------------------------------------------
+echo
+echo "12. --uniao expõe a união executável das tasks (consumida pela V9)"
+# ---------------------------------------------------------------------------
+D="$(novo_tmp)"
+mkdir -p "$D/docs/sprintx/features/ft-teste/sprint-01"
+cat > "$D/docs/sprintx/features/ft-teste/sprint-01/tasks.md" <<YAML
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: plano
+trabalho_id: ft-teste
+tasks:
+  - id: T-01.01
+    arquivos:
+      cria: [src/a.ts]
+      altera: [tests/a.test.ts]
+  - id: T-01.02
+    arquivos:
+      cria: [src/b.ts]
+      altera: [src/a.ts]
+---
+YAML
+saida="$(bash "$OWNERSHIP" --uniao "$D" sprintx ft-teste)"; rc=$?
+[ "$rc" = 0 ] && [ "$saida" = "$(printf 'src/a.ts\nsrc/b.ts\ntests/a.test.ts')" ] \
+  && ok "--uniao devolve a união ordenada" || falha "--uniao: rc=$rc saída=$saida"
+bash "$OWNERSHIP" --uniao "$D" sprintx ft-inexistente >/dev/null 2>&1
+[ $? = 1 ] && ok "--uniao sem plano falha fechado" || falha "--uniao sem plano não falhou"
+bash "$OWNERSHIP" --uniao "$D" >/dev/null 2>&1
+espera "--uniao com uso inválido" 64 "$?"
+
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
