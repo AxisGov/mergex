@@ -1,0 +1,4 @@
+chore(mergex): persiste metodo reconciliacao-base
+
+Trabalho: ft-rec
+Metodo: reconciliacao-base
