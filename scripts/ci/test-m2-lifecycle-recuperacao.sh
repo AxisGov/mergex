@@ -625,7 +625,7 @@ entrega_reconc() { # <repo> [nome...]
   for n in "$@"; do nomes="$nomes$n"$'\n'; done
   NOMES="$nomes" awk -v h="$HASH_B" '
     BEGIN { n = split(ENVIRON["NOMES"], lista, "\n") }
-    /^reconciliacoes:/ { pula = 1; next }
+    /^(reconciliacoes|faixa_atencao):/ { pula = 1; next }
     pula && /^(---|[A-Za-z_])/ { pula = 0 }
     pula { next }
     /^commits: \[\]$/ {
@@ -633,11 +633,13 @@ entrega_reconc() { # <repo> [nome...]
       print "    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; next
     }
     /^---$/ && ++cerca == 2 {
+      print "faixa_atencao:"; print "  - arquivo: src/antes.ts"; print "    faixa: alta"
       if (n > 1) {
         print "reconciliacoes:"
         for (i = 1; i < n; i++)
           printf "  - numero: %d\n    arquivo: %s\n    b1_sha: %s\n    m_sha: %s\n", i, lista[i], h, h
       } else print "reconciliacoes: []"
+      print "faixa_atencao:"; print "  - arquivo: src/depois.ts"; print "    faixa: media"
     }
     { print }
   ' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/docs/entregas/ft-m2/ENTREGA.tmp" \
@@ -722,6 +724,32 @@ grupo_catalog_reconc() {
   entrega_reconc "$repo" ''
   cat_direto "$repo" sprintx reconciliacao-base >/dev/null; rc=$?
   [ "$rc" != 0 ] && ok 'arquivo vazio na lista falha fechado' || falha 'arquivo vazio na lista foi aceito'
+
+  entrega_reconc "$repo" RECONCILIACAO-BASE-001.md
+  grep -c '^  - arquivo: src/' "$repo/$base/ENTREGA.md" | grep -qx 2 \
+    && ok 'a fixture tem faixa_atencao antes e depois do bloco reconciliacoes' || falha 'fixture sem faixa_atencao dos dois lados'
+  igual 'faixa_atencao fora do bloco nao entra: reconciliacao-base so tem ENTREGA e o artefato' \
+    "$(cat_direto "$repo" sprintx reconciliacao-base)" "$(printf '%s\n%s' "$base/ENTREGA.md" "$base/RECONCILIACAO-BASE-001.md")"
+  igual 'faixa_atencao fora do bloco nao entra: pre-e6 so acrescenta o artefato' \
+    "$(cat_direto "$repo" sprintx pre-e6)" "$(printf '%s\n%s' "$e6" "$base/RECONCILIACAO-BASE-001.md")"
+  igual 'faixa_atencao fora do bloco nao entra: e8 so acrescenta o artefato' \
+    "$(cat_direto "$repo" sprintx e8)" "$(printf '%s\n%s' "$e6" "$base/RECONCILIACAO-BASE-001.md")"
+
+  for nome in '[{numero: 1, arquivo: RECONCILIACAO-BASE-001.md}]' '[RECONCILIACAO-BASE-001.md]' 'null'; do
+    entrega_reconc "$repo"
+    sed -i "s/^reconciliacoes: \[\]\$/reconciliacoes: $nome/" "$repo/$base/ENTREGA.md"
+    for checkpoint in reconciliacao-base pre-e6 e8; do
+      obtido="$(cat_direto "$repo" sprintx "$checkpoint")"; rc=$?
+      if [ "$rc" != 0 ] && printf '%s\n' "$obtido" | grep -Fq "fora do formato de bloco: $nome"; then
+        ok "lista fora do formato de bloco '$nome' falha fechado no catalogo $checkpoint"
+      else
+        falha "lista '$nome' no catalogo $checkpoint (rc=$rc; $obtido)"
+      fi
+    done
+  done
+  entrega_reconc "$repo"
+  cat_direto "$repo" sprintx reconciliacao-base >/dev/null
+  igual 'reconciliacoes: [] continua aceito' "$?" 0
 
   repo="$D/catalogo-reconc-sujo"
   pasta="$(repo_reconc "$repo")"
@@ -809,6 +837,19 @@ grupo_lifecycle_reconc() {
   [ "$rc" = 0 ] && [ "$saida" = 'noop=true' ] && [ "$antes" = "$depois" ] \
     && ok 'so produto e artefato nao listado sujos: noop sem commit' \
     || falha "produto sujo gerou commit ou erro (rc=$rc; $saida)"
+
+  repo="$D/lifecycle-reconc-symlink"
+  pasta="$(repo_reconc "$repo")"
+  rm -f "$repo/$base/RECONCILIACAO-BASE-001.md"
+  ln -s ../../../src/ORQUESTRADOR.md "$repo/$base/RECONCILIACAO-BASE-001.md"
+  printf '\nregistro\n' >> "$repo/$base/ENTREGA.md"
+  printf '\nproduto\n' >> "$repo/src/ORQUESTRADOR.md"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>/dev/null)"; rc=$?
+  nomes="$(git -C "$repo" show --format= --name-only HEAD | sed '/^$/d')"
+  [ "$rc" = 0 ] && [ "$nomes" = "$base/ENTREGA.md" ] \
+    && [ -n "$(git -C "$repo" status --porcelain -- src/ORQUESTRADOR.md)" ] \
+    && ok 'artefato listado que e symlink para produto nao entra no commit' \
+    || falha "symlink entrou ou o checkpoint falhou (rc=$rc; $saida; $nomes)"
 
   repo="$D/lifecycle-reconc-historico-alheio"
   pasta="$(repo_reconc "$repo")"

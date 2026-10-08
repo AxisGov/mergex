@@ -147,7 +147,14 @@ catalogo_reconciliacoes_brutas() { # <ENTREGA.md> — `=<valor>` de cada `arquiv
     NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; fm = 1; next }
     fm && /^---[[:space:]]*$/ { exit }
     !fm { next }
-    /^[A-Za-z_][A-Za-z0-9_]*:/ { nome = $0; sub(/:.*/, "", nome); dentro = (nome == "reconciliacoes"); next }
+    /^[A-Za-z_][A-Za-z0-9_]*:/ {
+      nome = $0; sub(/:.*/, "", nome); dentro = (nome == "reconciliacoes")
+      if (dentro) {
+        v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
+        if (v != "" && v != "[]") print "!" v
+      }
+      next
+    }
     dentro && /^[[:space:]]*(-[[:space:]]+)?arquivo:/ {
       v = $0; sub(/^[[:space:]]*(-[[:space:]]+)?arquivo:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
       print "=" v
@@ -157,13 +164,18 @@ catalogo_reconciliacoes_brutas() { # <ENTREGA.md> — `=<valor>` de cada `arquiv
 
 # catalogo_reconciliacoes <raiz> <trabalho> — os artefatos RECONCILIACAO-BASE-NNN.md
 # nomeados em `reconciliacoes[].arquivo` do ENTREGA.md do disco, como caminhos
-# relativos à raiz. Só nome literal; qualquer outro valor falha fechado.
+# relativos à raiz. Só nome literal; qualquer outro valor, ou lista que não seja
+# `[]` nem bloco, falha fechado.
 catalogo_reconciliacoes() {
   local raiz="$1" trabalho="$2" arquivo nome
   arquivo="$raiz/docs/entregas/$trabalho/ENTREGA.md"
   [ -f "$arquivo" ] && [ ! -L "$arquivo" ] || return 0
   while IFS= read -r nome; do
-    case "$nome" in =*) nome="${nome#=}" ;; *) continue ;; esac
+    case "$nome" in
+      '!'*) CATALOGO_ERRO="ENTREGA.reconciliacoes fora do formato de bloco: ${nome#!}"; return 1 ;; # guarda:FLOW
+      =*) nome="${nome#=}" ;;
+      *) continue ;;
+    esac
     case "$nome" in
       RECONCILIACAO-BASE-[0-9][0-9][0-9].md) ;; # guarda:NOME-LITERAL
       *) CATALOGO_ERRO="ENTREGA.reconciliacoes lista nome inválido: $nome"; return 1 ;;
