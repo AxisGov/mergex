@@ -14,7 +14,15 @@
 # --registrar
 #   M é HEAD, ou o commit dado em --merge (SHA hex, 7 a 40 dígitos, resolvido
 #   para o SHA completo); P1 = M^1; B1 = M^2. Na primeira reconciliação, B0 é o
-#   base_validada_sha do ENTREGA.md de P1. Com reconciliações já gravadas (a
+#   base_validada_sha do ENTREGA.md de P1 (origem_base registrada_e0; chave
+#   presente vazia, null ou fora de 40 hex: rc 5). Entrega legada (spec, seção
+#   14: o ENTREGA.md de P1 sem base_validada_sha, sem origem_base, e nenhum
+#   RECONCILIACAO-BASE no histórico de P1; senão rc 5): o 001, e só ele, infere
+#   B0 = o merge-base de P1 e B1 e grava origem_base: inferida_legado no
+#   artefato e no ENTREGA.md, com as chaves novas que faltam. rc 6, antes de
+#   qualquer escrita, quando `git merge-base --all P1 B1` não tem exatamente
+#   um resultado, quando a linha de primeiro pai de P1 desde ele contém merge,
+#   ou quando ele não é ancestral de B1. Com reconciliações já gravadas (a
 #   cadeia, seção 14), B0 é o b1_sha da última e o <início> da prova 2 é o
 #   m_sha dela; antes, a cadeia existente (os artefatos do disco, rastreados ou
 #   não) passa pela mesma verificação de contrato e de provas do --verificar
@@ -78,7 +86,11 @@
 #   schema e assinatura; numeração contínua, `anterior`, `b0_sha` = `b1_sha`
 #   da anterior, estados (só a última `ativa`), M em ordem na linha de primeiro
 #   pai de HEAD; âncora (o `b0_sha` do 001 é o `base_validada_sha` do
-#   ENTREGA.md em P1, o de antes do merge); estrutura (inclusive: o merge não
+#   ENTREGA.md em P1, o de antes do merge; num 001 `inferida_legado`, o
+#   ENTREGA.md em P1 é legado, as três checagens da inferência passam de novo
+#   sobre p1_sha/b1_sha e o `b0_sha` é o merge-base único; só o 001 pode ser
+#   `inferida_legado`, e o ENTREGA.md do disco diz a mesma origem_base que
+#   ele); estrutura (inclusive: o merge não
 #   mexe no ENTREGA.md); as quatro provas (plano e catálogo da árvore do M de
 #   cada uma, `<início>` da prova 2 = M anterior); status_base, blob_b1,
 #   blob_m e diff_b1_m_sha256 de cada caminho; inventário B1..M (um caminho
@@ -608,6 +620,67 @@ campos_caminho() {
 }
 
 # ---------------------------------------------------------------------------
+# Base legada (spec, seção 14), comum aos dois modos: o registro do 001 infere
+# B0 com estas funções, e a verificação as recalcula sobre o p1_sha e o b1_sha
+# do 001. Tudo do Git: o ENTREGA.md lido é sempre o de P1.
+# ---------------------------------------------------------------------------
+LEG_ERRO=""
+LEG_MB=""
+
+# _entrega_chave_qualquer <arquivo> <chave> — a chave de topo aparece no
+# frontmatter em qualquer forma (entre aspas, espaço antes dos dois-pontos):
+# presença que não se lê com segurança nunca vira ausência.
+_entrega_chave_qualquer() {
+  awk -v c="$2" '
+    NR == 1 { next }
+    /^---[ \t]*\r?$/ { exit }
+    {
+      l = $0; sub(/\r$/, "", l); q = ""
+      if (l ~ /^["\047]/) { q = substr(l, 1, 1); l = substr(l, 2) }
+      if (index(l, c) != 1) next
+      r = substr(l, length(c) + 1)
+      if (q != "" && substr(r, 1, 1) == q) r = substr(r, 2)
+      if (r ~ /^[ \t]*:/) { achou = 1; exit }
+    }
+    END { exit !achou }
+  ' "$1"
+}
+
+# legado_entrega <ENTREGA.md de P1> <P1> — a entrega em P1 é legada: sem
+# base_validada_sha, sem origem_base (o E0 grava as duas juntas) e sem nenhum
+# RECONCILIACAO-BASE da entrega no histórico de P1 (base já validada uma vez
+# nunca é inferida de novo). Falha: LEG_ERRO e rc 1.
+legado_entrega() {
+  LEG_ERRO=""
+  if _entrega_chave_qualquer "$1" base_validada_sha; then LEG_ERRO="o ENTREGA.md em P1 já tem base_validada_sha: a base não é inferida"; return 1; fi # guarda:LEGE
+  if _entrega_chave_qualquer "$1" origem_base; then LEG_ERRO="o ENTREGA.md em P1 tem origem_base sem base_validada_sha: a base não é inferida"; return 1; fi # guarda:LEGE
+  g log -m --format= --name-only --no-renames "$2" -- "docs/entregas/$TRABALHO" > "$TMP_DIR/legado-historico" 2>/dev/null \
+    || { LEG_ERRO="histórico de P1 ilegível: a base não é inferida"; return 1; }
+  if P="docs/entregas/$TRABALHO/RECONCILIACAO-BASE-" awk 'index($0, ENVIRON["P"]) == 1 { f = 1 } END { exit !f }' "$TMP_DIR/legado-historico"; then
+    LEG_ERRO="já houve RECONCILIACAO-BASE no histórico de P1: a base não é inferida de novo"; return 1 # guarda:LEGE
+  fi
+}
+
+# legado_base <P1> <B1> — B0 = o merge-base de P1 e B1, só quando ele é único,
+# a linha de primeiro pai de P1 desde ele não tem merge e ele é ancestral de
+# B1. Define LEG_MB; base ambígua ou incalculável: LEG_ERRO e rc 1.
+legado_base() {
+  local p1="$1" b1="$2" n mg
+  LEG_MB=""; LEG_ERRO=""
+  g merge-base --all "$p1" "$b1" > "$TMP_DIR/legado-mb" 2>/dev/null \
+    || { LEG_ERRO="nenhum merge-base calculável entre P1 $p1 e B1 $b1"; return 1; }
+  n="$(grep -c . "$TMP_DIR/legado-mb")"
+  [ "$n" = 1 ] || { LEG_ERRO="$n merge-bases entre P1 $p1 e B1 $b1 (a inferência exige exatamente um)"; return 1; } # guarda:LEG2
+  mg="$(sed -n 1p "$TMP_DIR/legado-mb")"
+  printf '%s' "$mg" | grep -Eq '^[0-9a-f]{40}$' || { LEG_ERRO="merge-base de P1 e B1 fora de 40 hex: $mg"; return 1; }
+  g rev-list --first-parent --merges "$p1" "^$mg" > "$TMP_DIR/legado-merges" 2>/dev/null \
+    || { LEG_ERRO="linha de primeiro pai de P1 ilegível"; return 1; }
+  [ ! -s "$TMP_DIR/legado-merges" ] || { LEG_ERRO="a linha de primeiro pai de P1 desde o merge-base $mg contém o merge $(sed -n 1p "$TMP_DIR/legado-merges")"; return 1; } # guarda:LEG3
+  g merge-base --is-ancestor "$mg" "$b1" 2>/dev/null || { LEG_ERRO="o merge-base $mg não é ancestral de B1 $b1"; return 1; } # guarda:LEG4
+  LEG_MB="$mg"
+}
+
+# ---------------------------------------------------------------------------
 # --verificar
 # ---------------------------------------------------------------------------
 
@@ -741,8 +814,7 @@ cadeia_provas() {
 
     if [ "$i" = 1 ]; then
       case "$ob" in
-        registrada_e0) ;;
-        inferida_legado) motivo 5 origem_base 'origem_base inferida_legado ainda não suportada'; continue ;;
+        registrada_e0|inferida_legado) ;;
         *) motivo 5 origem_base "origem_base $ob não abre a cadeia"; continue ;;
       esac
       inicio="$b0"
@@ -765,8 +837,22 @@ cadeia_provas() {
     [ "$B1" = "$b1" ] || { estrutura b1 "b1_sha ($b1) não é o segundo pai de M ($B1)"; continue; }
 
     # âncora da cadeia: o base_validada_sha do ENTREGA.md de P1 (o de antes
-    # do merge), com P1 já conferido como M^1
-    if [ "$i" = 1 ]; then
+    # do merge), com P1 já conferido como M^1. Num 001 inferida_legado: o
+    # ENTREGA.md de P1 é legado, a inferência recalculada sobre P1 e B1 passa
+    # e o b0_sha é o merge-base único. Falha de âncora é contrato (rc 5):
+    # P1 e B1 são commits fixos, então uma inferência ambígua agora já era
+    # ambígua no registro, e o 001 que a afirma foi forjado.
+    if [ "$i" = 1 ] && [ "$ob" = inferida_legado ]; then
+      if ! g cat-file blob "$P1:$ENTREGA" > "$TMP_DIR/entrega-p1-$i.md" 2>/dev/null; then
+        motivo 5 ancora "inferida_legado: $ENTREGA ilegível em P1"
+      elif ! legado_entrega "$TMP_DIR/entrega-p1-$i.md" "$P1"; then
+        motivo 5 ancora "inferida_legado: $LEG_ERRO" # guarda:LEGV
+      elif ! legado_base "$P1" "$B1"; then
+        motivo 5 ancora "inferida_legado: base legada indeterminável: $LEG_ERRO" # guarda:LEGV
+      else
+        [ "$b0" = "$LEG_MB" ] || motivo 5 ancora "inferida_legado: b0_sha ($b0) não é o merge-base único de P1 e B1 ($LEG_MB)" # guarda:LEGV
+      fi
+    elif [ "$i" = 1 ]; then
       g cat-file blob "$P1:$ENTREGA" > "$TMP_DIR/entrega-p1-$i.md" 2>/dev/null || : > "$TMP_DIR/entrega-p1-$i.md"
       bv="$(catalogo_fm "$TMP_DIR/entrega-p1-$i.md" base_validada_sha)"
       [ "$b0" = "$bv" ] || motivo 5 ancora "b0_sha ($b0) diverge da base_validada_sha da entrega em P1 (${bv:-ausente})" # guarda:ANCORA
@@ -803,7 +889,7 @@ EOF
 # $TMP_DIR/lista-entrega) lista exatamente a cadeia, e o base_validada_sha
 # dele é o b1_sha da última.
 cadeia_coerencia() {
-  local n="$CAD_N" j numero arquivo eb1 em idx nome bv
+  local n="$CAD_N" j numero arquivo eb1 em idx nome bv eob ob1
   j=0
   while IFS="$TAB" read -r numero arquivo eb1 em <&3; do
     [ -n "$numero$arquivo" ] || continue
@@ -821,6 +907,13 @@ cadeia_coerencia() {
   if [ "$n" -gt 0 ] && [ -f "$TMP_DIR/r$n.lido" ]; then
     bv="$(catalogo_fm "$ENTREGA_D" base_validada_sha)"
     [ "$bv" = "$(_r "$n" b1_sha)" ] || motivo 5 entrega "ENTREGA.base_validada_sha (${bv:-ausente}) não é o b1_sha da última reconciliação" # guarda:COERENCIA
+  fi
+  # base inferida: o ENTREGA.md e o 001 dizem a mesma origem, nos dois sentidos
+  if [ "$n" -gt 0 ] && [ -f "$TMP_DIR/r1.lido" ]; then
+    eob="$(catalogo_fm "$ENTREGA_D" origem_base)"; ob1="$(_r 1 origem_base)"
+    if [ "$ob1" = inferida_legado ] || [ "$eob" = inferida_legado ]; then
+      [ "$eob" = "$ob1" ] || motivo 5 entrega "ENTREGA.origem_base (${eob:-ausente}) diverge da origem_base do 001 ($ob1)" # guarda:LEGC
+    fi
   fi
 }
 
@@ -844,11 +937,12 @@ cadeia_cobertura() {
 # ENTREGA.md do disco no encadeamento (--registrar com cadeia)
 # ---------------------------------------------------------------------------
 
-# _entrega_sem_gravadas <arquivo> — o arquivo sem os blocos (linha da chave e
-# as seguintes até a próxima chave de topo) das chaves que o registro grava;
-# o resto do frontmatter e o corpo, byte a byte.
+# _entrega_sem_gravadas <arquivo> [chave-extra] — o arquivo sem os blocos
+# (linha da chave e as seguintes até a próxima chave de topo) das chaves que o
+# registro grava (e da extra, se dada); o resto do frontmatter e o corpo, byte
+# a byte.
 _entrega_sem_gravadas() {
-  CHS=" $CHAVES_GRAVADAS reconciliacoes " awk '
+  CHS=" $CHAVES_GRAVADAS reconciliacoes ${2:-} " awk '
     BEGIN { chs = ENVIRON["CHS"] }
     NR == 1 { print; fm = 1; next }
     fm && /^---[ \t]*\r?$/ { fm = 0; print; next }
@@ -879,12 +973,20 @@ _entrega_bloco() {
 # lista `reconciliacoes` e a base são conferidas contra a cadeia antes
 # (cadeia_coerencia). Falha: ENTREGA_ERRO.
 entrega_disco_tolerado() {
-  local b1u="$1" chave esperado bloco
+  local b1u="$1" chave esperado bloco extra=""
   ENTREGA_ERRO=""
-  _entrega_sem_gravadas "$ENTREGA" > "$TMP_DIR/disco.resto" 2>/dev/null \
-    && _entrega_sem_gravadas "$ENTREGA_M" > "$TMP_DIR/m.resto" 2>/dev/null \
+  # base legada: o 001 inferida_legado gravou origem_base, que o ENTREGA.md de
+  # M (ainda o legado, sem o checkpoint) não tem; só então ela é tolerada, e
+  # só com esse valor
+  if [ "$(_r 1 origem_base)" = inferida_legado ] && ! _entrega_chave_qualquer "$ENTREGA_M" origem_base; then extra=origem_base; fi # guarda:LEGT
+  _entrega_sem_gravadas "$ENTREGA" "$extra" > "$TMP_DIR/disco.resto" 2>/dev/null \
+    && _entrega_sem_gravadas "$ENTREGA_M" "$extra" > "$TMP_DIR/m.resto" 2>/dev/null \
     || { ENTREGA_ERRO='não foi possível comparar com o de M'; return 1; }
   cmp -s "$TMP_DIR/disco.resto" "$TMP_DIR/m.resto" || { ENTREGA_ERRO='difere do de M fora das chaves que o registro grava'; return 1; } # guarda:DISCO
+  if [ -n "$extra" ]; then
+    bloco="$(_entrega_bloco "$ENTREGA" origem_base)" || { ENTREGA_ERRO="origem_base ausente ou repetida"; return 1; }
+    [ "$bloco" = "origem_base: inferida_legado" ] || { ENTREGA_ERRO="origem_base não tem o valor que a cadeia implica (inferida_legado)"; return 1; } # guarda:LEGT
+  fi
   for chave in $CHAVES_GRAVADAS; do
     case "$chave" in
       base_validada_sha) esperado="$b1u" ;;
@@ -971,6 +1073,44 @@ completa_interrompido() {
   mv "$TMP_ANT" "$arq" 2>/dev/null || para 1 "não foi possível marcar ${arq##*/} como superada; $INTERROMPIDO" # guarda:COMPLETA
   TMP_ANT=""
   COMPLETADO=superada
+}
+
+# base_do_registro — (registro sem cadeia) B0 e ORIGEM_BASE, do ENTREGA.md de
+# P1 = M^1, nunca do disco nem de M (o próprio merge poderia reescrevê-lo; a
+# estrutura exige depois que M e P1 tenham o mesmo). Com a chave
+# base_validada_sha, em qualquer forma: o valor gravado (registrada_e0), que
+# tem de ser SHA de 40 hex (vazio, null ou ilegível: rc 5). Sem ela, a entrega
+# legada (spec, seção 14) infere B0 = o merge-base de P1 e B1, uma única vez
+# (inferida_legado): P1 que não é legado, rc 5; base ambígua, rc 6. Tudo antes
+# de qualquer escrita; `para` libera a trava.
+base_do_registro() {
+  local p1 b1 pais npais modo p1_com_entrega=0
+  p1="$(g rev-parse --verify -q "$M^1")" || estrutura m 'M^1 ilegível'
+  ENTREGA_P1="$TMP_DIR/entrega-p1.md"
+  modo="$(modo_em "$p1" "$ENTREGA")"
+  case "$modo" in
+    100644|100755) g cat-file blob "$p1:$ENTREGA" > "$ENTREGA_P1" 2>/dev/null && p1_com_entrega=1 ;; # guarda:LEGF
+  esac
+  # P1 sem o ENTREGA.md (pais trocados, por exemplo): B0 do de M só para as
+  # condições estruturais, que reprovam de qualquer forma — no mínimo a guarda
+  # estrutura[entrega], já que M tem o ENTREGA.md (le_entrega_m) e P1 não.
+  [ "$p1_com_entrega" = 1 ] || cp "$ENTREGA_M" "$ENTREGA_P1"
+  if _entrega_chave_qualquer "$ENTREGA_P1" base_validada_sha; then
+    B0="$(catalogo_fm "$ENTREGA_P1" base_validada_sha)"
+    printf '%s' "$B0" | grep -Eq '^[0-9a-f]{40}$' || para 5 "ENTREGA.base_validada_sha não é SHA de 40 hex: ${B0:-vazia ou ilegível}"
+    ORIGEM_BASE=registrada_e0
+    return 0
+  fi
+  # entrega legada: a base é inferida só no 001, e só sobre o histórico de P1
+  [ "$p1_com_entrega" = 1 ] || estrutura entrega "P1 $p1 sem $ENTREGA regular: a base legada não é inferível"
+  legado_entrega "$ENTREGA_P1" "$p1" || para 5 "$LEG_ERRO; nada foi gravado"
+  pais="$(g rev-list --parents -n1 "$M" 2>/dev/null)" || estrutura m 'pais de M ilegíveis'
+  npais=$(( $(printf '%s\n' "$pais" | wc -w) - 1 ))
+  [ "$npais" = 2 ] || estrutura pais "M $M tem $npais pai(s); o commit de integração tem exatamente dois"
+  b1="$(g rev-parse --verify -q "$M^2")" || estrutura m 'M^2 ilegível'
+  legado_base "$p1" "$b1" || para 6 "base legada indeterminável: $LEG_ERRO; nada foi gravado"
+  B0="$LEG_MB"
+  ORIGEM_BASE=inferida_legado
 }
 
 # ---------------------------------------------------------------------------
@@ -1215,19 +1355,15 @@ if [ "$TEM_ARTEFATO" = 1 ]; then
   B0="$ULT_B1"
   INICIO="$ULT_M"
   LIMITE="$ULT_M"
+  ORIGEM_BASE=reconciliacao_anterior
+  # a origem da base da entrega é a do 001 (nunca inferida de novo)
+  ENTREGA_ORIGEM="$(_r 1 origem_base)"
   anteriores_da_cadeia "$TMP_DIR/cobertura" > "$TMP_DIR/anteriores"
 else
-  # B0 vem do ENTREGA.md de P1 (o de antes do merge): o próprio merge poderia
-  # reescrevê-lo, e a estrutura exige depois que M e P1 tenham o mesmo.
-  P1_ENTREGA="$(g rev-parse --verify -q "$M^1")" || estrutura m 'M^1 ilegível'
-  ENTREGA_P1="$TMP_DIR/entrega-p1.md"
-  # P1 sem o ENTREGA.md (pais trocados, por exemplo): B0 do de M só para as
-  # condições estruturais, que reprovam de qualquer forma — no mínimo a guarda
-  # estrutura[entrega], já que M tem o ENTREGA.md (le_entrega_m) e P1 não.
-  g cat-file blob "$P1_ENTREGA:$ENTREGA" > "$ENTREGA_P1" 2>/dev/null || cp "$ENTREGA_M" "$ENTREGA_P1"
-  B0="$(catalogo_fm "$ENTREGA_P1" base_validada_sha)"
-  [ -n "$B0" ] || para 6 'ENTREGA.base_validada_sha ausente: base validada indeterminável'
-  printf '%s' "$B0" | grep -Eq '^[0-9a-f]{40}$' || para 5 "ENTREGA.base_validada_sha não é SHA de 40 hex: $B0"
+  # B0 vem do ENTREGA.md de P1 (o de antes do merge), gravado ou, na entrega
+  # legada, inferido uma única vez (base_do_registro).
+  base_do_registro
+  ENTREGA_ORIGEM="$ORIGEM_BASE"
   INICIO="$B0"
   LIMITE="$B0"
   : > "$TMP_DIR/anteriores"
@@ -1272,8 +1408,7 @@ inventario "$B0" "$B1" "$M" "$LISTA" "$TMP_DIR/anteriores" || exit 1
 NUM=$((N_CAD + 1))
 NOME="$(printf 'RECONCILIACAO-BASE-%03d.md' "$NUM")"
 DESTINO="docs/entregas/$TRABALHO/$NOME"
-if [ "$N_CAD" -gt 0 ]; then ANTERIOR="$ULT_NOME"; ORIGEM_BASE=reconciliacao_anterior
-else ANTERIOR=null; ORIGEM_BASE=registrada_e0; fi
+if [ "$N_CAD" -gt 0 ]; then ANTERIOR="$ULT_NOME"; else ANTERIOR=null; fi
 ESC="$TMP_DIR/escalares.tsv"
 ARQ="$TMP_DIR/arquivos.tsv"
 {
@@ -1327,6 +1462,22 @@ fi
 
 ENTREGA_NOVO="$TMP_DIR/entrega-novo.md"
 cp "$ENTREGA_M" "$ENTREGA_NOVO" || para 1 'não foi possível preparar o ENTREGA.md novo'
+# Entrega legada (base inferida no 001): as chaves novas que faltam no
+# ENTREGA.md de M entram juntas, antes do fechamento, na ordem em que o E0 as
+# grava; os valores definitivos vêm logo abaixo. As demais chaves e o corpo
+# ficam como estão.
+if [ "$ENTREGA_ORIGEM" = inferida_legado ]; then
+  for chave in base_validada_sha origem_base reconciliacoes portao_sha; do
+    _entrega_chave_qualquer "$ENTREGA_NOVO" "$chave" && continue
+    case "$chave" in
+      base_validada_sha) valor="$B1" ;;
+      origem_base) valor=inferida_legado ;;
+      reconciliacoes) valor='[]' ;;
+      portao_sha) valor=null ;;
+    esac
+    entrega_define "$ENTREGA_NOVO" "$chave" "$valor" || para 5 "ENTREGA.md: $ENTREGA_ERRO"
+  done
+fi
 for chave in $CHAVES_GRAVADAS; do
   case "$chave" in
     base_validada_sha) valor="$B1" ;;

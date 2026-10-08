@@ -16,6 +16,8 @@
 #                               coerente e assinado (rb_emitir), sem provar nada
 #   fx_forja_artefato <dir> <caminho>...  o 001 (FX_B0, FX_M) com esses caminhos
 #   fx_entrega_sincroniza <dir> ENTREGA.md do disco com a lista dos artefatos
+#   fx_entrega_chaves_legado <dir> ENTREGA.md legado do disco com as chaves
+#                               que o registro legado grava (para forjar)
 #
 # Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
 # o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
@@ -73,6 +75,20 @@
 #                         ENTREGA.expx_tool runx
 #   entrega_no_merge      o PRÓPRIO merge reescreve base_validada_sha no
 #                         ENTREGA.md (M difere de P1 no ENTREGA.md)
+#   criss_cross           dois ramos laterais da base (docs/lateral/um.md e
+#                         dois.md) integrados por merges distintos na feature
+#                         (antes do merge, em P1) e na main (antes de B1):
+#                         `git merge-base --all P1 B1` tem dois resultados
+#   merge_previo          a feature integra uma main intermediária
+#                         (docs/intermediario.md) num merge comum antes do
+#                         merge de integração: a linha de primeiro pai de P1
+#                         desde o merge-base contém merge
+#   base_com_pai          um commit raiz (RAIZ.md) antes de B0: B0 tem pai
+#   entrega_sem_base      o ENTREGA.md (não legado) perde base_validada_sha e
+#                         mantém origem_base
+#   entrega_base_vazia    base_validada_sha presente e vazia
+#   entrega_base_null     base_validada_sha: null
+#   entrega_base_aspas    "base_validada_sha" entre aspas
 # As demais variantes de ENTREGA.md e de B0 alteram o ENTREGA.md num commit da
 # feature logo antes do merge (que passa a ser P1), porque o merge de
 # integração não pode mexer no ENTREGA.md; a árvore continua limpa.
@@ -173,7 +189,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -209,6 +225,14 @@ _fx_corpo() {
     git config core.autocrlf false
     git config core.quotepath false
     git config commit.gpgsign false
+
+    # base_com_pai: um commit raiz antes de B0
+    if [ "$var" = base_com_pai ]; then
+      printf '# Raiz\n' > RAIZ.md
+      git add RAIZ.md
+      _fx_msg "$msg" "chore: raiz"
+      _fx_commit "$msg"
+    fi
 
     # main: B0
     mkdir -p src
@@ -262,6 +286,44 @@ _fx_corpo() {
     bash "$_FXR_CONTRATO" --validar-metodo --trabalho ft-rec --checkpoint e8 --arquivo "$msg" >/dev/null
     _fx_commit "$msg"
     FX_P1="$(git rev-parse HEAD)"
+
+    # histórico com merge na feature antes do merge de integração (P1 muda)
+    case "$var" in
+      criss_cross)
+        # dois ramos laterais da base, integrados por merges distintos dos
+        # dois lados: os dois são merge-bases de P1 e B1
+        fixture_switch_exato lado1 -c lado1 "$FX_B0"
+        mkdir -p docs/lateral
+        printf '# Lateral um\n' > docs/lateral/um.md
+        git add docs/lateral/um.md
+        _fx_msg "$msg" "docs: lateral um"
+        _fx_commit "$msg"
+        fixture_switch_exato lado2 -c lado2 "$FX_B0"
+        mkdir -p docs/lateral
+        printf '# Lateral dois\n' > docs/lateral/dois.md
+        git add docs/lateral/dois.md
+        _fx_msg "$msg" "docs: lateral dois"
+        _fx_commit "$msg"
+        fixture_switch_exato feature/ft-rec feature/ft-rec
+        git merge -q --no-ff -m "merge: lateral um na feature" lado1
+        git merge -q --no-ff -m "merge: lateral dois na feature" lado2
+        FX_P1="$(git rev-parse HEAD)"
+        fixture_switch_exato main main
+        git merge -q --no-ff -m "merge: lateral um na base" lado1
+        git merge -q --no-ff -m "merge: lateral dois na base" lado2
+        fixture_switch_exato feature/ft-rec feature/ft-rec ;;
+      merge_previo)
+        # a feature integra uma main intermediária num merge comum
+        fixture_switch_exato main main
+        mkdir -p docs
+        printf '# Intermediário\n' > docs/intermediario.md
+        git add docs/intermediario.md
+        _fx_msg "$msg" "docs: base intermediaria"
+        _fx_commit "$msg"
+        fixture_switch_exato feature/ft-rec feature/ft-rec
+        git merge -q --no-ff -m "merge: traz a base intermediaria" main
+        FX_P1="$(git rev-parse HEAD)" ;;
+    esac
 
     # main avança: dois testes novos + mesma linha de painel.ts
     fixture_switch_exato main main
@@ -336,6 +398,10 @@ _fx_corpo() {
       entrega_bloco_estranho) _fx_entrega_sed 's/^falhas_portao: \[\]$/falhas_portao:\n  - v1\nsolto sem indentacao/' ;;
       entrega_aspas_d) _fx_entrega_sed 's/^estado: /"estado": /' ;;
       entrega_aspas_s) _fx_entrega_sed "s/^portao: /'portao': /" ;;
+      entrega_sem_base) _fx_entrega_sed '/^base_validada_sha:/d' ;;
+      entrega_base_vazia) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha:/' ;;
+      entrega_base_null) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha: null/' ;;
+      entrega_base_aspas) _fx_entrega_sed 's/^base_validada_sha:/"base_validada_sha":/' ;;
       entrega_symlink)
         git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
         ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md
@@ -681,4 +747,19 @@ fx_entrega_sincroniza() {
       { print }
     ' "$e" > "$e.fx" && cat "$e.fx" > "$e" && rm -f "$e.fx"
   )
+}
+
+# fx_entrega_chaves_legado <dir> — no ENTREGA.md legado do disco, acrescenta
+# antes do fechamento as chaves que um registro legado grava
+# (base_validada_sha, origem_base: inferida_legado, reconciliacoes, portao_sha:
+# null) e sincroniza a lista e a base com os artefatos presentes. Para forjar.
+fx_entrega_chaves_legado() {
+  ( cd "$1" || exit 1
+    e=docs/entregas/ft-rec/ENTREGA.md
+    awk '
+      NR == 1 { print; fm = 1; next }
+      fm && /^---/ { print "base_validada_sha: pendente"; print "origem_base: inferida_legado"; print "reconciliacoes: []"; print "portao_sha: null"; fm = 0 }
+      { print }
+    ' "$e" > "$e.fx" && cat "$e.fx" > "$e" && rm -f "$e.fx"
+  ) && fx_entrega_sincroniza "$1"
 }

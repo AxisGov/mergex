@@ -1168,7 +1168,9 @@ coberto	$FX_NOVO1	001"
   v_motivo "b1_sha de ENTREGA.reconciliacoes diferente do artefato reprova" 5 entrega "b1_sha"
   cp "$VT/entrega.md" "$FX_ENTREGA"
   FX_ORIGEM_BASE=inferida_legado fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" || falha "forja legado não emitiu"
-  v_motivo "origem_base inferida_legado: ainda não suportada" 5 origem_base "origem_base inferida_legado ainda não suportada"
+  # (Task 9) a origem inferida_legado passou a ser suportada: num 001 de uma
+  # entrega que já tinha a base em P1 ela é forjada e reprova pela âncora
+  v_motivo "origem_base inferida_legado com base_validada_sha em P1 reprova pela âncora" 5 ancora "já tem base_validada_sha"
   cp "$VT/bak.md" "$AR"
 
   # p1_sha e b1_sha gravados são os pais de M (forjados e reassinados; a
@@ -1884,6 +1886,264 @@ m=$FX_M2"
   esperado="$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t002\ncoberto\t%s\t002\ncoberto\t%s\t003' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3" "$FX_NOVO4")"
   [ "$("${v[@]}" 2>&1)" = "$esperado" ] && ok "três elos: verifica; NOVO1 coberto pelo 002 (o mais recente)" || falha "três elos: $("${v[@]}" 2>&1 | tr '\n\t' '|>')"
   cd "$REPO" || return
+}
+
+# --- apoio do grupo legado ---------------------------------------------------
+
+# _ultimas_chaves <arquivo> <n> — as n últimas chaves de topo do frontmatter
+_ultimas_chaves() {
+  awk 'NR == 1 { next } /^---[ \t]*\r?$/ { exit } /^[A-Za-z_][A-Za-z0-9_]*:/ { k = $0; sub(/:.*/, "", k); print k }' "$1" \
+    | tail -n "$2" | tr '\n' ' '
+}
+
+# _shim_merge_base <dir> — um `git` que responde `merge-base --all` com
+# $FX_SHIM_MB e repassa todo o resto ao git real: simula o merge-base que não é
+# ancestral de B1, inalcançável com o Git real (o merge-base é ancestral comum
+# por definição, e enxertos e refs/replace estão desligados no script).
+_shim_merge_base() {
+  mkdir -p "$1"
+  cat > "$1/git" <<EOF
+#!/usr/bin/env bash
+mb=0; todos=0
+for a in "\$@"; do case "\$a" in merge-base) mb=1 ;; --all) todos=1 ;; esac; done
+if [ "\$mb" = 1 ] && [ "\$todos" = 1 ]; then printf '%s\n' "\$FX_SHIM_MB"; exit 0; fi
+exec $(command -v git) "\$@"
+EOF
+  chmod +x "$1/git"
+}
+
+# _nada_gravado <desc> <status antes> — o registro reprovado não deixou nada:
+# nem alteração rastreada, nem arquivo não rastreado, nem artefato, nem trava
+_nada_gravado() {
+  git diff --quiet && ok "$1: git diff vazio" || falha "$1: gravou algo rastreado"
+  [ "$(git status --porcelain=v1 --untracked-files=all)" = "$2" ] && ok "$1: status (com não rastreados) igual ao de antes" || falha "$1: status mudou"
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-* >/dev/null 2>&1 && falha "$1: artefato gravado" || ok "$1: nenhum RECONCILIACAO-BASE-*"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "$1: trava livre" || falha "$1: trava presa"
+}
+
+grupo_legado() {
+  local d r v t VT out c antes st lido tt esperado variante mb raiz trecho m2x caso
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  t="$(mktemp -d)"; TMPS="$TMPS $t"; VT="$t"
+  _shim_merge_base "$t/shim-mb"
+
+  # ---- brief: o legado infere B0; o ambíguo falha fechado ------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado; cd "$d" || return
+  cp "$FX_ENTREGA" "$t/antes.md"; antes="$(bash "$SEQ" --ler "$FX_ENTREGA")"
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  rc_igual "legado infere B0" 0 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+  grep -q '^origem_base: inferida_legado' "$FX_ENTREGA" && ok "origem_base gravada" || falha "origem_base"
+  grep -q "^b0_sha: $FX_B0" docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md && ok "B0 inferido certo" || falha "B0"
+
+  # o 001 e o ENTREGA.md gravados
+  [ "$(git merge-base --all "$FX_P1" "$FX_B1")" = "$FX_B0" ] && ok "controle: B0 é o merge-base único de P1 e B1" || falha "controle: merge-base"
+  lido="$(rb_ler "$AR")"
+  for tt in "origem_base	inferida_legado" "anterior	null" "numero	1" "estado	ativa" "b0_sha	$FX_B0" \
+            "p1_sha	$FX_P1" "b1_sha	$FX_B1" "m_sha	$FX_M"; do
+    printf '%s\n' "$lido" | grep -Fxq "escalar	$tt" && ok "001 legado: $tt" || falha "001 legado: escalar ${tt%%	*} divergente"
+  done
+  rb_validar "$AR" ft-rec 1 && ok "001 legado válido" || falha "001 legado inválido: $RB_ERRO"
+  [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$FX_B1" ] && ok "ENTREGA: base_validada_sha = B1" || falha "ENTREGA: base_validada_sha"
+  [ "$(_chave "$FX_ENTREGA" portao_sha)" = null ] && ok "ENTREGA: portao_sha null" || falha "ENTREGA: portao_sha"
+  esperado="reconciliacoes:
+  - numero: 1
+    arquivo: RECONCILIACAO-BASE-001.md
+    b1_sha: $FX_B1
+    m_sha: $FX_M"
+  [ "$(awk '/^reconciliacoes:/ { f = 1; print; next } f && /^[ \t]/ { print; next } f { exit }' "$FX_ENTREGA")" = "$esperado" ] \
+    && ok "ENTREGA: reconciliacoes com o 001" || falha "ENTREGA: bloco reconciliacoes divergente"
+  for k in base_validada_sha origem_base reconciliacoes portao_sha; do
+    [ "$(grep -c "^$k:" "$FX_ENTREGA")" = 1 ] && ok "ENTREGA: $k uma vez só" || falha "ENTREGA: $k ausente ou repetida"
+  done
+  [ "$(_ultimas_chaves "$FX_ENTREGA" 4)" = "base_validada_sha origem_base reconciliacoes portao_sha " ] \
+    && ok "ENTREGA: as chaves novas entram juntas antes do fechamento, na ordem do E0" || falha "ENTREGA: ordem $(_ultimas_chaves "$FX_ENTREGA" 4)"
+  { [ "$(_chave "$FX_ENTREGA" estado)" = aberto ] && [ "$(_chave "$FX_ENTREGA" portao)" = null ] \
+    && [ "$(_chave "$FX_ENTREGA" push_feito)" = false ] && [ "$(_chave "$FX_ENTREGA" entregue_em)" = null ] \
+    && [ "$(_chave "$FX_ENTREGA" causa)" = null ] && [ "$(_chave "$FX_ENTREGA" falhas_portao)" = '[]' ]; } \
+    && ok "ENTREGA: reaberta (estado, portão, push, entregue_em, causa, falhas)" || falha "ENTREGA: reabertura"
+  entrega_confere "legado" "$t/antes.md" "$FX_ENTREGA" $GRAVADAS origem_base
+  [ "$(bash "$SEQ" --ler "$FX_ENTREGA")" = "$antes" ] && ok "legado: commits e seq intactos" || falha "legado: seq mudou"
+  [ "$(git status --porcelain=v1 --untracked-files=all | LC_ALL=C sort)" = " M $FX_ENTREGA
+?? $AR" ] && ok "legado: só ENTREGA.md e o 001 na árvore" || falha "legado: status inesperado"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "legado: trava livre" || falha "legado: trava presa"
+
+  # a verificação aceita o 001 inferido
+  v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+  v_ok "legado: --verificar aceita o 001 inferida_legado" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_NOVO1")"
+  # reexecução: noop (o ENTREGA.md do disco tem a origem_base que o de M não tem)
+  antes="$(_instantaneo)"
+  out="$("${r[@]}" "$FX_NOVO2" "$FX_NOVO1" 2>&1)"; c=$?
+  { [ "$c" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n 1p)" = noop=true ]; } \
+    && ok "legado: reexecução com a mesma lista é noop" || falha "legado noop: rc=$c $out"
+  [ "$(_instantaneo)" = "$antes" ] && ok "legado noop: nada gravado" || falha "legado noop gravou"
+  # o ENTREGA.md do disco diz a mesma origem_base que o 001
+  cp "$FX_ENTREGA" "$t/e1.md"
+  sed 's/^origem_base: inferida_legado$/origem_base: registrada_e0/' "$t/e1.md" > "$FX_ENTREGA"
+  v_motivo "ENTREGA.origem_base do disco divergente do 001 reprova" 5 entrega "origem_base"
+  reprova "registro com ENTREGA.origem_base divergente no disco: a cadeia não verifica" 5 "origem_base" "$FX_NOVO1" "$FX_NOVO2"
+  # a origem_base tolerada no disco é exatamente a linha que o registro grava
+  sed 's/^origem_base: inferida_legado$/origem_base: inferida_legado /' "$t/e1.md" > "$FX_ENTREGA"
+  reprova "noop com origem_base do disco fora da forma gravada" 3 "origem_base não tem o valor" "$FX_NOVO1" "$FX_NOVO2"
+  cp "$t/e1.md" "$FX_ENTREGA"
+  # a verificação recalcula a ancestralidade (git simulado: merge-base fora de B1)
+  v=(env FX_SHIM_MB="$(git rev-parse "$FX_P1~3")" PATH="$t/shim-mb:$PATH" bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+  v_motivo "--verificar: merge-base recalculado fora de B1 reprova (git simulado)" 5 ancora "não é ancestral de B1"
+  v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+
+  # ---- 002 depois do 001 legado commitado: encadeia e nunca reinfere ------
+  fx_persiste_reconciliacao "$d" || falha "checkpoint do 001 legado"
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+  out="$("${r[@]}" -- "$FX_NOVO3" 2>&1)"; c=$?
+  [ "$c" = 0 ] && ok "002 encadeia depois do 001 legado commitado" || falha "002 depois do legado: rc=$c $out"
+  lido="$(rb_ler "$AR2")"
+  for tt in "origem_base	reconciliacao_anterior" "anterior	RECONCILIACAO-BASE-001.md" "b0_sha	$FX_B1" \
+            "b1_sha	$FX_B2" "m_sha	$FX_M2"; do
+    printf '%s\n' "$lido" | grep -Fxq "escalar	$tt" && ok "002 (nunca reinfere): $tt" || falha "002: escalar ${tt%%	*} divergente"
+  done
+  { [ "$(_chave "$FX_ENTREGA" origem_base)" = inferida_legado ] && [ "$(grep -c '^origem_base:' "$FX_ENTREGA")" = 1 ] \
+    && [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$FX_B2" ]; } \
+    && ok "ENTREGA depois do 002: origem_base inferida_legado mantida, base B2" || falha "ENTREGA depois do 002"
+  v_ok "cadeia legado 001→002 verifica" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001\ncoberto\t%s\t002' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3")"
+  # só o 001 pode ser inferida_legado (origem_base não é assinada)
+  cp "$AR2" "$t/a2.md"
+  sed 's/^origem_base: .*/origem_base: inferida_legado/' "$t/a2.md" > "$AR2"
+  rb_validar "$AR2" ft-rec 2 && ok "forja: 002 com inferida_legado continua com assinatura válida" || falha "forja do 002 inválida: $RB_ERRO"
+  v_motivo "002 com origem_base inferida_legado reprova (só o 001 infere)" 5 origem_base "fora de reconciliacao_anterior"
+  cp "$t/a2.md" "$AR2"
+  cd "$REPO" || return
+
+  # ---- 002 sem commit entre os registros ----------------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  rc_igual "sem commit: 001 legado (--merge M1)" 0 "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2"
+  grep -q '^origem_base: inferida_legado$' "$AR" && ok "sem commit: 001 inferida_legado" || falha "sem commit: 001 origem_base"
+  out="$("${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; c=$?
+  { [ "$c" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n 1p)" = noop=true ]; } && ok "sem commit: reexecução do 001 é noop" || falha "sem commit noop: rc=$c $out"
+  rc_igual "sem commit: 002 encadeia (HEAD = M2)" 0 "${r[@]}" -- "$FX_NOVO3"
+  { grep -q "^b0_sha: $FX_B1\$" "$AR2" && grep -q '^origem_base: reconciliacao_anterior$' "$AR2"; } \
+    && ok "sem commit: 002 com B0 = B1 da cadeia" || falha "sem commit: 002 b0/origem"
+  { [ "$(_chave "$FX_ENTREGA" origem_base)" = inferida_legado ] && [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$FX_B2" ] \
+    && [ "$(_ultimas_chaves "$FX_ENTREGA" 4)" = "base_validada_sha origem_base reconciliacoes portao_sha " ]; } \
+    && ok "sem commit: o ENTREGA.md (de M2, legado) mantém origem_base inferida_legado" || falha "sem commit: ENTREGA $(_ultimas_chaves "$FX_ENTREGA" 4)"
+  rc_igual "sem commit: a cadeia legado verifica" 0 "${v[@]}"
+  cd "$REPO" || return
+
+  # ---- cadeia presente e base_validada_sha apagada de P1: rc 5 -------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001 legado"
+  fx_persiste_reconciliacao "$d" || falha "checkpoint do 001 legado"
+  sed '/^base_validada_sha:/d' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
+  git commit -q -m "docs: apaga a base validada" -- "$FX_ENTREGA"
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  reprova "cadeia presente e base_validada_sha apagada de P1: rc 5, sem inferir" 5 "base_validada_sha" -- "$FX_NOVO3"
+  cd "$REPO" || return
+
+  # ---- nunca reinfere: a cadeia apagada do histórico corrente --------------
+  for caso in historico origem; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+    cd "$d" || return
+    "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "$caso: registro do 001 legado"
+    fx_persiste_reconciliacao "$d" || falha "$caso: checkpoint do 001 legado"
+    git rm -q -- "$AR"
+    git show "$FX_P1:$FX_ENTREGA" > "$FX_ENTREGA"
+    [ "$caso" = origem ] && { sed 's/^branch_base: main$/&\norigem_base: inferida_legado/' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"; }
+    git add -- "$FX_ENTREGA"; git commit -q -m "docs: apaga a cadeia de reconciliacoes"
+    fx_segunda_base "$d" ajusta || { falha "$caso: segunda base não montou"; return; }
+    case "$caso" in
+      historico) reprova "cadeia apagada (artefato no histórico de P1): rc 5, nunca reinfere" 5 "RECONCILIACAO-BASE no histórico de P1" -- "$FX_NOVO3" ;;
+      origem) reprova "cadeia apagada com origem_base em P1: rc 5, nunca reinfere" 5 "origem_base sem base_validada_sha" -- "$FX_NOVO3" ;;
+    esac
+    cd "$REPO" || return
+  done
+
+  # ---- brief: legado ambíguo falha fechado, sem gravar nada ----------------
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  for variante in criss_cross merge_previo; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$variante" fx_cenario "$d" legado; cd "$d" || return
+    st="$(git status --porcelain=v1 --untracked-files=all)"
+    rc_igual "legado ambíguo ($variante) falha fechado" 6 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+    git diff --quiet && ok "nada gravado ($variante)" || falha "gravou algo ($variante)"
+    case "$variante" in
+      criss_cross)
+        [ "$(git merge-base --all "$FX_P1" "$FX_B1" | wc -l)" = 2 ] && ok "controle: dois merge-bases" || falha "controle: criss_cross sem dois merge-bases"
+        trecho="2 merge-bases entre P1" ;;
+      merge_previo)
+        [ "$(git merge-base --all "$FX_P1" "$FX_B1" | wc -l)" = 1 ] && ok "controle: um merge-base" || falha "controle: merge_previo"
+        [ -n "$(git rev-list --first-parent --merges "$FX_P1" "^$(git merge-base "$FX_P1" "$FX_B1")")" ] \
+          && ok "controle: merge na linha de primeiro pai de P1" || falha "controle: merge_previo sem merge"
+        trecho="contém o merge" ;;
+    esac
+    rc_motivo "legado ambíguo ($variante): o motivo é a condição dele" 6 "$trecho" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+    _nada_gravado "legado ambíguo ($variante)" "$st"
+    cd "$REPO" || return
+  done
+
+  # ---- merge-base não ancestral de B1 (git simulado) -----------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+  cd "$d" || return
+  st="$(git status --porcelain=v1 --untracked-files=all)"
+  git merge-base --is-ancestor "$(git merge-base "$FX_P1" "$FX_B1")" "$FX_B1" && ok "controle: com o git real, o merge-base é ancestral de B1" || falha "controle: ancestralidade"
+  rc_motivo "merge-base fora de B1 (git simulado): rc 6" 6 "não é ancestral de B1" \
+    env FX_SHIM_MB="$(git rev-parse "$FX_P1~3")" PATH="$t/shim-mb:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+  _nada_gravado "merge-base fora de B1" "$st"
+  cd "$REPO" || return
+
+  # ---- P1 sem o ENTREGA.md (pais trocados) num legado: não infere ----------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=pais_trocados fx_cenario "$d" legado || { falha "pais_trocados legado não montou"; return; }
+  cd "$d" || return
+  reprova "legado com P1 sem o ENTREGA.md (pais trocados): rc 4, sem inferir" 4 "a base legada não é inferível" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # ---- chave presente (vazia, null, entre aspas) ou origem sem base: rc 5 ---
+  for variante in entrega_base_vazia entrega_base_null entrega_base_aspas entrega_sem_base; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$variante" fx_cenario "$d" || { falha "$variante não montou"; return; }
+    cd "$d" || return
+    case "$variante" in entrega_sem_base) trecho="origem_base sem base_validada_sha" ;; *) trecho="base_validada_sha não é SHA de 40 hex" ;; esac
+    reprova "$variante: rc 5 (contrato), sem inferir" 5 "$trecho" "$FX_NOVO1" "$FX_NOVO2"
+    cd "$REPO" || return
+  done
+
+  # ---- a fonte é P1: nem o disco nem M sem a chave alimentam a inferência --
+  # (merge_previo não legado: com a base de P1, a ordem fala, rc 5; inferir daria 6)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=merge_previo fx_cenario "$d" || { falha "merge_previo não montou"; return; }
+  cd "$d" || return
+  sed '/^base_validada_sha:/d' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
+  reprova "ENTREGA.md do disco sem a chave: B0 vem de P1 (rc 5 pela ordem, não 6)" 5 "ordem:" "$FX_NOVO1" "$FX_NOVO2"
+  git add -- "$FX_ENTREGA"
+  m2x="$(git log -1 --format=%B "$FX_M" | git commit-tree "$(git write-tree)" -p "$FX_P1" -p "$FX_B1")"
+  git update-ref refs/heads/feature/ft-rec "$m2x"
+  [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] || falha "fonte: árvore suja depois de trocar M"
+  reprova "ENTREGA.md de M sem a chave: B0 vem de P1 (rc 5 pela ordem, não 6)" 5 "ordem:" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # ---- --verificar: 001 inferida_legado forjado ----------------------------
+  # b0_sha diferente do merge-base (B0 com pai: a raiz também é ancestral comum)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=base_com_pai fx_cenario "$d" legado || { falha "base_com_pai não montou"; return; }
+  cd "$d" || return
+  rc_igual "base_com_pai: o legado registra" 0 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+  v_ok "base_com_pai: verifica" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_NOVO1")"
+  raiz="$(git rev-parse "$FX_B0^")"
+  FX_ORIGEM_BASE=inferida_legado fx_emite_reconciliacao "$d" 1 "$raiz" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "forja do b0 legado"
+  rb_validar "$AR" ft-rec 1 || falha "forja do b0 legado inválida: $RB_ERRO"
+  v_motivo "001 inferida_legado com b0_sha diferente do merge-base único reprova" 5 ancora "não é o merge-base único"
+  [ "$("${v[@]}" 2>/dev/null | grep -c '^motivo')" = 1 ] && ok "b0 forjado: só a âncora reprova" || falha "b0 forjado: $("${v[@]}" 2>&1 | tr '\n\t' '|>')"
+  cd "$REPO" || return
+
+  # criss_cross e merge_previo: 001 forjado (assinado, ENTREGA.md coerente)
+  for variante in criss_cross merge_previo; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$variante" fx_cenario "$d" legado || { falha "$variante não montou"; return; }
+    cd "$d" || return
+    mb="$(git merge-base --all "$FX_P1" "$FX_B1" | sed -n 1p)"
+    FX_ORIGEM_BASE=inferida_legado fx_emite_reconciliacao "$d" 1 "$mb" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "$variante: forja"
+    fx_entrega_chaves_legado "$d" || falha "$variante: chaves do ENTREGA.md"
+    [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$FX_B1" ] || falha "$variante: ENTREGA forjado sem a base B1"
+    case "$variante" in criss_cross) trecho="2 merge-bases entre P1" ;; merge_previo) trecho="contém o merge" ;; esac
+    v_motivo "--verificar: 001 inferida_legado forjado sobre $variante reprova" 5 ancora "$trecho"
+    cd "$REPO" || return
+  done
 }
 
 # ---------------------------------------------------------------------------
