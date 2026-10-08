@@ -2859,6 +2859,198 @@ grupo_raso() {
   cd "$REPO" || return
 }
 
+# pt_espera <desc> <rc> <ok=...> [motivo] [primeiro] — a saída de
+# validade-do-portao.sh, sem as linhas aviso=, é exatamente a esperada
+pt_espera() {
+  local desc="$1" rc_esp="$2" okv="$3" mot="${4:-}" pri="${5:--}" out rc esp
+  out="$(bash "$VALIDADE" --verificar --entrega "${PT_ENTREGA:-$FX_ENTREGA}" 2>/dev/null)"; rc=$?
+  if [ "$okv" = ok=true ]; then esp="$(printf 'ok=true\nprimeiro_commit=-')"
+  else esp="$(printf 'ok=false\nmotivo=%s\nprimeiro_commit=%s' "$mot" "$pri")"; fi
+  [ "$rc" = "$rc_esp" ] && [ "$(printf '%s\n' "$out" | grep -v '^aviso=')" = "$esp" ] \
+    && ok "$desc" || falha "$desc — rc=$rc $(printf '%s' "$out" | tr '\n' '|')"
+}
+
+# _pt_entrega_commit <sed> — reescreve o ENTREGA.md e commita como pre-e6
+_pt_entrega_commit() {
+  sed "$1" "$FX_ENTREGA" > "$FX_ENTREGA.tmp" && cat "$FX_ENTREGA.tmp" > "$FX_ENTREGA" && rm -f "$FX_ENTREGA.tmp"
+  git add -- "$FX_ENTREGA"
+  printf 'docs(mergex): ajusta o portao\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"
+  git commit -q -F "$PT_MSG" >/dev/null || falha "fixture: _pt_entrega_commit '$1' não commitou"
+}
+
+grupo_portao() {
+  local d t p out rc antes c c9 m s pai solto filho e
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  d="$(mktemp -d)"; t="$(mktemp -d)"; TMPS="$TMPS $d $t"; PT_MSG="$t/msg"; PT_ENTREGA=""
+  fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  e="$FX_ENTREGA"
+  p=(bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA")
+
+  # ---- passos do brief ----------------------------------------------------
+  fx_portao_em "$d" "$FX_P1" || falha "fx_portao_em P1"
+  rc_igual "merge depois do portão invalida" 1 "${p[@]}"
+  # sem --first-parent, B1 (trazido pelo merge, pai antes do filho) aparece
+  # antes de M: é o primeiro que invalida
+  pt_espera "merge depois do portão: o commit trazido pelo merge é o primeiro (B1, commit_de_produto)" 1 ok=false commit_de_produto "$FX_B1"
+  fx_portao_em "$d" HEAD; fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/PR.md
+  rc_igual "commit só de método pre-e6 mantém válido" 0 "${p[@]}"
+  pt_espera "commit só de método pre-e6: ok=true e primeiro_commit=-" 0 ok=true
+  fx_commit_metodo "$d" e8 src/painel.ts
+  rc_igual "commit Metodo: tocando produto invalida" 1 "${p[@]}"
+  pt_espera "Metodo: e8 tocando produto: metodo_fora_do_catalogo no próprio commit" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD; echo y >> "$FX_NOVO2"; git commit -qam "ajuste de teste"
+  rc_igual "commit de teste invalida" 1 "${p[@]}"
+  pt_espera "commit de teste: commit_de_produto" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+  fx_portao_sem_sha "$d"
+  rc_igual "pronto sem portao_sha invalida" 1 "${p[@]}"
+  pt_espera "pronto sem portao_sha: portao_sha_ausente" 1 ok=false portao_sha_ausente -
+  solto="$(fx_commit_solto "$d")"
+  fx_portao_em "$d" "$solto"
+  rc_igual "portao_sha não ancestral invalida" 1 "${p[@]}"
+  pt_espera "portao_sha não ancestral: portao_sha_nao_ancestral" 1 ok=false portao_sha_nao_ancestral -
+
+  # ---- merge só de método: commit_merge no próprio merge --------------------
+  fx_portao_em "$d" HEAD
+  fixture_switch_exato lado-metodo -c lado-metodo
+  fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/QA-PACOTE.md
+  fixture_switch_exato feature/ft-rec feature/ft-rec
+  printf 'merge: traz o metodo\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"
+  git merge -q --no-ff -F "$PT_MSG" lado-metodo
+  m="$(git rev-parse HEAD)"
+  pt_espera "merge com Metodo: pre-e6 trazendo só método: commit_merge no merge" 1 ok=false commit_merge "$m"
+  # um commit raiz (outra história) trazido por merge, com trailers de método
+  fx_portao_em "$d" HEAD
+  printf 'docs(mergex): raiz\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"
+  s="$(git commit-tree "HEAD^{tree}" -F "$PT_MSG")"
+  m="$(git commit-tree "HEAD^{tree}" -p HEAD -p "$s" -F "$PT_MSG")"
+  git merge -q --ff-only "$m"
+  pt_espera "commit raiz trazido por merge: commit_de_produto na raiz" 1 ok=false commit_de_produto "$s"
+
+  # ---- checkpoints e trabalhos fora do aceito -------------------------------
+  fx_portao_em "$d" HEAD
+  fx_commit_metodo "$d" reconciliacao-base "$e"
+  pt_espera "Metodo: reconciliacao-base depois do portão: commit_de_produto" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD
+  fx_commit_metodo "$d" pre-e2 "$e"
+  pt_espera "Metodo: pre-e2 depois do portão: commit_de_produto" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD
+  printf 'outro\n' >> docs/entregas/ft-rec/PR.md; git add docs/entregas/ft-rec/PR.md
+  printf 'docs(mergex): pacote\n\nTrabalho: outro\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "pre-e6 com Trabalho: de outro trabalho: commit_de_produto" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+
+  # ---- artefatos de reconciliação: catálogo da árvore de cada commit ---------
+  fx_portao_em "$d" HEAD
+  awk 'NR == 1 { print; fm = 1; next }
+       fm && /^---/ { fm = 0 }
+       fm && /^reconciliacoes:/ { print "reconciliacoes:"; print "  - numero: 1"; print "    arquivo: RECONCILIACAO-BASE-001.md"; next }
+       { print }' "$e" > "$e.tmp" && cat "$e.tmp" > "$e" && rm -f "$e.tmp"
+  printf '# reconciliação 001\n' > docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
+  git add -- "$e" docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md
+  printf 'docs(mergex): reconciliacao\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "pre-e6 tocando RECONCILIACAO-BASE-001.md listado em reconciliacoes mantém válido" 0 ok=true
+  fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/RECONCILIACAO-BASE-009.md
+  c9="$(git rev-parse HEAD)"
+  pt_espera "pre-e6 tocando RECONCILIACAO-BASE-009.md não listado invalida" 1 ok=false metodo_fora_do_catalogo "$c9"
+  # o commit seguinte lista o 009: o HEAD e o disco passam a listá-lo, mas o
+  # catálogo de c9 vem da árvore de c9
+  awk '{ print } /^    arquivo: RECONCILIACAO-BASE-001.md$/ { print "  - numero: 9"; print "    arquivo: RECONCILIACAO-BASE-009.md" }' "$e" > "$e.tmp" \
+    && cat "$e.tmp" > "$e" && rm -f "$e.tmp"
+  git add -- "$e"
+  printf 'docs(mergex): lista o 009\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  git show HEAD:"$e" | grep -Fxq '    arquivo: RECONCILIACAO-BASE-009.md' && ok "controle: HEAD lista o 009" || falha "controle: HEAD não lista o 009"
+  pt_espera "009 listado só depois: o catálogo de c9 é o da árvore de c9" 1 ok=false metodo_fora_do_catalogo "$c9"
+
+  # ---- renomeação de produto para dentro de docs/entregas ---------------------
+  fx_portao_em "$d" HEAD
+  git rm -q docs/entregas/ft-rec/ATENCAO.md
+  git mv src/painel.ts docs/entregas/ft-rec/ATENCAO.md
+  printf 'docs(mergex): atencao\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "pre-e6 renomeando produto para docs/entregas invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+
+  # ---- gitlink num caminho do catálogo ----------------------------------------
+  fx_portao_em "$d" HEAD
+  git rm -q docs/entregas/ft-rec/PR.md
+  git update-index --add --cacheinfo "160000,$FX_B0,docs/entregas/ft-rec/PR.md"
+  printf 'docs(mergex): pr\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "pre-e6 com gitlink num caminho do catálogo invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  git rm -q --cached docs/entregas/ft-rec/PR.md
+  printf '# PR\n' > docs/entregas/ft-rec/PR.md; git add docs/entregas/ft-rec/PR.md
+  printf 'docs(mergex): pr de volta\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+
+  # ---- caminho especial (espaço, acento, apóstrofo; quotepath true) ----------
+  git config core.quotepath true
+  fx_portao_em "$d" HEAD
+  mkdir -p docs/sprintx/features/ft-rec/base
+  printf -- "---\nkind: base_indice\ntrabalho_id: ft-rec\nareas:\n  - arquivo: área com espaço e d'água.md\n---\n\n# Índice\n" > docs/sprintx/features/ft-rec/base/00-INDICE.md
+  printf '# área\n' > "docs/sprintx/features/ft-rec/base/área com espaço e d'água.md"
+  git add -- docs/sprintx/features/ft-rec/base
+  printf 'docs(mergex): base\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "caminho especial do catálogo (base enumerada no índice) mantém válido" 0 ok=true
+  fx_commit_metodo "$d" pre-e6 "$FX_ESPECIAL"
+  pt_espera "caminho especial de produto num pre-e6 invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  git config core.quotepath false
+
+  # ---- portao e portao_sha malformados ----------------------------------------
+  fx_portao_em "$d" HEAD
+  _pt_entrega_commit 's/^portao: .*/portao: bloqueado/'
+  pt_espera "portao bloqueado: portao_nao_pronto" 1 ok=false portao_nao_pronto -
+  _pt_entrega_commit 's/^portao: .*/portao: null/'
+  pt_espera "portao null: portao_nao_pronto" 1 ok=false portao_nao_pronto -
+  _pt_entrega_commit '/^portao: /d'
+  pt_espera "portao ausente: portao_nao_pronto" 1 ok=false portao_nao_pronto -
+  fx_portao_em "$d" HEAD
+  _pt_entrega_commit 's/^portao_sha:.*/portao_sha: null/'
+  pt_espera "portao_sha null: portao_sha_ausente" 1 ok=false portao_sha_ausente -
+  _pt_entrega_commit 's/^portao_sha:.*/portao_sha:/'
+  pt_espera "portao_sha vazio: portao_sha_ausente" 1 ok=false portao_sha_ausente -
+  _pt_entrega_commit "s/^portao_sha:.*/portao_sha: $(git rev-parse --short HEAD)/"
+  pt_espera "portao_sha abreviado: portao_sha_ausente" 1 ok=false portao_sha_ausente -
+  _pt_entrega_commit "s/^portao_sha:.*/portao_sha: $(git rev-parse HEAD | tr a-f A-F)/"
+  pt_espera "portao_sha em maiúsculas: portao_sha_ausente" 1 ok=false portao_sha_ausente -
+  _pt_entrega_commit 's/^portao_sha:.*/portao_sha: 0123456789abcdef0123456789abcdef01234567/'
+  pt_espera "portao_sha inexistente: portao_sha_nao_ancestral" 1 ok=false portao_sha_nao_ancestral -
+  # descendente de HEAD fora da branch: o intervalo seria vazio
+  filho="$(git commit-tree "HEAD^{tree}" -p HEAD -m "filho solto")"
+  _pt_entrega_commit "s/^portao_sha:.*/portao_sha: $filho/"
+  pt_espera "portao_sha descendente fora da história de HEAD: portao_sha_nao_ancestral" 1 ok=false portao_sha_nao_ancestral -
+
+  # ---- o disco diverge do HEAD: aviso, vale o de HEAD -------------------------
+  fx_portao_em "$d" HEAD
+  sed "s/^portao_sha: .*/portao_sha: $FX_B0/" "$e" > "$e.tmp" && cat "$e.tmp" > "$e" && rm -f "$e.tmp"
+  pt_espera "ENTREGA do disco com outro portao_sha: vale o de HEAD (ok)" 0 ok=true
+  out="$("${p[@]}" 2>/dev/null)"
+  printf '%s\n' "$out" | grep -q '^aviso=portao_sha do disco' && ok "ENTREGA do disco divergente gera aviso=" || falha "sem aviso de divergência: $(printf '%s' "$out" | tr '\n' '|')"
+  # só leitura: o status e os temporários
+  antes="$(git status --porcelain=v1 --untracked-files=all)"
+  mkdir -p "$t/tmpdir"
+  TMPDIR="$t/tmpdir" "${p[@]}" >/dev/null 2>&1
+  [ "$(git status --porcelain=v1 --untracked-files=all)" = "$antes" ] && ok "só leitura: o status não muda" || falha "o status mudou"
+  [ -z "$(ls -A "$t/tmpdir")" ] && ok "temporários removidos (ok)" || falha "temporário deixado: $(ls -A "$t/tmpdir")"
+  fx_commit_metodo "$d" e8 src/fora.ts
+  TMPDIR="$t/tmpdir" "${p[@]}" >/dev/null 2>&1
+  [ -z "$(ls -A "$t/tmpdir")" ] && ok "temporários removidos (inválido)" || falha "temporário deixado: $(ls -A "$t/tmpdir")"
+  git show "HEAD:$e" > "$e"
+
+  # ---- ENTREGA ausente em HEAD e uso -------------------------------------------
+  PT_ENTREGA=docs/entregas/outro/ENTREGA.md
+  pt_espera "ENTREGA ausente em HEAD: portao_nao_pronto" 1 ok=false portao_nao_pronto -
+  PT_ENTREGA=""
+  rc_igual "opção desconhecida: rc 64" 64 bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --force
+  rc_igual "sem --entrega: rc 64" 64 bash "$VALIDADE" --verificar
+  rc_igual "sem --verificar: rc 64" 64 bash "$VALIDADE" --entrega "$FX_ENTREGA"
+  rc_igual "--entrega fora de docs/entregas: rc 64" 64 bash "$VALIDADE" --verificar --entrega README.md
+  cd "$REPO" || return
+
+  # ---- repositório raso ---------------------------------------------------------
+  fx_portao_em "$d" HEAD
+  git clone -q --depth 2 -b feature/ft-rec "file://$d" "$t/raso" 2>/dev/null || falha "clone --depth 2"
+  cd "$t/raso" || return
+  [ "$(git rev-parse --is-shallow-repository)" = true ] && ok "controle: clone raso" || falha "controle: clone não é raso"
+  pt_espera "repositório raso: historia_incompleta" 1 ok=false historia_incompleta -
+  cd "$REPO" || return
+}
+
 # ---------------------------------------------------------------------------
 # Despacho
 # ---------------------------------------------------------------------------

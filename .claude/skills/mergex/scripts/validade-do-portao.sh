@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+# validade-do-portao — o portão `pronto` do E2 ainda vale para o HEAD?
+#
+# Contrato: docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md,
+# seção 13. Consumido pelo hook de push (pr-so-com-portao) e pelo E6/E7.
+#
+# Uso:
+#   validade-do-portao.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md
+#
+# Só leitura: não grava no repositório, não adquire a trava C5, não exige
+# stage vazio; os temporários (fora do repositório) saem em toda saída.
+#
+# Fonte: `portao`, `portao_sha`, `trabalho_id` e `expx_tool` vêm de
+# HEAD:<ENTREGA> (a versão commitada, que é a que o push envia). O ENTREGA.md
+# do disco nunca decide: se diverge do de HEAD em `portao` ou `portao_sha`, sai
+# uma linha `aviso=` e vale o de HEAD.
+#
+# O portão vale somente se:
+#   - HEAD:<ENTREGA> existe, é arquivo regular, `kind: entrega`, `trabalho_id`
+#     igual ao <id> do caminho, `expx_tool` sprintx|runx e `portao: pronto`;
+#   - `portao_sha` é um SHA de 40 hex minúsculo, existe e é ancestral de HEAD;
+#   - TODO commit de `git rev-list --reverse --topo-order <portao_sha>..HEAD`
+#     (sem --first-parent: os commits trazidos por um merge também são
+#     avaliados), na ordem, até o primeiro que invalida:
+#       * tem exatamente um pai (dois ou mais: commit_merge; nenhum, um commit
+#         raiz trazido de outra história: commit_de_produto);
+#       * é commit de método válido do trabalho, pela gramática de
+#         contrato-de-commit.sh --validar-metodo, com checkpoint pre-e6 ou e8
+#         (pre-e2, reconciliacao-base, outro trabalho ou sem Metodo:
+#         commit_de_produto);
+#       * toca só caminhos do catálogo daquele checkpoint (catalogo_metodo),
+#         calculado sobre a árvore DAQUELE commit — a pasta do trabalho e o
+#         ENTREGA.md do commit materializados num temporário, nunca o disco
+#         nem o HEAD. Caminhos de `git diff-tree --no-commit-id -r
+#         --no-renames --ignore-submodules=none -z`, exatos, sem quoting. Um
+#         gitlink (160000) tocado, um caminho com TAB ou quebra de linha, ou um
+#         catálogo que não se calcula: metodo_fora_do_catalogo.
+#
+# Saída (stdout), rc 0:
+#   ok=true
+#   primeiro_commit=-
+#   aviso=<texto>                  (zero ou mais)
+# ou, rc 1:
+#   ok=false
+#   motivo=<portao_nao_pronto|portao_sha_ausente|portao_sha_nao_ancestral|
+#           commit_de_produto|commit_merge|metodo_fora_do_catalogo|
+#           historia_incompleta>
+#   primeiro_commit=<sha40 do commit que invalidou|->
+#   aviso=<texto>                  (zero ou mais)
+# Motivos:
+#   portao_nao_pronto       ENTREGA ausente ou ilegível em HEAD, portao
+#                           diferente de pronto (null, bloqueado, ausente),
+#                           contexto inválido; também a falha de ambiente
+#                           (fora de repositório, dependência ausente,
+#                           temporário), com um `aviso=` que a descreve;
+#   portao_sha_ausente      portao_sha ausente, vazio, null ou fora de 40 hex;
+#   portao_sha_nao_ancestral  portao_sha inexistente ou não ancestral de HEAD;
+#   historia_incompleta     repositório raso (a história cortada esconde
+#                           commits): rode `git fetch --unshallow`.
+# Códigos: 0 válido; 1 inválido; 64 uso. Nenhuma opção de força.
+#
+# Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
+
+set -uo pipefail
+
+AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CATALOGO_SH="$AQUI/catalogo-de-metodo.sh"
+ARVORE_SH="$AQUI/reconciliacao-arvore.sh"
+CONTRATO_SH="$AQUI/contrato-de-commit.sh"
+g() { git -c core.quotepath=false "$@"; }
+
+NL='
+'
+TAB='	'
+
+uso() {
+  [ -z "${1:-}" ] || printf 'validade-do-portao: %s\n' "$1" >&2
+  printf '%s\n' 'uso: validade-do-portao.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md' >&2
+  exit 64
+}
+
+TMP_DIR=""
+encerrar() {
+  local rc="$1"
+  [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
+  exit "$rc"
+}
+trap 'encerrar $?' EXIT
+trap 'exit 1' HUP INT TERM
+
+AVISOS=""
+aviso() { AVISOS="$AVISOS$(printf '%s' "$1" | tr '\t\n\r' '   ')$NL"; }
+imprime_avisos() { [ -z "$AVISOS" ] || printf '%s' "$AVISOS" | sed 's/^/aviso=/'; }
+
+# invalido <motivo> [primeiro_commit] — rc 1
+invalido() {
+  printf 'ok=false\nmotivo=%s\nprimeiro_commit=%s\n' "$1" "${2:--}"
+  imprime_avisos
+  exit 1
+}
+ambiente() { aviso "$1"; invalido portao_nao_pronto; }
+
+MODO=""; ENTREGA=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --verificar) [ -z "$MODO" ] || uso; MODO=verificar; shift ;;
+    --entrega) [ "$#" -ge 2 ] && [ -z "$ENTREGA" ] || uso; ENTREGA="$2"; shift 2 ;;
+    *) uso "opção desconhecida: $1" ;;
+  esac
+done
+[ "$MODO" = verificar ] || uso 'falta --verificar'
+[ -n "$ENTREGA" ] || uso 'falta --entrega'
+
+for dependencia in "$CATALOGO_SH" "$ARVORE_SH" "$CONTRATO_SH"; do
+  [ -r "$dependencia" ] || ambiente "dependência indisponível: $dependencia"
+done
+# shellcheck source=catalogo-de-metodo.sh
+. "$CATALOGO_SH"
+# shellcheck source=reconciliacao-arvore.sh
+. "$ARVORE_SH"
+set +e
+
+# O ambiente Git fixo de reconciliacao-arvore.sh e nem o refresh oportunista
+# do índice: só leitura.
+arvore_ambiente_git
+export GIT_OPTIONAL_LOCKS=0
+
+RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || ambiente 'fora de um repositório Git'
+cd "$RAIZ" || ambiente "raiz inacessível: $RAIZ"
+case "$ENTREGA" in
+  ./*) ENTREGA="${ENTREGA#./}" ;;
+  "$RAIZ"/*) ENTREGA="${ENTREGA#"$RAIZ"/}" ;;
+esac
+case "$ENTREGA" in
+  docs/entregas/*/ENTREGA.md) ;;
+  *) uso "--entrega deve ser docs/entregas/<id>/ENTREGA.md: $ENTREGA" ;;
+esac
+TRABALHO="${ENTREGA#docs/entregas/}"; TRABALHO="${TRABALHO%/ENTREGA.md}"
+case "$TRABALHO" in
+  ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto)
+    uso "trabalho inválido no caminho da entrega: ${TRABALHO:-ausente}" ;;
+esac
+
+# história cortada esconde commits: antes de qualquer leitura
+arvore_recusa_raso || { aviso "$ARVORE_ERRO"; invalido historia_incompleta; } # guarda:PTRASO
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-validade-portao.XXXXXX")" || { TMP_DIR=""; ambiente 'não foi possível criar diretório temporário'; }
+HEAD_SHA="$(g rev-parse --verify -q 'HEAD^{commit}')" || ambiente 'HEAD não é um commit'
+
+modo_em() { g ls-tree -z "$1" -- "$2" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .*//p'; }
+
+# ---------------------------------------------------------------------------
+# O ENTREGA.md de HEAD (a versão commitada).
+# ---------------------------------------------------------------------------
+ENTREGA_H="$TMP_DIR/entrega-head.md"
+case "$(modo_em "$HEAD_SHA" "$ENTREGA")" in
+  100644|100755) g cat-file blob "$HEAD_SHA:$ENTREGA" > "$ENTREGA_H" 2>/dev/null \
+    || { aviso "$ENTREGA ilegível em HEAD"; invalido portao_nao_pronto; } ;;
+  '') aviso "$ENTREGA ausente em HEAD"; invalido portao_nao_pronto ;;
+  *) aviso "$ENTREGA não é arquivo regular em HEAD"; invalido portao_nao_pronto ;;
+esac
+[ "$(catalogo_fm "$ENTREGA_H" kind)" = entrega ] || { aviso "$ENTREGA de HEAD não declara kind: entrega"; invalido portao_nao_pronto; }
+[ "$(catalogo_fm "$ENTREGA_H" trabalho_id)" = "$TRABALHO" ] \
+  || { aviso "ENTREGA.trabalho_id de HEAD diverge do caminho ($TRABALHO)"; invalido portao_nao_pronto; }
+ORIGEM="$(catalogo_fm "$ENTREGA_H" expx_tool)"
+case "$ORIGEM" in sprintx|runx) ;; *) aviso "ENTREGA.expx_tool de HEAD fora de sprintx|runx: ${ORIGEM:-ausente}"; invalido portao_nao_pronto ;; esac
+
+PORTAO="$(catalogo_fm "$ENTREGA_H" portao)"
+PS="$(catalogo_fm "$ENTREGA_H" portao_sha)"
+
+# o disco que diverge de HEAD é relatado, nunca usado
+if [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ]; then
+  p_disco="$(catalogo_fm "$ENTREGA" portao)"; s_disco="$(catalogo_fm "$ENTREGA" portao_sha)"
+  [ "$p_disco" = "$PORTAO" ] || aviso "portao do disco (${p_disco:-ausente}) diverge do de HEAD:$ENTREGA (${PORTAO:-ausente}); vale o de HEAD"
+  [ "$s_disco" = "$PS" ] || aviso "portao_sha do disco (${s_disco:-ausente}) diverge do de HEAD:$ENTREGA (${PS:-ausente}); vale o de HEAD"
+else
+  aviso "$ENTREGA ausente ou não regular no disco; vale o de HEAD"
+fi
+
+[ "$PORTAO" = pronto ] || invalido portao_nao_pronto # guarda:PTPRONTO
+printf '%s' "$PS" | grep -Eq '^[0-9a-f]{40}$' || invalido portao_sha_ausente # guarda:PTSHA
+g cat-file -e "$PS^{commit}" 2>/dev/null || invalido portao_sha_nao_ancestral # guarda:PTANC
+g merge-base --is-ancestor "$PS" "$HEAD_SHA" 2>/dev/null || invalido portao_sha_nao_ancestral # guarda:PTANC
+
+# ---------------------------------------------------------------------------
+# Cada commit de portao_sha..HEAD, pais antes dos filhos, até o primeiro que
+# invalida. Sem --first-parent: o que um merge traz também é avaliado.
+# ---------------------------------------------------------------------------
+g rev-list --reverse --topo-order "$PS..$HEAD_SHA" > "$TMP_DIR/commits" 2>/dev/null \
+  || ambiente "rev-list $PS..HEAD não calculável" # guarda:PTLISTA
+i=0
+while IFS= read -r c <&3; do
+  [ -n "$c" ] || continue
+  i=$((i + 1))
+  n="$(g rev-list --parents -n1 "$c" 2>/dev/null | wc -w | tr -d ' ')"
+  case "$n" in
+    2) ;;
+    1) invalido commit_de_produto "$c" ;; # commit raiz: nenhuma diferença a provar
+    *) invalido commit_merge "$c" ;; # guarda:PTMERGE
+  esac
+
+  CP=""
+  for cand in pre-e6 e8; do # guarda:PTMET
+    if bash "$CONTRATO_SH" --validar-metodo --trabalho "$TRABALHO" --checkpoint "$cand" --commit "$c" >/dev/null 2>&1; then
+      CP="$cand"; break
+    fi
+  done
+  [ -n "$CP" ] || invalido commit_de_produto "$c" # guarda:PTMET
+
+  # o catálogo de CP sobre a árvore deste commit: a pasta do trabalho e o
+  # ENTREGA.md dele, materializados (sem subshell: ARVORE_* e CATALOGO_ERRO)
+  arv="$TMP_DIR/arvore-$i"
+  arvore_materializa "$c" "$arv" "$ORIGEM" "$TRABALHO" "$c" '' \
+    || { aviso "catálogo de $c não calculável: $ARVORE_ERRO"; invalido metodo_fora_do_catalogo "$c"; }
+  case "$(modo_em "$c" "$ENTREGA")" in
+    100644|100755)
+      mkdir -p "$ARVORE_RAIZ/docs/entregas/$TRABALHO" 2>/dev/null \
+        && g cat-file blob "$c:$ENTREGA" > "$ARVORE_RAIZ/$ENTREGA" 2>/dev/null \
+        || { aviso "$ENTREGA ilegível em $c"; invalido metodo_fora_do_catalogo "$c"; } ;;
+    '') ;;
+    *) aviso "$ENTREGA não é arquivo regular em $c"; invalido metodo_fora_do_catalogo "$c" ;;
+  esac
+  catalogo_metodo "$ARVORE_RAIZ" "$ORIGEM" "$TRABALHO" "$ARVORE_PASTA" "$CP" > "$TMP_DIR/catalogo-$i" \
+    || { aviso "catálogo $CP de $c inválido: $CATALOGO_ERRO"; invalido metodo_fora_do_catalogo "$c"; } # guarda:PTARV
+
+  # --raw: os mesmos caminhos de --name-only, com os modos (gitlink)
+  g diff-tree --no-commit-id -r --root --raw -z --no-abbrev --no-renames --ignore-submodules=none "$c" > "$TMP_DIR/toca-$i" 2>/dev/null \
+    || { aviso "diff-tree de $c não calculável"; invalido metodo_fora_do_catalogo "$c"; }
+  while IFS= read -r -d '' cab <&4 && IFS= read -r -d '' p <&4; do
+    case "$p" in *"$NL"*|*"$TAB"*) invalido metodo_fora_do_catalogo "$c" ;; esac
+    case "$cab" in ':160000 '*|':'*' 160000 '*) invalido metodo_fora_do_catalogo "$c" ;; esac # guarda:PTPROD
+    grep -Fxq -e "$p" "$TMP_DIR/catalogo-$i" || invalido metodo_fora_do_catalogo "$c" # guarda:PTPROD
+  done 4< "$TMP_DIR/toca-$i"
+  rm -rf "$arv" "$arv.lista" "$arv.pasta"
+done 3< "$TMP_DIR/commits"
+
+printf 'ok=true\nprimeiro_commit=-\n'
+imprime_avisos
+exit 0

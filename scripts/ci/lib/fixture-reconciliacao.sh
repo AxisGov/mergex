@@ -18,6 +18,11 @@
 #   fx_entrega_sincroniza <dir> ENTREGA.md do disco com a lista dos artefatos
 #   fx_entrega_chaves_legado <dir> ENTREGA.md legado do disco com as chaves
 #                               que o registro legado grava (para forjar)
+#   fx_portao_em <dir> <rev>    portao: pronto e portao_sha = <rev>, commit pre-e6
+#   fx_portao_sem_sha <dir>     portao: pronto sem portao_sha, commit pre-e6
+#   fx_commit_metodo <dir> <checkpoint> <caminho>...  commit de método que
+#                               acrescenta uma linha a cada caminho
+#   fx_commit_solto <dir>       commit fora da história de HEAD (imprime o SHA)
 #
 # Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
 # o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
@@ -762,4 +767,94 @@ fx_entrega_chaves_legado() {
       { print }
     ' "$e" > "$e.fx" && cat "$e.fx" > "$e" && rm -f "$e.fx"
   ) && fx_entrega_sincroniza "$1"
+}
+
+# ---------------------------------------------------------------------------
+# Validade do portão (commits depois de portao_sha)
+# ---------------------------------------------------------------------------
+
+# _fx_commit_metodo_msg <checkpoint> <assunto> — commita o índice com
+# `Trabalho: ft-rec` e `Metodo: <checkpoint>`, validado pelo contrato. Roda no
+# cwd (o repositório da fixture).
+_fx_commit_metodo_msg() {
+  local cp="$1" assunto="$2" msg rc
+  msg="$(mktemp)" || return 1
+  _fx_msg "$msg" "$assunto" "Trabalho: ft-rec" "Metodo: $cp"
+  bash "$_FXR_CONTRATO" --validar-metodo --trabalho ft-rec --checkpoint "$cp" --arquivo "$msg" >/dev/null \
+    && git commit -q -F "$msg"
+  rc=$?
+  rm -f "$msg"
+  return "$rc"
+}
+
+# fx_portao_em <dir> <rev> — grava `portao: pronto` e `portao_sha: <rev
+# resolvido para o SHA completo>` no ENTREGA.md (a revisão é resolvida ANTES do
+# commit) e commita só o ENTREGA.md como checkpoint de método pre-e6.
+fx_portao_em() {
+  local dir="$1" rev="$2"
+  [ -n "$dir" ] && [ -n "$rev" ] || return 64
+  ( cd "$dir" || exit 1
+    sha="$(git rev-parse --verify -q "$rev^{commit}")" || exit 1
+    e=docs/entregas/ft-rec/ENTREGA.md
+    SHA="$sha" awk '
+      NR == 1 { print; fm = 1; next }
+      fm && /^---/ {
+        if (!feito) { print "portao: pronto"; print "portao_sha: " ENVIRON["SHA"] }
+        fm = 0; print; next
+      }
+      fm && /^portao_sha:/ { next }
+      fm && /^portao:/ { print "portao: pronto"; print "portao_sha: " ENVIRON["SHA"]; feito = 1; next }
+      { print }
+    ' "$e" > "$e.fx" && cat "$e.fx" > "$e" && rm -f "$e.fx" || exit 1
+    git add -- "$e" || exit 1
+    _fx_commit_metodo_msg pre-e6 "docs(mergex): registra o portao" )
+}
+
+# fx_portao_sem_sha <dir> — `portao: pronto` e nenhuma linha portao_sha no
+# ENTREGA.md (entrega legada), commitado como pre-e6.
+fx_portao_sem_sha() {
+  local dir="$1"
+  [ -n "$dir" ] || return 64
+  ( cd "$dir" || exit 1
+    e=docs/entregas/ft-rec/ENTREGA.md
+    awk '
+      NR == 1 { print; fm = 1; next }
+      fm && /^---/ { if (!feito) print "portao: pronto"; fm = 0; print; next }
+      fm && /^portao_sha:/ { next }
+      fm && /^portao:/ { print "portao: pronto"; feito = 1; next }
+      { print }
+    ' "$e" > "$e.fx" && cat "$e.fx" > "$e" && rm -f "$e.fx" || exit 1
+    git add -- "$e" || exit 1
+    _fx_commit_metodo_msg pre-e6 "docs(mergex): portao sem sha" )
+}
+
+# fx_commit_metodo <dir> <checkpoint> <caminho>... — acrescenta uma linha a
+# cada caminho (criando o diretório) e commita como checkpoint de método.
+fx_commit_metodo() {
+  local dir="$1" cp="$2"
+  [ -n "$dir" ] && [ -n "$cp" ] && [ "$#" -ge 3 ] || return 64
+  shift 2
+  ( cd "$dir" || exit 1
+    for f in "$@"; do
+      mkdir -p "$(dirname "$f")" || exit 1
+      printf 'linha de %s\n' "$cp" >> "$f" || exit 1
+      git add -- "$f" || exit 1
+    done
+    _fx_commit_metodo_msg "$cp" "docs(mergex): checkpoint $cp" )
+}
+
+# fx_commit_solto <dir> — um commit num ramo novo a partir de FX_B0, fora da
+# história de HEAD; imprime o SHA e volta para feature/ft-rec.
+fx_commit_solto() {
+  local dir="$1"
+  [ -n "$dir" ] && [ -n "${FX_B0:-}" ] || return 64
+  ( cd "$dir" || exit 1
+    n=1; while git rev-parse -q --verify "refs/heads/fx-solto-$n" >/dev/null; do n=$((n + 1)); done
+    fixture_switch_exato "fx-solto-$n" -c "fx-solto-$n" "$FX_B0" || exit 1
+    printf '# solto\n' > SOLTO.md
+    git add SOLTO.md || exit 1
+    git commit -q -m "chore: commit solto" || exit 1
+    sha="$(git rev-parse HEAD)" || exit 1
+    fixture_switch_exato feature/ft-rec feature/ft-rec || exit 1
+    printf '%s\n' "$sha" )
 }
