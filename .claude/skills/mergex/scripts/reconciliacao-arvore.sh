@@ -8,11 +8,14 @@
 # Funções:
 #   arvore_ambiente_git
 #       Fixa o ambiente Git do processo (e dos filhos): caminho exatamente como
-#       no Git (sem quotepath, pathspec literal), submódulo nunca ignorado
-#       (diff.ignoreSubmodules=none, que vence o .gitmodules e a configuração
-#       do repositório; quem calcula conjunto passa também
-#       --ignore-submodules=none), pais e objetos só do Git (sem refs/replace,
-#       .git/info/grafts nem commit-graph local).
+#       no Git (sem quotepath, pathspec literal); diff.ignoreSubmodules=none,
+#       que só neutraliza o diff.ignoreSubmodules do repositório — NÃO vence o
+#       `ignore` do .gitmodules: só a flag --ignore-submodules=none mostra o
+#       gitlink, e todo diff de conjunto ou prova a passa; mensagens de commit
+#       sempre em UTF-8 (i18n.logOutputEncoding, que senão herda o
+#       i18n.commitEncoding local e esconde um trailer do --grep); pais e
+#       objetos só do Git (sem refs/replace, .git/info/grafts nem commit-graph
+#       local).
 #   _entrega_chave_qualquer <arquivo> <chave>
 #       A chave de topo aparece no frontmatter em qualquer forma (entre aspas,
 #       espaço antes dos dois-pontos): presença que não se lê com segurança
@@ -42,11 +45,14 @@ arvore_ambiente_git() {
   export GIT_LITERAL_PATHSPECS=1
   # (advice.graftFileDeprecated: o GIT_GRAFT_FILE abaixo não polui o stderr;
   # core.commitGraph=false: os pais vêm dos objetos, não de um commit-graph local;
-  # diff.ignoreSubmodules=none: um gitlink nunca some de um diff)
-  export GIT_CONFIG_COUNT=4 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false \
+  # diff.ignoreSubmodules=none: neutraliza a do repositório, não a do
+  # .gitmodules (para esta, a flag --ignore-submodules=none em cada diff);
+  # i18n.logOutputEncoding=UTF-8: o --grep de trailer vê a mensagem em UTF-8)
+  export GIT_CONFIG_COUNT=5 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false \
     GIT_CONFIG_KEY_1=advice.graftFileDeprecated GIT_CONFIG_VALUE_1=false \
-    GIT_CONFIG_KEY_2=core.commitGraph GIT_CONFIG_VALUE_2=false \
-    GIT_CONFIG_KEY_3=diff.ignoreSubmodules GIT_CONFIG_VALUE_3=none # guarda:SUB
+    GIT_CONFIG_KEY_2=core.commitGraph GIT_CONFIG_VALUE_2=false
+  export GIT_CONFIG_KEY_3=diff.ignoreSubmodules GIT_CONFIG_VALUE_3=none # guarda:SUB
+  export GIT_CONFIG_KEY_4=i18n.logOutputEncoding GIT_CONFIG_VALUE_4=UTF-8 # guarda:ENC
   # Ancestralidade e objetos só do Git, nunca de enxertos locais: refs/replace e
   # .git/info/grafts falsificariam os pais. Exportado, para que os filhos herdem.
   export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null # guarda:EST

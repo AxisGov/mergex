@@ -110,8 +110,12 @@
 #   `HEAD:<arquivo>`, nunca pelo índice), e o conjunto de
 #   RECONCILIACAO-BASE-NNN.md em HEAD igual ao do disco e ao listado no
 #   ENTREGA.md de HEAD. Cada arquivo que falha: `ok=false` e
-#   `motivo<TAB>5<TAB>persistencia: <arquivo>`, rc 5. Outro valor de
+#   `motivo<TAB>persistencia<TAB><arquivo>`, rc 5. Outro valor de
 #   --checkpoint, ou --checkpoint no --registrar: rc 64.
+#   Limitação conhecida, que falha fechado: com core.autocrlf e um arquivo
+#   que veio do checkout com CRLF, o conteúdo do disco difere do blob de HEAD
+#   e a barreira dá rc 5 mesmo com `git status` limpo. É de propósito: aplicar
+#   os filtros de checkout reabriria o contorno que `--no-filters` fecha.
 #
 #   Toda prova é recalculada do Git; nenhum caminho é aceito por estar listado.
 #   Não há opção de força, nem variável de ambiente que relaxe prova.
@@ -912,7 +916,7 @@ cadeia_cobertura() {
 # `HEAD:<arquivo>`), nunca pelo índice, que assume-unchanged e skip-worktree
 # enganam; e o conjunto de RECONCILIACAO-BASE-NNN.md em HEAD é o do disco e o
 # que o ENTREGA.md de HEAD lista. Cada arquivo que falha, uma vez:
-# `motivo<TAB>5<TAB>persistencia: <arquivo>`.
+# `motivo<TAB>persistencia<TAB><arquivo>` (rc 5).
 cadeia_persistida() {
   local f h d dir="docs/entregas/$TRABALHO"
   {
@@ -943,8 +947,7 @@ cadeia_persistida() {
   fi
   awk '!visto[$0]++' "$TMP_DIR/nao-persistidos" > "$TMP_DIR/nao-persistidos.u"
   while IFS= read -r f <&3; do
-    printf 'motivo\t5\t%s\n' "$(printf 'persistencia: %s' "$f" | tr '\t\n\r' '   ')" >> "$MOTIVOS"
-    FALHA_5=1; N_MOT5=$((N_MOT5 + 1))
+    motivo 5 persistencia "$f"
   done 3< "$TMP_DIR/nao-persistidos.u"
 }
 

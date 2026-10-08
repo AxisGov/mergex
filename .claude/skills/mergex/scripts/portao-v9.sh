@@ -26,8 +26,15 @@
 #      inexistente ou fora da forma de branch (inclusive `@...` e `@{`):
 #      v9_sem_prova.
 #    Em qualquer origem, a base que já contém o trabalho é v9_sem_prova: a
-#    própria HEAD, ou uma base da qual é ancestral algum commit de
-#    ENTREGA.commits (de HEAD) ou algum commit com `Trabalho: <id>`.
+#    própria HEAD; uma base da qual é ancestral algum commit de
+#    ENTREGA.commits (de HEAD; entrada que não resolve para um único commit
+#    também é v9_sem_prova), algum commit com `Trabalho: <id>` (mensagem lida
+#    em UTF-8) ou algum commit que toca a pasta do trabalho ou
+#    docs/entregas/<id>/. Sem reconciliação, o base_validada_sha de HEAD tem
+#    de ser o da versão que criou o ENTREGA.md (o commit mais antigo com
+#    --diff-filter=A); diverge ou não determinável: v9_sem_prova.
+#    Risco residual conhecido: no legado, a ref de base movida para um commit
+#    sem nenhuma dessas marcas é aceita (a spec lê a ref nesse caso).
 # 2. Diff: `git diff --raw --no-renames --ignore-submodules=none B...HEAD` (os
 #    caminhos de `--name-only`, com os modos), caminho exato (sem quoting).
 # 3. Aceito, nesta ordem: a união de arquivos.cria + arquivos.altera de todas
@@ -228,14 +235,29 @@ awk '
 ' "$ENTREGA_H" > "$TMP_DIR/commits" 2>/dev/null || sem_prova "ENTREGA.commits de HEAD ilegível"
 while IFS="$TAB" read -r _ c <&3; do
   [ -n "$c" ] || continue
-  cs="$(g rev-parse --verify -q "$c^{commit}" 2>/dev/null)" || continue
+  # abreviação ambígua, SHA inexistente ou valor solto: a guarda não pula em silêncio
+  cs="$(g rev-parse --verify -q "$c^{commit}" 2>/dev/null)" || sem_prova "ENTREGA.commits de HEAD: $c não resolve para um único commit" # guarda:V9SHA
   if g merge-base --is-ancestor "$cs" "$BASE" 2>/dev/null; then
     sem_prova "a base $BASE contém o commit $cs de ENTREGA.commits: a base contém o trabalho" # guarda:V9SHA
   fi
 done 3< "$TMP_DIR/commits"
 TRAB_RE="$(printf '%s' "$TRABALHO" | sed 's/[.]/\\./g')"
-c="$(g rev-list -n1 --grep="^Trabalho: $TRAB_RE\$" "$BASE" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível"
+c="$(g rev-list -n1 --encoding=UTF-8 --grep="^Trabalho: $TRAB_RE\$" "$BASE" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível" # guarda:ENC
 [ -z "$c" ] || sem_prova "a base $BASE contém o commit $c com Trabalho: $TRABALHO: a base contém o trabalho" # guarda:V9SHA
+
+# (a) sem reconciliação, a base de HEAD é a que o ENTREGA.md tinha ao nascer: a
+# spec só deixa a chave mudar por reconciliação (que traz a cadeia, ancorada)
+if [ -z "$ULTIMO" ] && [ "$ORIGEM_BASE" != inferida_leitura ]; then
+  g log --diff-filter=A --format=%H "$HEAD_SHA" -- "$ENTREGA" > "$TMP_DIR/criacao" 2>/dev/null \
+    || sem_prova "histórico de $ENTREGA ilegível: o commit que o criou não é determinável"
+  CRIACAO="$(sed -n '$p' "$TMP_DIR/criacao")"
+  [ -n "$CRIACAO" ] || sem_prova "o commit que criou $ENTREGA não é determinável"
+  g cat-file blob "$CRIACAO:$ENTREGA" > "$TMP_DIR/entrega-criacao.md" 2>/dev/null \
+    || sem_prova "$ENTREGA ilegível no commit que o criou ($CRIACAO)"
+  B_CRIACAO="$(catalogo_fm "$TMP_DIR/entrega-criacao.md" base_validada_sha)"
+  [ "$B_CRIACAO" = "$BASE" ] \
+    || sem_prova "a base $BASE diverge da versão que criou $ENTREGA ($CRIACAO: ${B_CRIACAO:-ausente})" # guarda:V9SHA
+fi
 
 # sem reconciliação: o disco que diverge de HEAD é relatado, nunca usado
 if [ -z "$ULTIMO" ]; then
@@ -253,6 +275,9 @@ fi
 arvore_materializa "$HEAD_SHA" "$TMP_DIR/arvore-head" "$ORIGEM" "$TRABALHO" HEAD '' || sem_prova "$ARVORE_ERRO"
 RAIZ_H="$ARVORE_RAIZ"
 PASTA="$ARVORE_PASTA"
+# (b) nenhum commit que toca a pasta do trabalho ou a entrega é da base
+c="$(g rev-list -n1 "$BASE" -- "$PASTA" "$DIR_E" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível"
+[ -z "$c" ] || sem_prova "a base $BASE contém o commit $c, que toca a pasta do trabalho ou a entrega: a base contém o trabalho" # guarda:V9SHA
 bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 2> "$TMP_DIR/uniao.err" \
   || sem_prova "união das tasks de HEAD não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")" # guarda:V9UNIAO
 

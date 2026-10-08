@@ -2346,6 +2346,32 @@ _v9_entrega_commit() {
   _v9_commit "entrega" "$FX_ENTREGA"
 }
 
+# _v9_reconstroi <mensagem> — sobre B0, um commit X que cria src/evil.ts (produto
+# fora do plano) com a mensagem dada, e a feature (B0..P1, primeiro pai) refeita
+# por cima na branch atk. Define X.
+_v9_reconstroi() {
+  git switch -q --detach "$FX_B0" || return 1
+  printf 'export const mal = 1;\n' > src/evil.ts
+  git add src/evil.ts && printf '%s\n' "$1" | git commit -q -F - || return 1
+  X="$(git rev-parse HEAD)"
+  git switch -q -c atk || return 1
+  git cherry-pick $(git rev-list --reverse --first-parent "$FX_B0..$FX_P1") >/dev/null 2>&1
+}
+
+# _v9_ambiguo — um prefixo de 4 hex que é de dois commits (gerados até colidir)
+_v9_ambiguo() {
+  local arv n c p vistos=""
+  arv="$(git rev-parse "$FX_B0^{tree}")"
+  n=0
+  while [ "$n" -lt 4000 ]; do
+    n=$((n + 1))
+    c="$(git commit-tree "$arv" -p "$FX_B0" -m "colisao $n")"; p="${c:0:4}"
+    case " $vistos " in *" $p "*) printf '%s\n' "$p"; return 0 ;; esac
+    vistos="$vistos $p"
+  done
+  return 1
+}
+
 # Fix round 1: submódulo, sanidade da base, guardas da árvore de HEAD, renomeação.
 grupo_v9_robusto() {
   local d v t out modo x plano msg r
@@ -2432,6 +2458,72 @@ grupo_v9_robusto() {
   v9_sem_prova "base que contém um commit de ENTREGA.commits" "ENTREGA.commits"
   cd "$REPO" || return
 
+  # ---- base ancorada na entrega (a) e sem a pasta do trabalho (b) -----------
+  # S1: X (cria src/evil.ts, sem trailer) logo depois de B0 e a feature refeita
+  # por cima; com base_validada_sha = X commitado, evil.ts sumiria do diff
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  _v9_reconstroi "chore: utilitario" || falha "reconstrução (S1)"
+  out="$("${v[@]}" 2>/dev/null)"
+  printf '%s\n' "$out" | grep -Fxq 'fora_do_plano	src/evil.ts' && ok "controle S1a: com a base de E0, evil.ts é desvio" || falha "controle S1a: $(printf '%s' "$out" | tr '\n\t' '|>')"
+  _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $X/"
+  v9_sem_prova "S1b: base_validada_sha commitado diferente do da criação do ENTREGA.md" "diverge da versão que criou"
+  cd "$REPO" || return
+
+  # trailer fora da forma canônica num commit lateral usado como base: (a)
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  x="$(printf 'parte do trabalho\n\nTrabalho:ft-rec\n' | git commit-tree "$FX_B0^{tree}" -p "$FX_B0")"
+  _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $x/"
+  v9_sem_prova "trailer escrito de outro jeito (Trabalho:ft-rec) na base" "diverge da versão que criou"
+  cd "$REPO" || return
+
+  # S3 (legado, só a regra b): a ref movida para o commit do plano
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  cd "$d" || return
+  git branch -f main "$(git rev-parse "$FX_P1~4")"
+  v9_sem_prova "S3: legado com a base num commit que toca a pasta do trabalho" "toca a pasta do trabalho ou a entrega"
+  cd "$REPO" || return
+
+  # S5f (legado, só o trailer): i18n.commitEncoding UTF-16 local não desliga a guarda
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  cd "$d" || return
+  _v9_reconstroi "$(printf 'chore: utilitario\n\nTrabalho: ft-rec')" || falha "reconstrução (S5)"
+  git branch -f main "$X"
+  v9_sem_prova "S5: legado com base que tem o trailer canônico" "Trabalho: ft-rec"
+  git config i18n.commitEncoding UTF-16
+  v9_sem_prova "S5f: com i18n.commitEncoding UTF-16 o trailer continua visto" "Trabalho: ft-rec"
+  git config --unset i18n.commitEncoding
+  cd "$REPO" || return
+
+  # residual: legado com ref movida (S2b). A spec lê a ref no legado e o Git
+  # local não distingue: X sem trailer e sem tocar a pasta, a ref movida para
+  # ele, aprova. Documentado, não corrigido.
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  cd "$d" || return
+  _v9_reconstroi "chore: utilitario" || falha "reconstrução (S2)"
+  git branch -f main "$FX_B1"
+  out="$("${v[@]}" 2>/dev/null)"
+  printf '%s\n' "$out" | grep -Fxq 'fora_do_plano	src/evil.ts' && ok "residual (controle): ref em B1, evil.ts é desvio" || falha "residual (controle): $(printf '%s' "$out" | tr '\n\t' '|>')"
+  git branch -f main "$X"
+  v9_espera "residual: legado com ref movida (comportamento atual: aprova)" 0 \
+    "$(printf 'base=%s\norigem_base=inferida_leitura\nresultado=ok' "$X")"
+  cd "$REPO" || return
+
+  # ---- ENTREGA.commits com entrada que não resolve para um único commit -----
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  _v9_entrega_commit 's/^commits:$/commits:\n  - seq: 0\n    task: T-00.00\n    commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/'
+  v9_sem_prova "S6c: ENTREGA.commits com SHA inexistente" "não resolve para um único commit"
+  cd "$REPO" || return
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  x="$(_v9_ambiguo)" || falha "S6b: colisão de prefixo não gerada"
+  git rev-parse --verify -q "$x^{commit}" >/dev/null 2>&1 && falha "controle S6b: $x resolve" || ok "controle S6b: $x é ambíguo"
+  _v9_entrega_commit "s/^commits:\$/commits:\n  - seq: 0\n    task: T-00.00\n    commit: $x/"
+  v9_sem_prova "S6b: ENTREGA.commits com abreviação ambígua" "não resolve para um único commit"
+  cd "$REPO" || return
+
   # ---- branch_base inválida (legado) ----------------------------------------
   for x in HEAD '@{-1}' '@'; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
@@ -2501,9 +2593,9 @@ grupo_barreira() {
   [ "$rc" = 5 ] && ok "registrado sem checkpoint: rc 5" || falha "registrado sem checkpoint: rc=$rc"
   [ "$(printf '%s\n' "$out" | sed -n 1p)" = ok=false ] && ! printf '%s\n' "$out" | grep -q '^coberto' \
     && ok "registrado sem checkpoint: ok=false sem coberto" || falha "registrado sem checkpoint: $(printf '%s' "$out" | tr '\n\t' '|>')"
-  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $FX_ENTREGA" \
+  printf '%s\n' "$out" | grep -Fxq "motivo	persistencia	$FX_ENTREGA" \
     && ok "motivo de persistência do ENTREGA.md" || falha "sem motivo do ENTREGA.md: $(printf '%s' "$out" | tr '\n\t' '|>')"
-  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $AR" \
+  printf '%s\n' "$out" | grep -Fxq "motivo	persistencia	$AR" \
     && ok "motivo de persistência do artefato" || falha "sem motivo do artefato: $(printf '%s' "$out" | tr '\n\t' '|>')"
 
   bash "$S/persistir-metodo.sh" --persistir --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --checkpoint reconciliacao-base >/dev/null 2>&1 \
@@ -2516,7 +2608,7 @@ grupo_barreira() {
   printf '\nNota acrescentada depois do commit.\n' >> "$AR"
   rc_igual "controle: o --verificar simples aceita a edição da prosa" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
   out="$("${b[@]}" 2>/dev/null)"; rc=$?
-  [ "$rc" = 5 ] && [ "$(printf '%s\n' "$out" | grep -c '^motivo')" = 1 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $AR" \
+  [ "$rc" = 5 ] && [ "$(printf '%s\n' "$out" | grep -c '^motivo')" = 1 ] && printf '%s\n' "$out" | grep -Fxq "motivo	persistencia	$AR" \
     && ok "artefato editado depois do commit: rc 5, só a persistência" || falha "artefato editado: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
 
   # o índice não é prova: assume-unchanged e skip-worktree não escondem a edição
@@ -2525,7 +2617,7 @@ grupo_barreira() {
     git update-index "--$bit" -- "$AR"
     git diff --quiet HEAD -- "$AR" && ok "controle: com --$bit o índice não vê a edição" || falha "controle: --$bit"
     out="$("${b[@]}" 2>/dev/null)"; rc=$?
-    [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $AR" \
+    [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	persistencia	$AR" \
       && ok "artefato editado com --$bit: rc 5" || falha "artefato editado com --$bit: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
     git update-index "--no-$bit" -- "$AR"
   done
@@ -2537,7 +2629,7 @@ grupo_barreira() {
   git update-index --assume-unchanged -- "$FX_ENTREGA" "$AR"
   rc_igual "controle: o --verificar simples aprova o disco pré-registro" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
   out="$("${b[@]}" 2>/dev/null)"; rc=$?
-  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fq "motivo	5	persistencia: " \
+  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fq "motivo	persistencia	" \
     && ok "disco pré-registro escondido do índice: rc 5" || falha "disco pré-registro: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
   git update-index --no-assume-unchanged -- "$FX_ENTREGA" "$AR"
   git restore -- "$FX_ENTREGA"; mv "$t/ar" "$AR"
@@ -2545,7 +2637,7 @@ grupo_barreira() {
 
   printf '\nNota.\n' >> "$FX_ENTREGA"; git add -- "$FX_ENTREGA"
   out="$("${b[@]}" 2>/dev/null)"; rc=$?
-  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $FX_ENTREGA" \
+  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	persistencia	$FX_ENTREGA" \
     && ok "ENTREGA.md no stage e não commitado: rc 5" || falha "ENTREGA.md no stage: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
   git restore --staged --worktree -- "$FX_ENTREGA"
   rc_igual "controle: ENTREGA.md devolvido, a barreira aprova" 0 "${b[@]}"
@@ -2556,7 +2648,7 @@ grupo_barreira() {
   rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
   rc_igual "controle: o --verificar simples aprova o disco" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
   out="$("${b[@]}" 2>/dev/null)"; rc=$?
-  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -q "^motivo	5	persistencia: .*RECONCILIACAO-BASE-002.md" \
+  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -q "^motivo	persistencia	.*RECONCILIACAO-BASE-002.md" \
     && ok "conjunto de artefatos em HEAD diferente do disco: rc 5" || falha "conjunto de artefatos: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
   cd "$REPO" || return
 }
