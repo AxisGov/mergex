@@ -14,8 +14,11 @@
 #       gitlink, e todo diff de conjunto ou prova a passa; mensagens de commit
 #       sempre em UTF-8 (i18n.logOutputEncoding, que senão herda o
 #       i18n.commitEncoding local e esconde um trailer do --grep); pais e
-#       objetos só do Git (sem refs/replace, .git/info/grafts nem commit-graph
-#       local).
+#       objetos só do Git (sem refs/replace, .git/info/grafts, commit-graph
+#       local nem GIT_SHALLOW_FILE).
+#   arvore_recusa_raso
+#       rc 1 (ARVORE_ERRO) num repositório raso; chamada logo depois do cd
+#       para a raiz, antes de qualquer prova.
 #   _entrega_chave_qualquer <arquivo> <chave>
 #       A chave de topo aparece no frontmatter em qualquer forma (entre aspas,
 #       espaço antes dos dois-pontos): presença que não se lê com segurança
@@ -56,6 +59,27 @@ arvore_ambiente_git() {
   # Ancestralidade e objetos só do Git, nunca de enxertos locais: refs/replace e
   # .git/info/grafts falsificariam os pais. Exportado, para que os filhos herdem.
   export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null # guarda:EST
+  # O raso que vale é o do repositório, nunca um GIT_SHALLOW_FILE do ambiente
+  # (que cortaria a história sem deixar .git/shallow).
+  unset GIT_SHALLOW_FILE # guarda:EST
+}
+
+# arvore_recusa_raso — rc 0 com a história completa; rc 1 (ARVORE_ERRO) num
+# repositório raso: `--is-shallow-repository` diferente de false, ou um
+# arquivo `shallow` no diretório Git ou no comum (worktree vinculada). A
+# história cortada esconde commits (e versões do ENTREGA.md): nada se prova.
+# Clone raso legítimo falha fechado: `git fetch --unshallow`.
+arvore_recusa_raso() {
+  local gd gc
+  ARVORE_ERRO="repositório raso: história incompleta"
+  [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ] || return 1 # guarda:EST
+  gd="$(git rev-parse --git-dir 2>/dev/null)" || return 1
+  gc="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
+  for gd in "$gd/shallow" "$gc/shallow"; do
+    { [ -e "$gd" ] || [ -L "$gd" ]; } && return 1 # guarda:EST
+  done
+  ARVORE_ERRO=""
+  return 0
 }
 
 _entrega_chave_qualquer() {

@@ -43,10 +43,19 @@
 #      marcas: aceito (a spec lê a ref nesse caso);
 #    - âncora nascida errada: o ENTREGA.md já nasce com base_validada_sha num
 #      commit só de produto (sem marca, sem tocar a pasta); todas as versões
-#      concordam e a base é aceita (o E0 lê a ref);
+#      concordam e a base é aceita (o E0 lê a ref). Inclui o ramo montado do
+#      zero em que o ENTREGA.md nasce noutro caminho e é renomeado para o
+#      canônico já com a base errada: `rev-list -- <caminho>` não segue
+#      renomeação, e no caminho nunca houve outra versão;
 #    - B1 lateral: com reconciliação, a cadeia nunca reconfere b1_sha contra a
 #      base real; um B1 forjado (descende de B0, traz produto, a ref movida no
 #      registro) desloca a base.
+#    Repositório raso (`git rev-parse --is-shallow-repository` true, ou um
+#    arquivo `shallow` no diretório Git ou no comum; GIT_SHALLOW_FILE do
+#    ambiente é descartado): v9_sem_prova com o motivo `repositório raso:
+#    história incompleta`, antes de qualquer prova — o corte esconde versões
+#    do ENTREGA.md e commits da base. Um clone raso legítimo (CI com
+#    --depth) também falha fechado: rode `git fetch --unshallow` antes do E2.
 # 2. Diff: `git diff --raw --no-renames --ignore-submodules=none B...HEAD` (os
 #    caminhos de `--name-only`, com os modos), caminho exato (sem quoting).
 # 3. Aceito, nesta ordem: a união de arquivos.cria + arquivos.altera de todas
@@ -146,6 +155,8 @@ export GIT_OPTIONAL_LOCKS=0
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-portao-v9.XXXXXX")" || { TMP_DIR=""; sem_prova 'não foi possível criar diretório temporário'; }
 RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || sem_prova 'fora de um repositório Git'
 cd "$RAIZ" || sem_prova "raiz inacessível: $RAIZ"
+# história cortada não prova nada: antes de qualquer leitura de versão ou base
+arvore_recusa_raso || sem_prova "$ARVORE_ERRO" # guarda:EST
 HEAD_SHA="$(g rev-parse --verify -q 'HEAD^{commit}')" || sem_prova 'HEAD não é um commit'
 
 # ---------------------------------------------------------------------------

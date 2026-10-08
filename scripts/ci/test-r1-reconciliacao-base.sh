@@ -2731,6 +2731,134 @@ grupo_barreira() {
   cd "$REPO" || return
 }
 
+# Fix round 4 (N6): repositório raso é recusado pela V9 e pela reconciliação.
+RASO_MOTIVO='repositório raso: história incompleta'
+
+# raso_v9 <desc> — V9 rc 3 com o motivo do raso como PRIMEIRO motivo (exato:
+# o motivo repassado do --verificar, com prefixo, não serve)
+raso_v9() {
+  local out rc
+  out="$("${v[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" = 3 ] && [ "$(printf '%s\n' "$out" | sed -n 1p)" = resultado=v9_sem_prova ] \
+    && [ "$(printf '%s\n' "$out" | sed -n 2p)" = "motivo	$RASO_MOTIVO" ] \
+    && ! printf '%s\n' "$out" | grep -Eq '^(base=|fora_do_plano)' \
+    && ok "$1" || falha "$1 — rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+}
+
+# raso_verificar <desc> [--checkpoint reconciliacao-base] — rc 4, ok=false e só
+# o motivo estrutura[raso]
+raso_verificar() {
+  local desc="$1" out rc; shift
+  out="$(bash "$RB" --verificar "$@" --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec 2>/dev/null)"; rc=$?
+  [ "$rc" = 4 ] && [ "$out" = "$(printf 'ok=false\nmotivo\testrutura\testrutura[raso]: %s' "$RASO_MOTIVO")" ] \
+    && ok "$desc" || falha "$desc — rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+}
+
+# raso_registrar <desc> <caminho>... — rc 4 estrutura[raso], nada gravado
+raso_registrar() {
+  local desc="$1" err rc antes; shift
+  antes="$(git status --porcelain=v1 --untracked-files=all | rb_sha256)"
+  err="$(bash "$RB" --registrar --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec -- "$@" 2>&1 >/dev/null)"; rc=$?
+  [ "$rc" = 4 ] && [ "$err" = "reconciliacao-base: estrutura[raso]: $RASO_MOTIVO" ] \
+    && [ ! -e docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md ] \
+    && [ "$(git status --porcelain=v1 --untracked-files=all | rb_sha256)" = "$antes" ] \
+    && ok "$desc" || falha "$desc — rc=$rc $(printf '%s' "$err" | tr '\n' '|')"
+}
+
+grupo_raso() {
+  local d c w t out rc mg sh
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  v=(bash "$V9" --verificar --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec)
+
+  # ---- S2: .git/shallow no commit que pôs X, HEAD merge com X ----------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  _v9_reconstroi "chore: utilitario" || falha "reconstrução (S2)"
+  _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $X/"; c="$(git rev-parse HEAD)"
+  mg="$(git commit-tree "HEAD^{tree}" -p HEAD -p "$X" -m "merge: traz o utilitario")"; git merge -q --ff-only "$mg"
+  v9_sem_prova "controle S1: sem shallow, a base X é recusada" "bases diferentes"
+  printf '%s\n' "$c" > "$t/shallow-c"
+  # GIT_SHALLOW_FILE do ambiente não entra: o raso que vale é o do repositório
+  out="$(GIT_SHALLOW_FILE="$t/shallow-c" "${v[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -q '^motivo	.*bases diferentes' \
+    && ok "GIT_SHALLOW_FILE no ambiente é ignorado" || falha "GIT_SHALLOW_FILE: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+  cp "$t/shallow-c" .git/shallow
+  [ "$(git rev-parse --is-shallow-repository)" = true ] && ok "controle S2: o repositório é raso" || falha "controle S2: não ficou raso"
+  raso_v9 "S2: .git/shallow no commit que pôs X: v9_sem_prova"
+  raso_verificar "S2: --verificar no raso: rc 4 estrutura[raso]"
+  raso_verificar "S2: barreira no raso: rc 4 estrutura[raso]" --checkpoint reconciliacao-base
+  rm -f .git/shallow
+  cd "$REPO" || return
+
+  # ---- .git/shallow forjado: --registrar e --verificar ----------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  printf '%s\n' "$FX_B0" > .git/shallow
+  raso_registrar "--registrar com .git/shallow forjado: rc 4, nada gravado" "$FX_NOVO1" "$FX_NOVO2"
+  raso_verificar "--verificar com .git/shallow forjado: rc 4"
+  raso_v9 "V9 com .git/shallow forjado: v9_sem_prova"
+  : > .git/shallow
+  raso_v9 "V9 com .git/shallow vazio: v9_sem_prova"
+  rm -f .git/shallow
+  # a trava ficou livre: sem o raso, o mesmo registro passa
+  rc_igual "controle: sem o raso, o --registrar passa (trava liberada)" 0 \
+    bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # ---- clone --depth real e clone completo ------------------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$REPO" || return
+  git clone -q --depth 2 --no-single-branch -b feature/ft-rec "file://$d" "$t/raso" 2>/dev/null || falha "clone --depth 2"
+  cd "$t/raso" || return
+  git branch -q main origin/main
+  [ "$(git rev-parse --is-shallow-repository)" = true ] && ok "controle: clone --depth 2 é raso" || falha "controle: clone não é raso"
+  raso_registrar "--registrar em clone --depth 2: rc 4, nada gravado" "$FX_NOVO1" "$FX_NOVO2"
+  raso_verificar "--verificar em clone --depth 2: rc 4"
+  raso_v9 "V9 em clone --depth 2: v9_sem_prova"
+
+  # worktree vinculada do clone raso (o shallow fica no diretório comum)
+  w="$t/wt-raso"
+  if git worktree add -q --detach "$w" HEAD 2>/dev/null; then
+    cd "$w" || return
+    [ "$(git rev-parse --is-shallow-repository)" = true ] && ok "controle: worktree vinculada rasa" || falha "controle: worktree não é rasa"
+    raso_v9 "V9 em worktree vinculada de clone raso: v9_sem_prova"
+    raso_verificar "--verificar em worktree vinculada rasa: rc 4"
+    cd "$t/raso" || return
+    git worktree remove --force "$w"
+  else falha "worktree vinculada não montou"; fi
+  cd "$REPO" || return
+
+  git clone -q -b feature/ft-rec "file://$d" "$t/completo" 2>/dev/null || falha "clone completo"
+  cd "$t/completo" || return
+  git branch -q main origin/main
+  [ "$(git rev-parse --is-shallow-repository)" = false ] && ok "controle: clone completo não é raso" || falha "controle: clone completo raso"
+  rc_igual "clone completo: --registrar passa" 0 \
+    bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2"
+  rc_igual "clone completo: --verificar passa" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  v9_espera "clone completo: V9 aprova" 0 "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B1")"
+
+  # worktree vinculada do completo, com o shallow forjado no diretório comum e
+  # no diretório Git próprio dela
+  w="$t/wt-completo"
+  if git worktree add -q --detach "$w" HEAD 2>/dev/null; then
+    cd "$w" || return
+    rc_igual "controle: worktree vinculada completa, V9 calcula" 1 "${v[@]}"
+    sh="$(git rev-parse --path-format=absolute --git-common-dir)/shallow"
+    printf '%s\n' "$FX_B0" > "$sh"
+    raso_v9 "worktree vinculada com shallow no diretório comum: v9_sem_prova"
+    rm -f "$sh"
+    sh="$(git rev-parse --path-format=absolute --git-dir)/shallow"
+    printf '%s\n' "$FX_B0" > "$sh"
+    raso_v9 "worktree vinculada com shallow no próprio diretório Git: v9_sem_prova"
+    raso_verificar "--verificar com shallow no diretório Git da worktree: rc 4"
+    rm -f "$sh"
+    cd "$t/completo" || return
+    git worktree remove --force "$w"
+  else falha "worktree vinculada do completo não montou"; fi
+  cd "$REPO" || return
+}
+
 # ---------------------------------------------------------------------------
 # Despacho
 # ---------------------------------------------------------------------------

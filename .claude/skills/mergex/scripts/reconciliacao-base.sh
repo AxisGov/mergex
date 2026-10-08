@@ -117,6 +117,12 @@
 #   e a barreira dá rc 5 mesmo com `git status` limpo. É de propósito: aplicar
 #   os filtros de checkout reabriria o contorno que `--no-filters` fecha.
 #
+#   Repositório raso (`--is-shallow-repository` true, ou arquivo `shallow`
+#   no diretório Git ou no comum), nos dois modos e com qualquer
+#   --checkpoint: rc 4 `estrutura[raso]` antes de qualquer prova, sem gravar
+#   nada e sem a trava (no --verificar, `ok=false` e esse único motivo). Clone
+#   raso legítimo: `git fetch --unshallow`.
+#
 #   Toda prova é recalculada do Git; nenhum caminho é aceito por estar listado.
 #   Não há opção de força, nem variável de ambiente que relaxe prova.
 #
@@ -667,6 +673,14 @@ verificar() {
   # nem o refresh oportunista do índice: a verificação não grava nada
   export GIT_OPTIONAL_LOCKS=0
 
+  # história cortada não prova nada: o raso para antes de qualquer prova
+  if ! arvore_recusa_raso; then # guarda:EST
+    estrutura raso "$ARVORE_ERRO"
+    printf 'ok=false\n'
+    cat "$MOTIVOS"
+    return 4
+  fi
+
   # O ENTREGA.md do disco: contexto e a lista de reconciliações.
   ENTREGA_D=""
   if [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cat "$ENTREGA" > "$TMP_DIR/entrega-disco.md" 2>/dev/null; then
@@ -1204,6 +1218,8 @@ fi
 # ---------------------------------------------------------------------------
 # --registrar. Pré-condições: trava C5, stage vazio, nenhum merge em andamento.
 # ---------------------------------------------------------------------------
+# história cortada não prova nada: o raso para antes da trava e de qualquer prova
+arvore_recusa_raso || para 4 "estrutura[raso]: $ARVORE_ERRO" # guarda:EST
 SAIDA_TRAVA="$(adquirir reconciliacao-base)"; RC_TRAVA=$?
 [ "$RC_TRAVA" != 2 ] || para 2 'índice ocupado pela trava C5'
 [ "$RC_TRAVA" = 0 ] || para 1 'não foi possível adquirir a trava C5 do índice'
