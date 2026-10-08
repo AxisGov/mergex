@@ -19,11 +19,15 @@
 #   - HEAD:<ENTREGA> existe, é arquivo regular, `kind: entrega`, `trabalho_id`
 #     igual ao <id> do caminho, `expx_tool` sprintx|runx e `portao: pronto`;
 #   - `portao_sha` é um SHA de 40 hex minúsculo, existe e é ancestral de HEAD;
+#   - nenhum merge no intervalo: `git rev-list --merges --topo-order --reverse
+#     <portao_sha>..HEAD` vazio. Havendo, commit_merge no merge mais antigo,
+#     antes de avaliar qualquer commit (o merge é a causa, não o que ele trouxe);
 #   - TODO commit de `git rev-list --reverse --topo-order <portao_sha>..HEAD`
 #     (sem --first-parent: os commits trazidos por um merge também são
 #     avaliados), na ordem, até o primeiro que invalida:
-#       * tem exatamente um pai (dois ou mais: commit_merge; nenhum, um commit
-#         raiz trazido de outra história: commit_de_produto);
+#       * tem exatamente um pai (dois ou mais: commit_merge, defesa em
+#         profundidade da passada dos merges; nenhum, um commit raiz trazido
+#         de outra história: commit_de_produto);
 #       * é commit de método válido do trabalho, pela gramática de
 #         contrato-de-commit.sh --validar-metodo, com checkpoint pre-e6 ou e8
 #         (pre-e2, reconciliacao-base, outro trabalho ou sem Metodo:
@@ -44,15 +48,17 @@
 #   ok=false
 #   motivo=<portao_nao_pronto|portao_sha_ausente|portao_sha_nao_ancestral|
 #           commit_de_produto|commit_merge|metodo_fora_do_catalogo|
-#           historia_incompleta>
+#           historia_incompleta|erro_ambiente>
 #   primeiro_commit=<sha40 do commit que invalidou|->
 #   aviso=<texto>                  (zero ou mais)
 # Motivos:
 #   portao_nao_pronto       ENTREGA ausente ou ilegível em HEAD, portao
 #                           diferente de pronto (null, bloqueado, ausente),
-#                           contexto inválido; também a falha de ambiente
-#                           (fora de repositório, dependência ausente,
-#                           temporário), com um `aviso=` que a descreve;
+#                           contexto inválido;
+#   erro_ambiente           nada se pôde avaliar: dependência ausente, fora de
+#                           um repositório Git, temporário que não se cria,
+#                           HEAD sem commit ou rev-list que falha; com um
+#                           `aviso=` que descreve a falha;
 #   portao_sha_ausente      portao_sha ausente, vazio, null ou fora de 40 hex;
 #   portao_sha_nao_ancestral  portao_sha inexistente ou não ancestral de HEAD;
 #   historia_incompleta     repositório raso (a história cortada esconde
@@ -98,7 +104,7 @@ invalido() {
   imprime_avisos
   exit 1
 }
-ambiente() { aviso "$1"; invalido portao_nao_pronto; }
+ambiente() { aviso "$1"; invalido erro_ambiente; }
 
 MODO=""; ENTREGA=""
 while [ "$#" -gt 0 ]; do
@@ -185,6 +191,11 @@ g merge-base --is-ancestor "$PS" "$HEAD_SHA" 2>/dev/null || invalido portao_sha_
 # Cada commit de portao_sha..HEAD, pais antes dos filhos, até o primeiro que
 # invalida. Sem --first-parent: o que um merge traz também é avaliado.
 # ---------------------------------------------------------------------------
+# Primeiro os merges: um merge no intervalo é a causa, antes do que ele trouxe.
+g rev-list --merges --topo-order --reverse "$PS..$HEAD_SHA" > "$TMP_DIR/merges" 2>/dev/null \
+  || ambiente "rev-list --merges $PS..HEAD não calculável"
+PRIMEIRO_MERGE="$(sed -n 1p "$TMP_DIR/merges")"
+[ -z "$PRIMEIRO_MERGE" ] || invalido commit_merge "$PRIMEIRO_MERGE" # guarda:PTMERGE
 g rev-list --reverse --topo-order "$PS..$HEAD_SHA" > "$TMP_DIR/commits" 2>/dev/null \
   || ambiente "rev-list $PS..HEAD não calculável" # guarda:PTLISTA
 i=0

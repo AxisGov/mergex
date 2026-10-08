@@ -2890,9 +2890,12 @@ grupo_portao() {
   # ---- passos do brief ----------------------------------------------------
   fx_portao_em "$d" "$FX_P1" || falha "fx_portao_em P1"
   rc_igual "merge depois do portão invalida" 1 "${p[@]}"
-  # sem --first-parent, B1 (trazido pelo merge, pai antes do filho) aparece
-  # antes de M: é o primeiro que invalida
-  pt_espera "merge depois do portão: o commit trazido pelo merge é o primeiro (B1, commit_de_produto)" 1 ok=false commit_de_produto "$FX_B1"
+  # (captura: com pipefail, o rc 1 do script reprovaria um pipe direto no grep)
+  out="$("${p[@]}" 2>/dev/null)"
+  printf '%s\n' "$out" | grep -q '^motivo=commit_merge' && ok "motivo commit_merge" || falha "motivo"
+  # a passada dos merges vem antes da avaliação commit a commit: o merge é a
+  # causa, não B1 (que ele trouxe)
+  pt_espera "merge depois do portão: commit_merge no merge M, não em B1" 1 ok=false commit_merge "$FX_M"
   fx_portao_em "$d" HEAD; fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/PR.md
   rc_igual "commit só de método pre-e6 mantém válido" 0 "${p[@]}"
   pt_espera "commit só de método pre-e6: ok=true e primeiro_commit=-" 0 ok=true
@@ -2925,7 +2928,19 @@ grupo_portao() {
   s="$(git commit-tree "HEAD^{tree}" -F "$PT_MSG")"
   m="$(git commit-tree "HEAD^{tree}" -p HEAD -p "$s" -F "$PT_MSG")"
   git merge -q --ff-only "$m"
-  pt_espera "commit raiz trazido por merge: commit_de_produto na raiz" 1 ok=false commit_de_produto "$s"
+  pt_espera "commit raiz trazido por merge: commit_merge no merge que o trouxe" 1 ok=false commit_merge "$m"
+  # dois merges no intervalo: o mais antigo
+  pai="$m"
+  m="$(git commit-tree "HEAD^{tree}" -p HEAD -p "$FX_B0" -F "$PT_MSG")"
+  git merge -q --ff-only "$m"
+  pt_espera "dois merges depois do portão: commit_merge no mais antigo" 1 ok=false commit_merge "$pai"
+  # um merge num ramo lateral, trazido por outro merge: fora da linha de
+  # primeiro pai, e é o mais antigo
+  fx_portao_em "$d" HEAD
+  pai="$(git commit-tree "HEAD^{tree}" -p HEAD -p "$FX_B0" -F "$PT_MSG")"
+  m="$(git commit-tree "HEAD^{tree}" -p HEAD -p "$pai" -F "$PT_MSG")"
+  git merge -q --ff-only "$m"
+  pt_espera "merge no ramo lateral trazido por merge: commit_merge no lateral (o mais antigo)" 1 ok=false commit_merge "$pai"
 
   # ---- checkpoints e trabalhos fora do aceito -------------------------------
   fx_portao_em "$d" HEAD
@@ -3040,6 +3055,19 @@ grupo_portao() {
   rc_igual "sem --entrega: rc 64" 64 bash "$VALIDADE" --verificar
   rc_igual "sem --verificar: rc 64" 64 bash "$VALIDADE" --entrega "$FX_ENTREGA"
   rc_igual "--entrega fora de docs/entregas: rc 64" 64 bash "$VALIDADE" --verificar --entrega README.md
+  # dependência ausente: o script sozinho, sem as bibliotecas ao lado
+  mkdir -p "$t/so"; cp "$VALIDADE" "$t/so/validade-do-portao.sh"
+  out="$(bash "$t/so/validade-do-portao.sh" --verificar --entrega "$FX_ENTREGA" 2>/dev/null)"; rc=$?
+  [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | grep -v '^aviso=')" = "$(printf 'ok=false\nmotivo=erro_ambiente\nprimeiro_commit=-')" ] \
+    && printf '%s\n' "$out" | grep -q '^aviso=dependência indisponível' \
+    && ok "dependência ausente: erro_ambiente com aviso=" || falha "dependência ausente — rc=$rc $(printf '%s' "$out" | tr '\n' '|')"
+  # temporário que não se cria
+  TMPDIR="$t/nao-existe" pt_espera "temporário que não se cria: erro_ambiente" 1 ok=false erro_ambiente -
+  # fora de um repositório Git
+  mkdir -p "$t/fora"; cd "$t/fora" || return
+  GIT_CEILING_DIRECTORIES="$t" pt_espera "fora de um repositório Git: erro_ambiente" 1 ok=false erro_ambiente -
+  out="$(GIT_CEILING_DIRECTORIES="$t" bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" 2>/dev/null)"
+  printf '%s\n' "$out" | grep -q '^aviso=fora de um repositório Git' && ok "fora de repositório: aviso=" || falha "fora de repositório sem aviso: $(printf '%s' "$out" | tr '\n' '|')"
   cd "$REPO" || return
 
   # ---- repositório raso ---------------------------------------------------------
