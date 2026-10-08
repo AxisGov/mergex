@@ -37,8 +37,29 @@
 #         ENTREGA.md do commit materializados num temporário, nunca o disco
 #         nem o HEAD. Caminhos de `git diff-tree --no-commit-id -r
 #         --no-renames --ignore-submodules=none -z`, exatos, sem quoting. Um
-#         gitlink (160000) tocado, um caminho com TAB ou quebra de linha, ou um
-#         catálogo que não se calcula: metodo_fora_do_catalogo.
+#         modo fora de arquivo regular (gitlink 160000, link simbólico 120000)
+#         em qualquer lado, um caminho com TAB, quebra de linha ou outro
+#         caractere de controle, ou um catálogo que não se calcula:
+#         metodo_fora_do_catalogo;
+#       * não toca o plano: `tasks.md`, `sprint.md`, `fases.md` ou
+#         `00-PLANEJAMENTO.md` em qualquer nível das pastas candidatas do
+#         trabalho (docs/sprintx/features/<id>, docs/<id>,
+#         docs/manutencao/<id>) dá metodo_fora_do_catalogo, mesmo estando no
+#         catálogo do checkpoint: o plano mudado depois do portão não foi
+#         avaliado pelo E2 ("qualquer commit de plano invalida"). O
+#         catalogo-de-metodo.sh não muda: o checkpoint continua podendo
+#         persistir o plano ANTES do portão.
+#
+# Limites (riscos residuais conhecidos):
+#   - Portão reposicionado por commit de método: o ENTREGA.md está no catálogo
+#     de pre-e6/e8, então um commit de método pode regravar `portao_sha` para
+#     um commit posterior (até um de produto) e o portão volta a valer. É
+#     indistinguível do fluxo legítimo "E2 avalia P, grava portao_sha: P e o
+#     pre-e6 persiste" — mesmo grafo, mesmo conteúdo. A validade prova que
+#     nada mudou depois de portao_sha, não que um E2 rodou em portao_sha
+#     (como já valia para `portao: pronto` editado à mão). O teste
+#     `residual: portão reposicionado por commit de método` fixa este
+#     comportamento (rc 0).
 #
 # Saída (stdout), rc 0:
 #   ok=true
@@ -237,8 +258,19 @@ while IFS= read -r c <&3; do
   g diff-tree --no-commit-id -r --root --raw -z --no-abbrev --no-renames --ignore-submodules=none "$c" > "$TMP_DIR/toca-$i" 2>/dev/null \
     || { aviso "diff-tree de $c não calculável"; invalido metodo_fora_do_catalogo "$c"; }
   while IFS= read -r -d '' cab <&4 && IFS= read -r -d '' p <&4; do
-    case "$p" in *"$NL"*|*"$TAB"*) invalido metodo_fora_do_catalogo "$c" ;; esac
-    case "$cab" in ':160000 '*|':'*' 160000 '*) invalido metodo_fora_do_catalogo "$c" ;; esac # guarda:PTPROD
+    # NL faria o grep -Fx casar uma linha do caminho com o catálogo
+    case "$p" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) invalido metodo_fora_do_catalogo "$c" ;; esac # guarda:PTPROD
+    # `:<modo origem> <modo destino> ...`: só arquivo regular (ou ausente)
+    mo="${cab#:}"; md="${mo#* }"; mo="${mo%% *}"; md="${md%% *}"
+    case "$mo" in 000000|100644|100755) ;; *) invalido metodo_fora_do_catalogo "$c" ;; esac # guarda:PTPROD
+    case "$md" in 000000|100644|100755) ;; *) invalido metodo_fora_do_catalogo "$c" ;; esac # guarda:PTPROD
+    # o plano depois do portão não foi avaliado pelo E2
+    for pl in "docs/sprintx/features/$TRABALHO" "docs/$TRABALHO" "docs/manutencao/$TRABALHO"; do
+      case "$p" in
+        "$pl"/*/tasks.md|"$pl"/*/sprint.md|"$pl"/*/fases.md|"$pl"/*/00-PLANEJAMENTO.md|"$pl"/tasks.md|"$pl"/sprint.md|"$pl"/fases.md|"$pl"/00-PLANEJAMENTO.md)
+          invalido metodo_fora_do_catalogo "$c" ;; # guarda:PTPROD
+      esac
+    done
     grep -Fxq -e "$p" "$TMP_DIR/catalogo-$i" || invalido metodo_fora_do_catalogo "$c" # guarda:PTPROD
   done 4< "$TMP_DIR/toca-$i"
   rm -rf "$arv" "$arv.lista" "$arv.pasta"

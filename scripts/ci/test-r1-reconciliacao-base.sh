@@ -2879,7 +2879,7 @@ _pt_entrega_commit() {
 }
 
 grupo_portao() {
-  local d t p out rc antes c c9 m s pai solto filho e
+  local d t p out rc antes c c9 m s pai solto filho e e2
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   d="$(mktemp -d)"; t="$(mktemp -d)"; TMPS="$TMPS $d $t"; PT_MSG="$t/msg"; PT_ENTREGA=""
   fx_cenario "$d" || { falha "cenário não montou"; return; }
@@ -2993,6 +2993,78 @@ grupo_portao() {
   printf '# PR\n' > docs/entregas/ft-rec/PR.md; git add docs/entregas/ft-rec/PR.md
   printf 'docs(mergex): pr de volta\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
 
+  # ---- link simbólico num caminho do catálogo ---------------------------------
+  fx_portao_em "$d" HEAD
+  git rm -q docs/entregas/ft-rec/QA-PACOTE.md
+  ln -s ../../../README.md docs/entregas/ft-rec/QA-PACOTE.md; git add docs/entregas/ft-rec/QA-PACOTE.md
+  printf 'docs(mergex): qa\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  [ "$(git ls-tree HEAD docs/entregas/ft-rec/QA-PACOTE.md | cut -c1-6)" = 120000 ] && ok "controle: QA-PACOTE.md é link (120000)" || falha "controle: QA-PACOTE.md não é link"
+  pt_espera "pre-e6 com link simbólico num caminho do catálogo invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  # o portão com o link na árvore; o commit seguinte troca o link por arquivo
+  # (modo de origem 120000)
+  fx_portao_em "$d" HEAD
+  rm -f docs/entregas/ft-rec/QA-PACOTE.md; printf '# QA\n' > docs/entregas/ft-rec/QA-PACOTE.md; git add docs/entregas/ft-rec/QA-PACOTE.md
+  printf 'docs(mergex): qa de volta\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "pre-e6 trocando link simbólico do catálogo por arquivo invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+
+  # ---- renomeação de produto para um caminho livre do catálogo -----------------
+  fx_portao_em "$d" HEAD
+  git mv README.md docs/sprintx/features/ft-rec/00-DECISOES.md
+  printf 'docs(mergex): decisoes\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "pre-e6 renomeando produto para caminho livre do catálogo invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  # o inverso: artefato do catálogo renomeado para produto (com -M, o registro
+  # de renomeação traria a origem do catálogo e esconderia o destino)
+  fx_portao_em "$d" HEAD
+  git mv docs/entregas/ft-rec/PR.md src/pr-renomeado.ts
+  printf 'docs(mergex): pr para produto\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  pt_espera "pre-e6 renomeando artefato do catálogo para produto invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  git mv src/pr-renomeado.ts docs/entregas/ft-rec/PR.md
+  printf 'docs(mergex): pr de volta\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+
+  # ---- plano depois do portão ------------------------------------------------------
+  fx_portao_em "$d" HEAD
+  e2="docs/sprintx/features/ft-rec/sprint-01/tasks.md"
+  sed 's/^    status: concluida$/    status: pendente/' "$e2" > "$e2.tmp" && cat "$e2.tmp" > "$e2" && rm -f "$e2.tmp"
+  git add -- "$e2"
+  printf 'docs(mergex): plano\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  git show HEAD:"$e2" | grep -q '^    status: pendente$' && ok "controle: T-01.01 voltou a pendente" || falha "controle: T-01.01 não mudou"
+  rc_igual "pre-e6 que volta T-01.01 a pendente invalida" 1 "${p[@]}"
+  pt_espera "pre-e6 alterando tasks.md: metodo_fora_do_catalogo" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD
+  fx_commit_metodo "$d" e8 docs/sprintx/features/ft-rec/sprint-02/tasks.md
+  rc_igual "e8 que cria sprint-02/tasks.md invalida" 1 "${p[@]}"
+  pt_espera "e8 criando sprint-02/tasks.md: metodo_fora_do_catalogo" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD
+  fx_commit_metodo "$d" pre-e6 docs/sprintx/features/ft-rec/00-PLANEJAMENTO.md
+  pt_espera "pre-e6 criando 00-PLANEJAMENTO.md: metodo_fora_do_catalogo" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD
+  fx_commit_metodo "$d" pre-e6 docs/sprintx/features/ft-rec/sprint-01/fases.md
+  pt_espera "pre-e6 criando sprint-01/fases.md: metodo_fora_do_catalogo" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+
+  # ---- caminho com quebra de linha ou TAB ----------------------------------------
+  fx_portao_em "$d" HEAD
+  c="evil
+docs/entregas/ft-rec/PR.md"
+  mkdir -p "$(dirname "$c")"; printf 'export const x = 1;\n' > "$c"; git add -- "$c"
+  printf 'docs(mergex): nl\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  rc_igual "pre-e6 com caminho evil<NL>docs/entregas/ft-rec/PR.md invalida" 1 "${p[@]}"
+  pt_espera "caminho com NL: metodo_fora_do_catalogo" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD
+  c="docs/entregas/ft-rec/PR	.md"
+  printf 'x\n' > "$c"; git add -- "$c"
+  printf 'docs(mergex): tab\n\nTrabalho: ft-rec\nMetodo: pre-e6\n' > "$PT_MSG"; git commit -q -F "$PT_MSG"
+  rc_igual "pre-e6 com caminho com TAB invalida" 1 "${p[@]}"
+  pt_espera "caminho com TAB: metodo_fora_do_catalogo" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+
+  # ---- residual: o portão se reposiciona com um commit de método ---------------
+  # (indistinguível de "E2 em P, depois pre-e6": fixa o comportamento atual)
+  fx_portao_em "$d" HEAD
+  printf 'export const residual = 1;\n' > src/residual.ts; git add src/residual.ts
+  git commit -q -m "feat: produto depois do portão"
+  pt_espera "controle: produto depois do portão invalida" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+  fx_portao_em "$d" HEAD
+  rc_igual "residual: portão reposicionado por commit de método" 0 "${p[@]}"
+
   # ---- caminho especial (espaço, acento, apóstrofo; quotepath true) ----------
   git config core.quotepath true
   fx_portao_em "$d" HEAD
@@ -3014,6 +3086,10 @@ grupo_portao() {
   pt_espera "portao null: portao_nao_pronto" 1 ok=false portao_nao_pronto -
   _pt_entrega_commit '/^portao: /d'
   pt_espera "portao ausente: portao_nao_pronto" 1 ok=false portao_nao_pronto -
+  fx_portao_em "$d" HEAD
+  _pt_entrega_commit 's/^kind: entrega$/kind: outro/'
+  pt_espera "kind diferente de entrega em HEAD:ENTREGA: portao_nao_pronto" 1 ok=false portao_nao_pronto -
+  _pt_entrega_commit 's/^kind: outro$/kind: entrega/'
   fx_portao_em "$d" HEAD
   _pt_entrega_commit 's/^portao_sha:.*/portao_sha: null/'
   pt_espera "portao_sha null: portao_sha_ausente" 1 ok=false portao_sha_ausente -
