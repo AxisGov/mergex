@@ -1689,13 +1689,79 @@ grupo_cadeia() {
   reprova "X9: resíduo + frase no branch da última: rc 5, sem conclusão" 5 "branch ($frase) diverge de ENTREGA.branch" -- "$FX_NOVO3"
   grep -q '^estado: ativa$' "$AR" && ok "X9: o 001 continua ativa" || falha "X9: o 001 mudou"
   cd "$REPO" || return
-  # X7: sobra rastreada nunca é removida pelo registro
+  # X7: sobra rastreada nunca é removida pelo registro. O commit da sobra tira
+  # HEAD do merge: o registro roda com --merge M2, o mesmo M da última, para
+  # chegar à conclusão; a cadeia a reprova (não é resíduo) antes dela.
   d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
   printf 'commitada\n' > "$AR.superada.99"
   git add -f -- "$AR.superada.99" && git commit -q -m "sobra commitada" -- "$AR.superada.99" || falha "X7: commit da sobra"
-  reprova "X7: sobra rastreada: rc 5 com instrução, nada removido" 5 "sobra rastreada: RECONCILIACAO-BASE-001.md.superada.99; remova-a com um commit" -- "$FX_NOVO3"
-  { [ -f "$AR.superada.99" ] && ! git status --porcelain=v1 | grep -q '^ D'; } && ok "X7: a sobra rastreada ficou" || falha "X7: a sobra rastreada foi removida"
-  grep -q '^estado: ativa$' "$AR" && ok "X7: o 001 continua ativa" || falha "X7: o 001 mudou"
+  cp "$AR" "$t/x7-a1.md"
+  reprova "X7: sobra rastreada (--merge M2): rc 5 pela cadeia, nada removido" 5 \
+    "cadeia existente: RECONCILIACAO-BASE-001.md.superada.99: sobra rastreada: RECONCILIACAO-BASE-001.md.superada.99; remova-a com um commit" --merge "$FX_M2" -- "$FX_NOVO3"
+  { [ -f "$AR.superada.99" ] && [ "$(cat "$AR.superada.99")" = commitada ] && ! git status --porcelain=v1 | grep -q '^ D'; } \
+    && ok "X7: a sobra rastreada ficou, intacta, sem ' D'" || falha "X7: a sobra rastreada foi removida ou mudou"
+  { grep -q '^estado: ativa$' "$AR" && cmp -s "$AR" "$t/x7-a1.md"; } && ok "X7: o 001 continua ativa, intacto" || falha "X7: o 001 mudou"
+  cd "$REPO" || return
+  # sobra que não é arquivo regular (diretório vazio, link simbólico): não é
+  # resíduo; rc 5 `sobra inválida`, validada antes de qualquer escrita
+  local tipo_sobra
+  for tipo_sobra in diretorio link; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+    cp "$AR" "$t/si-a1.md"; printf 'alvo\n' > "$t/si-alvo"
+    case "$tipo_sobra" in
+      diretorio) mkdir "$AR.superada.88" ;;
+      link) ln -s "$t/si-alvo" "$AR.superada.88" ;;
+    esac
+    ls_antes="$(ls -A docs/entregas/ft-rec)"
+    out="$("${v[@]}" 2>&1)"; c=$?
+    { [ "$c" = 5 ] && printf '%s\n' "$out" | grep -Fq 'sobra inválida: RECONCILIACAO-BASE-001.md.superada.88; remova-a'; } \
+      && ok "sobra $tipo_sobra: --verificar rc 5 'sobra inválida'" || falha "sobra $tipo_sobra: --verificar rc=$c $(printf '%s' "$out" | tr '\n\t' '|>')"
+    reprova "sobra $tipo_sobra: rc 5 'sobra inválida' pela cadeia, nada gravado" 5 \
+      "cadeia existente: RECONCILIACAO-BASE-001.md.superada.88: sobra inválida: RECONCILIACAO-BASE-001.md.superada.88; remova-a" -- "$FX_NOVO3"
+    { grep -q '^estado: ativa$' "$AR" && cmp -s "$AR" "$t/si-a1.md"; } && ok "sobra $tipo_sobra: o 001 continua ativa, intacto" || falha "sobra $tipo_sobra: o 001 mudou"
+    [ "$(ls -A docs/entregas/ft-rec)" = "$ls_antes" ] && ok "sobra $tipo_sobra: pasta da entrega como antes" || falha "sobra $tipo_sobra: pasta mudou: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
+    if [ "$tipo_sobra" = diretorio ]; then
+      [ -d "$AR.superada.88" ] && ok "sobra diretorio: o diretório ficou" || falha "sobra diretorio: removido"
+    else
+      { [ -L "$AR.superada.88" ] && [ "$(cat "$t/si-alvo")" = alvo ]; } && ok "sobra link: o link e o alvo ficaram" || falha "sobra link: link ou alvo mudou"
+    fi
+    cd "$REPO" || return
+  done
+  # o prefixo da sobra é exatamente o nome de um artefato da cadeia
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  cp "$AR" "$t/sp-a1.md"
+  cp "$AR" docs/entregas/ft-rec/RECONCILIACAO-BASE-009.md.superada.123
+  reprova "sobra de 009 sem 009 na cadeia: rc 5 pela cadeia, nada completado" 5 \
+    "cadeia existente: RECONCILIACAO-BASE-009.md.superada.123: sobra sem artefato na cadeia: RECONCILIACAO-BASE-009.md.superada.123; remova-a" -- "$FX_NOVO3"
+  { [ -f docs/entregas/ft-rec/RECONCILIACAO-BASE-009.md.superada.123 ] && cmp -s "$AR" "$t/sp-a1.md"; } \
+    && ok "sobra de 009: ela ficou e o 001 continua ativa" || falha "sobra de 009: removida ou 001 mudou"
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-009.md.superada.123
+  cp "$AR" docs/entregas/ft-rec/RECONCILIACAO-BASE-xyz.superada.5
+  reprova "RECONCILIACAO-BASE-xyz.superada.5 não é sobra (registro: pasta suja)" 3 "RECONCILIACAO-BASE-xyz.superada.5" -- "$FX_NOVO3"
+  out="$("${v[@]}" 2>&1)"; c=$?
+  { [ "$c" = 5 ] && printf '%s\n' "$out" | grep -Fq 'RECONCILIACAO-BASE-xyz.superada.5: nome fora do padrão'; } \
+    && ok "RECONCILIACAO-BASE-xyz.superada.5 não é sobra (verificar: nome fora do padrão)" || falha "xyz: rc=$c $(printf '%s' "$out" | tr '\n\t' '|>')"
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-xyz.superada.5
+  rc_igual "prefixo: removidas as duas, o mesmo M completa" 0 "${r[@]}" -- "$FX_NOVO3"
+  grep -q '^estado: superada$' "$AR" && ok "prefixo: o 001 ficou superada" || falha "prefixo: o 001 não ficou superada"
+  cd "$REPO" || return
+  # a remoção da sobra falha: nenhum erro deixa o 001 superada com rc ≠ 0
+  # (as sobras saem antes da marcação); a reexecução, sem a falha, completa
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  cp "$AR" "$AR.superada.321"; cp "$AR" "$t/rm-a1.md"
+  mkdir -p "$t/shim-rm"
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in *.superada.[0-9]*) echo "rm: recusado de propósito" >&2; exit 1 ;; esac; done\nexec %s "$@"\n' "$(command -v rm)" > "$t/shim-rm/rm"
+  chmod +x "$t/shim-rm/rm"
+  out="$(env PATH="$t/shim-rm:$PATH" "${r[@]}" -- "$FX_NOVO3" 2>&1 >/dev/null)"; c=$?
+  { [ "$c" = 1 ] && case "$out" in *"não foi possível remover a sobra RECONCILIACAO-BASE-001.md.superada.321"*) true ;; *) false ;; esac; } \
+    && ok "rm da sobra falha: rc 1 com instrução" || falha "rm da sobra falha: rc=$c $out"
+  { grep -q '^estado: ativa$' "$AR" && cmp -s "$AR" "$t/rm-a1.md"; } && ok "rm da sobra falha: o 001 continua ativa, intacto" || falha "rm da sobra falha: o 001 ficou superada com rc ≠ 0"
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md.superada.* 2>/dev/null | grep -v '\.superada\.321$' | grep -q . \
+    && falha "rm da sobra falha: ficou temporário do anterior" || ok "rm da sobra falha: nenhum temporário além da sobra"
+  bash "$TRAVA" --status >/dev/null 2>&1 && ok "rm da sobra falha: trava livre" || falha "rm da sobra falha: trava presa"
+  out="$("${r[@]}" -- "$FX_NOVO3" 2>&1)"; c=$?
+  { [ "$c" = 0 ] && printf '%s\n' "$out" | grep -Fxq completado=superada && grep -q '^estado: superada$' "$AR" && [ ! -e "$AR.superada.321" ]; } \
+    && ok "rm da sobra falha: a reexecução completa" || falha "rm da sobra falha: reexecução rc=$c $(printf '%s' "$out" | tr '\n' '|')"
   cd "$REPO" || return
 
   # três elos com a ANTEPENÚLTIMA ativa: não é resíduo, não completa

@@ -43,7 +43,11 @@
 #   artefato lido (senão rc 5 `cadeia ilegível`), nenhuma prova reprovada (rc
 #   4), e as únicas falhas de contrato são a penúltima com `estado: ativa` e
 #   sobras não rastreadas. Sobra rastreada: rc 5 `sobra rastreada: <nome>;
-#   remova-a com um commit`. O anterior `superada` só é preparado depois do
+#   remova-a com um commit`. Só é sobra um arquivo regular cujo prefixo é o
+#   nome de um artefato da cadeia; diretório, link ou outro tipo: rc 5 `sobra
+#   inválida: <nome>; remova-a`; prefixo fora da cadeia: rc 5 `sobra sem
+#   artefato na cadeia: <nome>; remova-a`. A conclusão confere tudo antes de
+#   qualquer escrita. O anterior `superada` só é preparado depois do
 #   ponto de commit; artefato órfão junto de sobra nomeia as duas na
 #   instrução.
 #   Calcula as condições estruturais, as quatro provas de cada caminho dado e o
@@ -223,6 +227,20 @@ INTERROMPIDO='registro interrompido: rode --registrar de novo com o mesmo --merg
 sobra_superada() {
   case "$1" in RECONCILIACAO-BASE-[0-9][0-9][0-9].md.superada.[0-9]*) ;; *) return 1 ;; esac
   case "${1##*.superada.}" in *[!0-9]*) return 1 ;; esac # guarda:SOBRA
+  return 0
+}
+
+# sobra_valida <pasta> <nome> — a sobra (nome já casado por sobra_superada) é
+# um arquivo regular (nunca diretório, link simbólico ou outro tipo) e o
+# prefixo é exatamente o nome de um artefato da cadeia na pasta. Senão define
+# SOBRA_ERRO e devolve 1: não é resíduo, e nada a remove sozinho.
+SOBRA_ERRO=""
+sobra_valida() {
+  local arq="$1/$2" pre="${2%.superada.*}"
+  if [ ! -f "$arq" ] || [ -L "$arq" ]; then SOBRA_ERRO="sobra inválida: $2; remova-a"; return 1; fi # guarda:SOBRA
+  if [ ! -e "$1/$pre" ] && [ ! -L "$1/$pre" ]; then # guarda:SOBRA
+    SOBRA_ERRO="sobra sem artefato na cadeia: $2; remova-a"; return 1
+  fi
   return 0
 }
 
@@ -648,6 +666,9 @@ cadeia_le() {
       if g ls-files --error-unmatch -- "$arq" >/dev/null 2>&1; then
         # rastreada: não é resíduo, e nada a remove sozinho
         motivo 5 contrato "sobra rastreada: $nome; remova-a com um commit" # guarda:SOBRA
+      elif ! sobra_valida "$dir" "$nome"; then
+        # diretório, link, outro tipo ou prefixo fora da cadeia: não é resíduo
+        motivo 5 contrato "$SOBRA_ERRO" # guarda:SOBRA
       else
         motivo 5 contrato "sobra de registro interrompido (o anterior superada preparado e não trocado); com a penúltima ainda ativa, $INTERROMPIDO; senão, remova-a"
         RESIDUO_N=$((RESIDUO_N + 1))
@@ -925,21 +946,31 @@ cadeia_reprovada() {
 
 # completa_interrompido — (reexecução do mesmo M, cadeia só com o resíduo de
 # um registro interrompido depois do ponto de commit, reconhecido pela
-# estrutura) marca a penúltima `superada` e remove as sobras `.superada.<pid>`
-# não rastreadas (cadeia_le só conta como resíduo a não rastreada; a
-# rastreada reprova antes). Define COMPLETADO.
+# estrutura) remove as sobras `.superada.<pid>` e marca a penúltima
+# `superada`. Defesa em profundidade: cadeia_le só conta como resíduo a sobra
+# não rastreada, regular e de um artefato da cadeia; aqui todas as condições
+# são conferidas de novo ANTES de qualquer escrita (rc 5, nada gravado). As
+# sobras saem antes da marcação: depois do `mv` da penúltima nada mais falha,
+# então nenhum erro deixa a penúltima `superada` com rc ≠ 0. Define COMPLETADO.
 completa_interrompido() {
-  local k=$((N_CAD - 1)) arq sobra
+  local k=$((N_CAD - 1)) arq sobra nome
   [ "$(_r "$k" estado)" = ativa ] || para 5 "$(cat "$TMP_DIR/nome$k") não está ativa; nada foi completado"
   arq="$ENTREGA_DIR/$(cat "$TMP_DIR/nome$k")"
+  : > "$TMP_DIR/sobras"
+  for sobra in "$ENTREGA_DIR"/RECONCILIACAO-BASE-*; do
+    nome="${sobra##*/}"
+    sobra_superada "$nome" || continue
+    g ls-files --error-unmatch -- "$sobra" >/dev/null 2>&1 && para 5 "sobra rastreada: $nome; remova-a com um commit; nada foi completado" # guarda:COMPLETA
+    sobra_valida "$ENTREGA_DIR" "$nome" || para 5 "$SOBRA_ERRO; nada foi completado" # guarda:COMPLETA
+    printf '%s\n' "$sobra" >> "$TMP_DIR/sobras"
+  done
+  while IFS= read -r sobra; do
+    rm -f "$sobra" || para 1 "não foi possível remover a sobra ${sobra##*/}; $INTERROMPIDO"
+  done < "$TMP_DIR/sobras"
   prepara_superada "$arq" "$k"
   mv "$TMP_ANT" "$arq" 2>/dev/null || para 1 "não foi possível marcar ${arq##*/} como superada; $INTERROMPIDO" # guarda:COMPLETA
   TMP_ANT=""
   COMPLETADO=superada
-  for sobra in "$ENTREGA_DIR"/RECONCILIACAO-BASE-*; do
-    sobra_superada "${sobra##*/}" || continue
-    rm -f "$sobra" || para 1 "não foi possível remover a sobra ${sobra##*/}"
-  done
 }
 
 # ---------------------------------------------------------------------------
