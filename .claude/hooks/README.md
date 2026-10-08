@@ -91,8 +91,14 @@ subshell, plumbing. Tudo sai do Git, nunca do disco.
 **1. Gatilho largo.** O hook dispara quando o comando contém, como palavra, um
 termo de publicação:
 
-- `push`, `send-pack` ou `subtree`;
+- `push`, `send-pack` ou `subtree`, também na forma do executável do
+  subcomando: `git-push`, `git-send-pack` e `git-subtree`
+  (`/usr/lib/git-core/git-push`, `"$(git --exec-path)"/git-push`);
 - `pr` ou `mr` seguido, em qualquer posição, de `create` ou `new`.
+
+A fronteira antes do termo (ou do `git-`) é o início do comando ou qualquer
+caractere fora de letra, dígito, `_` e `-`: espaço, `/`, aspas. Depois, a
+mesma. Por isso `npm run git-push-notifications` não dispara.
 
 Não importa se o termo está dentro de aspas, função, `xargs` ou subshell. O
 hook não tenta entender o comando para decidir se dispara. Sem termo de
@@ -101,10 +107,16 @@ publicação (`git status`, `npm run push-notifications`), sai na hora.
 **2. Varredura do estado.** O hook varre o repositório do `cwd` e todo
 diretório literal citado no comando que seja outro repositório Git:
 
-- `cd X` e `pushd X`;
+- `cd X` e `pushd X`, com ou sem opções: o diretório é o primeiro argumento
+  que não começa com `-` (`cd -P X`, `cd -L X`, `pushd -n X`), ou o que vem
+  depois de `--` (`cd -- X`);
 - `-C X`, inclusive `env -C X`, e `--chdir X`;
 - `--git-dir=X` e `--work-tree=X`;
 - `GIT_DIR=X`, `GIT_WORK_TREE=X` e `GIT_COMMON_DIR=X`.
+
+Um `X` que é o gitdir de uma worktree vinculada (`<repo>/.git/worktrees/<wt>`)
+não tem árvore própria: o hook resolve o repositório comum
+(`git --git-dir=X rev-parse --git-common-dir`) e varre a partir dele.
 
 Em cada repositório, para **cada branch local**, ele procura o
 `docs/entregas/<id>/ENTREGA.md` da **ponta** dessa branch que declara
@@ -123,22 +135,44 @@ reconciliação pós-E8, §4.5 e §13.5):
 - código fora de 0/1.
 
 A mensagem nomeia a branch, o trabalho, o `motivo` e o `primeiro_commit`, e
-manda rodar o E2 de novo (`/mergex-check`).
+manda rodar o E2 de novo (`/mergex-check`). Se a branch estiver abandonada, a
+outra saída é apagá-la: o portão dela deixa de contar.
 
 A varredura **para na primeira falha**: o hook barra na hora e não valida o
 resto. Uma mesma ponta com o mesmo ENTREGA é validada uma vez só por chamada.
 
 **Tempo e timeout.** Um hook que estoura o `timeout` **não bloqueia**: o
 comando segue. Por isso este hook tem `timeout: 60` no `.claude/settings.json`
-e 60 s no plugin do OpenCode (`TEMPO_POR_HOOK`). Os outros hooks continuam com
-10 s, e o `git-perigoso`, com 30 s. Medido no WSL, com 50 branches:
+e 60 s no plugin do OpenCode (`TEMPO_POR_HOOK`). No Claude Code, os outros
+hooks ficam com 10 s e o `git-perigoso` com 30 s; no OpenCode, todos os outros,
+`git-perigoso` inclusive, ficam no limite único de 10 s (`TEMPO_LIMITE`).
+
+**Prazo próprio, que falha fechado.** Como o timeout do harness libera o
+comando, o hook tem um prazo interno de **45 s**, contado desde o início da
+execução. Ele é verificado antes de cada validade e passado a ela como limite
+(`timeout` do coreutils, quando existe). Estourou: `exit 2` em qualquer modo,
+com a mensagem `varredura do portão excedeu o prazo; rode /mergex-check ou
+apague branches abandonadas`. Só a bancada (`EXPX_HOOKS_BANCADA=1`) pode
+reduzir o prazo, por `EXPX_PORTAO_PRAZO_TESTE`; nunca aumentá-lo.
+
+O custo de cada validade cresce com os commits de método depois do portão.
+Medido no WSL (média de 3 chamadas, `git push origin main` com todos os
+portões válidos):
 
 | Situação | Tempo |
 |---|---|
-| nenhum portão `pronto` | ~0,5 s |
-| 50 portões `pronto` válidos | ~7 s (~0,15 s por validade) |
-| 50 vencidos (para na primeira) | ~0,5 s |
-| comando sem termo de publicação | ~16 ms |
+| 50 portões `pronto` válidos, 2 commits de método cada | ~12 s (~0,24 s por validade) |
+| 20 portões `pronto` válidos, 12 commits de método cada | ~23,6 s (~1,2 s por validade) |
+| 40 portões `pronto` válidos, 12 commits de método cada | barra pelo prazo em ~45 s |
+| 50 portões `pronto` válidos, 12 commits de método cada | barra pelo prazo em ~45 s |
+| nenhum portão `pronto`, 50 branches (medição anterior) | ~0,5 s |
+| 50 vencidos, para na primeira (medição anterior) | ~0,5 s |
+| comando sem termo de publicação | ~20–35 ms |
+
+Branches suportadas antes do prazo: cerca de **185** portões `pronto` válidos
+simultâneos com 2 commits de método cada, e cerca de **38** com 12 commits de
+método cada. Acima disso o hook não libera mais nada: todo comando de
+publicação barra pelo prazo até as branches abandonadas serem apagadas.
 
 A validade não tem "caminho curto" para `portao_sha` igual à revisão: esse caso
 não ocorre. O `ENTREGA.md` da revisão teria de conter o SHA do próprio commit
@@ -200,12 +234,24 @@ adversário.**
   branch local (SHA solto, HEAD destacado, branch só no remoto) não é varrido.
   A exceção é quando ele é a origem explícita de um push para a branch local
   de um trabalho com `pronto`. Destino sem branch local não é checado.
+- **Origem explícita só quando literal.** A checagem da origem explícita lê o
+  refspec no texto do comando. Um refspec que chega por fora do texto
+  (`echo <sha>:feature/x | xargs git push origin`) não é lido; vale só a
+  varredura da ponta local.
 - **Alias de git.** Com `git config alias.p push`, o comando `git p origin
   <branch>` não tem termo de publicação e não dispara o hook.
-- **Tempo.** A varredura roda a validade para cada portão `pronto` válido,
-  cerca de 0,15 s cada. Acima de umas 300 branches com portão `pronto` válido
-  ao mesmo tempo, os 60 s do timeout deixariam de bastar, e um hook que estoura
-  o tempo não bloqueia.
+- **Ofuscação por aspas.** `git pu""sh origin <branch>` é um push para o shell,
+  mas o texto não tem o termo `push` como palavra e o hook não dispara. É a
+  mesma classe do alias.
+- **PR pela API.** `gh api repos/<o>/<r>/pulls -f head=<branch> …` abre um PR
+  sem termo de publicação no comando, e o hook não dispara. Ele só expõe o que
+  já está no remoto: o código chegou lá por um push, que passou pelo hook.
+- **Tempo.** O prazo interno de 45 s falha fechado: acima dele, o hook barra
+  em vez de deixar passar. O custo de cada validade cresce com os commits de
+  método depois do portão (E4, E5, E8 acumulam em branches entregues que
+  ficam locais). Ver a tabela acima: com muitos portões `pronto` válidos ao
+  mesmo tempo, todo comando de publicação passa a ser barrado pelo prazo até
+  as branches abandonadas serem apagadas.
 
 **Recomendação.** A garantia forte é rodar `validade-do-portao.sh` fora do
 agente:

@@ -12,8 +12,9 @@
 # plumbing). Por isso:
 #
 #   1. Gatilho largo: o comando contém, como palavra, um termo de publicação
-#      (`push`, `send-pack`, `subtree`, ou `pr`/`mr` seguido de `create`/`new`),
-#      em qualquer posição — dentro de aspas, função, xargs ou subshell.
+#      (`push`, `send-pack`, `subtree`, também como `git-push` etc., ou
+#      `pr`/`mr` seguido de `create`/`new`), em qualquer posição — dentro de
+#      aspas, função, xargs ou subshell.
 #   2. Varredura: no repositório do cwd e em cada diretório literal citado no
 #      comando que seja outro repositório (`cd X`, `-C X`, `env -C X`,
 #      `--git-dir=X`, `--work-tree=X`, `GIT_DIR=X`), para CADA branch local, o
@@ -30,7 +31,8 @@
 #      b) `null`/`bloqueado` seguem o modo configurado quando o comando
 #         empurra a branch daquele trabalho.
 #   A varredura para na primeira falha. O timeout do hook é 60 s nos dois
-#   harnesses: hook que estoura o tempo não bloqueia.
+#   harnesses, e hook que estoura o tempo não bloqueia: por isso o hook tem
+#   prazo próprio de 45 s, que falha FECHADO (exit 2 em qualquer modo).
 #
 # É uma barreira de AGENTE, não de segurança contra adversário. A garantia
 # forte é rodar validade-do-portao.sh no CI ou num hook `pre-push` (README).
@@ -53,12 +55,31 @@ CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null
 # --------------------------------------------------------------------------
 # 1. Gatilho largo — termo de publicação como palavra, em qualquer lugar
 # --------------------------------------------------------------------------
+# O executável do subcomando também conta: `/usr/lib/git-core/git-push`,
+# `"$(git --exec-path)"/git-push`, `git-send-pack`, `git-subtree`. O `git-` só
+# vale como prefixo do termo, com a mesma fronteira antes (espaço, `/`, aspas).
 P_='(^|[^A-Za-z0-9_-])'; _S='([^A-Za-z0-9_-]|$)'
 tem_termo() {
-  printf '%s' "$CMD" | grep -Eq "${P_}(push|send-pack|subtree)${_S}" && return 0
+  printf '%s' "$CMD" | grep -Eq "${P_}(git-)?(push|send-pack|subtree)${_S}" && return 0
   printf '%s' "$CMD" | grep -Eq "${P_}(pr|mr)[^A-Za-z0-9_-](.*[^A-Za-z0-9_-])?(create|new)${_S}"
 }
 tem_termo || exit 0 # guarda:HKGATILHO
+
+# Prazo próprio, que falha FECHADO. Um hook que estoura o timeout do harness
+# não bloqueia — o comando segue. Por isso a varredura tem prazo interno de
+# 45 s, contado desde o início da execução ($SECONDS), abaixo dos 60 s do
+# harness: verificado antes de cada validade e passado a ela como limite
+# (`timeout`, quando existe). Estourou: exit 2 em qualquer modo.
+# Na bancada (EXPX_HOOKS_BANCADA=1), EXPX_PORTAO_PRAZO_TESTE só REDUZ o prazo;
+# fora dela, é ignorada.
+PRAZO=45 # guarda:HKPRAZO
+if [ "${EXPX_HOOKS_BANCADA:-}" = 1 ]; then
+  case "${EXPX_PORTAO_PRAZO_TESTE:-}" in
+    ''|*[!0-9]*) ;;
+    *) [ "$((10#$EXPX_PORTAO_PRAZO_TESTE))" -lt "$PRAZO" ] && PRAZO="$((10#$EXPX_PORTAO_PRAZO_TESTE))" ;;
+  esac
+fi
+TIMEOUT_BIN="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 DIR_INICIAL="${CWD:-$PWD}"
@@ -91,6 +112,23 @@ ponta() { git -C "$1" rev-parse --verify -q "refs/heads/$2^{commit}" 2>/dev/null
 # Git é ignorado; um valor com expansão não se lê (risco residual, README).
 CANDIDATOS="$DIR_INICIAL
 "
+# dir_cd <cd|pushd> <args...> — DIR_CD recebe o diretório: o primeiro
+# argumento que não começa com `-` (`-P`, `-L`, `-e`, `-@`, `-n` e
+# combinações são opções), ou o que vem depois de `--`.
+DIR_CD=""
+dir_cd() {
+  local t
+  DIR_CD=""
+  shift
+  while [ "$#" -gt 0 ]; do
+    t="$(expx_sem_aspas "$1")"
+    case "$t" in
+      --) DIR_CD="$(expx_sem_aspas "${2:-}")"; return 0 ;;
+      -?*) shift ;;
+      *) DIR_CD="$t"; return 0 ;;
+    esac
+  done
+}
 candidato() {
   local v
   literal "$1" || return 0
@@ -107,7 +145,8 @@ while IFS= read -r SEG; do
   while [ "$#" -gt 0 ]; do
     T="$(expx_sem_aspas "$1")"
     case "$T" in
-      cd|pushd|-C|--chdir|--git-dir|--work-tree) candidato "$(expx_sem_aspas "${2:-}")" ;; # guarda:HKOUTROS
+      cd|pushd) dir_cd "$@"; candidato "$DIR_CD" ;; # guarda:HKOUTROS
+      -C|--chdir|--git-dir|--work-tree) candidato "$(expx_sem_aspas "${2:-}")" ;; # guarda:HKOUTROS
       --chdir=*|--git-dir=*|--work-tree=*|GIT_DIR=*|GIT_WORK_TREE=*|GIT_COMMON_DIR=*) candidato "${T#*=}" ;; # guarda:HKOUTROS
     esac
     shift
@@ -149,15 +188,41 @@ leitura do comando.
 O que fazer:
   - Rode o E2 de novo na branch acima:  /mergex-check
   - PRONTO   → o push e o PR seguem normalmente.
-  - BLOQUEADO → a saída nomeia o que falta e onde corrigir."
+  - BLOQUEADO → a saída nomeia o que falta e onde corrigir.
+  - Se a branch estiver abandonada, apague-a: o portão dela deixa de contar."
+}
+
+# estouro — o prazo interno acabou: exit 2 em qualquer modo
+estouro() {
+  barra_sempre "varredura do portao excedeu o prazo" "mergex/pr-so-com-portao — varredura do portão excedeu o prazo; rode /mergex-check ou apague branches abandonadas
+
+Comando: $CMD
+
+A varredura valida o portão PRONTO de cada branch local, e não terminou em
+${PRAZO} s. Um hook que estoura o timeout do harness deixaria o comando passar
+sem avaliação; por isso este hook barra ao atingir o próprio prazo, em
+qualquer modo.
+
+O que fazer:
+  - Rode o E2 (/mergex-check) nas branches com portão PRONTO, ou
+  - apague as branches locais abandonadas: cada portão PRONTO custa uma
+    validade a cada comando de publicação." # guarda:HKPRAZO
 }
 
 # valida <raiz> <ENTREGA> <revisão> <descrição> — só ok=true COM rc 0 passa;
 # qualquer outra resposta barra na hora, em qualquer modo.
 valida() {
-  local saida rc okv mot pri
+  local saida rc okv mot pri resta
   [ -f "$VALIDADE" ] || falha_portao "$4: validade-do-portao.sh ausente ao lado dos hooks"
-  saida="$(cd "$1" 2>/dev/null && bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$?
+  resta=$((PRAZO - SECONDS))
+  [ "$resta" -gt 0 ] || estouro # guarda:HKPRAZO
+  if [ -n "$TIMEOUT_BIN" ]; then
+    saida="$(cd "$1" 2>/dev/null && "$TIMEOUT_BIN" -k 1 "$resta" bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$?
+    case "$rc" in 124|137) estouro ;; esac
+  else
+    saida="$(cd "$1" 2>/dev/null && bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$?
+  fi
+  [ "$SECONDS" -lt "$PRAZO" ] || estouro # guarda:HKPRAZO
   okv="$(printf '%s\n' "$saida" | sed -n 's/^ok=//p' | head -1)"
   mot="$(printf '%s\n' "$saida" | sed -n 's/^motivo=//p' | head -1)"
   pri="$(printf '%s\n' "$saida" | sed -n 's/^primeiro_commit=//p' | head -1)"
@@ -173,7 +238,8 @@ VALIDADOS=""    # |<ponta>:<ENTREGA>| já validados nesta chamada
 # varre <raiz> — para cada branch local, o ENTREGA.md pronto da ponta dela
 varre() {
   local top="$1" refs objs pronto cand obj path br id
-  refs="$(git -C "$top" for-each-ref --format='%(objectname) %(refname:short)' refs/heads 2>/dev/null)" # guarda:HKVARRE
+  # lstrip=2, nunca short: com uma tag homônima, `short` devolve `heads/<b>`.
+  refs="$(git -C "$top" for-each-ref --format='%(objectname) %(refname:lstrip=2)' refs/heads 2>/dev/null)" # guarda:HKVARRE
   [ -n "$refs" ] || return 0
   objs="$(printf '%s\n' "$refs" | cut -d' ' -f1 | sort -u)"
   # Um `git grep` só, sobre as pontas: `branch:` e `portao:` de cada
@@ -212,10 +278,22 @@ $cand
 EOF
 }
 
+# top_pelo_comum <gitdir> — o gitdir de uma worktree vinculada
+# (`<repo>/.git/worktrees/<wt>`) não tem árvore própria: resolve o repositório
+# comum (`--git-common-dir`) e varre a partir da árvore principal dele.
+top_pelo_comum() {
+  local c
+  c="$(cd "$1" 2>/dev/null && git --git-dir=. rev-parse --git-common-dir 2>/dev/null)" || return 1
+  [ -n "$c" ] || return 1
+  c="$(cd "$1" 2>/dev/null && cd "$c" 2>/dev/null && pwd -P)" || return 1
+  git -C "$(dirname "$c")" rev-parse --show-toplevel 2>/dev/null
+}
+
 while IFS= read -r D; do
   [ -n "$D" ] || continue
   TOP="$(git -C "$D" rev-parse --show-toplevel 2>/dev/null)" \
-    || TOP="$(git -C "$(dirname "$D")" rev-parse --show-toplevel 2>/dev/null)" || continue
+    || TOP="$(git -C "$(dirname "$D")" rev-parse --show-toplevel 2>/dev/null)" \
+    || TOP="$(top_pelo_comum "$D")" || continue # guarda:HKCOMUM
   [ -n "$TOP" ] || continue
   GCD="$(cd "$TOP" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" || continue
   case "$VISTOS" in *"|$GCD|"*) continue ;; esac
@@ -296,7 +374,7 @@ avalia_push() {
     while IFS= read -r b; do
       [ -n "$b" ] && item "$REPO" "$b" "$(ponta "$REPO" "$b")"
     done <<EOF
-$(git -C "$REPO" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+$(git -C "$REPO" for-each-ref --format='%(refname:lstrip=2)' refs/heads 2>/dev/null)
 EOF
     return 0
   fi
@@ -390,7 +468,7 @@ while IFS= read -r SEG; do
   while [ "$#" -gt 0 ]; do
     case "$(expx_sem_aspas "$1")" in
       cd|pushd)
-        V="$(expx_sem_aspas "${2:-}")"
+        dir_cd "$@"; V="$DIR_CD"
         if literal "$V"; then DIR_SEG="$(absoluto "$DIR_SEG" "$V")" || DIR_SEG=""; else DIR_SEG=""; fi ;;
     esac
     shift

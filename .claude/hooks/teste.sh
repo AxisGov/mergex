@@ -764,6 +764,17 @@ caso "vencido: gh pr new barra (N5)"        mergex/pr-so-com-portao.sh "$(bash_j
 caso "vencido: glab mr new barra (N5)"      mergex/pr-so-com-portao.sh "$(bash_json 'glab mr new --fill')" 2
 caso "vencido: send-pack barra (N6)"        mergex/pr-so-com-portao.sh "$(bash_json 'git send-pack origin refs/heads/feature/ft-02')" 2
 caso "vencido: subtree push barra (N6)"     mergex/pr-so-com-portao.sh "$(bash_json 'git subtree push --prefix src origin feature/ft-02')" 2
+# O executavel do subcomando (exec-path) tambem e termo de publicacao (P2)
+caso "vencido: /usr/lib/git-core/git-push barra (P2)" mergex/pr-so-com-portao.sh "$(bash_json '/usr/lib/git-core/git-push origin feature/ft-02')" 2
+caso "vencido: \"\$(git --exec-path)\"/git-push barra (P2)" mergex/pr-so-com-portao.sh "$(bash_json '"$(git --exec-path)"/git-push origin feature/ft-02')" 2
+caso "vencido: git-send-pack barra (P2)"    mergex/pr-so-com-portao.sh "$(bash_json 'git-send-pack origin refs/heads/feature/ft-02')" 2
+caso "vencido: 'git-subtree' conta como termo (P2)" mergex/pr-so-com-portao.sh "$(bash_json "'/usr/lib/git-core/git-subtree' --help")" 2
+caso "sem termo: npm run git-push-notifications passa com portao vencido" mergex/pr-so-com-portao.sh "$(bash_json 'npm run git-push-notifications')" 0
+# Tag com o mesmo nome da branch: a varredura le o nome da branch sem
+# ambiguidade (refname:lstrip=2, nunca refname:short) (P3)
+git tag feature/ft-02 main >/dev/null 2>&1
+caso "tag homonima da branch: push -u origin HEAD barra (P3)" mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin HEAD')" 2
+git tag -d feature/ft-02 >/dev/null 2>&1
 entrega outro feature/outro
 touch -t 203001010000 docs/entregas/outro/ENTREGA.md
 caso "vencido: entrega de outro trabalho mais recente nao libera" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
@@ -805,6 +816,8 @@ caso "custo: git log --grep push barra com portao vencido" mergex/pr-so-com-port
 caso "custo: push de outra branch barra com portao vencido" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main')" 2
 mensagem_cita "custo: a mensagem explica que todo termo de publicacao e barrado" "$(bash_json 'echo push')" \
   "qualquer comando com termo de publicação" /mergex-check
+mensagem_cita "custo: a mensagem sugere apagar a branch abandonada" "$(bash_json 'echo push')" \
+  "Se a branch estiver abandonada, apague-a"
 caso "sem termo de publicacao: git status passa"           mergex/pr-so-com-portao.sh "$(bash_json 'git status')" 0
 caso "sem termo de publicacao: npm run push-notifications" mergex/pr-so-com-portao.sh "$(bash_json 'npm run push-notifications')" 0
 
@@ -835,6 +848,18 @@ caso "fora de repositorio: git push sem citar repositorio" mergex/pr-so-com-port
 HOOK_CWD="$SEMX_T"
 caso "repo sem MergeX: env -C <dir vencido> git push (N3)" mergex/pr-so-com-portao.sh "$(bash_json "env -C $HIST_T git push")" 2
 caso "repo sem MergeX: push proprio nao bloqueia" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin dev')" 0
+# Opcoes de `cd`/`pushd` nao sao o diretorio (P1)
+caso "repo sem MergeX: cd -- <wt> && push (P1)"  mergex/pr-so-com-portao.sh "$(bash_json "cd -- $WTM_T && $PUSH_FT")" 2
+caso "repo sem MergeX: cd -P <wt> && push (P1)"  mergex/pr-so-com-portao.sh "$(bash_json "cd -P $WTM_T && $PUSH_FT")" 2
+caso "repo sem MergeX: cd -L <wt>; push (P1)"    mergex/pr-so-com-portao.sh "$(bash_json "cd -L $WTM_T; $PUSH_FT")" 2
+caso "repo sem MergeX: cd -eP -- <wt> && push (P1)" mergex/pr-so-com-portao.sh "$(bash_json "cd -eP -- $WTM_T && $PUSH_FT")" 2
+caso "repo sem MergeX: pushd -n <wt> && push (P1)" mergex/pr-so-com-portao.sh "$(bash_json "pushd -n $WTM_T && $PUSH_FT")" 2
+# GIT_DIR/--git-dir no gitdir de uma worktree vinculada: o repositorio comum
+# e varrido (P4)
+GD_WTM="$(git -C "$WTM_T" rev-parse --absolute-git-dir)"
+HOOK_CWD="$SEMGIT_T"
+caso "fora de repositorio: GIT_DIR=<gitdir de worktree vinculada> (P4)" mergex/pr-so-com-portao.sh "$(bash_json "GIT_DIR=$GD_WTM git push origin feature/ft-02")" 2
+caso "fora de repositorio: --git-dir=<gitdir de worktree vinculada> (P4)" mergex/pr-so-com-portao.sh "$(bash_json "git --git-dir=$GD_WTM push origin feature/ft-02")" 2
 HOOK_CWD="$HIST_T"
 git worktree remove --force "$WTM_T" || exit 1
 git worktree remove --force "$WTB_T" || exit 1
@@ -858,7 +883,9 @@ for C in 'git push' 'git push -u origin feature/ft-02' 'git push origin HEAD:fea
          'git push origin main' 'git push --tags' 'git push --all origin' \
          'GIT_DIR=.git git push origin feature/ft-02' 'cd $DIR_X && git push origin feature/ft-02' \
          "cd $HIST_T && git push origin feature/ft-02" 'echo push' 'git log --grep push' \
-         'git commit -m "antes do git push"' 'echo "git push origin feature/ft-02"' 'docker push img'; do
+         'git commit -m "antes do git push"' 'echo "git push origin feature/ft-02"' 'docker push img' \
+         '/usr/lib/git-core/git-push origin feature/ft-02' '"$(git --exec-path)"/git-push origin feature/ft-02' \
+         "cd -P $HIST_T && git push origin feature/ft-02" "cd -- $HIST_T && git push origin feature/ft-02"; do
   caso "portao valido: $C" mergex/pr-so-com-portao.sh "$(bash_json "$C")" 0
 done
 # Origem explicita para a branch de um trabalho com `pronto`: quando nao e a
@@ -960,6 +987,50 @@ printf '#!/usr/bin/env bash\nexit 64\n' > "$STUB_T"
 caso "validade com uso invalido e pronto barra"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 printf '#!/usr/bin/env bash\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 1\n' > "$STUB_T"
 caso "validade ok=true com rc 1 barra"             mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+# Prazo proprio (P6): timeout do harness LIBERA o comando, entao o hook tem um
+# prazo interno de 45 s que falha FECHADO. Na bancada, EXPX_PORTAO_PRAZO_TESTE
+# so reduz o prazo (nunca o relaxa), e so vale com EXPX_HOOKS_BANCADA=1.
+printf '#!/usr/bin/env bash\nsleep 8\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
+export EXPX_HOOKS_BANCADA=1 EXPX_PORTAO_PRAZO_TESTE=1
+T0_PRAZO=$SECONDS
+caso "prazo estourado barra (P6)"                  mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+valor "prazo estourado: a validade lenta e interrompida" "$([ $((SECONDS - T0_PRAZO)) -lt 6 ] && echo sim || echo nao)" sim
+mensagem_cita "prazo estourado: a mensagem" "$(bash_json "$PUSH_FT")" \
+  "varredura do portão excedeu o prazo; rode /mergex-check ou apague branches abandonadas"
+modo_portao desligado
+caso "prazo estourado barra tambem em desligado (P6)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+modo_portao aviso
+# Prazo ja esgotado antes da validade: barra sem chama-la
+PRAZO_CHAMADAS_T="$SEMGIT_T/chamadas-prazo"
+: > "$PRAZO_CHAMADAS_T"
+printf '#!/usr/bin/env bash\necho x >> %s\nsleep 8\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' "$PRAZO_CHAMADAS_T" > "$STUB_T"
+EXPX_PORTAO_PRAZO_TESTE=0
+caso "prazo esgotado antes da validade barra (P6)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+valor "prazo esgotado: a validade nao e chamada" "$(wc -l < "$PRAZO_CHAMADAS_T" | tr -d ' ')" 0
+# Um `timeout` falso no PATH registra o limite que o hook passa a validade.
+FALSO_T="$SEMGIT_T/falso-timeout"
+mkdir -p "$FALSO_T"
+printf '#!/usr/bin/env bash\n[ "$1" = -k ] && shift 2\necho "$1" >> %s/limites\nshift\n[ -n "${FALSO_TIMEOUT_124:-}" ] && exit 124\nexec "$@"\n' "$FALSO_T" > "$FALSO_T/timeout"
+chmod +x "$FALSO_T/timeout"
+printf '#!/usr/bin/env bash\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
+PATH_REAL_T="$PATH"; export PATH="$FALSO_T:$PATH"
+EXPX_PORTAO_PRAZO_TESTE=100
+: > "$FALSO_T/limites"
+caso "prazo de teste acima de 45 (P6): o portao valido passa" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+valor "prazo de teste nunca relaxa o prazo: o limite passado fica em 45 s ou menos" \
+  "$(awk 'NR == 1 { print ($1 >= 1 && $1 <= 45) ? "sim" : "nao:" $1 }' "$FALSO_T/limites")" sim
+# A validade interrompida pelo limite (rc 124) e estouro do prazo, nao erro
+export FALSO_TIMEOUT_124=1
+mensagem_cita "validade interrompida pelo limite: a mensagem e a do prazo (P6)" "$(bash_json "$PUSH_FT")" \
+  "varredura do portão excedeu o prazo"
+unset FALSO_TIMEOUT_124
+export PATH="$PATH_REAL_T"
+EXPX_PORTAO_PRAZO_TESTE=0
+unset EXPX_HOOKS_BANCADA
+printf '#!/usr/bin/env bash\nsleep 2\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
+caso "fora da bancada o prazo de teste e ignorado (P6)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+unset EXPX_PORTAO_PRAZO_TESTE
+valor "prazo padrao do hook e 45 s" "$(grep -c '^PRAZO=45 # guarda:HKPRAZO$' "$H_REAL/mergex/pr-so-com-portao.sh")" 1
 # Para na primeira falha: com dois portoes `pronto` no repositorio, uma
 # validade que reprova roda uma vez so.
 fixture_switch_exato feature/outro -c feature/outro || exit 1
@@ -999,7 +1070,9 @@ mkdir -p "$SEMX_T/.expx"
 printf '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"bloqueio"}}}\n' > "$SEMX_T/.expx/hooks.json"
 HOOK_CWD="$SEMX_T"
 for C in 'git push' 'git push origin dev' 'git push -u origin dev' 'gh pr create --fill' 'echo push' \
-         "sh -c 'git push'" 'git push origin $(git branch --show-current)'; do
+         "sh -c 'git push'" 'git push origin $(git branch --show-current)' \
+         '/usr/lib/git-core/git-push origin dev' '"$(git --exec-path)"/git-push origin dev' 'git-send-pack origin refs/heads/dev' \
+         'cd -P . && git push origin dev'; do
   caso "sem MergeX em bloqueio: $C" mergex/pr-so-com-portao.sh "$(bash_json "$C")" 0
 done
 HOOK_CWD="$HIST_T"
