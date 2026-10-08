@@ -561,6 +561,42 @@ confere "lista ilegível (diretório): rc != 0 ($RC)" "$([ "$RC" != 0 ] && echo 
 SAIDA="$(printf 'x.ts\n' | bash "$CLASSIFICADOR" --base main --reconciliados 2>"$D/err")"; RC=$?
 confere "--reconciliados sem argumento: rc != 0 ($RC)" "$([ "$RC" != 0 ] && echo 0 || echo 1)"
 
+# lista com NNN: a justificativa cita o artefato
+printf 'tests/ui/novo.test.tsx\t007\nsem-nnn.ts\n%s\t012\n' "$ESPECIAL" > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}O5: contrato
+sem-nnn.ts${T}D1: x
+EOF
+espera tests/ui/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O5: contrato; O10:' 'O10: arquivo reconciliado da base (RECONCILIACAO-BASE-007.md)' "NNN: cita o artefato"
+espera sem-nnn.ts 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "sem NNN: texto sem artefato"
+l="$(linha_de sem-nnn.ts)"
+case "$l" in *RECONCILIACAO-BASE*) confere "sem NNN: não cita artefato" 1 ;; *) confere "sem NNN: não cita artefato" 0 ;; esac
+espera "$ESPECIAL" 'OLHO OBRIGATÓRIO' 'O10:' 'RECONCILIACAO-BASE-012.md)' "NNN: ausente da entrada, caminho especial"
+
+# NNN inválido falha fechado
+for ruim in '07' '0007' 'abc' '' '007	x'; do
+  printf 'a.ts\t%s\n' "$ruim" > "$D/ruim.txt"
+  SAIDA="$(printf 'a.ts\n' | bash "$CLASSIFICADOR" --base main --reconciliados "$D/ruim.txt" 2>"$D/err")"; RC=$?
+  confere "NNN inválido '$ruim': rc 66 sem saída ($RC)" "$([ "$RC" = 66 ] && [ -z "$SAIDA" ] && grep -q NNN "$D/err" && echo 0 || echo 1)"
+done
+
+# maiúscula e minúscula são caminhos diferentes
+printf 'Tests/UI/novo.test.tsx\n' > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}D1: minúsculo
+EOF
+espera tests/ui/novo.test.tsx 'DISPENSÁVEL' 'D1:' 'minúsculo' "caixa: Tests/UI não casa tests/ui"
+espera Tests/UI/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "caixa: o caminho da lista sai à parte"
+
+# lista com CRLF casa normalmente
+printf 'tests/ui/novo.test.tsx\t007\r\nsem-nnn.ts\r\n' > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}D1: a
+sem-nnn.ts${T}D1: b
+EOF
+espera tests/ui/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O10:' 'RECONCILIACAO-BASE-007.md)' "CRLF: casa com NNN"
+espera sem-nnn.ts 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "CRLF: casa sem NNN"
+
 # sem --reconciliados nada muda
 SAIDA="$(printf 'tests/ui/novo.test.tsx\tD1: x\n' | bash "$CLASSIFICADOR" --base main)"
 espera tests/ui/novo.test.tsx 'DISPENSÁVEL' 'D1:' 'x' "sem a opção, o O10 não existe"

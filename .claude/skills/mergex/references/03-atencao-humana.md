@@ -162,7 +162,7 @@ Basta **um** destes:
 | O7 | Efeito irreversível declarado no plano de reversão | O plano de reversão da legadox diz que este arquivo produz efeito que o versionador não desfaz |
 | O8 | Veio de raio ALTO | O raio da legadox classifica este arquivo como ALTO |
 | O9 | Histórico de regressão registrado, ou reprovação anterior em QA no mesmo arquivo | O memox devolve `regressoes` não vazio, ou `reprovacoes_qa` maior que zero, para este caminho (`Passo 2.b`). Sem o memox instalado, este critério **não se aplica** |
-| O10 | Arquivo reconciliado da base | O caminho consta na lista de reconciliados do registro (`RECONCILIACAO-BASE-NNN.md`, `coberto`); passe-a ao classificador com `--reconciliados`. A faixa nunca desce |
+| O10 | Arquivo reconciliado da base | O caminho consta na lista de reconciliados do registro (`RECONCILIACAO-BASE-NNN.md`, `coberto`); passe-a ao classificador com `--reconciliados`. A faixa nunca desce. No `ATENCAO.md`, cite o `RECONCILIACAO-BASE-NNN.md` e copie o `motivo` dele |
 
 ### LEITURA RÁPIDA — o revisor confere intenção, não implementação
 
@@ -318,6 +318,13 @@ printf '%s\t%s\t%s\n' src/auth/sessao.ts "O4: cria o token de sessão (T-01.02)"
 - Saída: `<caminho> TAB <faixa> TAB <justificativa>`. A justificativa já nomeia o critério; copie
   para o `ATENCAO.md` e acrescente o que o revisor precisa saber.
 - `L4` ou `D4` passados na entrada são **ignorados**, e a saída diz isso.
+- `--reconciliados <arquivo>` recebe a lista dos reconciliados (O10): uma linha por arquivo, só o
+  caminho ou `<caminho> TAB <NNN>` (NNN com 3 dígitos). Com NNN, a justificativa vira
+  `O10: arquivo reconciliado da base (RECONCILIACAO-BASE-NNN.md)`; NNN fora do formato, ou lista
+  ausente ou ilegível, faz o classificador falhar (rc 66) sem classificar nada. Todo caminho da
+  lista sai em OLHO OBRIGATÓRIO, mesmo ausente da entrada. Monte a lista a partir do
+  `reconciliacao-base.sh --verificar`:
+  `... --verificar | awk -F'\t' '$1=="coberto"{print $2"\t"$3}' > reconciliados.tsv`.
 - `--catalogo` imprime o catálogo; `--ordem`, a ordem. O validador de contrato confere que as
   duas batem com este reference e com o prompt do agente.
 - O resultado vem do trabalho corrente resolvido pela branch (exatamente um `ENTREGA.md` com

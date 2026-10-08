@@ -39,8 +39,10 @@
 #   --base <ref>   base do diff (a mesma do E3); sem ela, D4 do HISTORICO não é provado
 #   --raiz <dir>   raiz do projeto (padrão: a que o versionador informa)
 #   --reconciliados <arquivo>
-#                  um caminho por linha (a coluna 2 das linhas `coberto` de
-#                  `reconciliacao-base.sh --verificar`). Todo caminho da lista
+#                  um caminho por linha, ou `caminho TAB NNN` (as colunas 2 e 3
+#                  das linhas `coberto` de `reconciliacao-base.sh --verificar`);
+#                  com NNN a justificativa cita RECONCILIACAO-BASE-NNN.md, e
+#                  NNN fora de 3 dígitos falha (rc 66). Todo caminho da lista
 #                  recebe O10 e fica em OLHO OBRIGATÓRIO, qualquer que seja a
 #                  evidência L/D, mesmo ausente da entrada (a linha dele é
 #                  emitida). Correspondência exata; linha vazia é ignorada.
@@ -119,12 +121,21 @@ if [ -n "$RECONC_ARQ" ]; then
     printf 'classificar-atencao: --reconciliados: lista ausente ou ilegível: %s\n' "$RECONC_ARQ" >&2
     exit 66
   fi
-  RECONC="$(tr -d '\r' < "$RECONC_ARQ")" || {
+  RECONC_RAW="$(tr -d '\r' < "$RECONC_ARQ")" || { # guarda:O10-crlf
     printf 'classificar-atencao: --reconciliados: falha ao ler a lista: %s\n' "$RECONC_ARQ" >&2; exit 66; }
+  # Linha: <caminho> ou <caminho> TAB <NNN> (3 dígitos); outro formato falha fechado.
+  if ! printf '%s\n' "$RECONC_RAW" | awk -F'\t' 'NF > 2 || (NF == 2 && $2 !~ /^[0-9][0-9][0-9]$/) { exit 1 }'; then
+    printf 'classificar-atencao: --reconciliados: NNN fora do formato de 3 dígitos em %s\n' "$RECONC_ARQ" >&2
+    exit 66
+  fi
+  RECONC="$(printf '%s\n' "$RECONC_RAW" | cut -f1)"
 fi
 
 # Correspondência exata de linha inteira: nunca substring, nunca glob.
 e_reconciliado() { [ -n "$RECONC" ] && printf '%s\n' "$RECONC" | grep -Fxq -e "$1"; } # guarda:O10-exato
+
+# NNN do registro que reconciliou o caminho (vazio se a lista não o informou).
+num_do_registro() { printf '%s\n' "$RECONC_RAW" | P="$1" awk -F'\t' '$1 == ENVIRON["P"] && NF == 2 { print $2; exit }'; }
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_SH="$DIR/../../../hooks/comum/base.sh"
@@ -399,7 +410,7 @@ junta() { if [ -n "$1" ]; then printf '%s; %s' "$1" "$2"; else printf '%s' "$2";
 
 classifica() {
   local caminho="$1"; shift
-  local ev id o="" l="" d="" ignorados=""
+  local ev id nnn o="" l="" d="" ignorados=""
 
   for ev in "$@"; do
     [ -n "$ev" ] || continue
@@ -414,7 +425,11 @@ classifica() {
 
   # O10: arquivo reconciliado da base. Vem da lista, nunca da evidência recebida,
   # e se junta a qualquer O anterior pelo mesmo padrão dos demais critérios O.
-  if e_reconciliado "$caminho"; then o="$(junta "$o" 'O10: arquivo reconciliado da base')"; fi # guarda:O10
+  if e_reconciliado "$caminho"; then # guarda:O10
+    nnn="$(num_do_registro "$caminho")"
+    if [ -n "$nnn" ]; then o="$(junta "$o" "O10: arquivo reconciliado da base (RECONCILIACAO-BASE-$nnn.md)")"
+    else o="$(junta "$o" 'O10: arquivo reconciliado da base')"; fi
+  fi
 
   local nota=""
   [ -z "$ignorados" ] || nota=" [ignorado:$ignorados — L4 e D4 só vêm do reconhecimento]"

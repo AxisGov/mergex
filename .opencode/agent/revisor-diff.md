@@ -75,7 +75,7 @@ D1–D4, padrão.
 | O7 | Efeito irreversível declarado no plano de reversão |
 | O8 | Veio de raio ALTO |
 | O9 | Histórico de regressão registrado no memox, ou reprovação anterior em QA no mesmo arquivo — **sem o memox, não se aplica** |
-| O10 | Arquivo reconciliado da base — consta na lista de reconciliados do registro (`--reconciliados`); a faixa nunca desce |
+| O10 | Arquivo reconciliado da base — consta na lista de reconciliados do registro (`--reconciliados`); a faixa nunca desce. No `ATENCAO.md`, cite o `RECONCILIACAO-BASE-NNN.md` e copie o `motivo` dele |
 
 ### LEITURA RÁPIDA — o revisor confere intenção, não implementação
 
