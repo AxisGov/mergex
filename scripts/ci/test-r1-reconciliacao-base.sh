@@ -876,7 +876,8 @@ _shim_bloqueio() {
     printf 'case "$ultimo" in %s)\n' "$padrao"
     [ "$quando" = depois ] && printf '  %q "$@"\n' "$real"
     printf '  printf "%%s\\n" "$$" > %q && %q %q %q\n' "$marca.tmp" "$real" "$marca.tmp" "$marca"
-    printf '  exec -a %s sleep 3600 ;;\nesac\n' "$SHIM_NOME"
+    # 300 s: teto para um órfão se a suíte for abortada no meio do caso
+    printf '  exec -a %s sleep 300 ;;\nesac\n' "$SHIM_NOME"
     printf 'exec %q "$@"\n' "$real"
   } > "$arq"
   chmod +x "$arq"
@@ -2995,6 +2996,12 @@ grupo_portao() {
   rc_igual "--rev duplicado: rc 64" 64 bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --rev HEAD --rev HEAD
   rc_igual "--rev sem valor: rc 64" 64 bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --rev
   rc_igual "--rev vazio: rc 64" 64 bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --rev ''
+  # tree e blob não são commit: erro_ambiente, sem o `error:` do git no stderr
+  for c in 'HEAD^{tree}' "HEAD:$FX_ENTREGA"; do
+    PT_REV="$c" pt_espera "--rev com $c: erro_ambiente" 1 ok=false erro_ambiente -
+    out="$(bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --rev "$c" 2>&1 >/dev/null)"
+    [ -z "$out" ] && ok "--rev com $c: stderr vazio" || falha "--rev com $c vazou no stderr: $out"
+  done
 
   # ---- merge só de método: commit_merge no próprio merge --------------------
   fx_portao_em "$d" HEAD

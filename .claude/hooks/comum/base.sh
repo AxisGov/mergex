@@ -144,6 +144,32 @@ expx_trabalho_atual_por_branch() {
   printf '%s\n' "$1"
 }
 
+# expx_trabalho_por_branch_na_revisao <raiz> <branch> <revisão> — a mesma
+# regra de expx_trabalho_atual_por_branch (exatamente um ENTREGA.md declara
+# `branch: <branch>`), mas para uma branch DADA e lendo os
+# docs/entregas/*/ENTREGA.md da ÁRVORE da revisão, nunca do disco: um ENTREGA
+# não rastreado, apagado ou editado no disco não muda a resposta.
+# Saída: o <trabalho_id> e 0; nada e 1 (nenhum declara); nada e 2 (dois ou
+# mais declaram, ou a árvore não se lê: indeterminado).
+expx_trabalho_por_branch_na_revisao() {
+  local raiz="$1" branch="$2" rev="$3" lista arq id valor achados="" n=0
+  [ -n "$branch" ] && [ -n "$rev" ] || return 2
+  lista="$(git -C "$raiz" -c core.quotepath=false ls-tree -r --name-only "$rev" -- docs/entregas 2>/dev/null)" || return 2
+  while IFS= read -r arq; do
+    case "$arq" in docs/entregas/*/ENTREGA.md) ;; *) continue ;; esac
+    id="${arq#docs/entregas/}"; id="${id%/ENTREGA.md}"
+    case "$id" in ''|*/*) continue ;; esac
+    valor="$(git -C "$raiz" cat-file blob "$rev:$arq" 2>/dev/null | expx_frontmatter_valor /dev/stdin branch)"
+    [ -n "$valor" ] && [ "$valor" = "$branch" ] || continue
+    achados="$id"; n=$((n + 1))
+  done <<EOF
+$lista
+EOF
+  [ "$n" -eq 0 ] && return 1
+  [ "$n" -eq 1 ] || return 2
+  printf '%s\n' "$achados"
+}
+
 # --------------------------------------------------------------------------
 # Leitura do push — o segmento normalizado, por token
 # --------------------------------------------------------------------------
@@ -207,18 +233,23 @@ expx_emenda_continuacao() {
   printf '%s' "$saida"
 }
 
-# expx_push_segmentos <comando> — os segmentos que podem ser um push, um por
-# linha. Separadores de segmento: `&&`, `||`, `;`, `|`, `&`, subshell, crase e
+# expx_segmentos <comando> — todos os segmentos do comando, um por linha.
+# Separadores de segmento: `&&`, `||`, `;`, `|`, `&`, subshell, crase e
 # redirecionamento; a quebra de linha que já estava no comando também separa.
 # A troca é do `tr` (byte a byte, POSIX), não do `sed`: `s/X/\n/` é extensão
 # GNU, e no sed do BSD o `\n` vira a letra `n` e grudaria os segmentos.
-expx_push_segmentos() {
+expx_segmentos() {
   local c="$1"
   case "$c" in
     *\\$'\n'*) c="$(expx_emenda_continuacao "$c")" ;;
   esac
-  printf '%s' "$c" | grep -Fq push || return 0
-  printf '%s\n' "$c" | tr ';|&()`<>' '\n\n\n\n\n\n\n\n' | grep -F push
+  printf '%s\n' "$c" | tr ';|&()`<>' '\n\n\n\n\n\n\n\n'
+}
+
+# expx_push_segmentos <comando> — só os segmentos que podem ser um push.
+expx_push_segmentos() {
+  printf '%s' "$1" | grep -Fq push || return 0
+  expx_segmentos "$1" | grep -F push
   return 0
 }
 
@@ -228,11 +259,17 @@ expx_push_segmentos() {
 #                       `-o` e de aglomerado curto terminado em `o` é pulado);
 #   EXPX_PUSH_TEM_REMOTO 1 quando há um primeiro posicional (o remoto);
 #   EXPX_PUSH_REMOTO    esse remoto, sem aspas;
-#   EXPX_PUSH_REFSPECS  os posicionais seguintes (refspecs), sem aspas.
+#   EXPX_PUSH_REFSPECS  os posicionais seguintes (refspecs), sem aspas;
+#   EXPX_PUSH_GLOBAIS   as opções globais do git antes do `push`, com o valor
+#                       das que o levam na palavra seguinte, sem aspas;
+#   EXPX_PUSH_AMBIENTE_GIT 1 quando uma atribuição `GIT_*=` precede o `git`
+#                       (prefixo de ambiente ou argumento de `env`).
 EXPX_PUSH_OPCOES=(); EXPX_PUSH_REFSPECS=(); EXPX_PUSH_REMOTO=""; EXPX_PUSH_TEM_REMOTO=0
+EXPX_PUSH_GLOBAIS=(); EXPX_PUSH_AMBIENTE_GIT=0
 expx_push_le() {
   local tok seg atribuiu=0
   EXPX_PUSH_OPCOES=(); EXPX_PUSH_REFSPECS=(); EXPX_PUSH_REMOTO=""; EXPX_PUSH_TEM_REMOTO=0
+  EXPX_PUSH_GLOBAIS=(); EXPX_PUSH_AMBIENTE_GIT=0
   seg="$(expx_sem_descritor "$1")"
   set -f                    # o segmento é texto: nada aqui vira glob
   # shellcheck disable=SC2086
@@ -245,6 +282,7 @@ expx_push_le() {
   # também são pulados até o nome do programa.
   while [ "$#" -gt 0 ]; do
     case "$(expx_sem_aspas "$1")" in
+      GIT_*=*)         atribuiu=1; EXPX_PUSH_AMBIENTE_GIT=1 ;;
       [_[:alpha:]]*=*) atribuiu=1 ;;
       -*)              [ "$atribuiu" = 1 ] || break ;;
       *)               break ;;
@@ -258,7 +296,10 @@ expx_push_le() {
   if [ "$tok" != git ]; then
     expx_executor "${tok##*/}" || return 1
     while [ "$#" -gt 0 ]; do
-      [ "$(expx_sem_aspas "$1")" = git ] && break
+      case "$(expx_sem_aspas "$1")" in
+        git) break ;;
+        GIT_*=*) EXPX_PUSH_AMBIENTE_GIT=1 ;;
+      esac
       shift
     done
     [ "$#" -gt 0 ] || return 1
@@ -271,8 +312,12 @@ expx_push_le() {
     case "$1" in
       -C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--attr-source|--config-env)
         [ "$#" -ge 2 ] || return 1
+        EXPX_PUSH_GLOBAIS[${#EXPX_PUSH_GLOBAIS[@]}]="$(expx_sem_aspas "$1")"
+        EXPX_PUSH_GLOBAIS[${#EXPX_PUSH_GLOBAIS[@]}]="$(expx_sem_aspas "$2")"
         shift 2 ;;
-      -*) shift ;;
+      -*)
+        EXPX_PUSH_GLOBAIS[${#EXPX_PUSH_GLOBAIS[@]}]="$(expx_sem_aspas "$1")"
+        shift ;;
       *) break ;;
     esac
   done

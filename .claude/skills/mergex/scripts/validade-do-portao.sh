@@ -183,7 +183,7 @@ esac
 # história cortada esconde commits: antes de qualquer leitura
 arvore_recusa_raso || { aviso "$ARVORE_ERRO"; invalido historia_incompleta; } # guarda:PTRASO
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-validade-portao.XXXXXX")" || { TMP_DIR=""; ambiente 'não foi possível criar diretório temporário'; }
-REV_SHA="$(g rev-parse --verify -q "$REV^{commit}")" || ambiente "$REV não é um commit"
+REV_SHA="$(g rev-parse --verify -q "$REV^{commit}" 2>/dev/null)" || ambiente "$REV não é um commit"
 
 modo_em() { g ls-tree -z "$1" -- "$2" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .*//p'; }
 

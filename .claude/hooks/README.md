@@ -84,56 +84,95 @@ A mergex só **detecta e nomeia** a condição (`arquivo_de_task_irma`). Abrir
 
 ### ² A exceção do `pr-so-com-portao`: portão `pronto` que não vale
 
-O trabalho sai da **branch ativa** (`expx_trabalho_atual_por_branch`, o mesmo
-resolvedor dos outros hooks), nunca do `ENTREGA.md` modificado por último. Sem
-trabalho determinado (nenhuma ou mais de uma entrega declara a branch, HEAD
-destacado), o hook sai 0: não é assunto dele.
+Tudo sai do Git, **nunca do disco**.
 
-O estado do portão vem do `ENTREGA.md` do disco; sem o campo no disco, do
-`ENTREGA.md` commitado na revisão publicada. `null` e `bloqueado` seguem o
-modo configurado, como sempre. Já `pronto` só libera com a prova de
+**Qual trabalho.** Para cada branch que o comando publica, vale a mesma regra
+de `expx_trabalho_atual_por_branch`, aplicada a **essa** branch e à árvore da
+**revisão empurrada** (`expx_trabalho_por_branch_na_revisao`, em
+`comum/base.sh`): o trabalho existe quando exatamente um
+`docs/entregas/<id>/ENTREGA.md` daquela árvore declara `branch: <branch>`.
+Por isso nada muda o resultado quando:
+
+- o comando roda com outra branch ativa, ou de outra árvore;
+- o `ENTREGA.md` foi apagado, editado ou criado sem commit no disco;
+- um `ENTREGA.md` modificado mais recentemente pertence a outro trabalho.
+
+Branch que nenhuma entrega declara não é assunto deste hook. Duas ou mais
+entregas declarando a mesma branch tornam o trabalho indeterminado, e o hook
+barra.
+
+**Qual portão.** O `portao` sai de `<revisão empurrada>:ENTREGA.md`. `null` e
+`bloqueado` seguem o modo configurado, como sempre. Um `pronto` só libera com
+a prova de
 `scripts/validade-do-portao.sh --verificar --entrega <ENTREGA> --rev <sha>`
-(`ok=true`) sobre o commit que o comando **publica** — não sobre o HEAD por
-suposição. Barra com `exit 2` em **qualquer** modo, `desligado` inclusive
-(spec de reconciliação pós-E8, §4.5 e §13.5):
+sobre o commit que o comando **publica**, e só `ok=true` **com** código 0
+conta como prova. Sem ela, barra com `exit 2` em **qualquer** modo,
+`desligado` inclusive (spec de reconciliação pós-E8, §4.5 e §13.5):
 
-- validade `ok=false`: a mensagem nomeia o `motivo` e o `primeiro_commit` e
-  manda rodar o E2 de novo (`/mergex-check`). Inclui a entrega legada com
-  `pronto` e sem `portao_sha`;
-- validade ausente ao lado dos hooks, ou que não se calcula (`erro_ambiente`,
-  código fora de 0/1, saída ilegível): mensagem própria;
-- refspec que o portão não sabe avaliar (abaixo).
+- **validade `ok=false`:** a mensagem nomeia o `motivo` e o `primeiro_commit`
+  e manda rodar o E2 de novo (`/mergex-check`). Inclui a entrega legada com
+  `pronto` e sem `portao_sha`.
+- **validade ausente ao lado dos hooks, ou que não se calcula**
+  (`erro_ambiente`, código fora de 0/1, saída ilegível): mensagem própria.
+- **refspec que o portão não sabe avaliar:** ver abaixo.
 
-A revisão publicada sai da leitura por token do push, a mesma do
-`mergex/git-perigoso` (`expx_push_segmentos`/`expx_push_le`, em
-`comum/base.sh`). Pela **origem** de cada refspec:
+**Como o comando é lido.** A leitura por token é a mesma do
+`mergex/git-perigoso` (`expx_segmentos`/`expx_push_le`, em `comum/base.sh`).
+Não existe regex de gatilho própria. Cada segmento do comando é lido, inclusive:
 
-| Comando | Revisão validada |
+- opções globais com valor (`git -C <dir> push`, `git -c k=v push`,
+  `git --git-dir <dir> push`, `git --work-tree <dir> push`);
+- push dentro de `bash -c`/`sh -c`.
+
+O repositório de cada push é resolvido a partir de:
+
+- o `cwd` do evento;
+- um `cd <dir>` literal nos segmentos anteriores;
+- `-C`, `--git-dir` e `--work-tree` literais.
+
+| Comando | Branch e revisão validadas |
 |---|---|
-| `git push`, `git push origin`, `git push -u origin` | HEAD (a branch ativa) |
-| `git push origin <branch>`, `HEAD`, `@`, `refs/heads/<branch>`, com qualquer destino (`HEAD:<branch>`, `<branch>:<branch>`, `HEAD:refs/heads/<branch>`) | a ponta da branch do trabalho |
-| `gh pr create`, `glab mr create` | HEAD |
-| push que o gatilho reconhece e a leitura por token não (lançador fora da lista de executores) | HEAD |
+| `git push`, `git push origin`, `git push -u origin` | a branch ativa daquele repositório, no HEAD |
+| `git push origin <branch>`, `refs/heads/<branch>`, `<branch>:<destino>` | `<branch>`, na ponta dela |
+| `git push origin HEAD`, `@`, `HEAD:<destino>` | a branch ativa, no HEAD |
+| `gh pr create`, `gh -R <repo> pr create`, `glab mr create` | a branch ativa (ou `--head <branch>`), na ponta |
 
 Não avaliáveis — com `pronto`, barram em qualquer modo, com a mensagem `push
 com refspec que o portão não sabe avaliar`; com `null`/`bloqueado`, seguem o
 modo:
 
-- origem em SHA explícito, expressão (`HEAD~1`), ref remota ou nome que não
-  se resolve;
-- outra branch, tag ou remoção (`:dst`, `--delete`) com destino na branch do
-  trabalho;
-- `--all`, `--mirror`, `--branches`;
-- `--tags` junto com a branch do trabalho;
-- mais de um refspec — ou mais de um push na mesma linha — envolvendo a
-  branch do trabalho.
+- destino na branch de um trabalho com outra origem: SHA, tag, ref remota,
+  outra branch, remoção (`:dst`, `--delete`, `-d`) ou destino `HEAD`/`@`;
+- `--all`, `--mirror`, `--branches`: todas as branches locais sobem;
+- `--tags` junto com uma branch;
+- mais de um refspec — ou mais de um push no mesmo comando — envolvendo a
+  branch do mesmo trabalho.
 
-**Push que não envolve a branch do trabalho** (`git push origin main` com a
-feature ativa, `git push origin <outra-branch>`, `git push --tags`) mantém o
-comportamento de antes: `pronto` registrado libera, sem validade; `null` e
-`bloqueado` seguem o modo. O portão é da branch do trabalho; o que sobe em
-outra branch não é avaliado por ele (e o `mergex/git-perigoso` continua
-barrando o push na principal).
+**Indeterminado.** Barra em qualquer modo sempre que algum repositório tocado
+tem trabalho da mergex (algum `docs/entregas/<id>/ENTREGA.md` no HEAD), mesmo
+que outro segmento do mesmo comando tenha sido lido. Conta como indeterminado:
+
+- push que a leitura por token não lê: `\git push`, `/usr/bin/git push`,
+  `find -exec git push`, `flock ... git push` e outro lançador fora da lista
+  de executores;
+- origem que não se resolve (nome inexistente, expressão como `HEAD~1`,
+  variável, substituição de comando);
+- repositório de destino que não se resolve: `cd` com expansão, `-C`,
+  `--git-dir` ou `--work-tree` com expansão, ou `GIT_*=` no ambiente do push;
+- HEAD destacado sem refspec.
+
+Citação não é push: `echo`, `printf`, `grep`, `rg`, `cat`, `sed`, `awk`,
+`tee` e outros não contam, e um `git` com outro subcomando, como
+`git commit -m "... git push ..."`, também não.
+
+**Push que não envolve a branch de um trabalho** (`git push origin main`,
+`git push origin <outra-branch>`, `git push --tags`) não é assunto deste hook.
+O `mergex/git-perigoso` continua barrando o push na principal.
+
+**Limite (hook textual):** um alias de git (`git config alias.p push` e depois
+`git p origin <branch>`) não é reconhecido como push. O hook lê o texto do
+comando, não a configuração do git. A barreira executável continua no E6/E7,
+que exigem a mesma validade.
 
 ## Onde cada coisa mora
 
