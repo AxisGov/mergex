@@ -468,19 +468,41 @@ Chaves novas, sempre presentes:
    - **Sem `pre-push` nesse diretório:** o E0 instala o chamador gerenciado pela MergeX, um
      `pre-push` mínimo, identificado por um marcador próprio, que só chama o validador de push da
      skill e propaga o código de saída dele.
-   - **Já é o chamador gerenciado:** a ativação é idempotente e não muda nada.
-   - **Existe um `pre-push` de terceiro:** o E0 não o sobrescreve, não o renomeia e não o edita
-     automaticamente. Falha fechado como pré-requisito ausente e mostra a instrução explícita de
-     composição.
-   - **Composição deliberada:** feita por quem mantém o hook existente. Esse hook passa a chamar o
-     validador de push da MergeX, repassando a entrada padrão, e propaga o código de saída dele.
-     Um hook que chama a MergeX e ignora o código de saída não conta como composto.
-   - **O E2 prova a ativação funcionalmente,** sem confiar no caminho nem na existência do arquivo.
+   - **Já é o chamador gerenciado:** a ativação é idempotente e não muda nada. O marcador serve só
+     para a idempotência e para a reversão: a aceitação de qualquer `pre-push`, gerenciado ou de
+     terceiro, sempre passa pela prova funcional.
+   - **Existe um `pre-push` de terceiro:** o E0 nunca o sobrescreve, renomeia ou edita. O que
+     acontece depende da prova funcional, pela sequência abaixo.
+   - **Composição deliberada:** feita à mão por quem mantém o hook existente. Esse hook passa a
+     chamar o validador de push da MergeX, repassando a entrada padrão, e propaga exatamente o
+     código de saída dele.
+   - **Recuperação com hook de terceiro (sequência normativa):**
+     1. Na primeira execução, se o `pre-push` de terceiro ainda não invoca a MergeX, a prova
+        funcional falha. O E0 não altera o arquivo, falha fechado como pré-requisito ausente e
+        mostra a instrução de composição.
+     2. O usuário compõe o hook existente à mão, como descrito acima.
+     3. Na execução seguinte, o E0 não reprova só porque falta o marcador do chamador gerenciado.
+        Ele executa a prova funcional controlada.
+     4. Se o hook composto bloquear a ref inválida da prova e propagar o resultado esperado, o E0 o
+        reconhece como **integração externa válida** e prossegue.
+     5. Se a prova falhar, terminar inesperadamente, liberar a ref inválida ou não propagar o código
+        de saída, o E0 continua falhando fechado.
+     6. A reversão da MergeX não modifica o hook composto. Só informa que a integração externa
+        precisa ser removida pelo responsável dela.
+
+     O reconhecimento é **por comportamento comprovado**, nunca por busca textual dentro do hook.
+     A prova controlada confirma que o validador da MergeX foi de fato executado por um sinal que
+     só ele produz durante a prova, e confirma que a ref inválida foi bloqueada pelo código de saída
+     do hook.
+   - **O E2 prova a ativação funcionalmente,** com a mesma prova do E0, sem confiar no caminho nem
+     na existência do arquivo. Vale tanto para o chamador gerenciado quanto para a integração
+     externa.
      Executa o `pre-push` efetivo numa prova controlada, alimentando-o com uma ref aplicável
      sabidamente inválida, sem contato com nenhum remoto. Exige que ele chame a MergeX e bloqueie
      com código diferente de zero. Sem essa prova o E2 não emite `PRONTO`.
    - **Reversão:** remove apenas o chamador gerenciado pela MergeX, reconhecido pelo marcador.
-     Nunca toca num hook de terceiro, composto ou não.
+     Nunca toca num hook de terceiro, composto ou não. Diante de uma integração externa, só informa
+     que ela precisa ser removida pelo responsável.
 7. **Regras do `pre-push`.** Decide só com o que o Git entrega na entrada padrão (uma linha por ref:
    ref local, SHA local, ref remota, SHA remoto). Nunca analisa texto de comando de shell.
    - **Exclusão de branch** (SHA local nulo) passa. **Tag** (`refs/tags/*`) passa.
@@ -556,7 +578,8 @@ Chaves novas, sempre presentes:
 | Repositório raso ou objeto Git ausente | Validade `historia_incompleta`; V9 `v9_sem_prova`; reconciliação código 4 (`estrutura[raso]`); `pre-push` e CI barram, com diagnóstico de história incompleta |
 | Ambiente impede a avaliação (dependência ausente, fora de repositório, temporário, validador ausente) | Validade `erro_ambiente`; `pre-push` e CI barram, com diagnóstico de ambiente |
 | `pre-push` efetivo que não chama a MergeX, não propaga o código de saída ou não bloqueia a ref inválida da prova controlada | E2 não emite `PRONTO` |
-| `pre-push` de terceiro no diretório de hooks efetivo | E0 falha fechado, sem sobrescrever, renomear ou editar; mostra a instrução de composição |
+| `pre-push` de terceiro que não passa na prova funcional (ainda não composto, ou composto sem propagar o código de saída) | E0 falha fechado, sem sobrescrever, renomear ou editar; mostra a instrução de composição |
+| `pre-push` de terceiro composto que passa na prova funcional | Integração externa válida; E0 prossegue |
 | Reconciliação registrada e não persistida, ou persistência adulterada | Barreira código 5 (`persistencia`); E2 não emite `PRONTO` |
 | Os três consumidores interpretam o modo de `portao: null` de formas diferentes | Defeito de contrato |
 | Push com `--no-verify` | Hook do Claude bloqueia quando identifica com certeza; o CI, quando ativo no produto, reprova o PR |
@@ -738,8 +761,11 @@ Negativos (um caso por regra):
       tiver (sem ele, o caso é registrado como não executado, nunca como aprovado);
     - custo proporcional às refs enviadas: o tempo não cresce com o número de branches entregues;
     - E0 resolvendo o diretório efetivo, inclusive com `core.hooksPath` já configurado, sem alterá-lo;
-      E0 idempotente; E0 recusando um `pre-push` de terceiro sem sobrescrever, renomear ou editar;
-      hook composto que propaga o código de saída aceito, e o que não propaga recusado;
+      E0 idempotente; E0 recusando um `pre-push` de terceiro ainda não composto, sem sobrescrever,
+      renomear ou editar; sequência de recuperação: o mesmo hook, depois de composto à mão, aceito
+      pela prova funcional; hook composto que não propaga o código de saída, que libera a ref
+      inválida ou que termina inesperadamente, recusado; um hook que só cita a MergeX em texto, sem
+      executá-la, recusado;
     - prova funcional do E2: sem `PRONTO` quando o `pre-push` efetivo não chama a MergeX ou não
       bloqueia a ref inválida da prova controlada;
     - reversão removendo só o chamador gerenciado e preservando o hook de terceiro;
@@ -828,11 +854,13 @@ Cada um tem de reprovar ao menos um caso:
   - **Hook do Claude `pr-so-com-portao`:** passa a ser aviso antecipado. Bloqueia só o que prova
     inválido e o `--no-verify` reconhecido; no indeterminado, avisa.
   - **Instalação:** o E0 usa o diretório de hooks efetivo do Git, sem nunca alterar
-    `core.hooksPath`, e instala o chamador gerenciado de forma idempotente. Diante de um `pre-push`
-    de terceiro, não sobrescreve, não renomeia e não edita: falha fechado com a instrução de
-    composição deliberada (chamar o validador e propagar o código de saída). O E2 só emite
-    `PRONTO` depois de uma prova funcional de que o `pre-push` efetivo chama a MergeX e bloqueia
-    uma ref inválida. A reversão remove só o chamador gerenciado.
+    `core.hooksPath`, e instala o chamador gerenciado de forma idempotente. Nunca sobrescreve,
+    renomeia ou edita um `pre-push` de terceiro. Se ele ainda não passa na prova funcional, o E0
+    falha fechado com a instrução de composição deliberada: chamar o validador e propagar o código
+    de saída. Depois de composto à mão, o hook que passa na prova é reconhecido como integração
+    externa válida, por comportamento e nunca por busca textual. O E2 só emite `PRONTO` depois da
+    mesma prova funcional. A reversão remove só o chamador gerenciado e só informa sobre a
+    integração externa.
   - **Modo:** `portao: null` usa o modo existente de `pr-so-com-portao`, sem chave nova. Os três
     consumidores o interpretam igual, e divergência entre eles é defeito de contrato.
   - **Diagnósticos:** `historia_incompleta` (raso, objeto ausente) e `erro_ambiente` barram sempre,
