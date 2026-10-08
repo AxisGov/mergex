@@ -2919,10 +2919,11 @@ grupo_raso() {
 }
 
 # pt_espera <desc> <rc> <ok=...> [motivo] [primeiro] — a saída de
-# validade-do-portao.sh, sem as linhas aviso=, é exatamente a esperada
+# validade-do-portao.sh, sem as linhas aviso=, é exatamente a esperada.
+# PT_REV não vazio acrescenta `--rev "$PT_REV"`.
 pt_espera() {
   local desc="$1" rc_esp="$2" okv="$3" mot="${4:-}" pri="${5:--}" out rc esp
-  out="$(bash "$VALIDADE" --verificar --entrega "${PT_ENTREGA:-$FX_ENTREGA}" 2>/dev/null)"; rc=$?
+  out="$(bash "$VALIDADE" --verificar --entrega "${PT_ENTREGA:-$FX_ENTREGA}" ${PT_REV:+--rev "$PT_REV"} 2>/dev/null)"; rc=$?
   if [ "$okv" = ok=true ]; then esp="$(printf 'ok=true\nprimeiro_commit=-')"
   else esp="$(printf 'ok=false\nmotivo=%s\nprimeiro_commit=%s' "$mot" "$pri")"; fi
   [ "$rc" = "$rc_esp" ] && [ "$(printf '%s\n' "$out" | grep -v '^aviso=')" = "$esp" ] \
@@ -2971,6 +2972,29 @@ grupo_portao() {
   fx_portao_em "$d" "$solto"
   rc_igual "portao_sha não ancestral invalida" 1 "${p[@]}"
   pt_espera "portao_sha não ancestral: portao_sha_nao_ancestral" 1 ok=false portao_sha_nao_ancestral -
+
+  # ---- --rev: a revisão avaliada é a empurrada, não o HEAD ------------------
+  fx_portao_em "$d" HEAD; fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/PR.md
+  c="$(git rev-parse HEAD)"
+  # o ENTREGA de HEAD passa a dizer bloqueado; o de c ainda diz pronto
+  _pt_entrega_commit 's/^portao: .*/portao: bloqueado/'
+  pt_espera "controle --rev: sem --rev, o ENTREGA de HEAD (bloqueado)" 1 ok=false portao_nao_pronto -
+  PT_REV="$c" pt_espera "--rev lê portao e portao_sha de <rev>:ENTREGA, não de HEAD" 0 ok=true
+  _pt_entrega_commit 's/^portao: .*/portao: pronto/'
+  printf 'export const depoisRev = 1;\n' > src/depois-rev.ts; git add src/depois-rev.ts
+  git commit -q -m "feat: produto depois do portão"
+  pt_espera "controle --rev: sem --rev, o HEAD vencido por produto" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+  PT_REV="$c" pt_espera "--rev com commit anterior válido: ok=true com o HEAD vencido" 0 ok=true
+  PT_REV=HEAD pt_espera "--rev HEAD: igual a sem --rev" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+  PT_REV="$(git rev-parse HEAD)" pt_espera "--rev com o SHA do HEAD vencido: commit_de_produto" 1 ok=false commit_de_produto "$(git rev-parse HEAD)"
+  PT_REV=0123456789abcdef0123456789abcdef01234567 pt_espera "--rev inexistente: erro_ambiente" 1 ok=false erro_ambiente -
+  PT_REV=nao-existe pt_espera "--rev com nome que não resolve: erro_ambiente" 1 ok=false erro_ambiente -
+  # portao, portao_sha e trabalho_id saem de <rev>:<ENTREGA>, não de HEAD: na
+  # base B0 não há ENTREGA nenhum
+  PT_REV="$FX_B0" pt_espera "--rev na base B0: o ENTREGA daquela revisão decide" 1 ok=false portao_nao_pronto -
+  rc_igual "--rev duplicado: rc 64" 64 bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --rev HEAD --rev HEAD
+  rc_igual "--rev sem valor: rc 64" 64 bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --rev
+  rc_igual "--rev vazio: rc 64" 64 bash "$VALIDADE" --verificar --entrega "$FX_ENTREGA" --rev ''
 
   # ---- merge só de método: commit_merge no próprio merge --------------------
   fx_portao_em "$d" HEAD

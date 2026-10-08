@@ -22,7 +22,7 @@ importam mais, e onde um hook mal escrito faz mais estrago.
 | `branch-limpa` | `PreToolUse` | **bloqueio** | Barra criação ou troca de branch com alteração não commitada pendente |
 | `commit-por-task` | `PreToolUse` | aviso¹ | Verifica que o commit corresponde a **uma** task, `concluida` e com registro de suíte válido (`parcial` ou `verde`); e que nenhum arquivo em preparação pertence **só a outra task** da feature |
 | `arquivo-fora-do-plano` | `PreToolUse` | aviso | Compara o que está em preparação com a lista declarada na task. Artefato de método do **próprio** trabalho é isento; o de outro trabalho, não |
-| `pr-so-com-portao` | `PreToolUse` | aviso | Barra push e abertura de PR sem `PRONTO` registrado no rastro |
+| `pr-so-com-portao` | `PreToolUse` | aviso² | Barra push e abertura de PR sem `PRONTO` registrado, ou com `PRONTO` que não vale para a revisão publicada |
 
 Os três de segurança nascem em bloqueio: segredo commitado não tem volta, e o
 falso positivo ali é raro. Os três de método nascem em aviso, e só sobem a
@@ -82,6 +82,59 @@ classificam pela mesma implementação, nunca por regras divergentes.
 A mergex só **detecta e nomeia** a condição (`arquivo_de_task_irma`). Abrir
 `B-NN` e replanejar é da sprintx.
 
+### ² A exceção do `pr-so-com-portao`: portão `pronto` que não vale
+
+O trabalho sai da **branch ativa** (`expx_trabalho_atual_por_branch`, o mesmo
+resolvedor dos outros hooks), nunca do `ENTREGA.md` modificado por último. Sem
+trabalho determinado (nenhuma ou mais de uma entrega declara a branch, HEAD
+destacado), o hook sai 0: não é assunto dele.
+
+O estado do portão vem do `ENTREGA.md` do disco; sem o campo no disco, do
+`ENTREGA.md` commitado na revisão publicada. `null` e `bloqueado` seguem o
+modo configurado, como sempre. Já `pronto` só libera com a prova de
+`scripts/validade-do-portao.sh --verificar --entrega <ENTREGA> --rev <sha>`
+(`ok=true`) sobre o commit que o comando **publica** — não sobre o HEAD por
+suposição. Barra com `exit 2` em **qualquer** modo, `desligado` inclusive
+(spec de reconciliação pós-E8, §4.5 e §13.5):
+
+- validade `ok=false`: a mensagem nomeia o `motivo` e o `primeiro_commit` e
+  manda rodar o E2 de novo (`/mergex-check`). Inclui a entrega legada com
+  `pronto` e sem `portao_sha`;
+- validade ausente ao lado dos hooks, ou que não se calcula (`erro_ambiente`,
+  código fora de 0/1, saída ilegível): mensagem própria;
+- refspec que o portão não sabe avaliar (abaixo).
+
+A revisão publicada sai da leitura por token do push, a mesma do
+`mergex/git-perigoso` (`expx_push_segmentos`/`expx_push_le`, em
+`comum/base.sh`). Pela **origem** de cada refspec:
+
+| Comando | Revisão validada |
+|---|---|
+| `git push`, `git push origin`, `git push -u origin` | HEAD (a branch ativa) |
+| `git push origin <branch>`, `HEAD`, `@`, `refs/heads/<branch>`, com qualquer destino (`HEAD:<branch>`, `<branch>:<branch>`, `HEAD:refs/heads/<branch>`) | a ponta da branch do trabalho |
+| `gh pr create`, `glab mr create` | HEAD |
+| push que o gatilho reconhece e a leitura por token não (lançador fora da lista de executores) | HEAD |
+
+Não avaliáveis — com `pronto`, barram em qualquer modo, com a mensagem `push
+com refspec que o portão não sabe avaliar`; com `null`/`bloqueado`, seguem o
+modo:
+
+- origem em SHA explícito, expressão (`HEAD~1`), ref remota ou nome que não
+  se resolve;
+- outra branch, tag ou remoção (`:dst`, `--delete`) com destino na branch do
+  trabalho;
+- `--all`, `--mirror`, `--branches`;
+- `--tags` junto com a branch do trabalho;
+- mais de um refspec — ou mais de um push na mesma linha — envolvendo a
+  branch do trabalho.
+
+**Push que não envolve a branch do trabalho** (`git push origin main` com a
+feature ativa, `git push origin <outra-branch>`, `git push --tags`) mantém o
+comportamento de antes: `pronto` registrado libera, sem validade; `null` e
+`bloqueado` seguem o modo. O portão é da branch do trabalho; o que sobe em
+outra branch não é avaliado por ele (e o `mergex/git-perigoso` continua
+barrando o push na principal).
+
 ## Onde cada coisa mora
 
 Segue a convenção do ecossistema — a mesma da `stackx` e da `sprintx`:
@@ -139,7 +192,7 @@ O modo vive em `.expx/hooks.json`, na raiz do projeto:
 |---|---|
 | `aviso` | Registra `regra_violada` no rastro e deixa passar |
 | `bloqueio` | Registra `acao_bloqueada`, sai com 2 e devolve o motivo ao modelo |
-| `desligado` | Não faz nada, nem registra |
+| `desligado` | Não faz nada, nem registra — menos o portão `pronto` que não vale para a revisão publicada (²), que nenhum modo pula |
 
 Arquivo ausente: valem os padrões da tabela dos seis hooks. **Um hook de
 segurança nunca é rebaixado por arquivo ausente** — a ausência do arquivo não

@@ -34,7 +34,8 @@ RAIZ_T="$(mktemp -d)"
 WT_T="${RAIZ_T}--wt"        # worktree derivado: .git e ARQUIVO, nao diretorio
 SEMGIT_T="$(mktemp -d)"
 HIST_T="$(mktemp -d)"
-trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T" "$HIST_T"' EXIT
+WTH_T="${HIST_T}--wt"       # worktree vinculada do repositorio historico
+trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T" "$HIST_T" "$WTH_T"' EXIT
 HOOK_CWD="$RAIZ_T"
 
 cd "$RAIZ_T" || exit 1
@@ -99,6 +100,24 @@ caso() {
   else
     FALHOU=$((FALHOU+1)); printf '  FALHA %s (esperava %s, obteve %s)\n' "$desc" "$esperado" "$obtido"
   fi
+}
+
+# fm_chave <arquivo> <chave> <valor> — grava a chave no frontmatter do arquivo
+# no disco (troca a linha existente ou acrescenta antes do `---` que fecha).
+# fm_sem_chave <arquivo> <chave> — tira a chave do frontmatter.
+fm_chave() {
+  awk -v k="$2" -v v="$3" '
+    NR == 1 { print; fm = 1; next }
+    fm && /^---/ { if (!feito) print k ": " v; fm = 0; print; next }
+    fm && index($0, k ":") == 1 { print k ": " v; feito = 1; next }
+    { print }' "$1" > "$1.fm" && cat "$1.fm" > "$1" && rm -f "$1.fm"
+}
+fm_sem_chave() {
+  awk -v k="$2" '
+    NR == 1 { print; fm = 1; next }
+    fm && /^---/ { fm = 0; print; next }
+    fm && index($0, k ":") == 1 { next }
+    { print }' "$1" > "$1.fm" && cat "$1.fm" > "$1" && rm -f "$1.fm"
 }
 
 bash_json() { jq -cn --arg c "$1" --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}'; }
@@ -318,15 +337,21 @@ git reset -q
 
 echo
 echo "pr-so-com-portao"
-caso "sem ENTREGA.md nao e assunto" mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin f')" 0
+# Os casos de portão `pronto` moram no repositório histórico (mais abaixo, em
+# "pr-so-com-portao — validade"): lá a branch ativa casa com a entrega e o
+# portão é montado com portao_sha e commits de método de verdade.
+# Aqui a branch `main` casa com a entrega `trab`, que não registrou portão.
+caso "portao null, modo aviso: nao barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin f')" 0
+# Uma ENTREGA sem frontmatter (sem `branch:`), mais recente, não é o trabalho.
 mkdir -p docs/entregas/t1
 printf 'portao: pronto\n' > docs/entregas/t1/ENTREGA.md
-caso "portao pronto libera"     mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin f')" 0
-caso "pr create com pronto"     mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 0
-printf 'portao: bloqueado\n' > docs/entregas/t1/ENTREGA.md
+caso "ENTREGA sem branch: nao decide"   mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin f')" 0
+rm -rf docs/entregas/t1
+fm_chave docs/entregas/trab/ENTREGA.md portao bloqueado
 echo '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"bloqueio"}}}' > .expx/hooks.json
 caso "portao bloqueado barra"   mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin f')" 2
 caso "build nao e push"         mergex/pr-so-com-portao.sh "$(bash_json 'npm run build')" 0
+git checkout -q -- docs/entregas/trab/ENTREGA.md
 rm -f .expx/hooks.json
 
 echo
@@ -456,6 +481,42 @@ entrega() { # entrega <trabalho_id> <branch>
   mkdir -p "docs/entregas/$1"
   printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: %s\nentregue_por: mergex\nbranch: %s\nbranch_base: main\n---\n\n# Entrega\n' \
     "$1" "$2" > "docs/entregas/$1/ENTREGA.md"
+}
+
+# Validade do portão: o push só segue com `portao: pronto` se o portão VALE
+# para a revisão empurrada (validade-do-portao.sh). Os helpers montam o portão
+# como o E2 e o checkpoint pre-e6 montam: `portao_sha` no ENTREGA.md commitado
+# por um commit de método. O trabalho é o último segmento da branch
+# (`feature/ft-02` => `ft-02`). Rodam no cwd (o repositório da fixture).
+MSG_PORTAO="$SEMGIT_T/mensagem-portao"
+metodo_commit() { # <trabalho> <assunto> — commita o índice como pre-e6
+  printf '%s\n\nTrabalho: %s\nMetodo: pre-e6\n' "$2" "$1" > "$MSG_PORTAO" || return 1
+  git commit -q -F "$MSG_PORTAO"
+}
+_portao_registra() { # <trabalho> <sha|-> — portao: pronto (+ portao_sha), commitado
+  local e="docs/entregas/$1/ENTREGA.md"
+  fm_chave "$e" portao pronto || return 1
+  if [ "$2" = - ]; then fm_sem_chave "$e" portao_sha; else fm_chave "$e" portao_sha "$2"; fi || return 1
+  git add -- "$e" && metodo_commit "$1" "docs(mergex): registra o portao"
+}
+portao_valido_com_metodo() { # <branch> — portão em HEAD, depois um commit só de método
+  local t="${1##*/}"
+  fixture_switch_exato "$1" "$1" || return 1
+  _portao_registra "$t" "$(git rev-parse HEAD)" || return 1
+  printf 'pacote do pr\n' >> "docs/entregas/$t/PR.md"
+  git add -- "docs/entregas/$t/PR.md" && metodo_commit "$t" "docs(mergex): pacote do pr"
+}
+portao_vencido_por_merge() { # <branch> — portão válido, depois um merge da base
+  portao_valido_com_metodo "$1" || return 1
+  fixture_switch_exato main main || return 1
+  printf 'a base avancou\n' >> src/base-avanca.ts
+  git add src/base-avanca.ts && git commit -qm "a base avanca" || return 1
+  fixture_switch_exato "$1" "$1" || return 1
+  git merge -q --no-ff -m "integra a base" main
+}
+portao_sem_sha() { # <branch> — `portao: pronto` sem portao_sha (entrega legada)
+  fixture_switch_exato "$1" "$1" || return 1
+  _portao_registra "${1##*/}" -
 }
 
 # Os artefatos usados depois de varias trocas ja nascem tracked em todas as
@@ -598,10 +659,12 @@ git reset -q; rm -f docs/sprintx/estimativas/CALIBRAGEM.md
 # 3 — a varredura de segredo vale igual no artefato de metodo
 caso "fechamento final: segredo no artefato barra" comum/sem-segredo.sh "$(write_json "token: \"$SK\"")" 2
 
-# 4 — publicar o fechamento e push: o portao continua mandando
-printf 'portao: pronto\n' >> docs/entregas/ft-02/ENTREGA.md
+# 4 — publicar o fechamento e push: o portao continua mandando, e o `pronto`
+# precisa valer para a revisao empurrada (portao_sha + so commits de metodo)
+git reset -q
+portao_valido_com_metodo feature/ft-02 || exit 1
 caso "publicacao do fechamento com portao pronto" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 0
-printf 'portao: bloqueado\n' > docs/entregas/ft-02/ENTREGA.md
+fm_chave docs/entregas/ft-02/ENTREGA.md portao bloqueado
 echo '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"bloqueio"}}}' > .expx/hooks.json
 caso "publicacao do fechamento com portao bloqueado barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 2
 
@@ -612,6 +675,159 @@ caso "fechamento final: push --force-with-lease barra" mergex/git-perigoso.sh "$
 git reset -q; rm -f .expx/hooks.json
 git restore --worktree -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null || true
 fixture_switch_exato main main || exit 1
+
+echo
+echo "pr-so-com-portao — validade (o portao vale para a revisao empurrada)"
+# O trabalho sai da branch ativa, nunca do ENTREGA.md mais recente. Com
+# `portao: pronto`, o push exige validade-do-portao.sh ok=true para a revisao
+# que ele publica; vencido, barra em QUALQUER modo. `null` e `bloqueado`
+# continuam obedecendo ao modo configurado.
+fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
+mkdir -p .expx
+modo_portao() { printf '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"%s"}}}\n' "$1" > .expx/hooks.json; }
+PUSH_FT='git push origin feature/ft-02'
+# mensagem_cita <desc> <json> <trecho>... — o stderr do hook cita cada trecho
+mensagem_cita() {
+  local desc="$1" json="$2" saida t
+  shift 2
+  if [ "$SEM_JQ" = "1" ]; then PULADOS=$((PULADOS+1)); printf '  pulado %s (sem jq)\n' "$desc"; return 0; fi
+  saida="$(printf '%s' "$json" | bash "$H/mergex/pr-so-com-portao.sh" 2>&1 >/dev/null)"
+  for t in "$@"; do
+    case "$saida" in
+      *"$t"*) ;;
+      *) FALHOU=$((FALHOU+1)); printf '  FALHA %s (a mensagem nao cita: %s)\n' "$desc" "$t"; return 0 ;;
+    esac
+  done
+  OK=$((OK+1)); printf '  ok    %s\n' "$desc"
+}
+
+# ENTREGA de outro trabalho, mais recente e `pronto`, nao decide pela branch
+# ativa (ft-02, aqui com portao null no disco).
+entrega outro feature/outro
+fm_chave docs/entregas/outro/ENTREGA.md portao pronto
+fm_chave docs/entregas/ft-02/ENTREGA.md portao null
+touch -t 203001010000 docs/entregas/outro/ENTREGA.md
+modo_portao bloqueio
+caso "entrega de outro trabalho mais recente nao libera" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+modo_portao aviso
+caso "entrega de outro trabalho mais recente nao barra (null em aviso)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+rm -rf docs/entregas/outro
+fixture_restaurar_tracked docs/entregas/ft-02/ENTREGA.md || exit 1
+
+# Portao vencido por merge da base: barra mesmo em aviso
+portao_vencido_por_merge feature/ft-02 || exit 1
+MERGE_T="$(git rev-parse HEAD)"
+caso "portao vencido barra mesmo em aviso" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+mensagem_cita "portao vencido: a mensagem nomeia motivo, primeiro commit e o E2" "$(bash_json "$PUSH_FT")" \
+  commit_merge "$MERGE_T" /mergex-check
+caso "portao vencido: pr create tambem barra" mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 2
+
+# Entrega legada: pronto sem portao_sha nunca libera
+portao_sem_sha feature/ft-02 || exit 1
+caso "pronto legado sem portao_sha barra" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+mensagem_cita "pronto legado: a mensagem nomeia portao_sha_ausente" "$(bash_json "$PUSH_FT")" portao_sha_ausente /mergex-check
+
+# Portao valido seguido so de commit de metodo: libera
+portao_valido_com_metodo feature/ft-02 || exit 1
+caso "portao valido com commit so de metodo libera" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+caso "pronto valido: push sem refspec"             mergex/pr-so-com-portao.sh "$(bash_json 'git push')" 0
+caso "pronto valido: push -u da branch"            mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin feature/ft-02')" 0
+caso "pronto valido: HEAD:feature/ft-02"           mergex/pr-so-com-portao.sh "$(bash_json 'git push origin HEAD:feature/ft-02')" 0
+caso "pronto valido: HEAD:refs/heads/feature/ft-02" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin HEAD:refs/heads/feature/ft-02')" 0
+caso "pronto valido: feature/ft-02:feature/ft-02"  mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02:feature/ft-02')" 0
+caso "pronto valido: pr create"                    mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 0
+
+# Refspec que o portao nao sabe avaliar: com pronto, barra em qualquer modo
+SHA_T="$(git rev-parse HEAD)"
+caso "push de SHA explicito com pronto barra"      mergex/pr-so-com-portao.sh "$(bash_json "git push origin $SHA_T:refs/heads/feature/ft-02")" 2
+mensagem_cita "refspec nao avaliavel: a mensagem diz por que" "$(bash_json "git push origin $SHA_T:refs/heads/feature/ft-02")" \
+  "push com refspec que o portão não sabe avaliar"
+caso "push --all com pronto barra"                 mergex/pr-so-com-portao.sh "$(bash_json 'git push --all origin')" 2
+caso "push --mirror com pronto barra"              mergex/pr-so-com-portao.sh "$(bash_json 'git push --mirror origin')" 2
+caso "push --tags com a branch do trabalho barra"  mergex/pr-so-com-portao.sh "$(bash_json 'git push --tags origin feature/ft-02')" 2
+caso "dois refspecs da branch do trabalho barram"  mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02 HEAD:feature/ft-02')" 2
+caso "origem que nao se resolve barra"             mergex/pr-so-com-portao.sh "$(bash_json 'git push origin nao-existe:feature/ft-02')" 2
+caso "expressao de revisao na origem barra"        mergex/pr-so-com-portao.sh "$(bash_json 'git push origin HEAD~1:feature/ft-02')" 2
+caso "outra branch publicada na do trabalho barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main:feature/ft-02')" 2
+caso "delete da branch do trabalho barra"          mergex/pr-so-com-portao.sh "$(bash_json 'git push origin --delete feature/ft-02')" 2
+
+# Push que nao envolve a branch do trabalho: comportamento de antes (pronto
+# registrado libera; null/bloqueado seguem o modo)
+caso "push de outra branch: como antes"            mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main')" 0
+caso "push so de tags: como antes"                 mergex/pr-so-com-portao.sh "$(bash_json 'git push --tags')" 0
+
+# Commit de produto depois do portao: vencido para a branch, nao para outra
+printf 'produto depois do portao\n' > src/depois.ts
+git add src/depois.ts && git commit -qm "feat: produto depois do portao" || exit 1
+caso "produto depois do portao barra o push da branch" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+mensagem_cita "produto depois do portao: commit_de_produto no proprio commit" "$(bash_json "$PUSH_FT")" \
+  commit_de_produto "$(git rev-parse HEAD)"
+caso "produto depois do portao: push de outra branch como antes" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main')" 0
+modo_portao bloqueio
+caso "portao vencido em bloqueio tambem barra"     mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+# spec §4.5: nenhum modo de hook pula a validade do portao — nem o desligado
+modo_portao desligado
+caso "desligado nao pula a validade do portao"     mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+
+# null e bloqueado: o modo configurado continua mandando
+fm_chave docs/entregas/ft-02/ENTREGA.md portao null
+modo_portao aviso
+caso "null em aviso: comportamento de antes (passa)"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+caso "null em aviso: refspec nao avaliavel nao barra"   mergex/pr-so-com-portao.sh "$(bash_json 'git push --all origin')" 0
+modo_portao bloqueio
+caso "null em bloqueio: comportamento de antes (barra)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+modo_portao desligado
+caso "null com o hook desligado: nao age"               mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+modo_portao bloqueio
+fm_chave docs/entregas/ft-02/ENTREGA.md portao bloqueado
+caso "bloqueado em bloqueio: comportamento de antes (barra)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+modo_portao aviso
+caso "bloqueado em aviso: comportamento de antes (passa)"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+fixture_restaurar_tracked docs/entregas/ft-02/ENTREGA.md || exit 1
+
+# Instalacao sem validade-do-portao.sh: com pronto, barra em qualquer modo.
+# Os hooks copiados para uma arvore sem .claude/skills.
+portao_valido_com_metodo feature/ft-02 || exit 1
+caso "controle: portao valido de novo libera"      mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+INST_T="$SEMGIT_T/instalacao/.claude/hooks"
+mkdir -p "$INST_T/comum" "$INST_T/mergex"
+cp "$H/comum/base.sh" "$INST_T/comum/base.sh"
+cp "$H/mergex/pr-so-com-portao.sh" "$INST_T/mergex/pr-so-com-portao.sh"
+H_REAL="$H"; H="$INST_T"
+caso "validade ausente com pronto barra"           mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+mensagem_cita "validade ausente: a mensagem nomeia o script" "$(bash_json "$PUSH_FT")" validade-do-portao.sh
+
+# O hook passa a revisao empurrada (--rev <sha40>) para a validade: um
+# substituto que so diz ok=true quando recebe --rev com o SHA de HEAD.
+mkdir -p "$SEMGIT_T/instalacao/.claude/skills/mergex/scripts"
+STUB_T="$SEMGIT_T/instalacao/.claude/skills/mergex/scripts/validade-do-portao.sh"
+cat > "$STUB_T" <<'STUB'
+#!/usr/bin/env bash
+esperado="$(git rev-parse HEAD)"; rev=""
+while [ "$#" -gt 0 ]; do case "$1" in --rev) rev="${2:-}"; shift 2 ;; *) shift ;; esac; done
+[ "$rev" = "$esperado" ] && { printf 'ok=true\nprimeiro_commit=-\n'; exit 0; }
+printf 'ok=false\nmotivo=commit_de_produto\nprimeiro_commit=-\n'; exit 1
+STUB
+caso "o hook passa --rev com o SHA empurrado (push)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+caso "o hook passa --rev com o SHA de HEAD (pr create)" mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 0
+printf '#!/usr/bin/env bash\nprintf "ok=false\\nmotivo=erro_ambiente\\nprimeiro_commit=-\\naviso=sem git\\n"; exit 1\n' > "$STUB_T"
+caso "validade com erro_ambiente e pronto barra"   mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+printf '#!/usr/bin/env bash\nexit 64\n' > "$STUB_T"
+caso "validade com uso invalido e pronto barra"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+H="$H_REAL"
+rm -rf "$SEMGIT_T/instalacao"
+
+# Worktree vinculada (.git e arquivo): mesma resolucao, mesma validade
+rm -f .expx/hooks.json
+fixture_switch_exato main main || exit 1
+git worktree add -q "$WTH_T" feature/ft-02 >/dev/null 2>&1 || exit 1
+HOOK_CWD="$WTH_T"
+caso "worktree vinculada: portao valido libera"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+printf 'produto na worktree\n' > "$WTH_T/src/na-worktree.ts"
+git -C "$WTH_T" add src/na-worktree.ts && git -C "$WTH_T" commit -qm "feat: produto na worktree" || exit 1
+caso "worktree vinculada: portao vencido barra em aviso" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+HOOK_CWD="$HIST_T"
+git worktree remove --force "$WTH_T" || exit 1
 
 cd "$RAIZ_T" || exit 1
 HOOK_CWD="$RAIZ_T"

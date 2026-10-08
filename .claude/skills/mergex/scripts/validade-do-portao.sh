@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
-# validade-do-portao — o portão `pronto` do E2 ainda vale para o HEAD?
+# validade-do-portao — o portão `pronto` do E2 ainda vale para a revisão?
 #
 # Contrato: docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md,
 # seção 13. Consumido pelo hook de push (pr-so-com-portao) e pelo E6/E7.
 #
 # Uso:
-#   validade-do-portao.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md
+#   validade-do-portao.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md [--rev <commit>]
 #
 # Só leitura: não grava no repositório, não adquire a trava C5, não exige
 # stage vazio; os temporários (fora do repositório) saem em toda saída.
 #
+# Revisão avaliada: `--rev <commit>` (padrão HEAD), resolvida para o SHA do
+# commit. O hook de push passa o commit que o push publica, que nem sempre é o
+# HEAD. Abaixo, "HEAD" é essa revisão. Uma revisão que não se resolve para um
+# commit é erro_ambiente.
+#
 # Fonte: `portao`, `portao_sha`, `trabalho_id` e `expx_tool` vêm de
-# HEAD:<ENTREGA> (a versão commitada, que é a que o push envia). O ENTREGA.md
-# do disco nunca decide: se diverge do de HEAD em `portao` ou `portao_sha`, sai
-# uma linha `aviso=` e vale o de HEAD.
+# <rev>:<ENTREGA> (a versão commitada, que é a que o push envia). O ENTREGA.md
+# do disco nunca decide: se diverge do da revisão em `portao` ou `portao_sha`,
+# sai uma linha `aviso=` e vale o da revisão.
 #
 # O portão vale somente se:
 #   - HEAD:<ENTREGA> existe, é arquivo regular, `kind: entrega`, `trabalho_id`
@@ -78,7 +83,8 @@
 #                           contexto inválido;
 #   erro_ambiente           nada se pôde avaliar: dependência ausente, fora de
 #                           um repositório Git, temporário que não se cria,
-#                           HEAD sem commit ou rev-list que falha; com um
+#                           revisão (HEAD ou --rev) que não é um commit
+#                           ou rev-list que falha; com um
 #                           `aviso=` que descreve a falha;
 #   portao_sha_ausente      portao_sha ausente, vazio, null ou fora de 40 hex;
 #   portao_sha_nao_ancestral  portao_sha inexistente ou não ancestral de HEAD;
@@ -102,7 +108,7 @@ TAB='	'
 
 uso() {
   [ -z "${1:-}" ] || printf 'validade-do-portao: %s\n' "$1" >&2
-  printf '%s\n' 'uso: validade-do-portao.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md' >&2
+  printf '%s\n' 'uso: validade-do-portao.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md [--rev <commit>]' >&2
   exit 64
 }
 
@@ -127,16 +133,22 @@ invalido() {
 }
 ambiente() { aviso "$1"; invalido erro_ambiente; }
 
-MODO=""; ENTREGA=""
+MODO=""; ENTREGA=""; REV=""; REV_DADA=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --verificar) [ -z "$MODO" ] || uso; MODO=verificar; shift ;;
     --entrega) [ "$#" -ge 2 ] && [ -z "$ENTREGA" ] || uso; ENTREGA="$2"; shift 2 ;;
+    --rev) [ "$#" -ge 2 ] && [ "$REV_DADA" = 0 ] || uso; REV="$2"; REV_DADA=1; shift 2 ;;
     *) uso "opção desconhecida: $1" ;;
   esac
 done
 [ "$MODO" = verificar ] || uso 'falta --verificar'
 [ -n "$ENTREGA" ] || uso 'falta --entrega'
+if [ "$REV_DADA" = 1 ]; then
+  case "$REV" in ''|-*) uso "revisão inválida em --rev: ${REV:-vazia}" ;; esac
+else
+  REV=HEAD
+fi
 
 for dependencia in "$CATALOGO_SH" "$ARVORE_SH" "$CONTRATO_SH"; do
   [ -r "$dependencia" ] || ambiente "dependência indisponível: $dependencia"
@@ -171,54 +183,54 @@ esac
 # história cortada esconde commits: antes de qualquer leitura
 arvore_recusa_raso || { aviso "$ARVORE_ERRO"; invalido historia_incompleta; } # guarda:PTRASO
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-validade-portao.XXXXXX")" || { TMP_DIR=""; ambiente 'não foi possível criar diretório temporário'; }
-HEAD_SHA="$(g rev-parse --verify -q 'HEAD^{commit}')" || ambiente 'HEAD não é um commit'
+REV_SHA="$(g rev-parse --verify -q "$REV^{commit}")" || ambiente "$REV não é um commit"
 
 modo_em() { g ls-tree -z "$1" -- "$2" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .*//p'; }
 
 # ---------------------------------------------------------------------------
-# O ENTREGA.md de HEAD (a versão commitada).
+# O ENTREGA.md da revisão (a versão commitada).
 # ---------------------------------------------------------------------------
 ENTREGA_H="$TMP_DIR/entrega-head.md"
-case "$(modo_em "$HEAD_SHA" "$ENTREGA")" in
-  100644|100755) g cat-file blob "$HEAD_SHA:$ENTREGA" > "$ENTREGA_H" 2>/dev/null \
-    || { aviso "$ENTREGA ilegível em HEAD"; invalido portao_nao_pronto; } ;;
-  '') aviso "$ENTREGA ausente em HEAD"; invalido portao_nao_pronto ;;
-  *) aviso "$ENTREGA não é arquivo regular em HEAD"; invalido portao_nao_pronto ;;
+case "$(modo_em "$REV_SHA" "$ENTREGA")" in
+  100644|100755) g cat-file blob "$REV_SHA:$ENTREGA" > "$ENTREGA_H" 2>/dev/null \
+    || { aviso "$ENTREGA ilegível em $REV"; invalido portao_nao_pronto; } ;;
+  '') aviso "$ENTREGA ausente em $REV"; invalido portao_nao_pronto ;;
+  *) aviso "$ENTREGA não é arquivo regular em $REV"; invalido portao_nao_pronto ;;
 esac
-[ "$(catalogo_fm "$ENTREGA_H" kind)" = entrega ] || { aviso "$ENTREGA de HEAD não declara kind: entrega"; invalido portao_nao_pronto; }
+[ "$(catalogo_fm "$ENTREGA_H" kind)" = entrega ] || { aviso "$ENTREGA de $REV não declara kind: entrega"; invalido portao_nao_pronto; }
 [ "$(catalogo_fm "$ENTREGA_H" trabalho_id)" = "$TRABALHO" ] \
-  || { aviso "ENTREGA.trabalho_id de HEAD diverge do caminho ($TRABALHO)"; invalido portao_nao_pronto; }
+  || { aviso "ENTREGA.trabalho_id de $REV diverge do caminho ($TRABALHO)"; invalido portao_nao_pronto; }
 ORIGEM="$(catalogo_fm "$ENTREGA_H" expx_tool)"
-case "$ORIGEM" in sprintx|runx) ;; *) aviso "ENTREGA.expx_tool de HEAD fora de sprintx|runx: ${ORIGEM:-ausente}"; invalido portao_nao_pronto ;; esac
+case "$ORIGEM" in sprintx|runx) ;; *) aviso "ENTREGA.expx_tool de $REV fora de sprintx|runx: ${ORIGEM:-ausente}"; invalido portao_nao_pronto ;; esac
 
 PORTAO="$(catalogo_fm "$ENTREGA_H" portao)"
 PS="$(catalogo_fm "$ENTREGA_H" portao_sha)"
 
-# o disco que diverge de HEAD é relatado, nunca usado
+# o disco que diverge da revisão é relatado, nunca usado
 if [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ]; then
   p_disco="$(catalogo_fm "$ENTREGA" portao)"; s_disco="$(catalogo_fm "$ENTREGA" portao_sha)"
-  [ "$p_disco" = "$PORTAO" ] || aviso "portao do disco (${p_disco:-ausente}) diverge do de HEAD:$ENTREGA (${PORTAO:-ausente}); vale o de HEAD"
-  [ "$s_disco" = "$PS" ] || aviso "portao_sha do disco (${s_disco:-ausente}) diverge do de HEAD:$ENTREGA (${PS:-ausente}); vale o de HEAD"
+  [ "$p_disco" = "$PORTAO" ] || aviso "portao do disco (${p_disco:-ausente}) diverge do de $REV:$ENTREGA (${PORTAO:-ausente}); vale o de $REV"
+  [ "$s_disco" = "$PS" ] || aviso "portao_sha do disco (${s_disco:-ausente}) diverge do de $REV:$ENTREGA (${PS:-ausente}); vale o de $REV"
 else
-  aviso "$ENTREGA ausente ou não regular no disco; vale o de HEAD"
+  aviso "$ENTREGA ausente ou não regular no disco; vale o de $REV"
 fi
 
 [ "$PORTAO" = pronto ] || invalido portao_nao_pronto # guarda:PTPRONTO
 printf '%s' "$PS" | grep -Eq '^[0-9a-f]{40}$' || invalido portao_sha_ausente # guarda:PTSHA
 g cat-file -e "$PS^{commit}" 2>/dev/null || invalido portao_sha_nao_ancestral # guarda:PTANC
-g merge-base --is-ancestor "$PS" "$HEAD_SHA" 2>/dev/null || invalido portao_sha_nao_ancestral # guarda:PTANC
+g merge-base --is-ancestor "$PS" "$REV_SHA" 2>/dev/null || invalido portao_sha_nao_ancestral # guarda:PTANC
 
 # ---------------------------------------------------------------------------
-# Cada commit de portao_sha..HEAD, pais antes dos filhos, até o primeiro que
+# Cada commit de portao_sha..<rev>, pais antes dos filhos, até o primeiro que
 # invalida. Sem --first-parent: o que um merge traz também é avaliado.
 # ---------------------------------------------------------------------------
 # Primeiro os merges: um merge no intervalo é a causa, antes do que ele trouxe.
-g rev-list --merges --topo-order --reverse "$PS..$HEAD_SHA" > "$TMP_DIR/merges" 2>/dev/null \
-  || ambiente "rev-list --merges $PS..HEAD não calculável"
+g rev-list --merges --topo-order --reverse "$PS..$REV_SHA" > "$TMP_DIR/merges" 2>/dev/null \
+  || ambiente "rev-list --merges $PS..$REV não calculável"
 PRIMEIRO_MERGE="$(sed -n 1p "$TMP_DIR/merges")"
 [ -z "$PRIMEIRO_MERGE" ] || invalido commit_merge "$PRIMEIRO_MERGE" # guarda:PTMERGE
-g rev-list --reverse --topo-order "$PS..$HEAD_SHA" > "$TMP_DIR/commits" 2>/dev/null \
-  || ambiente "rev-list $PS..HEAD não calculável" # guarda:PTLISTA
+g rev-list --reverse --topo-order "$PS..$REV_SHA" > "$TMP_DIR/commits" 2>/dev/null \
+  || ambiente "rev-list $PS..$REV não calculável" # guarda:PTLISTA
 i=0
 while IFS= read -r c <&3; do
   [ -n "$c" ] || continue

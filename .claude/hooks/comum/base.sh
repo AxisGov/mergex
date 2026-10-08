@@ -144,6 +144,171 @@ expx_trabalho_atual_por_branch() {
   printf '%s\n' "$1"
 }
 
+# --------------------------------------------------------------------------
+# Leitura do push — o segmento normalizado, por token
+# --------------------------------------------------------------------------
+# Uma leitura só, usada por `mergex/git-perigoso` (destino: a principal) e por
+# `pr-so-com-portao` (origem: a revisão que o push publica). A razão de ler por
+# token, e não por regex sobre a linha inteira, está no git-perigoso, seção 0.
+#
+# Não é um parser de shell: não expande variável, não resolve substituição de
+# comando, não entende agrupamento e só tira um par de aspas das pontas do
+# token. Classificar o que foi lido — e barrar o que não se classifica — é de
+# quem chama.
+
+# Uma aspa em cada ponta do token, no máximo, e só. As pontas são tratadas
+# separadamente porque o par se abre e se fecha em tokens diferentes quando o
+# comando inteiro está entre aspas (`bash -c "git push origin main"` dá os
+# tokens `"git` e `main"`).
+expx_sem_aspas() {
+  local v="$1"
+  v="${v#[\"\']}"
+  v="${v%[\"\']}"
+  printf '%s' "$v"
+}
+
+# Programas que RODAM o que vem no argumento: é esta lista que separa EXECUTAR
+# (`bash -c "git push ..."`) de CITAR (`echo "git push ..."`). Compara-se o
+# NOME do programa, não o caminho: `/bin/sh` é o mesmo `sh`.
+expx_executor() {
+  case "$1" in
+    bash|sh|dash|zsh|ksh|ksh93|mksh|ash|busybox) return 0 ;;
+    eval|command|exec|env|sudo|doas|nohup|setsid|nice|time|timeout|stdbuf|xargs) return 0 ;;
+  esac
+  return 1
+}
+
+# O número que ABRE um redirecionamento sobra no fim do segmento depois da
+# quebra (`git push origin main 2>/tmp/log` vira `git push origin main 2`). Ele
+# é descritor só quando é uma palavra INTEIRA de dígitos: `main2` é outra
+# branch.
+expx_sem_descritor() {
+  local v="$1" t
+  t="${v##*[[:space:]]}"
+  case "$t" in
+    ''|*[!0-9]*) printf '%s' "$v" ;;
+    *)           printf '%s' "${v%"$t"}" ;;
+  esac
+}
+
+# Emenda SÓ o par barra-invertida+quebra que continua a linha: a barra que NÃO
+# está escapada (corrida ímpar de barras no fim da linha). A quebra solta
+# continua separando comandos, como no shell.
+expx_emenda_continuacao() {
+  local linha saida='' barras
+  while IFS= read -r linha; do
+    barras="${linha##*[!\\]}"          # a corrida de barras no fim da linha
+    if [ $(( ${#barras} % 2 )) = 1 ]; then
+      saida="$saida${linha%?}"         # ímpar: a última barra continua a linha
+    else
+      saida="$saida$linha"$'\n'        # par: a quebra continua separando
+    fi
+  done <<<"$1"
+  printf '%s' "$saida"
+}
+
+# expx_push_segmentos <comando> — os segmentos que podem ser um push, um por
+# linha. Separadores de segmento: `&&`, `||`, `;`, `|`, `&`, subshell, crase e
+# redirecionamento; a quebra de linha que já estava no comando também separa.
+# A troca é do `tr` (byte a byte, POSIX), não do `sed`: `s/X/\n/` é extensão
+# GNU, e no sed do BSD o `\n` vira a letra `n` e grudaria os segmentos.
+expx_push_segmentos() {
+  local c="$1"
+  case "$c" in
+    *\\$'\n'*) c="$(expx_emenda_continuacao "$c")" ;;
+  esac
+  printf '%s' "$c" | grep -Fq push || return 0
+  printf '%s\n' "$c" | tr ';|&()`<>' '\n\n\n\n\n\n\n\n' | grep -F push
+  return 0
+}
+
+# expx_push_le <segmento> — 0 se o segmento é mesmo um `git ... push`. Deixa:
+#   EXPX_PUSH_OPCOES    as opções do push, sem aspas, na ordem (o VALOR de
+#                       `--repo`, `--receive-pack`, `--exec`, `--push-option`,
+#                       `-o` e de aglomerado curto terminado em `o` é pulado);
+#   EXPX_PUSH_TEM_REMOTO 1 quando há um primeiro posicional (o remoto);
+#   EXPX_PUSH_REMOTO    esse remoto, sem aspas;
+#   EXPX_PUSH_REFSPECS  os posicionais seguintes (refspecs), sem aspas.
+EXPX_PUSH_OPCOES=(); EXPX_PUSH_REFSPECS=(); EXPX_PUSH_REMOTO=""; EXPX_PUSH_TEM_REMOTO=0
+expx_push_le() {
+  local tok seg atribuiu=0
+  EXPX_PUSH_OPCOES=(); EXPX_PUSH_REFSPECS=(); EXPX_PUSH_REMOTO=""; EXPX_PUSH_TEM_REMOTO=0
+  seg="$(expx_sem_descritor "$1")"
+  set -f                    # o segmento é texto: nada aqui vira glob
+  # shellcheck disable=SC2086
+  set -- $seg
+  set +f
+
+  # Prefixo de ambiente: `GIT_DIR=/tmp/x git push ...` continua sendo um push.
+  # Valor com espaço (`GIT_SSH_COMMAND="ssh -v" git push`) chega partido em
+  # vários tokens, então, depois da primeira atribuição, os pedaços soltos
+  # também são pulados até o nome do programa.
+  while [ "$#" -gt 0 ]; do
+    case "$(expx_sem_aspas "$1")" in
+      [_[:alpha:]]*=*) atribuiu=1 ;;
+      -*)              [ "$atribuiu" = 1 ] || break ;;
+      *)               break ;;
+    esac
+    shift
+  done
+  [ "$#" -gt 0 ] || return 1
+
+  # O `git` só é procurado adiante quando o programa do segmento é executor.
+  tok="$(expx_sem_aspas "$1")"
+  if [ "$tok" != git ]; then
+    expx_executor "${tok##*/}" || return 1
+    while [ "$#" -gt 0 ]; do
+      [ "$(expx_sem_aspas "$1")" = git ] && break
+      shift
+    done
+    [ "$#" -gt 0 ] || return 1
+  fi
+  shift
+
+  # Opções globais do git, antes do subcomando. As desta lista levam o valor
+  # numa palavra separada (`git -C <path> push`, `git -c <k>=<v> push`).
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--attr-source|--config-env)
+        [ "$#" -ge 2 ] || return 1
+        shift 2 ;;
+      -*) shift ;;
+      *) break ;;
+    esac
+  done
+  [ "$(expx_sem_aspas "${1:-}")" = push ] || return 1
+  shift
+
+  # A aspa sai do token ANTES de qualquer comparação: quando o comando vem
+  # embrulhado, a aspa de fechamento cola na última palavra (`--all"`).
+  while [ "$#" -gt 0 ]; do
+    tok="$(expx_sem_aspas "$1")"; shift
+    case "$tok" in
+      # Opções do push cujo valor vem na palavra seguinte.
+      --repo|--receive-pack|--exec|--push-option|-o)
+        EXPX_PUSH_OPCOES[${#EXPX_PUSH_OPCOES[@]}]="$tok"
+        [ "$#" -gt 0 ] && shift
+        continue ;;
+      --*)
+        EXPX_PUSH_OPCOES[${#EXPX_PUSH_OPCOES[@]}]="$tok"
+        continue ;;
+      -*) # Aglomerado curto: `-fu`; terminado em `o`, o valor vem a seguir.
+        EXPX_PUSH_OPCOES[${#EXPX_PUSH_OPCOES[@]}]="$tok"
+        case "$tok" in *o) [ "$#" -gt 0 ] && shift ;; esac
+        continue ;;
+    esac
+
+    # Primeiro posicional é o remoto; os seguintes são refspecs.
+    if [ "$EXPX_PUSH_TEM_REMOTO" = 0 ]; then
+      EXPX_PUSH_TEM_REMOTO=1
+      EXPX_PUSH_REMOTO="$tok"
+      continue
+    fi
+    EXPX_PUSH_REFSPECS[${#EXPX_PUSH_REFSPECS[@]}]="$tok"
+  done
+  return 0
+}
+
 expx_rastro() {
   # expx_rastro <raiz> <evento> <resultado> <detalhe> <hook> [arquivos_json]
   local raiz="$1" evento="$2" resultado="$3" detalhe="$4" hook="$5"
