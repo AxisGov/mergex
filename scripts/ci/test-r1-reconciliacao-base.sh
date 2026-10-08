@@ -2147,6 +2147,235 @@ grupo_legado() {
 }
 
 # ---------------------------------------------------------------------------
+# V9 executável (Task 11): portao-v9.sh e a barreira do checkpoint
+# ---------------------------------------------------------------------------
+
+# v9_espera <desc> <rc> <saída exata> — portao-v9.sh (array `v` do grupo) com
+# o rc e a saída exatos e o stderr vazio.
+v9_espera() {
+  local desc="$1" esperado="$2" saida="$3" out rc err
+  err="$(mktemp)"; TMPS="$TMPS $err"
+  out="$("${v[@]}" 2>"$err")"; rc=$?
+  if [ "$rc" = "$esperado" ] && [ "$out" = "$saida" ] && [ ! -s "$err" ]; then ok "$desc"
+  else falha "$desc — rc=$rc (esperava $esperado) out=$(printf '%s' "$out" | tr '\n\t' '|>') err=$(tr '\n' ' ' < "$err")"; fi
+}
+
+# v9_sem_prova <desc> <trecho> — rc 3, `resultado=v9_sem_prova`, uma linha
+# `motivo` com o trecho e nenhuma linha `fora_do_plano` nem `base=`.
+v9_sem_prova() {
+  local desc="$1" trecho="$2" out rc
+  out="$("${v[@]}" 2>/dev/null)"; rc=$?
+  if [ "$rc" != 3 ]; then falha "$desc — rc=$rc, esperava 3: $(printf '%s' "$out" | tr '\n\t' '|>')"; return; fi
+  if ! printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+      || printf '%s\n' "$out" | grep -Eq '^(fora_do_plano|base=|resultado=(ok|v9)$)'; then
+    falha "$desc — saída fora do contrato: $(printf '%s' "$out" | tr '\n\t' '|>')"; return
+  fi
+  if printf '%s\n' "$out" | TRECHO="$trecho" awk '/^motivo\t/ && index($0, ENVIRON["TRECHO"]) { f = 1 } END { exit !f }'; then ok "$desc"
+  else falha "$desc — sem motivo com '$trecho': $(printf '%s' "$out" | tr '\n\t' '|>')"; fi
+}
+
+# _v9_commit <mensagem> <arquivo>... — commita só os arquivos dados
+_v9_commit() {
+  local m="$1"; shift
+  git add -- "$@" && git commit -q -m "$m" -- "$@"
+}
+
+grupo_v9() {
+  local d v t out tk lt e x
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+
+  # ---- o fluxo do plano: antes e depois do registro, ref parada, produto ----
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  v=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+  rc_igual "antes do registro: V9 reprova os dois" 1 "${v[@]}"
+  [ "$("${v[@]}" | grep -c '^fora_do_plano	')" = 2 ] && ok "nomeia os dois" || falha "lista de desvios"
+  v9_espera "antes do registro: base_validada_sha de HEAD, saída exata" 1 \
+    "$(printf 'base=%s\norigem_base=registrada_e0\nresultado=v9\nfora_do_plano\t%s\nfora_do_plano\t%s' "$FX_B0" "$FX_NOVO2" "$FX_NOVO1")"
+  bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null
+  rc_igual "depois do registro: V9 aprova" 0 "${v[@]}"
+  v9_espera "depois do registro: base é o b1_sha da reconciliação (sem commit dos artefatos)" 0 \
+    "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B1")"
+  git branch -f main "$FX_B0"
+  rc_igual "ref local desatualizada não muda o resultado" 0 "${v[@]}"
+  v9_espera "ref local desatualizada: mesma base" 0 "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B1")"
+  git branch -f main "$(git commit-tree "$(git mktree < /dev/null)" -m orfao)"
+  v9_espera "ref de base num commit sem relação: mesma base" 0 "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B1")"
+  git branch -q -D main
+  v9_espera "ref de base inexistente: mesma base" 0 "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B1")"
+
+  # só leitura: status e índice intactos; temporários removidos
+  lt="$(_leitura)"; mkdir -p "$t/tmp"
+  TMPDIR="$t/tmp" "${v[@]}" >/dev/null 2>&1
+  TMPDIR="$t/tmp" "${v[@]}" --force >/dev/null 2>&1
+  [ "$(_leitura)" = "$lt" ] && ok "só leitura: status e índice intactos" || falha "a V9 mudou o status ou o índice"
+  [ -z "$(ls -A "$t/tmp")" ] && ok "temporários removidos" || falha "temporários deixados: $(ls -A "$t/tmp" | tr '\n' ' ')"
+
+  echo x > extra.ts; git add extra.ts; git commit -qm "produto fora do plano"
+  rc_igual "arquivo de produto fora do plano reprova" 1 "${v[@]}"
+  v9_espera "produto fora do plano: só ele é nomeado" 1 \
+    "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\textra.ts' "$FX_B1")"
+
+  # isenções: pasta do trabalho, docs/entregas/<id>/, HISTORICO na SprintX
+  mkdir -p docs/sprintx/estimativas docs/entregas/outro
+  printf 'h\n' > docs/sprintx/estimativas/HISTORICO.md
+  printf 'n\n' > docs/sprintx/features/ft-rec/notas.md
+  printf 'n\n' > docs/entregas/ft-rec/NOTAS.md
+  _v9_commit "metodo" docs/sprintx/estimativas/HISTORICO.md docs/sprintx/features/ft-rec/notas.md docs/entregas/ft-rec/NOTAS.md
+  v9_espera "isenções de método (pasta, entrega, HISTORICO na SprintX) não são desvio" 1 \
+    "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\textra.ts' "$FX_B1")"
+  printf 'o\n' > docs/sprintx/estimativas/outro.md
+  printf 'o\n' > docs/entregas/outro/ENTREGA.md
+  _v9_commit "fora" docs/sprintx/estimativas/outro.md docs/entregas/outro/ENTREGA.md
+  v9_espera "outro arquivo de estimativas e a entrega de outro trabalho são desvio" 1 \
+    "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\tdocs/entregas/outro/ENTREGA.md\nfora_do_plano\tdocs/sprintx/estimativas/outro.md\nfora_do_plano\textra.ts' "$FX_B1")"
+
+  # reconciliado alterado depois de M: --verificar ok=false → v9_sem_prova
+  printf 'export const depois = 1;\n' >> "$FX_NOVO1"; _v9_commit "muda o reconciliado" "$FX_NOVO1"
+  v9_sem_prova "reconciliado alterado depois de M: v9_sem_prova" "ok=false"
+  cd "$REPO" || return
+
+  # ---- sem reconciliação: base de HEAD:ENTREGA, nunca do disco ------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  sed "s/^base_validada_sha: .*/base_validada_sha: $FX_M/" "$FX_ENTREGA" > "$t/e" && cat "$t/e" > "$FX_ENTREGA"
+  out="$("${v[@]}" 2>/dev/null)"
+  [ "$(printf '%s\n' "$out" | sed -n 1p)" = "base=$FX_B0" ] && ok "base do disco divergente: vale a de HEAD" || falha "base do disco: $(printf '%s' "$out" | tr '\n\t' '|>')"
+  printf '%s\n' "$out" | grep -q "^aviso	.*$FX_M.*$FX_B0" && ok "divergência relatada numa linha aviso" || falha "sem aviso: $(printf '%s' "$out" | tr '\n\t' '|>')"
+  [ "$(printf '%s\n' "$out" | grep -c '^fora_do_plano	')" = 2 ] && ok "base do disco divergente: os dois continuam desvio" || falha "base do disco escondeu desvio"
+  rc_igual "base do disco divergente: rc 1" 1 "${v[@]}"
+  git restore -- "$FX_ENTREGA"
+
+  # plano sujo no disco não amplia o aceito; commitado, amplia
+  tk=docs/sprintx/features/ft-rec/sprint-01/tasks.md
+  sed "s#cria: \[tests/ui/ft-rec.test.ts\]#cria: [tests/ui/ft-rec.test.ts, $FX_NOVO1]#" "$tk" > "$t/tk" && cat "$t/tk" > "$tk"
+  grep -Fq "$FX_NOVO1" "$tk" && ! git diff --quiet -- "$tk" \
+    && ok "controle: o plano do disco (sujo) declara $FX_NOVO1" || falha "controle: a edição do plano não pegou"
+  v9_espera "tasks.md sujo declarando arquivo fora do plano: V9 reprova" 1 \
+    "$(printf 'base=%s\norigem_base=registrada_e0\nresultado=v9\nfora_do_plano\t%s\nfora_do_plano\t%s' "$FX_B0" "$FX_NOVO2" "$FX_NOVO1")"
+  _v9_commit "plano" "$tk"
+  v9_espera "controle: o plano commitado amplia o aceito" 1 \
+    "$(printf 'base=%s\norigem_base=registrada_e0\nresultado=v9\nfora_do_plano\t%s' "$FX_B0" "$FX_NOVO2")"
+  cd "$REPO" || return
+
+  # ---- artefato com contrato quebrado: ok=false → v9_sem_prova ------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null
+  sed 's/^estado: ativa$/estado: superada/' "$AR" > "$t/a" && cat "$t/a" > "$AR"
+  rc_igual "controle: --verificar reprova o artefato editado" 5 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  v9_sem_prova "--verificar com ok=false: v9_sem_prova, nada coberto" "ok=false"
+  cd "$REPO" || return
+
+  # ---- caminho com espaço, acento e apóstrofo -------------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=caminho_especial fx_cenario "$d" || { falha "caminho_especial não montou"; return; }
+  cd "$d" || return
+  out="$("${v[@]}" 2>/dev/null)"
+  printf '%s\n' "$out" | grep -Fxq "fora_do_plano	$FX_ESPECIAL" \
+    && ok "caminho especial fora do plano listado exato (sem quoting)" || falha "caminho especial: $(printf '%s' "$out" | tr '\n\t' '|>')"
+  [ "$(printf '%s\n' "$out" | grep -c '^fora_do_plano	')" = 3 ] && ok "caminho especial: três desvios" || falha "caminho especial: contagem"
+  bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" "$FX_ESPECIAL" >/dev/null
+  v9_espera "caminho especial coberto: aceito" 0 "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B1")"
+  cd "$REPO" || return
+
+  # ---- RunX: HISTORICO.md não é isento --------------------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=runx fx_cenario "$d" || { falha "runx não montou"; return; }
+  cd "$d" || return
+  bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null
+  v=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec)
+  v9_espera "RunX registrada: aprova" 0 "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B1")"
+  mkdir -p docs/sprintx/estimativas; printf 'h\n' > docs/sprintx/estimativas/HISTORICO.md
+  _v9_commit "historico" docs/sprintx/estimativas/HISTORICO.md
+  v9_espera "RunX: HISTORICO.md é desvio" 1 \
+    "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\tdocs/sprintx/estimativas/HISTORICO.md' "$FX_B1")"
+  cd "$REPO" || return
+  v=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+
+  # ---- legado sem a chave: merge-base único, só leitura ---------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  cd "$d" || return
+  lt="$(_leitura)"
+  v9_espera "legado sem base_validada_sha: merge-base único com branch_base (inferida_leitura)" 1 \
+    "$(printf 'base=%s\norigem_base=inferida_leitura\nresultado=v9\nfora_do_plano\t%s\nfora_do_plano\t%s' "$FX_B1" "$FX_NOVO2" "$FX_NOVO1")"
+  [ "$(_leitura)" = "$lt" ] && git diff --quiet HEAD -- "$FX_ENTREGA" && ok "legado: nada gravado" || falha "legado: a V9 gravou"
+  git branch -q -m main base-antiga
+  v9_sem_prova "legado com branch_base inexistente: v9_sem_prova" "branch_base"
+  git branch -q -m base-antiga main
+  x="$(git commit-tree "$FX_M^{tree}" -p "$FX_P1" -p "$FX_B1" -m gemeo)"
+  git branch -f main "$x"
+  [ "$(git merge-base --all HEAD main | grep -c .)" = 2 ] && ok "controle: dois merge-bases" || falha "controle: merge-bases"
+  v9_sem_prova "legado com dois merge-bases: v9_sem_prova" "merge-base"
+  cd "$REPO" || return
+
+  # ---- chave presente e inválida em HEAD; contexto divergente --------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=entrega_base_null fx_cenario "$d" || { falha "entrega_base_null não montou"; return; }
+  cd "$d" || return
+  v9_sem_prova "base_validada_sha null em HEAD: v9_sem_prova" "base_validada_sha"
+  cd "$REPO" || return
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  e=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec)
+  rc_igual "origem divergente do ENTREGA.md: rc 3" 3 "${e[@]}"
+
+  # ---- uso ------------------------------------------------------------------
+  rc_igual "--force é uso inválido" 64 "${v[@]}" --force
+  rc_igual "opção desconhecida é uso inválido" 64 "${v[@]}" --sem-prova
+  rc_igual "sem argumentos é uso inválido" 64 bash "$V9"
+  rc_igual "sem --verificar é uso inválido" 64 bash "$V9" --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  rc_igual "--entrega fora de docs/entregas/<id>/ENTREGA.md é uso inválido" 64 bash "$V9" --verificar --entrega outro.md --origem sprintx --trabalho ft-rec
+  rc_igual "origem inválida é uso inválido" 64 bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem n/a --trabalho ft-rec
+  cd "$REPO" || return
+}
+
+grupo_barreira() {
+  local d b out rc esperado t
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  b=(bash "$RB" --verificar --checkpoint reconciliacao-base --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+  out="$("${b[@]}" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && [ "$out" = ok=true ] && ok "sem reconciliação e ENTREGA.md persistido: ok=true" || falha "barreira sem reconciliação: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+  rc_igual "--checkpoint diferente de reconciliacao-base é uso" 64 bash "$RB" --verificar --checkpoint pre-e6 --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  rc_igual "--checkpoint e8 é uso" 64 bash "$RB" --verificar --checkpoint e8 --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  rc_igual "--checkpoint sem valor é uso" 64 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --checkpoint
+  rc_igual "--checkpoint repetido é uso" 64 "${b[@]}" --checkpoint reconciliacao-base
+  rc_igual "--checkpoint no --registrar é uso" 64 bash "$RB" --registrar --checkpoint reconciliacao-base --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1"
+  [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] && ok "uso inválido não grava nada" || falha "uso inválido gravou"
+
+  bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null
+  rc_igual "controle: --verificar simples aprova o registrado" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  out="$("${b[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" = 5 ] && ok "registrado sem checkpoint: rc 5" || falha "registrado sem checkpoint: rc=$rc"
+  [ "$(printf '%s\n' "$out" | sed -n 1p)" = ok=false ] && ! printf '%s\n' "$out" | grep -q '^coberto' \
+    && ok "registrado sem checkpoint: ok=false sem coberto" || falha "registrado sem checkpoint: $(printf '%s' "$out" | tr '\n\t' '|>')"
+  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$FX_ENTREGA" \
+    && ok "motivo de persistência do ENTREGA.md" || falha "sem motivo do ENTREGA.md: $(printf '%s' "$out" | tr '\n\t' '|>')"
+  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$AR" \
+    && ok "motivo de persistência do artefato" || falha "sem motivo do artefato: $(printf '%s' "$out" | tr '\n\t' '|>')"
+
+  bash "$S/persistir-metodo.sh" --persistir --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --checkpoint reconciliacao-base >/dev/null 2>&1 \
+    && ok "checkpoint reconciliacao-base persistido" || falha "persistir-metodo falhou"
+  esperado="$(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec 2>/dev/null)"
+  out="$("${b[@]}" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && [ "$out" = "$esperado" ] && [ "$(printf '%s\n' "$out" | grep -c '^coberto	')" = 2 ] \
+    && ok "depois do checkpoint: ok, mesma saída do --verificar" || falha "depois do checkpoint: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+
+  printf '\nNota acrescentada depois do commit.\n' >> "$AR"
+  rc_igual "controle: o --verificar simples aceita a edição da prosa" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  out="$("${b[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" = 5 ] && [ "$(printf '%s\n' "$out" | grep -c '^motivo')" = 1 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$AR" \
+    && ok "artefato editado depois do commit: rc 5, só a persistência" || falha "artefato editado: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+  git restore -- "$AR"
+  printf '\nNota.\n' >> "$FX_ENTREGA"; git add -- "$FX_ENTREGA"
+  out="$("${b[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$FX_ENTREGA" \
+    && ok "ENTREGA.md no stage e não commitado: rc 5" || falha "ENTREGA.md no stage: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+  cd "$REPO" || return
+}
+
+# ---------------------------------------------------------------------------
 # Despacho
 # ---------------------------------------------------------------------------
 

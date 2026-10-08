@@ -103,6 +103,14 @@
 #   caminho; ou `ok=false` e `motivo<TAB><código><TAB><detalhe>` por falha,
 #   todas relatadas. rc 5 se houver falha de contrato, senão 4.
 #
+# --verificar --checkpoint reconciliacao-base (a barreira que o E2 exige, spec
+#   seção 9): o mesmo --verificar e, além dele, o ENTREGA.md e todo artefato da
+#   cadeia (os do disco e os listados no ENTREGA.md do disco) rastreados e sem
+#   alteração em relação a HEAD (`git ls-files --error-unmatch` e
+#   `git diff --quiet HEAD`). Cada um que falha: `ok=false` e
+#   `motivo<TAB>5<TAB>persistencia<TAB><arquivo>`, rc 5. Outro valor de
+#   --checkpoint, ou --checkpoint no --registrar: rc 64.
+#
 #   Toda prova é recalculada do Git; nenhum caminho é aceito por estar listado.
 #   Não há opção de força, nem variável de ambiente que relaxe prova.
 #
@@ -161,12 +169,13 @@ ORIGEM=""
 TRABALHO=""
 SEPARADOR=0
 MERGE_ARG=""
+CHECKPOINT="" # (verificar) reconciliacao-base: a barreira de persistência (spec, seção 9)
 
 uso() {
   [ -z "${1:-}" ] || printf 'reconciliacao-base: %s\n' "$1" >&2
   printf '%s\n' \
     'uso: reconciliacao-base.sh --registrar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> [--merge <sha>] -- <caminho>...' \
-    '     reconciliacao-base.sh --verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id>' >&2
+    '     reconciliacao-base.sh --verificar [--checkpoint reconciliacao-base] --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id>' >&2
   exit 64
 }
 
@@ -711,6 +720,7 @@ verificar() {
   cadeia_provas
   [ -z "$ENTREGA_D" ] || cadeia_coerencia
   cadeia_cobertura
+  [ "$CHECKPOINT" != reconciliacao-base ] || cadeia_persistida
 
   if [ "$FALHA_5" = 1 ] || [ "$FALHA_4" = 1 ]; then
     printf 'ok=false\n'
@@ -933,6 +943,24 @@ cadeia_cobertura() {
   done 3< "$TMP_DIR/cobertura.ultima"
 }
 
+# cadeia_persistida — (--verificar --checkpoint reconciliacao-base, spec 9) o
+# ENTREGA.md e todo artefato da cadeia (os do disco e os que o ENTREGA.md do
+# disco lista) estão rastreados e sem alteração em relação a HEAD, nem no
+# stage. Cada um que não está: `motivo<TAB>5<TAB>persistencia<TAB><arquivo>`.
+cadeia_persistida() {
+  local f
+  {
+    printf '%s\n' "$ENTREGA"
+    sed "s#^#docs/entregas/$TRABALHO/#" "$TMP_DIR/artefatos"
+    [ ! -f "$TMP_DIR/lista-entrega" ] || cut -f2 "$TMP_DIR/lista-entrega" | sed '/^$/d' | sed "s#^#docs/entregas/$TRABALHO/#"
+  } | awk '!visto[$0]++' > "$TMP_DIR/persistidos"
+  while IFS= read -r f <&3; do
+    if g ls-files --error-unmatch -- "$f" >/dev/null 2>&1 && g diff --quiet HEAD -- "$f" >/dev/null 2>&1; then continue; fi # guarda:PERSIST
+    printf 'motivo\t5\tpersistencia\t%s\n' "$(printf '%s' "$f" | tr '\t\n\r' '   ')" >> "$MOTIVOS"
+    FALHA_5=1; N_MOT5=$((N_MOT5 + 1))
+  done 3< "$TMP_DIR/persistidos"
+}
+
 # ---------------------------------------------------------------------------
 # ENTREGA.md do disco no encadeamento (--registrar com cadeia)
 # ---------------------------------------------------------------------------
@@ -1135,16 +1163,20 @@ while [ "$#" -gt 0 ]; do
     --origem) [ "$#" -ge 2 ] || uso; ORIGEM="$2"; shift 2 ;;
     --trabalho) [ "$#" -ge 2 ] || uso; TRABALHO="$2"; shift 2 ;;
     --merge) [ "$#" -ge 2 ] && [ -n "$2" ] && [ -z "$MERGE_ARG" ] || uso '--merge exige um SHA, uma vez só'; MERGE_ARG="$2"; shift 2 ;;
+    --checkpoint) [ "$#" -ge 2 ] && [ -z "$CHECKPOINT" ] || uso '--checkpoint exige um valor, uma vez só'; CHECKPOINT="$2"; shift 2 ;;
     --) SEPARADOR=1; shift; break ;;
     *) uso "opção desconhecida: $1" ;;
   esac
 done
 
 case "$MODO" in
-  registrar) [ "$SEPARADOR" = 1 ] || uso 'falta -- antes da lista de caminhos' ;;
+  registrar)
+    [ "$SEPARADOR" = 1 ] || uso 'falta -- antes da lista de caminhos'
+    [ -z "$CHECKPOINT" ] || uso '--registrar não recebe --checkpoint' ;;
   verificar)
     [ "$SEPARADOR" = 0 ] || uso '--verificar não recebe lista de caminhos'
-    [ -z "$MERGE_ARG" ] || uso '--verificar não recebe --merge' ;;
+    [ -z "$MERGE_ARG" ] || uso '--verificar não recebe --merge'
+    case "$CHECKPOINT" in ''|reconciliacao-base) ;; *) uso "--checkpoint só aceita reconciliacao-base: $CHECKPOINT" ;; esac ;;
   *) uso 'falta --registrar ou --verificar' ;;
 esac
 # --merge é um SHA (nunca nome de ref): hex, de 7 a 40 dígitos

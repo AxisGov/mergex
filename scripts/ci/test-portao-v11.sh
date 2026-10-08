@@ -21,6 +21,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROVA="${PROVA:-$REPO/.claude/skills/mergex/scripts/prova-de-commit.sh}"
 CAUSA="${CAUSA:-$REPO/.claude/skills/mergex/scripts/causa-do-portao.sh}"
+V9="${V9:-$REPO/.claude/skills/mergex/scripts/portao-v9.sh}"
 FIXTURES="$REPO/scripts/ci/fixtures/e2e-p0-2"
 
 OK=0; FALHOU=0
@@ -444,6 +445,13 @@ LIDO="$(git -C "$R" show feature/ft-v11:docs/entregas/ft-v11/ENTREGA.md 2>/dev/n
   && ok "portão completo — git show do HEAD da feature → $LIDO" || falha "git show: '$LIDO'"
 case "$LIDO" in *indeterminada*|*falha_tecnica*) falha "a V11 provada virou causa não provada" ;;
   *) ok "a V11 provada não vira indeterminada nem falha_tecnica" ;; esac
+
+# A V9 do mesmo portão, executável, sobre o ENTREGA.md commitado (sem
+# base_validada_sha: merge-base único com branch_base, só leitura).
+V9OUT="$(cd "$R" && bash "$V9" --verificar --entrega docs/entregas/ft-v11/ENTREGA.md --origem sprintx --trabalho ft-v11 2>&1)"; V9RC=$?
+printf '%s\n' "$V9OUT" | grep -Fxq 'resultado=ok' && [ "$V9RC" = 0 ] \
+  && ok "portão completo — V9 executável: resultado=ok" || falha "portão completo — V9: rc=$V9RC $(printf '%s' "$V9OUT" | tr '\n\t' '|>')"
+[ -z "$(git -C "$R" status --porcelain)" ] && ok "portão completo — a V9 não gravou nada" || falha "portão completo — a V9 gravou"
 
 # --- E1 tardio: a T-01.02 já estava commitada; falta o registro da prova ---
 SHA2="$(git -C "$R" rev-parse --short feature/ft-v11~1)"
