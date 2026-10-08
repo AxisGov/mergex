@@ -387,9 +387,9 @@ cmp -s "$atencao_cmd" "$atencao_oc" || fail 'OpenCode mergex-atencao command div
 
 # A ordem dos critérios: a do classificador é a das tabelas do reference e do agente.
 ordem_script="$(bash "$classificador" --ordem)"
-[ "$ordem_script" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ] \
+[ "$ordem_script" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 O10 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ] \
   || fail "classifier order changed: $ordem_script"
-ordem_tabelas() { grep -oE '^\| [OLD][0-9] \|' "$1" | tr -d '| ' | tr '\n' ' ' | sed 's/ $//'; }
+ordem_tabelas() { grep -oE '^\| [OLD][0-9]+ \|' "$1" | tr -d '| ' | tr '\n' ' ' | sed 's/ $//'; }
 for f in "$atencao" "$agente_cl"; do
   [ "$(ordem_tabelas "$f") PADRAO" = "$ordem_script" ] \
     || fail "$f criteria tables are not in the classifier order ($(ordem_tabelas "$f"))"

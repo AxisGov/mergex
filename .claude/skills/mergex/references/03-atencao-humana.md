@@ -145,7 +145,7 @@ olhar, que é o ponto inteiro. O formato está no Passo 4.
 
 ## Passo 3 — Classificar, arquivo por arquivo
 
-Aplique **nesta ordem**. Pare no primeiro critério que bater: a ordem já é a da rigidez. É a mesma ordem que o classificador aplica (`classificar-atencao.sh --ordem`): O1–O9, L1–L4, D1–D4, padrão.
+Aplique **nesta ordem**. Pare no primeiro critério que bater: a ordem já é a da rigidez. É a mesma ordem que o classificador aplica (`classificar-atencao.sh --ordem`): O1–O10, L1–L4, D1–D4, padrão.
 
 ### OLHO OBRIGATÓRIO — o revisor lê linha a linha
 
@@ -162,6 +162,7 @@ Basta **um** destes:
 | O7 | Efeito irreversível declarado no plano de reversão | O plano de reversão da legadox diz que este arquivo produz efeito que o versionador não desfaz |
 | O8 | Veio de raio ALTO | O raio da legadox classifica este arquivo como ALTO |
 | O9 | Histórico de regressão registrado, ou reprovação anterior em QA no mesmo arquivo | O memox devolve `regressoes` não vazio, ou `reprovacoes_qa` maior que zero, para este caminho (`Passo 2.b`). Sem o memox instalado, este critério **não se aplica** |
+| O10 | Arquivo reconciliado da base | O caminho consta na lista de reconciliados do registro (`RECONCILIACAO-BASE-NNN.md`, `coberto`); passe-a ao classificador com `--reconciliados`. A faixa nunca desce |
 
 ### LEITURA RÁPIDA — o revisor confere intenção, não implementação
 
@@ -313,7 +314,7 @@ printf '%s\t%s\t%s\n' src/auth/sessao.ts "O4: cria o token de sessão (T-01.02)"
 ```
 
 - Entrada: uma linha por arquivo do diff — o caminho e, separados por TAB, os critérios
-  `Xn: evidência` confirmados (O1–O9, L1–L3, D1–D3). Arquivo sem critério vai só com o caminho.
+  `Xn: evidência` confirmados (O1–O9, L1–L3, D1–D3; O10 vem só da lista de reconciliados). Arquivo sem critério vai só com o caminho.
 - Saída: `<caminho> TAB <faixa> TAB <justificativa>`. A justificativa já nomeia o critério; copie
   para o `ATENCAO.md` e acrescente o que o revisor precisa saber.
 - `L4` ou `D4` passados na entrada são **ignorados**, e a saída diz isso.
@@ -465,7 +466,7 @@ Esta saída vai inteira para a seção **"Onde eu quero seu olho"** da descriç�
 ## Critério de saída
 
 - [ ] Todo arquivo do diff está em exatamente uma faixa.
-- [ ] Toda classificação nomeia pelo menos um critério (`O1`..`O9`, `L1`..`L4`, `D1`..`D4`).
+- [ ] Toda classificação nomeia pelo menos um critério (`O1`..`O10`, `L1`..`L4`, `D1`..`D4`).
 - [ ] Todo L4 e D4 veio da saída do classificador, com a linha do catálogo ou a prova.
 - [ ] Todo artefato de método que é origem de decisão de risco foi avaliado pelos critérios O antes.
 - [ ] Nenhuma justificativa é baseada em tamanho de diff.
