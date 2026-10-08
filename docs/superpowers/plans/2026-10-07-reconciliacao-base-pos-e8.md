@@ -4,7 +4,14 @@
 
 **Goal:** Dar à MergeX um caminho fechado e verificável para integrar uma base que avançou depois do E8: artefato de reconciliação com quatro provas recalculadas do Git, V9 executável por SHA, E3 obrigatório para reconciliados e portão vinculado a commit.
 
-**Architecture:** Um executável novo (`reconciliacao-base.sh`) registra e verifica a reconciliação, apoiado numa biblioteca de artefato (`reconciliacao-artefato.sh`) que emite, lê, valida e assina `RECONCILIACAO-BASE-NNN.md`. A V9 passa a ser o executável `portao-v9.sh`, que compõe a união das tasks (exposta por `ownership-da-task.sh --uniao`) com os caminhos que a verificação da reconciliação declara cobertos. A validade do portão é o executável `validade-do-portao.sh`, consumido pelo hook `pr-so-com-portao`; o checkpoint `reconciliacao-base` entra no enum fechado de `contrato-de-commit.sh`, `catalogo-de-metodo.sh` e `persistir-metodo.sh`.
+**Architecture:** Um executável novo (`reconciliacao-base.sh`) registra e verifica a reconciliação, apoiado numa biblioteca de artefato (`reconciliacao-artefato.sh`) que emite, lê, valida e assina `RECONCILIACAO-BASE-NNN.md`. A V9 passa a ser o executável `portao-v9.sh`, que compõe a união das tasks (exposta por `ownership-da-task.sh --uniao`) com os caminhos que a verificação da reconciliação declara cobertos. A validade do portão é o executável `validade-do-portao.sh --rev`. A barreira de push segue a DM-184 e tem três consumidores do mesmo validador, através da biblioteca de decisão por ref `portao-regras.sh`:
+- o `pre-push` do Git (`portao-push.sh`), ativado pelo E0 e provado funcionalmente pelo E2 (`ativacao-pre-push.sh`): barreira local contra erro normal;
+- o executável de CI (`portao-ci.sh`), com template de workflow: barreira contra contorno deliberado, não ativada em produto nesta branch;
+- o hook do Claude `pr-so-com-portao`, só consultivo.
+
+O checkpoint `reconciliacao-base` entra no enum fechado de `contrato-de-commit.sh`, `catalogo-de-metodo.sh` e `persistir-metodo.sh`.
+
+**Estado de execução (2026-10-08):** as Tasks 1–13 estão concluídas e aprovadas. A antiga Task 14 (hook `pr-so-com-portao` como fronteira, commits `92d5471`..`78fbb10`) não foi aprovada depois de cinco ciclos e foi superada pela DM-184. Ela fica no histórico, sem reescrita, e não conta como aprovação de nenhuma das Tasks 14–17 abaixo. As antigas Tasks 15–19 não foram iniciadas e passam a 18–22. A execução é subagent-driven, com implementador e revisor novos por task.
 
 **Tech Stack:** Bash 3.2+, Git, awk, `sha256sum` ou `shasum -a 256`; `jq` só nos hooks (como hoje).
 
@@ -21,7 +28,11 @@
 - Códigos de saída de `reconciliacao-base.sh`: `0` ok, `2` trava C5 ocupada, `3` stage não vazio ou merge em andamento, `4` prova reprovada, `5` contrato inválido, `6` base indeterminável, `64` uso.
 - Checkpoints de método: enum fechado `pre-e2 | reconciliacao-base | pre-e6 | e8`.
 - O portão só continua válido depois de `portao_sha` com commits de um pai, `Metodo:` `pre-e6` ou `e8`, tocando só o catálogo daquele checkpoint. Qualquer commit de produto, teste, plano ou merge invalida.
-- Portão `pronto` vencido barra o push em qualquer modo do hook; portão `null` ou `bloqueado` continua respeitando o modo configurado, como hoje.
+- Portão `pronto` vencido, ausente, inconsistente ou ilegível, `historia_incompleta` e `erro_ambiente` barram o push no `pre-push` e reprovam no CI, em qualquer modo. `portao: null` segue o modo de `pr-so-com-portao` em `.expx/hooks.json`, interpretado igual pelos três consumidores.
+- O `pre-push` e o CI decidem só pelo que o Git entrega (refs, SHAs, árvores). Nenhum executável da barreira trata texto de comando de shell como fronteira de segurança. O hook do Claude é só consultivo: na dúvida, avisa e sai 0.
+- O E0 nunca altera `core.hooksPath` e nunca sobrescreve, renomeia ou edita um `pre-push` de terceiro. Aceitação de qualquer `pre-push` só por prova funcional, nunca por busca textual.
+- Nenhum arquivo em `.github/workflows/`: esta branch entrega o template de CI e não ativa CI em lugar nenhum.
+- Testes que dependem de Git for Windows sobre `\\wsl.localhost\...` imprimem `NAO_EXECUTADO: <motivo>` quando o ambiente não os tem, e esses casos nunca contam como aprovados.
 - Toda linha que implementa uma guarda listada nos mutantes termina com o comentário `# guarda:<ID>`; os mutantes trocam essas linhas pelo identificador.
 - Commits pequenos, um por task, no formato do repositório (`test(mergex):`, `fix(mergex):`, `docs(mergex):`), sem push.
 - Nenhum caminho absoluto nem estado de máquina nos arquivos versionados.
@@ -29,10 +40,18 @@
 ## Review Focus
 
 1. **Caminho com espaço, acento ou aspas** entre os reconciliados — o registro grava, a verificação cobre e a V9 aceita exatamente aquele caminho, sem `core.quotepath` escapar nomes. Teste na Task 5 (`caminho com espaço e acento`).
-2. **Entrega legada com `portao: pronto` e sem `portao_sha`** — o push é barrado com instrução de rodar o E2 de novo, nunca liberado. Teste na Task 14 (`pronto legado sem portao_sha`).
+2. **Entrega legada com `portao: pronto` e sem `portao_sha`** — o push real é barrado pelo `pre-push`, com instrução de rodar o E2 de novo, nunca liberado. Teste na Task 14 (`pronto legado sem portao_sha barra`).
 3. **Ref local da base parada enquanto a remota avançou** — a V9 dá o mesmo resultado, porque usa o SHA validado, não o nome. Teste na Task 11 (`ref local desatualizada`).
 4. **Conflito resolvido pegando o lado da base inteiro para um arquivo** — sem diferença `B1..M`, o arquivo não pode ser reconciliado (prova 4) e também não aparece na V9. Teste na Task 5 (`resolução igual à base`).
-5. **Produto rodando numa worktree vinculada** (`.git` é arquivo) — registro, trava C5 e checkpoint funcionam igual. Teste na Task 17 (`worktree vinculada`).
+5. **Produto rodando numa worktree vinculada** (`.git` é arquivo) — registro, trava C5, checkpoint e `pre-push` funcionam igual. Teste na Task 20 (`fluxo na worktree vinculada`) e na Task 15 (`ativação em worktree vinculada`).
+6. **Push com várias refs** — uma ref aplicável inválida barra o push inteiro, mesmo depois de uma válida. Teste na Task 14 (`duas refs, a segunda inválida, barra o push inteiro`).
+7. **SHA enviado diferente do `HEAD`** — o `pre-push` avalia o SHA enviado, não o checkout. Teste na Task 14 (`push de commit anterior ao HEAD valida o SHA enviado`).
+8. **Hook de terceiro composto corretamente** — depois de composto à mão, passa na prova funcional e vira integração externa válida. Teste na Task 15 (`hook de terceiro composto passa na prova`).
+9. **Hook que só cita a MergeX** — sem executá-la, reprova a prova. Teste na Task 15 (`hook que só cita a MergeX reprova`).
+10. **Git for Windows sobre `\\wsl.localhost\...`** — o hook do Claude avisa e não bloqueia push legítimo; o `pre-push` decide. Teste na Task 17 (`git for windows sobre UNC: aviso sem bloqueio`), que imprime `NAO_EXECUTADO` sem o ambiente.
+11. **Clone raso ou objeto ausente** — `historia_incompleta` e push barrado, com diagnóstico próprio. Teste na Task 14 (`clone raso barra com historia_incompleta` e `objeto ausente é historia_incompleta`).
+12. **`--no-verify`** — o hook do Claude bloqueia o reconhecido com certeza; o CI é a barreira contra o contorno. Teste na Task 17 (`--no-verify reconhecido bloqueia`) e na Task 16 (`ci reprova o SHA que o pre-push barraria`).
+13. **`portao: null` nos modos existentes** — `pre-push`, CI e hook dão o mesmo resultado em `bloqueio`, `aviso` e `desligado`. Teste na Task 17 (`null nos três modos: consumidores iguais`).
 
 ---
 
@@ -739,56 +758,249 @@ git add .claude/skills/mergex/scripts/validade-do-portao.sh scripts/ci/lib/fixtu
 git commit -m "feat(mergex): vincula o portao ao sha avaliado"
 ```
 
-### Task 14: Hook `pr-so-com-portao`
+### Task 14: Validador por revisão e protocolo `pre-push`
 
 **Files:**
-- Modify: `.claude/hooks/mergex/pr-so-com-portao.sh`
-- Test: `.claude/hooks/teste.sh`
+- Modify: `.claude/skills/mergex/scripts/validade-do-portao.sh` (objeto Git ausente passa a `historia_incompleta`)
+- Create: `.claude/skills/mergex/scripts/portao-regras.sh` (biblioteca carregada com `.`, 100644)
+- Create: `.claude/skills/mergex/scripts/portao-push.sh` (100644, chamado com `bash`)
+- Create: `scripts/ci/test-r2-barreira-push.sh` (100755; grupos `prepush` nesta task, `ativacao` na 15, `ci` na 16, `modo` na 17)
+- Modify: `scripts/ci/lib/fixture-reconciliacao.sh` (`fx_remoto_bare`, `fx_push_real`)
+- Modify: `scripts/ci/test-r1-reconciliacao-base.sh` (grupo `portao`: classificação de objeto ausente)
 
 **Interfaces:**
-- Consumes: `expx_trabalho_atual_por_branch` (base.sh), `validade-do-portao.sh --verificar`.
-- Produces: o hook resolve o `ENTREGA.md` pelo trabalho da branch ativa (nunca `ls -t`; `# guarda:HKREC`); sem trabalho determinado, sai 0 como hoje; `portao: pronto` com `validade ok=false` barra com exit 2 em qualquer modo (`# guarda:HKAVISO`), com mensagem nomeando `motivo` e `primeiro_commit` e mandando rodar o E2; `null`/`bloqueado` mantêm o comportamento por modo.
+- Consumes: `validade-do-portao.sh --verificar --entrega <E> [--rev <sha>]` (já existe, da implementação superada); `reconciliacao-base.sh --verificar --checkpoint reconciliacao-base` (Task 11); `persistir-metodo.sh --checkpoint reconciliacao-base` (Task 10); `reconciliacao-arvore.sh` (`arvore_ambiente_git`, `arvore_recusa_raso`); `fx_cenario`.
+- Produces:
+  - `validade-do-portao.sh`: contrato da spec, seção 13, item 4. Saída `ok=`, `motivo=`, `primeiro_commit=`, `aviso=`; códigos 0, 1 e 64. Objeto Git necessário ausente é `historia_incompleta` (`# guarda:VALOBJ`). Revisão que não é commit por outro motivo continua `erro_ambiente`.
+  - `portao-regras.sh`, funções que retornam 0/1 e preenchem `PR_ERRO` em falha:
+    - `pr_modo_null <raiz>`: imprime `bloqueio|aviso|desligado`, o modo de `pr-so-com-portao` em `.expx/hooks.json`; sem a chave, `aviso`, que é o padrão do repositório.
+    - `pr_entrega_da_ref <raiz> <ref_remota> <sha_local> <sha_remoto>`: imprime o caminho do `ENTREGA.md` que declara `branch: <b>` para `refs/heads/<b>` na árvore do SHA enviado, do SHA remoto anterior ou da ponta local de `refs/heads/<b>`; nada quando a ref não é aplicável.
+    - `pr_decide_ref <raiz> <ref_local> <sha_local> <ref_remota> <sha_remoto>`: imprime `decisao=<passa|avisa|barra>`, `motivo=<texto>` e `entrega=<caminho|->`. Exclusão (SHA local nulo), tag e ref não aplicável dão `passa`. Para ref aplicável, roda `validade-do-portao.sh --rev <sha_local>`: `ok=true` passa; `portao: null` segue `pr_modo_null`; todo o resto barra (`# guarda:PPMODO` na linha que impede o modo de afrouxar `pronto` inválido).
+  - `portao-push.sh --pre-push <remoto> <url>`: lê da entrada padrão as linhas do protocolo `pre-push` e decide cada ref com `pr_decide_ref` sobre o SHA local da linha, nunca sobre o `HEAD` (`# guarda:PPSHA`). Barra o push inteiro se qualquer ref barrar (`# guarda:PPMULTI`). Diagnóstico em stderr, com `historia_incompleta` e `erro_ambiente` em textos distintos. Códigos: 0 libera, 1 barra, 64 uso. Com `MERGEX_PRE_PUSH_SINAL=<arquivo>` no ambiente, só acrescenta a linha `mergex-pre-push invocado <pid>` ao arquivo, sem mudar a decisão (é o sinal da prova funcional da Task 15). O custo é uma validade por ref aplicável, nenhuma varredura de branches.
+  - Fixture: `fx_remoto_bare <dir>` cria `remoto.git` bare ao lado do cenário e exporta `FX_REMOTO`; `fx_push_real <dir> <args do git push>` roda `git push` real com o `pre-push` apontando para `portao-push.sh` (instalado por chamador mínimo da própria fixture, até a Task 15 trazer o oficial) e imprime `rc=<n>` e a ref remota resultante.
 
-- [ ] **Step 1: Escrever os casos (RED)**
+- [ ] **Step 1: Escrever o grupo `prepush` (RED)**
 
-```bash
-echo "pr-so-com-portao — validade"
-# ENTREGA de outro trabalho mais recente não decide pela branch ativa
-entrega outro feature/outro; sed -i 's/^portao: .*/portao: pronto/' docs/entregas/outro/ENTREGA.md; touch docs/entregas/outro/ENTREGA.md
-caso "entrega de outro trabalho mais recente não libera" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 2
-echo '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"aviso"}}}' > .expx/hooks.json
-portao_vencido_por_merge feature/ft-02
-caso "portão vencido barra mesmo em aviso" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 2
-portao_sem_sha feature/ft-02
-caso "pronto legado sem portao_sha barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 2
-portao_valido_com_metodo feature/ft-02
-caso "portão válido com commit só de método libera" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02')" 0
-```
+Casos, todos com push **real** contra `FX_REMOTO`, afirmando o rc do `git push` e o SHA da ref remota depois:
+- `pronto válido passa`;
+- `pronto vencido barra` (commit de produto depois do portão);
+- `pronto legado sem portao_sha barra`;
+- `ENTREGA ausente no SHA enviado barra` (a ref é aplicável pela ponta remota anterior);
+- `ENTREGA ilegível barra` (frontmatter quebrado);
+- `push de commit anterior ao HEAD valida o SHA enviado` (`git push origin <sha_valido>:feature/ft-rec`, com HEAD vencido: passa; e o inverso: barra);
+- `duas refs, a segunda inválida, barra o push inteiro` (a ref remota da primeira não muda);
+- `exclusão de branch passa` (`git push origin :feature/ft-rec`);
+- `tag passa`;
+- `ref fora da branch do trabalho passa`;
+- `null nos três modos` (`bloqueio` barra, `aviso` passa com diagnóstico em stderr, `desligado` passa);
+- `clone raso barra com historia_incompleta` (`git clone --depth 1 file://…`);
+- `objeto ausente é historia_incompleta` (repositório com o objeto do `portao_sha` removido de `objects/`);
+- `validador ausente é erro_ambiente e barra` (a cópia do `portao-push.sh` aponta para um validador inexistente);
+- `push com cd, bash -c e link simbólico é decidido pelo pre-push` (os três comandos rodam `git push` real, e o resultado é o da validade, sem leitura de shell);
+- `custo independe das branches entregues` (50 branches locais com `ENTREGA.md` próprio e só uma ref no push: no máximo uma chamada da validade, contada por um stub que registra as chamadas);
+- `barreira: reconciliação registrada e não persistida dá persistencia` (`reconciliacao-base.sh --verificar --checkpoint reconciliacao-base` sai 5 com `motivo\tpersistencia`; depois do checkpoint, sai 0);
+- `ordem: sem portão pronto o push segue o modo` (reconciliação persistida, `portao: null`: o push real segue `pr_modo_null`, porque o E2 ainda não autorizou);
+- `ordem: commit reconciliacao-base depois do portão barra o push` (um novo checkpoint `reconciliacao-base` depois de `portao_sha` dá `commit_de_produto` na validade, e o push real é barrado);
+- `ordem: o pre-push não reexecuta a reconciliação` (portão válido; um artefato não rastreado adulterado no disco não muda a decisão do push, que depende só da validade sobre o SHA enviado).
 
-Os helpers `portao_vencido_por_merge`, `portao_sem_sha` e `portao_valido_com_metodo` ficam junto do helper `entrega` existente na bancada.
+No grupo `portao` da suíte r1:
+- `objeto ausente é historia_incompleta, não erro_ambiente`;
+- `isenção por prefixo: .ts em docs/entregas depois do portão invalida` (commit `Metodo: pre-e6` criando `docs/entregas/ft-rec/x.ts` depois do portão: `metodo_fora_do_catalogo`). Fixa o risco residual 5 da spec.
 
 - [ ] **Step 2: Rodar e ver falhar**
 
-Run: `bash .claude/hooks/teste.sh`
-Expected: FAIL nos quatro casos novos (o hook atual lê o `ENTREGA.md` mais recente e libera `pronto`).
+Run: `bash scripts/ci/test-r2-barreira-push.sh prepush; bash scripts/ci/test-r1-reconciliacao-base.sh portao`
+Expected: FAIL. O `prepush` falha com `portao-push.sh: No such file`; o `portao` falha em `objeto ausente é historia_incompleta, não erro_ambiente`, porque hoje sai `erro_ambiente`. O caso de isenção por prefixo já passa, porque fixa um comportamento existente; ele não faz parte do RED e precisa matar o mutante PTPROD.
 
 - [ ] **Step 3: Implementar**
 
-Substituir a linha do `ls -t` pela resolução por branch e acrescentar a chamada à validade antes do `case "$PORTAO"`.
+`portao-regras.sh` com as três funções; `portao-push.sh` lendo a entrada padrão linha a linha; `validade-do-portao.sh` distinguindo, antes de concluir `erro_ambiente`, a falha por objeto ausente (`git cat-file -e` do objeto pedido falha num repositório Git legível). Ambiente Git fixado como nos outros executáveis (`arvore_ambiente_git`). Sem opção de força.
 
 - [ ] **Step 4: Rodar e ver passar**
 
-Run: `bash .claude/hooks/teste.sh`
-Expected: todos `ok` (os casos antigos de `pronto` passam a montar `portao_sha` válido).
+Run: `bash scripts/ci/test-r2-barreira-push.sh prepush && bash scripts/ci/test-r1-reconciliacao-base.sh portao && bash scripts/ci/validate-mergex-contract.sh`
+Expected: todos `ok`, rc 0.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Revisão independente**
+
+Revisor novo, com o diff da task e as seções 13 e 15 da spec. Foco: decisão só por refs e SHAs do Git; o modo nunca afrouxa `pronto` inválido; várias refs; objeto ausente contra ambiente; custo por ref.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add .claude/hooks/mergex/pr-so-com-portao.sh .claude/hooks/teste.sh
-git commit -m "fix(mergex): push exige portao valido para o head da branch"
+git add .claude/skills/mergex/scripts/validade-do-portao.sh .claude/skills/mergex/scripts/portao-regras.sh .claude/skills/mergex/scripts/portao-push.sh scripts/ci/test-r2-barreira-push.sh scripts/ci/lib/fixture-reconciliacao.sh scripts/ci/test-r1-reconciliacao-base.sh
+git commit -m "feat(mergex): pre-push decide pelas refs enviadas"
 ```
 
-### Task 15: Hooks de commit no merge de integração
+### Task 15: Ativação no E0 e prova funcional no E2
+
+**Files:**
+- Create: `.claude/skills/mergex/scripts/ativacao-pre-push.sh` (100644)
+- Create: `.claude/skills/mergex/assets/pre-push-gerenciado.sh` (modelo do chamador gerenciado, 100644; instalado com 100755)
+- Create: `.claude/skills/mergex/references/12-barreira-de-push.md` (seções "Ativação", "Composição com hook de terceiro", "Prova funcional", "Reversão")
+- Modify: `scripts/ci/test-r2-barreira-push.sh` (grupo `ativacao`)
+- Modify: `scripts/ci/lib/fixture-reconciliacao.sh` (`fx_hook_terceiro`, `fx_worktree_vinculada`)
+
+**Interfaces:**
+- Consumes: `portao-push.sh --pre-push` e o sinal `MERGEX_PRE_PUSH_SINAL` (Task 14); `fx_cenario`.
+- Produces (fixture): `fx_worktree_vinculada <dir>` cria uma worktree vinculada do cenário e exporta `FX_WT`; `fx_hook_terceiro <dir> <nao_composto|composto|so_cita|nao_propaga|libera|sinal>` grava um `pre-push` de terceiro na variante pedida. A Task 20 consome `fx_worktree_vinculada`.
+- Produces: `ativacao-pre-push.sh <--instalar|--provar|--reverter> --entrega <ENTREGA.md>`:
+  - `--instalar` (E0): resolve o diretório efetivo com `git rev-parse --git-path hooks` e nunca escreve `core.hooksPath` (`# guarda:ATVHP`). Sem `pre-push`, copia o modelo, que tem o marcador `# mergex: pre-push gerenciado`. Com o chamador gerenciado, nada muda. Com `pre-push` de terceiro, nunca escreve, renomeia nem edita o arquivo (`# guarda:ATVSOB`) e roda `--provar`: passando, aceita como integração externa válida; reprovando, sai com 3 e a instrução de composição.
+  - `--provar` (E0 e E2): cria, sem tocar remoto nem ref, um commit solto (`git commit-tree`) sobre `HEAD` com um arquivo de produto e o `ENTREGA.md` em `portao: pronto` com `portao_sha` = `HEAD`, que é sabidamente vencido. Executa o `pre-push` efetivo como o Git o executaria (argumentos `prova-mergex file:///dev/null`, uma linha de protocolo para `refs/heads/<branch da entrega>`, `MERGEX_PRE_PUSH_SINAL` num temporário). Aprova só se o hook sair com código diferente de zero **e** o sinal registrar a execução do `portao-push.sh` (`# guarda:ATVTXT`). Término por sinal, código zero ou ausência do sinal reprovam.
+  - `--reverter`: remove o arquivo só se tiver o marcador de gerenciado; diante de integração externa ou hook de terceiro, só informa e sai 0, sem tocar o arquivo.
+  - Códigos: 0 ok; 1 prova reprovada; 3 pré-requisito ausente (hook de terceiro não composto); 64 uso. Sem opção de força.
+
+- [ ] **Step 1: Escrever o grupo `ativacao` (RED)**
+
+Casos:
+- `instala sem pre-push e é idempotente` (segunda execução não muda o arquivo, comparado por hash e mtime);
+- `core.hooksPath já configurado é respeitado e não muda` (relativo e absoluto; `git config --get core.hooksPath` igual antes e depois);
+- `hook de terceiro não composto: E0 sai 3 e não toca o arquivo` (hash igual; a mensagem traz a instrução de composição);
+- `hook de terceiro composto passa na prova` (variante que chama `portao-push.sh` e propaga o código de saída; o E0 sai 0);
+- `hook que só cita a MergeX reprova` (variante que tem o caminho do validador num comentário e sai 1 por conta própria: sem o sinal, reprova);
+- `hook composto que não propaga o código reprova` (chama a MergeX e sai 0);
+- `hook composto que libera a ref inválida reprova`, `hook que termina por sinal reprova`;
+- `prova funcional não toca remoto nem refs` (`git for-each-ref` e o remoto bare iguais antes e depois);
+- `E2 sem prova aprovada não emite PRONTO` (o `--provar` sai 1 com o hook removido);
+- `reversão remove só o chamador gerenciado` e `reversão preserva hook de terceiro e integração externa`;
+- `ativação em worktree vinculada` (o diretório efetivo é o comum);
+- `diretório com espaço e acento` (raiz do cenário e `core.hooksPath` com espaço, acento e apóstrofo);
+- `git for windows: diretório efetivo sobre UNC` (com `git.exe` e `wslpath` disponíveis, resolve o diretório efetivo e roda `--provar` pelo Git Bash; sem eles, imprime `NAO_EXECUTADO: git for windows indisponível` e não conta como ok).
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `bash scripts/ci/test-r2-barreira-push.sh ativacao`
+Expected: FAIL com `ativacao-pre-push.sh: No such file`.
+
+- [ ] **Step 3: Implementar**
+
+O executável, o modelo e o reference `12-barreira-de-push.md`. A instrução de composição da mensagem de erro é a mesma do reference: o hook existente chama `portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída.
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `bash scripts/ci/test-r2-barreira-push.sh ativacao prepush && bash scripts/ci/validate-mergex-contract.sh`
+Expected: todos `ok` (os casos `NAO_EXECUTADO`, se houver, listados à parte), rc 0.
+
+- [ ] **Step 5: Revisão independente**
+
+Revisor novo, com o diff e a seção 13, item 6, da spec. Foco: nenhuma escrita em `core.hooksPath` nem em hook de terceiro; reconhecimento só por comportamento; prova sem efeito colateral em refs e remoto; reversão.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .claude/skills/mergex/scripts/ativacao-pre-push.sh .claude/skills/mergex/assets/pre-push-gerenciado.sh .claude/skills/mergex/references/12-barreira-de-push.md scripts/ci/test-r2-barreira-push.sh scripts/ci/lib/fixture-reconciliacao.sh
+git commit -m "feat(mergex): ativa e prova o pre-push sem tocar hook de terceiro"
+```
+
+### Task 16: Contrato e template de CI
+
+**Files:**
+- Create: `.claude/skills/mergex/scripts/portao-ci.sh` (100644)
+- Create: `.claude/skills/mergex/assets/ci/mergex-portao.yml` (template; nunca copiado para `.github/workflows/` nesta branch)
+- Modify: `.claude/skills/mergex/references/12-barreira-de-push.md` (seção "CI", com o handoff e a condição do PR #192)
+- Modify: `scripts/ci/test-r2-barreira-push.sh` (grupo `ci`)
+
+**Interfaces:**
+- Consumes: `pr_decide_ref` e `pr_modo_null` (Task 14).
+- Produces: `portao-ci.sh --verificar --sha <sha40> --branch <nome>`. Decide como uma ref `refs/heads/<nome>` empurrada com o SHA local `<sha>`, chamando `pr_decide_ref` (mesmas regras e mesmo modo do `pre-push`). Imprime `decisao=`, `motivo=`, `entrega=`. Códigos: 0 passa ou avisa, 1 barra, 64 uso. O template roda o checkout com `fetch-depth: 0` e chama `portao-ci.sh` com o SHA da cabeça do PR e a branch de origem dele.
+
+- [ ] **Step 1: Escrever o grupo `ci` (RED)**
+
+Casos:
+- `ci reprova o SHA que o pre-push barraria` (vencido, ausente, `historia_incompleta`, `erro_ambiente`);
+- `ci aprova o SHA que o pre-push libera`;
+- `ci usa o SHA do PR, não o HEAD local` (checkout em outro commit);
+- `null no CI segue o modo de .expx/hooks.json`;
+- `template fixa fetch-depth 0 e passa o SHA da cabeça do PR` (verificação estática do YAML: `fetch-depth: 0`, `pull_request.head.sha`, chamada a `portao-ci.sh`);
+- `nenhum workflow ativo nesta branch` (`git ls-files .github/workflows` vazio);
+- `documentação não afirma CI ativo` (o reference diz que esta branch não ativa CI em produto, e nenhum arquivo versionado afirma o contrário pela frase-alvo verificada em `validate-mergex-contract.sh`);
+- `PR #192 fica em rascunho até instalação, CI e gates` (a condição está no reference, com os três itens).
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `bash scripts/ci/test-r2-barreira-push.sh ci`
+Expected: FAIL com `portao-ci.sh: No such file`.
+
+- [ ] **Step 3: Implementar**
+
+O executável, o template e a seção "CI" do reference. Em `validate-mergex-contract.sh`, acrescente a asserção de que nenhum arquivo versionado afirma CI ativo (`# guarda:CIATIVO` na linha da verificação). Inclua esse arquivo no commit.
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `bash scripts/ci/test-r2-barreira-push.sh ci prepush && bash scripts/ci/validate-mergex-contract.sh`
+Expected: todos `ok`, rc 0.
+
+- [ ] **Step 5: Revisão independente**
+
+Revisor novo, com o diff e a seção 13, item 8, da spec. Foco: mesma decisão do `pre-push` para a mesma entrada; nada ativa CI; o texto não promete proteção já em vigor.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .claude/skills/mergex/scripts/portao-ci.sh .claude/skills/mergex/assets/ci/mergex-portao.yml .claude/skills/mergex/references/12-barreira-de-push.md scripts/ci/test-r2-barreira-push.sh scripts/ci/validate-mergex-contract.sh
+git commit -m "feat(mergex): contrato e template de ci do portao"
+```
+
+### Task 17: Hook do Claude consultivo
+
+**Files:**
+- Modify: `.claude/hooks/mergex/pr-so-com-portao.sh` (reescrito como consultivo; a varredura de branches, o prazo de 45 s e a leitura de diretório encadeado da implementação superada saem)
+- Modify: `.claude/hooks/teste.sh` (remove as expectativas da implementação superada; casos novos)
+- Modify: `.claude/hooks/README.md` (seção do hook: consultivo, limites, papel do `pre-push` e do CI)
+- Modify: `.claude/settings.json` e `.opencode/plugin/mergex.ts` (timeout do hook volta a 10 s, como os demais)
+- Modify: `scripts/ci/test-r2-barreira-push.sh` (grupo `modo`)
+
+**Interfaces:**
+- Consumes: `pr_decide_ref`, `pr_modo_null` (Task 14); `portao-ci.sh` (Task 16, no grupo `modo`); o parser compartilhado de `comum/base.sh`, inalterado.
+- Produces: comportamento do hook.
+  - **Bloqueia (exit 2) só com prova:** o comando é um único `git push` simples, sem `;`, `&&`, `||`, `|`, subshell, `cd`, `-C` ou expansão, no repositório do cwd legível pelo Git, com refspec que resolve sem ambiguidade para uma ref aplicável, e `pr_decide_ref` dá `barra`.
+  - **Bloqueia sempre** o `--no-verify` literal num comando que publica (`# guarda:HKNV`).
+  - **Em qualquer outro caso** (comando composto, UNC, `dubious ownership`, diretório que não determina, `git rev-parse` que falha, validade que não termina dentro do orçamento interno de 8 s): imprime aviso e sai 0. O `pre-push` decide.
+  - Sem varredura de branches; sem laço de subida de diretório; nenhum caminho de código espera mais que o orçamento.
+
+- [ ] **Step 1: Escrever os casos (RED)**
+
+Na bancada:
+- `push simples com portão vencido bloqueia`;
+- `push simples com portão válido passa`;
+- `--no-verify reconhecido bloqueia`;
+- `comando composto avisa e sai 0` (`cd x && git push`, `bash -c 'git push'`, `xargs`);
+- `dubious ownership avisa e sai 0` (repositório de outro dono, sem `safe.directory`);
+- `cwd UNC sem repositório não entra em laço` (termina em menos de 2 s com `//`);
+- `validade lenta não segura o comando` (stub que dorme 120 s: o hook sai 0 com aviso em menos de 9 s; e o `git push` real seguinte é barrado pelo `pre-push`);
+- `regressão do falso bloqueio desta máquina: portão válido sobre UNC passa`;
+- `git for windows sobre UNC: aviso sem bloqueio` (com `git.exe` e `wslpath`: push legítimo pelo Git Bash sobre `\\wsl.localhost\...` não é bloqueado pelo hook; sem eles, `NAO_EXECUTADO`, que não conta como ok);
+- `hook não varre branches` (50 branches entregues: no máximo uma chamada da validade).
+Os casos da implementação superada que esperavam bloqueio em comando composto, `cd`, `-C`, `GIT_DIR` ou varredura de branches passam a esperar aviso e exit 0, ou saem, se testavam mecanismo removido.
+
+No grupo `modo` da `test-r2`: `null nos três modos: consumidores iguais`, com a mesma entrada no `portao-push.sh`, no `portao-ci.sh` e no hook (caso simples), em `bloqueio`, `aviso` e `desligado`.
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `bash .claude/hooks/teste.sh; bash scripts/ci/test-r2-barreira-push.sh modo`
+Expected: FAIL. O `comando composto avisa e sai 0` falha, porque o hook atual bloqueia; o `validade lenta não segura o comando` falha, porque o hook atual espera até 45 s; e o `modo` falha, porque o hook ainda não usa `pr_decide_ref`.
+
+- [ ] **Step 3: Implementar**
+
+Reescrever o hook sobre `pr_decide_ref`, com orçamento interno de 8 s (`timeout` do coreutils na chamada à validade; sem `timeout`, só o caso simples sem validade lenta é avaliado e o resto avisa). Voltar o timeout em `settings.json` e no plugin a 10 s. Atualizar o README.
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `bash .claude/hooks/teste.sh && bash scripts/ci/test-r2-barreira-push.sh todos && bash scripts/ci/validate-mergex-contract.sh`
+Expected: todos `ok` (`NAO_EXECUTADO` listado à parte), rc 0. O lado a lado do `git-perigoso` contra `bd4c1c5`, com 300 comandos ou mais, continua com zero diferenças.
+
+- [ ] **Step 5: Revisão independente**
+
+Revisor novo, com o diff e a seção 13, item 8, da spec. Foco: nenhum bloqueio sem prova; `--no-verify`; nenhum caminho que espere ou entre em laço; nada que trate o hook como fronteira; o `git-perigoso` intacto.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .claude/hooks/mergex/pr-so-com-portao.sh .claude/hooks/teste.sh .claude/hooks/README.md .claude/settings.json .opencode/plugin/mergex.ts scripts/ci/test-r2-barreira-push.sh
+git commit -m "fix(mergex): hook de portao passa a ser consultivo"
+```
+
+### Task 18: Hooks de commit no merge de integração
 
 **Files:**
 - Modify: `.claude/hooks/mergex/commit-por-task.sh`
@@ -832,25 +1044,36 @@ git add .claude/hooks/mergex/commit-por-task.sh .claude/hooks/mergex/arquivo-for
 git commit -m "fix(mergex): hooks reconhecem o commit de integracao da base"
 ```
 
-### Task 16: Contrato textual e decisões
+### Task 19: Contrato textual e decisões
 
 **Files:**
 - Create: `.claude/skills/mergex/references/11-reconciliacao-base.md`
-- Modify: `.claude/skills/mergex/references/00-abertura.md` (E0 grava `base_validada_sha` e `origem_base: registrada_e0`)
+- Modify: `.claude/skills/mergex/references/00-abertura.md` (E0 grava `base_validada_sha` e `origem_base: registrada_e0`; E0 roda `ativacao-pre-push.sh --instalar`)
 - Modify: `.claude/skills/mergex/references/00-schema.md` (chaves novas do `kind: entrega`; `kind: reconciliacao_base`; "Arquivos SEM frontmatter" não lista o artefato novo)
 - Modify: `.claude/skills/mergex/references/01-commits.md` (classe integração; enum de checkpoints)
-- Modify: `.claude/skills/mergex/references/02-prontidao.md` (V9 roda `portao-v9.sh`; barreira `reconciliacao-base`; E2 grava `portao_sha`)
-- Modify: `.claude/skills/mergex/references/06-push.md`, `07-abertura-pr.md` (pré-requisito de validade)
+- Modify: `.claude/skills/mergex/references/02-prontidao.md` (ordem reconciliação → validade → push; barreira `--verificar --checkpoint reconciliacao-base`; V9 roda `portao-v9.sh`; E2 roda `ativacao-pre-push.sh --provar`; E2 grava `portao_sha`)
+- Modify: `.claude/skills/mergex/references/06-push.md`, `07-abertura-pr.md` (pré-requisito de validade; o `pre-push` decide; o hook do Claude é consultivo; aponta para `12-barreira-de-push.md`)
 - Modify: `.claude/skills/mergex/references/08-registro.md` (tabela "Quando o arquivo é escrito" com a reconciliação; catálogo cumulativo)
 - Modify: `.claude/skills/mergex/SKILL.md` (fluxo e enum de checkpoints)
 - Modify: `.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md` (chaves novas)
-- Modify: `.claude/skills/mergex/DECISOES-DA-SKILL.md` (DM-178 a DM-183, texto da spec)
-- Modify: `.claude/commands/mergex-check.md`, `.opencode/commands/mergex-check.md` (V9 por script)
-- Modify: `.claude/hooks/README.md` (validade do portão; integração)
+- Modify: `.claude/skills/mergex/DECISOES-DA-SKILL.md` (DM-178 a DM-184, texto da spec)
+- Modify: `.claude/commands/mergex-check.md`, `.opencode/commands/mergex-check.md` (V9 por script; prova do `pre-push`)
+- Modify: `.claude/hooks/README.md` (validade do portão; integração; o texto do hook consultivo já vem da Task 17)
+- Modify: `AGENTS.md` e `.claude/skills/mergex/SKILL.md`:
+  - a frase "Uma única condição de método barra **mesmo em aviso**", que trata da regra de task irmã do `commit-por-task`, ganha a ressalva de que, fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo (DM-184);
+  - a lista de hooks que nascem em aviso continua citando `pr-so-com-portao`, agora descrito como consultivo;
+  - nenhuma frase passa a tratar esse hook como barreira.
 - Test: `scripts/ci/validate-mergex-contract.sh`
 
 **Interfaces:**
-- Produces: asserções de prosa: enum `pre-e2 | reconciliacao-base | pre-e6 | e8` idêntico em `SKILL.md`, `01-commits.md`, `08-registro.md`, `catalogo-de-metodo.sh`, `persistir-metodo.sh`, `contrato-de-commit.sh`; `02-prontidao.md` cita `portao-v9.sh` e `validade-do-portao.sh`; `11-reconciliacao-base.md` tem as quatro provas e a tabela de códigos de saída da spec; DM-178..DM-183 presentes; nenhum script em `.claude/skills/mergex/scripts/` aceita opção que case `force|sem-prova|bypass` (`# guarda` não se aplica: é varredura).
+- Consumes: os executáveis e o reference `12-barreira-de-push.md` das Tasks 14–17.
+- Produces: asserções de prosa:
+  - enum `pre-e2 | reconciliacao-base | pre-e6 | e8` idêntico em `SKILL.md`, `01-commits.md`, `08-registro.md`, `catalogo-de-metodo.sh`, `persistir-metodo.sh` e `contrato-de-commit.sh`;
+  - `02-prontidao.md` cita `portao-v9.sh`, `validade-do-portao.sh` e `ativacao-pre-push.sh --provar`; `00-abertura.md` cita `ativacao-pre-push.sh --instalar`;
+  - `11-reconciliacao-base.md` tem as quatro provas, a tabela de códigos de saída e os riscos residuais da seção 15.1 da spec;
+  - DM-178..DM-184 presentes;
+  - nenhum texto versionado trata `pr-so-com-portao` como barreira autoritativa;
+  - nenhum script em `.claude/skills/mergex/scripts/` aceita opção que case `force|sem-prova|bypass` (`# guarda` não se aplica: é varredura).
 
 - [ ] **Step 1: Escrever as asserções (RED)**
 
@@ -860,7 +1083,9 @@ for f in "$SKILL" "$REF/01-commits.md" "$REF/08-registro.md"; do
 done
 grep -Fq 'portao-v9.sh' "$REF/02-prontidao.md" || fail "02-prontidao não manda rodar portao-v9.sh"
 grep -Fq 'portao_sha' "$REF/02-prontidao.md" || fail "02-prontidao não grava portao_sha"
-for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183; do
+grep -Fq 'ativacao-pre-push.sh --provar' "$REF/02-prontidao.md" || fail "02-prontidao não prova o pre-push"
+grep -Fq 'ativacao-pre-push.sh --instalar' "$REF/00-abertura.md" || fail "00-abertura não ativa o pre-push"
+for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184; do
   grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
 done
 if grep -nE -- '--(force|sem-prova|bypass)' "$SKILL_DIR"/scripts/*.sh; then fail "flag de bypass encontrada"; fi
@@ -873,7 +1098,7 @@ Expected: FAIL com as primeiras mensagens `sem o enum de checkpoints novo`.
 
 - [ ] **Step 3: Escrever a prosa**
 
-Transcrever as seções 4–20 da spec para os references indicados (`11-reconciliacao-base.md` leva as seções 4–9, 14, 15, 19 e 20; os demais references, o trecho da sua etapa), sem prosa nova de desenho; DM-178..DM-183 com o texto da seção "Decisões propostas".
+Transcrever as seções 4–20 da spec para os references indicados (`11-reconciliacao-base.md` leva as seções 4–9, 14, 15 com a 15.1, 19 e 20; a seção 13, itens 5–8, já está em `12-barreira-de-push.md` pelas Tasks 15 e 16; os demais references, o trecho da sua etapa), sem prosa nova de desenho; DM-178..DM-184 com o texto da seção "Decisões propostas".
 
 - [ ] **Step 4: Rodar e ver passar**
 
@@ -883,21 +1108,35 @@ Expected: rc 0.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .claude/skills/mergex .claude/commands/mergex-check.md .opencode/commands/mergex-check.md .claude/hooks/README.md scripts/ci/validate-mergex-contract.sh
+git add .claude/skills/mergex AGENTS.md .claude/commands/mergex-check.md .opencode/commands/mergex-check.md .claude/hooks/README.md scripts/ci/validate-mergex-contract.sh
 git commit -m "docs(mergex): contrato da reconciliacao de base e do portao por sha"
 ```
 
-### Task 17: Fluxo ponta a ponta
+### Task 20: Fluxo ponta a ponta
 
 **Files:**
 - Modify: `scripts/ci/test-r1-reconciliacao-base.sh` (grupos `fluxo` e `invariantes`)
 - Modify: `scripts/ci/lib/fixture-reconciliacao.sh`
 
 **Interfaces:**
-- Consumes: todos os executáveis anteriores, sem atalhos.
-- Produces: `fx_worktree_vinculada <dir>` (cria worktree e exporta `FX_WT`).
+- Consumes: todos os executáveis anteriores, sem atalhos; `fx_worktree_vinculada` (Task 15); `fx_remoto_bare` e `fx_push_real` (Task 14).
+- Produces: `fx_fluxo_completo <dir>`.
 
-O grupo `fluxo` executa, na ordem da spec (seção 16), sobre o cenário: `--registrar` dos dois testes → `persistir-metodo --checkpoint reconciliacao-base` → barreira `--verificar` → `portao-v9.sh` ok → grava `portao: pronto` e `portao_sha` → `persistir-metodo --checkpoint pre-e6` com `ATENCAO.md` contendo os dois reconciliados em O10 → validade ok → `persistir-metodo --checkpoint e8` → validade ok → hook libera o push. O grupo `invariantes` repete o fluxo e exige `tasks.md` com o mesmo hash, `sequencia-de-commits.sh --ler` idêntico, V11 OK, e roda o mesmo fluxo dentro de `FX_WT` (Review Focus 5).
+O grupo `fluxo` executa, na ordem da spec (seção 16), sobre o cenário:
+1. `ativacao-pre-push.sh --instalar`, como no E0;
+2. `--registrar` dos dois testes;
+3. `persistir-metodo --checkpoint reconciliacao-base`;
+4. barreira `--verificar --checkpoint reconciliacao-base`;
+5. `portao-v9.sh` ok e `ativacao-pre-push.sh --provar` ok;
+6. grava `portao: pronto` e `portao_sha`;
+7. `persistir-metodo --checkpoint pre-e6`, com `ATENCAO.md` contendo os dois reconciliados em O10;
+8. validade ok;
+9. `persistir-metodo --checkpoint e8`;
+10. validade ok;
+11. push real ao remoto bare aceito pelo `pre-push`;
+12. um commit de produto depois do portão, e o push real seguinte barrado.
+
+O grupo `invariantes` repete o fluxo e exige `tasks.md` com o mesmo hash, `sequencia-de-commits.sh --ler` idêntico e V11 OK, e roda o mesmo fluxo dentro de `FX_WT` (Review Focus 5).
 
 - [ ] **Step 1: Escrever os grupos (RED)**
 
@@ -906,7 +1145,10 @@ grupo_fluxo() {
   local d; d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d"; cd "$d" || return
   fx_fluxo_completo "$d" || { falha "fluxo: $FX_ERRO"; cd "$REPO"; return; }
   ok "fluxo completo depois da reconciliação"
-  printf '%s\n' "$(fx_hook_push "$d" feature/ft-rec)" | grep -q '^rc=0' && ok "hook libera push" || falha "hook"
+  fx_remoto_bare "$d"
+  fx_push_real "$d" origin feature/ft-rec | grep -q '^rc=0' && ok "pre-push libera o push real" || falha "push real"
+  fx_commit_produto_apos_portao "$d"
+  fx_push_real "$d" origin feature/ft-rec | grep -q '^rc=1' && ok "pre-push barra o push vencido" || falha "push vencido"
   cd "$REPO" || return
 }
 grupo_invariantes() {
@@ -923,11 +1165,11 @@ grupo_invariantes() {
 - [ ] **Step 2: Rodar e ver falhar**
 
 Run: `bash scripts/ci/test-r1-reconciliacao-base.sh fluxo invariantes`
-Expected: FAIL (`fx_fluxo_completo: command not found`).
+Expected: FAIL (`fx_fluxo_completo: command not found`); `fx_worktree_vinculada`, `fx_remoto_bare` e `fx_push_real` já existem (Tasks 14 e 15).
 
 - [ ] **Step 3: Implementar os helpers de fixture**
 
-`fx_fluxo_completo` só chama os executáveis da skill e grava os campos do `ENTREGA.md` que o contrato manda o agente gravar (`portao`, `portao_sha`); falha na primeira etapa com rc diferente de 0, preenchendo `FX_ERRO`. `fx_hook_push` alimenta o hook com o JSON do harness e imprime `rc=<n>`.
+`fx_fluxo_completo` só chama os executáveis da skill e grava os campos do `ENTREGA.md` que o contrato manda o agente gravar (`portao`, `portao_sha`); falha na primeira etapa com rc diferente de 0, preenchendo `FX_ERRO`. `fx_commit_produto_apos_portao <dir>` faz um commit de produto comum na branch do trabalho. O push é sempre real, pelo `pre-push` instalado no passo 1; o hook do Claude não participa desta suíte.
 
 - [ ] **Step 4: Rodar e ver passar**
 
@@ -941,14 +1183,14 @@ git add scripts/ci/lib/fixture-reconciliacao.sh scripts/ci/test-r1-reconciliacao
 git commit -m "test(mergex): fluxo completo depois da reconciliacao de base"
 ```
 
-### Task 18: Mutantes
+### Task 21: Mutantes
 
 **Files:**
 - Create: `scripts/ci/mutacao-r1-reconciliacao-base.sh`
 
 **Interfaces:**
-- Consumes: as linhas marcadas `# guarda:<ID>` das Tasks 3–15.
-- Produces: matriz com controle verde e 17 mutantes, no padrão de `mutacao-m3-fixture-lock-lf.sh` (`copia`, troca da linha marcada por `: # mutante <ID>`, suíte alvo, resultado `morto|vivo`); rc 0 só com controle verde e todos mortos.
+- Consumes: as linhas marcadas `# guarda:<ID>` das Tasks 3–18 e a verificação `CIATIVO` de `validate-mergex-contract.sh` (Task 16).
+- Produces: matriz com controle verde e 24 mutantes, no padrão de `mutacao-m3-fixture-lock-lf.sh` (`copia`, troca da linha marcada por `: # mutante <ID>`, suíte alvo, resultado `morto|vivo`); rc 0 só com controle verde e todos mortos. Os 17 primeiros são a lista da spec (seção 21); os 7 seguintes completam a barreira de push da DM-184.
 
 | # | ID | Mutação | Suíte que tem de reprovar |
 |---|---|---|---|
@@ -964,11 +1206,18 @@ git commit -m "test(mergex): fluxo completo depois da reconciliacao de base"
 | 10 | `V9SHA` | V9 pela ref em vez do SHA | `r1 v9` |
 | 11 | `PTPROD` | portão aceita commit de produto | `r1 portao` |
 | 12 | `PTMERGE` | portão aceita merge | `r1 portao` |
-| 13 | `HKREC` | hook volta a ler o `ENTREGA.md` mais recente | `.claude/hooks/teste.sh` |
-| 14 | `HKAVISO` | portão vencido respeita modo aviso | `.claude/hooks/teste.sh` |
+| 13 | `PPSHA` | `pre-push` valida o `HEAD` do checkout em vez do SHA enviado | `r2 prepush` |
+| 14 | `PPMODO` | `pre-push` deixa o modo `aviso` afrouxar `pronto` vencido | `r2 prepush` |
 | 15 | `LEG2` | legado aceita dois merge-bases | `r1 legado` |
 | 16 | `SEQ` | registro grava `seq` (acrescenta chamada a `sequencia-de-commits.sh --acrescentar`) | `r1 entrega`, `r1 invariantes` |
 | 17 | `O10` | O10 permite faixa média | `test-atencao-metodo.sh` |
+| 18 | `PPMULTI` | `pre-push` ignora uma segunda ref inválida | `r2 prepush` |
+| 19 | `VALOBJ` | objeto Git ausente classificado como `erro_ambiente` | `r1 portao`, `r2 prepush` |
+| 20 | `ATVTXT` | prova aceita hook que só cita a MergeX (sem conferir o sinal) | `r2 ativacao` |
+| 21 | `ATVSOB` | E0 sobrescreve um `pre-push` de terceiro | `r2 ativacao` |
+| 22 | `ATVHP` | E0 grava `core.hooksPath` | `r2 ativacao` |
+| 23 | `HKNV` | hook do Claude aceita `--no-verify` como se a proteção local bastasse | `.claude/hooks/teste.sh` |
+| 24 | `CIATIVO` | o contrato aceita texto que afirma CI ativo sem instalação no produto (a verificação é desligada e o mutante insere a frase-alvo no reference) | `validate-mergex-contract.sh`, `r2 ci` |
 
 - [ ] **Step 1: Escrever a matriz e rodar o controle**
 
@@ -978,7 +1227,7 @@ Expected: `controle verde`.
 - [ ] **Step 2: Rodar a matriz**
 
 Run: `bash scripts/ci/mutacao-r1-reconciliacao-base.sh`
-Expected: `17 mortos, 0 vivos`, rc 0. Um mutante vivo é teste faltando na task dona da guarda: voltar àquela task, acrescentar o caso e só então reexecutar.
+Expected: `24 mortos, 0 vivos`, rc 0. Um mutante vivo é teste faltando na task dona da guarda: voltar àquela task, acrescentar o caso e só então reexecutar.
 
 - [ ] **Step 3: Commit**
 
@@ -987,7 +1236,7 @@ git add scripts/ci/mutacao-r1-reconciliacao-base.sh
 git commit -m "test(mergex): mutantes da reconciliacao e do portao por sha"
 ```
 
-### Task 19: Suíte ampla e validação do contrato
+### Task 22: Suíte ampla e validação do contrato
 
 **Files:**
 - Nenhum arquivo novo; correções só onde uma suíte apontar regressão real.
@@ -1001,16 +1250,38 @@ for m in scripts/ci/mutacao-*.sh; do bash "$m" || echo "FALHOU $m"; done
 bash .claude/hooks/teste.sh
 bash scripts/ci/validate-mergex-contract.sh
 ```
-Expected: nenhuma linha `FALHOU`; todos rc 0.
+Expected: nenhuma linha `FALHOU`; todos rc 0. As linhas `NAO_EXECUTADO` (Git for Windows ausente) são listadas no relatório final como não executadas, nunca como aprovadas.
 
 - [ ] **Step 2: Conferir o escopo da branch**
 
 Run: `git diff --name-only bd4c1c58c2ec36635aa365a3e79b3acbc7b7357d..HEAD`
-Expected: só caminhos sob `.claude/`, `.opencode/`, `scripts/ci/` e `docs/superpowers/`; nenhum caminho de SprintX, BuildX ou ExpxDev; `git grep -nE '/home/|C:\\\\'` vazio nos arquivos alterados.
+Expected: só caminhos sob `.claude/`, `.opencode/`, `scripts/ci/`, `docs/superpowers/` e `AGENTS.md`; nenhum caminho de SprintX, BuildX ou ExpxDev; nenhum caminho sob `.github/workflows/`; `git grep -nE '/home/|C:\\\\'` vazio nos arquivos alterados.
 
 - [ ] **Step 3: Corrigir regressão, se houver**
 
 Uma suíte vermelha no Step 1 é regressão de uma task anterior: corrigir na task dona, com teste que a reproduza, e commitar só os arquivos tocados com a mensagem `fix(mergex): corrige regressao da suite ampla`. Sem regressão, esta task não gera commit.
+
+### Revisão final da branch
+
+Depois da Task 22, um revisor novo, no modelo mais capaz, avalia a branch inteira contra a spec, este plano e os contratos. Além da conformidade geral, o relatório classifica cada um dos oito riscos residuais da spec (seção 15.1) numa destas categorias, citando o teste ou o trecho de código que sustenta a classificação:
+- **eliminado:** o desenho atual o remove;
+- **testado e aceito:** existe teste que fixa o comportamento aceito;
+- **documentado sem mitigação técnica nesta rodada:** só cabeçalho ou reference.
+
+Classificação esperada, que o revisor confirma ou contesta com evidência:
+
+| # | Risco (spec 15.1) | Categoria esperada |
+|---|---|---|
+| 1 | Portão reposicionado por commit de método | testado e aceito (teste `residual: portão reposicionado por commit de método`) |
+| 2 | Legado com ref de base movida; âncora nascida errada | testado e aceito (testes `residual: legado com ref movida` e `residual: âncora nascida errada`) |
+| 3 | B1 lateral | documentado sem mitigação técnica |
+| 4 | Clone raso legítimo falha fechado | testado e aceito (`clone raso barra com historia_incompleta`) |
+| 5 | Isenção por prefixo em `docs/entregas/<id>/` | testado e aceito (`isenção por prefixo: .ts em docs/entregas depois do portão invalida`, Task 14) |
+| 6 | `core.autocrlf` na barreira | documentado sem mitigação técnica |
+| 7 | Hash do diff com atributos `-diff`/`binary` | documentado sem mitigação técnica |
+| 8 | Escala por branches entregues | eliminado (`custo independe das branches entregues`, `hook não varre branches`) |
+
+Também lista os casos `NAO_EXECUTADO` e confirma que nenhum foi contado como aprovado.
 
 ---
 
@@ -1018,8 +1289,8 @@ Uma suíte vermelha no Step 1 é regressão de uma task anterior: corrigir na ta
 
 Nenhum destes passos é código desta branch; cada um tem dono e autorização próprios.
 
-1. **PR da MergeX:** `fix/mergex-reconciliacao-base-pos-e8` → `p0.2/mergex-historico-yaml-escalar`, com o resultado da Task 19 na descrição.
-2. **Recertificação:** a Task 19 reexecutada no commit integrado.
-3. **ExpxDev:** atualizar pin/lock da MergeX e os candidatos de certificação, e rodar a certificação P0.2 (spec, seção 18.3).
-4. **Conselhos Municipais:** PR separado de instalação na `main`, com o lock novo e `doctor` limpo (spec, seção 18.4).
-5. **Retomada do PR #192:** pela spec, seção 17, preservando a resolução que está no índice.
+1. **PR da MergeX:** `fix/mergex-reconciliacao-base-pos-e8` → `p0.2/mergex-historico-yaml-escalar`, com o resultado da Task 22 e da revisão final na descrição. O PR não declara CI ativo em produto nenhum.
+2. **Recertificação:** a Task 22 reexecutada no commit integrado.
+3. **ExpxDev:** atualizar pin/lock da MergeX e os candidatos de certificação, e rodar a certificação P0.2 (spec, seção 18.3). Se o empacotamento do `pre-push` ou do template de CI exigir mudança no ExpxDev, ela é handoff próprio.
+4. **Conselhos Municipais:** PR separado de instalação na `main`, com o lock novo e `doctor` limpo (spec, seção 18.4). Ativação do `pre-push` pelo E0 (`ativacao-pre-push.sh --instalar`) e do check de CI a partir de `assets/ci/mergex-portao.yml`, com proteção de merge exigindo o check: handoffs próprios desse passo, comprovados antes do passo 5.
+5. **Retomada do PR #192:** pela spec, seção 17, preservando a resolução que está no índice. O PR continua em rascunho até o QA aprovar e até estarem comprovados a instalação com o `pre-push` ativo, o check de CI com a proteção de merge e os gates.
