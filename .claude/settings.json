@@ -32,7 +32,7 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/mergex/pr-so-com-portao.sh\"",
-            "timeout": 10
+            "timeout": 60
           }
         ]
       },

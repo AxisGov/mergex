@@ -125,6 +125,26 @@ reconciliação pós-E8, §4.5 e §13.5):
 A mensagem nomeia a branch, o trabalho, o `motivo` e o `primeiro_commit`, e
 manda rodar o E2 de novo (`/mergex-check`).
 
+A varredura **para na primeira falha**: o hook barra na hora e não valida o
+resto. Uma mesma ponta com o mesmo ENTREGA é validada uma vez só por chamada.
+
+**Tempo e timeout.** Um hook que estoura o `timeout` **não bloqueia**: o
+comando segue. Por isso este hook tem `timeout: 60` no `.claude/settings.json`
+e 60 s no plugin do OpenCode (`TEMPO_POR_HOOK`). Os outros hooks continuam com
+10 s, e o `git-perigoso`, com 30 s. Medido no WSL, com 50 branches:
+
+| Situação | Tempo |
+|---|---|
+| nenhum portão `pronto` | ~0,5 s |
+| 50 portões `pronto` válidos | ~7 s (~0,15 s por validade) |
+| 50 vencidos (para na primeira) | ~0,5 s |
+| comando sem termo de publicação | ~16 ms |
+
+A validade não tem "caminho curto" para `portao_sha` igual à revisão: esse caso
+não ocorre. O `ENTREGA.md` da revisão teria de conter o SHA do próprio commit
+que o contém, e o SHA depende do conteúdo. Todo portão válido tem pelo menos o
+commit de método que o registrou no intervalo.
+
 Isso independe do HEAD e da branch ativa. Por isso também vale:
 
 - no primeiro trabalho MergeX do projeto, quando a main ainda não tem
@@ -156,8 +176,19 @@ A abertura de PR (`gh pr create|new`, `gh -R <repo> pr create`,
 `--head`/`--source-branch`. Isso só vale quando `gh`/`glab` é o programa:
 `grep 'gh pr create'` não abre PR.
 
-A leitura por token **não** decide a liberação de um portão `pronto`. Quem
-decide é a varredura.
+**Origem explícita.** Há um caso em que a leitura por token acrescenta uma
+checagem ao `pronto`: o destino é a branch de um trabalho com `pronto` e a
+origem não é a ponta local dessa branch. Exemplos: `git push origin
+<sha>:feature/x`, `HEAD~1:refs/heads/feature/x`, `main:feature/x`.
+
+Nesse caso a validade roda também sobre a **origem**
+(`--rev <origem resolvida>`), porque é ela que sobe. Origem que não resolve
+num commit barra. As duas regras valem em qualquer modo. Com
+`feature/x:feature/x`, ou com o SHA da própria ponta, vale a ponta, que a
+varredura já validou.
+
+Fora isso, a leitura por token **não** decide a liberação de um portão
+`pronto`: quem decide é a varredura.
 
 **Riscos residuais — é uma barreira de agente, não de segurança contra
 adversário.**
@@ -166,13 +197,15 @@ adversário.**
   `GIT_DIR=$X`) não é varrido. O hook só varre o `cwd` e os diretórios
   literais.
 - **Commit fora de ponta de branch.** Um commit que não é a ponta de nenhuma
-  branch local (SHA solto, HEAD destacado, branch só no remoto) não é
-  varrido.
+  branch local (SHA solto, HEAD destacado, branch só no remoto) não é varrido.
+  A exceção é quando ele é a origem explícita de um push para a branch local
+  de um trabalho com `pronto`. Destino sem branch local não é checado.
 - **Alias de git.** Com `git config alias.p push`, o comando `git p origin
   <branch>` não tem termo de publicação e não dispara o hook.
-- **Tempo.** A varredura roda a validade para cada portão `pronto` encontrado.
-  Com muitas branches com portão pronto ao mesmo tempo, o tempo cresce: cerca
-  de 0,15 s por portão.
+- **Tempo.** A varredura roda a validade para cada portão `pronto` válido,
+  cerca de 0,15 s cada. Acima de umas 300 branches com portão `pronto` válido
+  ao mesmo tempo, os 60 s do timeout deixariam de bastar, e um hook que estoura
+  o tempo não bloqueia.
 
 **Recomendação.** A garantia forte é rodar `validade-do-portao.sh` fora do
 agente:

@@ -23,9 +23,14 @@
 #      Vencido, ausente ou que não se calcula: exit 2 em QUALQUER modo,
 #      `desligado` inclusive (spec 2026-10-07-reconciliacao-base-pos-e8, §4.5 e
 #      §13.5) — qualquer que seja o comando com termo de publicação.
-#   3. Refinamento: a leitura por token do push (comum/base.sh) só decide o
-#      caso `null`/`bloqueado`, que segue o modo configurado quando o comando
-#      empurra a branch daquele trabalho, e dá contexto à mensagem.
+#   3. Refinamento pela leitura por token do push (comum/base.sh):
+#      a) origem explícita (`<sha>:feature/x`, `main:feature/x`) para a branch
+#         de um trabalho com `pronto`: a validade roda também sobre a ORIGEM;
+#         origem que não resolve barra — em qualquer modo;
+#      b) `null`/`bloqueado` seguem o modo configurado quando o comando
+#         empurra a branch daquele trabalho.
+#   A varredura para na primeira falha. O timeout do hook é 60 s nos dois
+#   harnesses: hook que estoura o tempo não bloqueia.
 #
 # É uma barreira de AGENTE, não de segurança contra adversário. A garantia
 # forte é rodar validade-do-portao.sh no CI ou num hook `pre-push` (README).
@@ -115,9 +120,59 @@ VISTOS=""       # git-common-dir de cada repositório já varrido
 FALHAS=""       # uma linha por portão pronto que não vale
 REPOS=""        # raízes varridas (para o refinamento)
 
+# barra_sempre <motivo-curto> <mensagem> — exit 2 em qualquer modo
+barra_sempre() {
+  expx_barra bloqueio "$RAIZ" "$HOOK" "$1" "$2" # guarda:HKAVISO
+}
+
+# falha_portao <linha> — a primeira falha barra na hora (o resto não roda)
+falha_portao() {
+  barra_sempre "portao pronto que nao vale" "mergex/pr-so-com-portao — portão vencido no repositório
+
+Comando: $CMD
+
+O comando tem um termo de publicação (push, send-pack, subtree, pr/mr
+create|new), e há portão PRONTO que não vale para o que seria publicado:
+
+  - $1
+
+Depois do commit que o E2 avaliou (portao_sha) entrou commit que o E2 não viu
+— produto, teste, plano ou merge —, ou o portao_sha está ausente ou fora da
+história, ou a prova não pôde ser calculada. Publicar agora levaria ao revisor
+código que o portão não avaliou.
+
+Enquanto houver portão vencido, qualquer comando com termo de publicação é
+barrado — inclusive citações como \`git log --grep push\` ou \`echo push\` —, em
+qualquer modo do hook: o hook decide pelo estado do repositório, não pela
+leitura do comando.
+
+O que fazer:
+  - Rode o E2 de novo na branch acima:  /mergex-check
+  - PRONTO   → o push e o PR seguem normalmente.
+  - BLOQUEADO → a saída nomeia o que falta e onde corrigir."
+}
+
+# valida <raiz> <ENTREGA> <revisão> <descrição> — só ok=true COM rc 0 passa;
+# qualquer outra resposta barra na hora, em qualquer modo.
+valida() {
+  local saida rc okv mot pri
+  [ -f "$VALIDADE" ] || falha_portao "$4: validade-do-portao.sh ausente ao lado dos hooks"
+  saida="$(cd "$1" 2>/dev/null && bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$?
+  okv="$(printf '%s\n' "$saida" | sed -n 's/^ok=//p' | head -1)"
+  mot="$(printf '%s\n' "$saida" | sed -n 's/^motivo=//p' | head -1)"
+  pri="$(printf '%s\n' "$saida" | sed -n 's/^primeiro_commit=//p' | head -1)"
+  [ "$rc" = 0 ] && [ "$okv" = true ] && return 0
+  if [ "$rc" != 1 ] || [ "$okv" != false ] || [ -z "$mot" ] || [ "$mot" = erro_ambiente ]; then
+    falha_portao "$4: validade-do-portao.sh não se calcula (rc=$rc${mot:+, motivo=$mot})"
+  fi
+  falha_portao "$4: motivo=$mot, primeiro_commit=${pri:--}"
+}
+
+VALIDADOS=""    # |<ponta>:<ENTREGA>| já validados nesta chamada
+
 # varre <raiz> — para cada branch local, o ENTREGA.md pronto da ponta dela
 varre() {
-  local top="$1" refs objs pronto cand obj path br id saida rc okv mot pri
+  local top="$1" refs objs pronto cand obj path br id
   refs="$(git -C "$top" for-each-ref --format='%(objectname) %(refname:short)' refs/heads 2>/dev/null)" # guarda:HKVARRE
   [ -n "$refs" ] || return 0
   objs="$(printf '%s\n' "$refs" | cut -d' ' -f1 | sort -u)"
@@ -147,25 +202,11 @@ varre() {
     { split($0, a, "\t"); if ((a[1] SUBSEP a[3]) in R) print a[1] "\t" a[2] "\t" a[3] }')"
   while IFS="$TAB" read -r obj path br; do
     [ -n "$obj" ] || continue
+    # A mesma ponta com o mesmo ENTREGA só se valida uma vez por chamada.
+    case "$VALIDADOS" in *"|$obj:$path|"*) continue ;; esac
+    VALIDADOS="$VALIDADOS|$obj:$path|"
     id="${path#docs/entregas/}"; id="${id%/ENTREGA.md}"
-    if [ ! -f "$VALIDADE" ]; then
-      FALHAS="${FALHAS}  - branch $br (trabalho $id): validade-do-portao.sh ausente ao lado dos hooks
-"
-      continue
-    fi
-    saida="$(cd "$top" 2>/dev/null && bash "$VALIDADE" --verificar --entrega "$path" --rev "$obj" 2>/dev/null)"; rc=$? # guarda:HKREV
-    okv="$(printf '%s\n' "$saida" | sed -n 's/^ok=//p' | head -1)"
-    mot="$(printf '%s\n' "$saida" | sed -n 's/^motivo=//p' | head -1)"
-    pri="$(printf '%s\n' "$saida" | sed -n 's/^primeiro_commit=//p' | head -1)"
-    # Só ok=true COM rc 0 prova o portão.
-    [ "$rc" = 0 ] && [ "$okv" = true ] && continue
-    if [ "$rc" != 1 ] || [ "$okv" != false ] || [ -z "$mot" ] || [ "$mot" = erro_ambiente ]; then
-      FALHAS="${FALHAS}  - branch $br (trabalho $id): validade-do-portao.sh não se calcula (rc=$rc${mot:+, motivo=$mot})
-"
-    else
-      FALHAS="${FALHAS}  - branch $br (trabalho $id, ponta $obj): motivo=$mot, primeiro_commit=${pri:--}
-"
-    fi
+    valida "$top" "$path" "$obj" "branch $br (trabalho $id, ponta $obj)" # guarda:HKREV
   done <<EOF
 $cand
 EOF
@@ -186,45 +227,22 @@ done <<EOF
 $CANDIDATOS
 EOF
 
-# barra_sempre <motivo-curto> <mensagem> — exit 2 em qualquer modo
-barra_sempre() {
-  expx_barra bloqueio "$RAIZ" "$HOOK" "$1" "$2" # guarda:HKAVISO
-}
-
-if [ -n "$FALHAS" ]; then
-  barra_sempre "portao pronto que nao vale" "mergex/pr-so-com-portao — portão vencido no repositório
-
-Comando: $CMD
-
-O comando tem um termo de publicação (push, send-pack, subtree, pr/mr
-create|new), e há portão PRONTO que não vale para a ponta da branch:
-
-$FALHAS
-Depois do commit que o E2 avaliou (portao_sha) entrou commit que o E2 não viu
-— produto, teste, plano ou merge —, ou o portao_sha está ausente ou fora da
-história, ou a prova não pôde ser calculada. Publicar agora levaria ao revisor
-código que o portão não avaliou.
-
-Enquanto houver portão vencido, qualquer comando com termo de publicação é
-barrado — inclusive citações como \`git log --grep push\` ou \`echo push\` —, em
-qualquer modo do hook: o hook decide pelo estado do repositório, não pela
-leitura do comando.
-
-O que fazer:
-  - Rode o E2 de novo na branch acima:  /mergex-check
-  - PRONTO   → o push e o PR seguem normalmente.
-  - BLOQUEADO → a saída nomeia o que falta e onde corrigir."
-fi
-
-[ "$MODO" = "desligado" ] && exit 0
-
 # --------------------------------------------------------------------------
-# 3. Refinamento — `null`/`bloqueado` da branch que o comando empurra
+# 3. Refinamento — a leitura por token do push (comum/base.sh)
 # --------------------------------------------------------------------------
-# A leitura por token (comum/base.sh) identifica as branches empurradas; o
-# trabalho de cada uma sai da árvore da revisão empurrada; o `portao`, de
-# <revisão>:ENTREGA.md. `pronto` já foi decidido pela varredura.
+# a) Origem explícita para a branch de um trabalho com `pronto` (ex.:
+#    `git push origin <sha>:feature/x`): a ponta local já foi varrida, mas o
+#    que sobe é a ORIGEM. Quando ela não é a ponta, a validade roda sobre ela;
+#    origem que não resolve barra. Em qualquer modo.
+# b) `null`/`bloqueado` da branch empurrada seguem o modo configurado.
+# O trabalho de cada branch sai da árvore da revisão; o `portao`, de
+# <revisão>:ENTREGA.md.
 IT_RAIZ=(); IT_BRANCH=(); IT_REV=()
+OR_RAIZ=(); OR_DST=(); OR_SRC=()
+origem() { # <raiz> <branch de destino> <origem como escrita>
+  local n="${#OR_RAIZ[@]}"
+  OR_RAIZ[$n]="$1"; OR_DST[$n]="$2"; OR_SRC[$n]="$3"
+}
 ACAO=""
 item() { # <raiz> <branch> <rev|"">
   local n="${#IT_RAIZ[@]}"
@@ -297,6 +315,8 @@ EOF
     esac
     dstn="${dst#refs/heads/}"
     case "$dstn" in HEAD|@) dstn="$atual" ;; esac
+    # o par (destino, origem como escrita), para a origem explícita
+    if [ -n "$src" ] && [ -n "$dstn" ] && nome_de_branch "$dstn"; then origem "$REPO" "$dstn" "$src"; fi
     case "$src" in
       HEAD|@) [ -n "$atual" ] && item "$REPO" "$atual" "$head" ;;
       *)
@@ -384,6 +404,28 @@ done <<EOF
 $(expx_segmentos "$CMD")
 EOF
 
+# a) Origem explícita para a branch de um trabalho com `pronto`
+i=0
+while [ "$i" -lt "${#OR_RAIZ[@]}" ]; do
+  R="${OR_RAIZ[$i]}"; B="${OR_DST[$i]}"; S="${OR_SRC[$i]}"
+  i=$((i + 1))
+  PT="$(ponta "$R" "$B")"
+  [ -n "$PT" ] || continue                 # destino sem branch local: risco residual (README)
+  TID="$(expx_trabalho_por_branch_na_revisao "$R" "$B" "$PT")" || continue
+  PORTAO="$(git -C "$R" cat-file blob "$PT:docs/entregas/$TID/ENTREGA.md" 2>/dev/null | expx_frontmatter_valor /dev/stdin portao)"
+  [ "$PORTAO" = pronto ] || continue
+  case "$S" in
+    HEAD|@) SHA="$(git -C "$R" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" ;;
+    *)      SHA="$(git -C "$R" rev-parse --verify -q "$S^{commit}" 2>/dev/null)" ;;
+  esac
+  [ -n "$SHA" ] || falha_portao "branch $B (trabalho $TID): a origem '$S' do push não se resolve num commit"
+  [ "$SHA" = "$PT" ] && continue          # a própria ponta: já validada na varredura
+  valida "$R" "docs/entregas/$TID/ENTREGA.md" "$SHA" "branch $B (trabalho $TID), origem explícita '$S' = $SHA" # guarda:HKORIGEM
+done
+
+[ "$MODO" = "desligado" ] && exit 0
+
+# b) `null`/`bloqueado` da branch empurrada: o modo manda
 MODO_TRAB=""; MODO_PORTAO=""
 i=0
 while [ "$i" -lt "${#IT_RAIZ[@]}" ]; do

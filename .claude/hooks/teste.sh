@@ -855,12 +855,31 @@ for C in 'git push' 'git push -u origin feature/ft-02' 'git push origin HEAD:fea
          'git push origin refs/heads/feature/ft-02' 'git -C . push origin feature/ft-02' \
          'git push -o main origin feature/ft-02' 'git push -uo main origin feature/ft-02' \
          "sh -c 'git push'" 'gh pr create --fill' 'gh -R o/r pr create --fill' 'gh pr new --fill' 'glab mr new --fill' \
-         'git push origin main' 'git push --tags' 'git push --all origin' 'git push origin main:feature/ft-02' \
+         'git push origin main' 'git push --tags' 'git push --all origin' \
          'GIT_DIR=.git git push origin feature/ft-02' 'cd $DIR_X && git push origin feature/ft-02' \
          "cd $HIST_T && git push origin feature/ft-02" 'echo push' 'git log --grep push' \
          'git commit -m "antes do git push"' 'echo "git push origin feature/ft-02"' 'docker push img'; do
   caso "portao valido: $C" mergex/pr-so-com-portao.sh "$(bash_json "$C")" 0
 done
+# Origem explicita para a branch de um trabalho com `pronto`: quando nao e a
+# ponta local dessa branch, a validade roda sobre a ORIGEM (--rev <origem>).
+fixture_switch_exato fixture-produto -c fixture-produto || exit 1
+printf 'produto solto\n' > src/solto.ts
+git add src/solto.ts && git commit -qm "feat: produto solto" || exit 1
+SHA_PROD="$(git rev-parse HEAD)"
+fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
+git branch -q -D fixture-produto
+caso "origem explicita: <sha de produto>:feature/ft-02 barra" mergex/pr-so-com-portao.sh "$(bash_json "git push origin $SHA_PROD:feature/ft-02")" 2
+mensagem_cita "origem explicita: a mensagem nomeia a origem, o motivo e o E2" "$(bash_json "git push origin $SHA_PROD:feature/ft-02")" \
+  "$SHA_PROD" commit_de_produto /mergex-check
+modo_portao desligado
+caso "origem explicita: barra tambem em desligado" mergex/pr-so-com-portao.sh "$(bash_json "git push origin $SHA_PROD:refs/heads/feature/ft-02")" 2
+modo_portao aviso
+caso "origem explicita: HEAD~1:refs/heads/feature/ft-02 validada pela origem" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin HEAD~1:refs/heads/feature/ft-02')" 0
+caso "origem explicita: feature/ft-02:feature/ft-02 ok" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02:feature/ft-02')" 0
+caso "origem explicita: SHA da propria ponta ok" mergex/pr-so-com-portao.sh "$(bash_json "git push origin $(git rev-parse HEAD):feature/ft-02")" 0
+caso "origem explicita: outra branch (main) barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main:feature/ft-02')" 2
+caso "origem explicita que nao se resolve barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin nao-existe:feature/ft-02')" 2
 # A ponta da branch decide, nao o HEAD de outra arvore: uma arvore cujo HEAD
 # esta vencido (outra branch) nao barra a branch do trabalho valida
 git branch -q fixture-vencida HEAD
@@ -941,6 +960,19 @@ printf '#!/usr/bin/env bash\nexit 64\n' > "$STUB_T"
 caso "validade com uso invalido e pronto barra"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 printf '#!/usr/bin/env bash\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 1\n' > "$STUB_T"
 caso "validade ok=true com rc 1 barra"             mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+# Para na primeira falha: com dois portoes `pronto` no repositorio, uma
+# validade que reprova roda uma vez so.
+fixture_switch_exato feature/outro -c feature/outro || exit 1
+entrega outro feature/outro
+fm_chave docs/entregas/outro/ENTREGA.md portao pronto
+git add docs/entregas/outro/ENTREGA.md && git commit -qm "entrega outro pronta" || exit 1
+fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
+CHAMADAS_T="$SEMGIT_T/chamadas-validade"
+: > "$CHAMADAS_T"
+printf '#!/usr/bin/env bash\necho x >> %s\nprintf "ok=false\\nmotivo=commit_de_produto\\nprimeiro_commit=-\\n"; exit 1\n' "$CHAMADAS_T" > "$STUB_T"
+caso "dois portoes pronto e o primeiro reprova: barra" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+valor "para na primeira falha: uma validade so" "$(wc -l < "$CHAMADAS_T" | tr -d ' ')" 1
+git branch -q -D feature/outro
 H="$H_REAL"
 rm -rf "$SEMGIT_T/instalacao"
 
@@ -992,6 +1024,15 @@ caso "tasks.md corrompido barra ownership" mergex/commit-por-task.sh "$(bash_jso
 caso "tasks.md corrompido (escopo)" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
 rm -f docs/sprintx/features/exportacao-csv/sprint-01/tasks.md
 caso "tasks.md ausente barra ownership" mergex/commit-por-task.sh "$(bash_json "$MSG_PLANO_INVALIDO")" 2
+
+echo
+echo "registro dos hooks — tempo do pr-so-com-portao"
+# Hook que estoura o timeout NAO bloqueia (o comando segue): a varredura do
+# portao precisa de folga. 60 s nos dois harnesses.
+valor "settings.json: timeout do pr-so-com-portao e 60" \
+  "$(jq -r '.. | objects | select(has("command")) | select(.command | contains("mergex/pr-so-com-portao.sh")) | .timeout' "$REPO_ROOT/.claude/settings.json")" 60
+valor "OpenCode: limite do pr-so-com-portao e 60 s" \
+  "$(grep -c '"mergex/pr-so-com-portao.sh": 60_000' "$REPO_ROOT/.opencode/plugin/mergex.ts")" 1
 
 echo
 echo "---------------------------------------------"
