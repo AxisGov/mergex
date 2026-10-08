@@ -20,21 +20,33 @@
 #    - sem reconciliação: o base_validada_sha do ENTREGA.md de HEAD (a versão
 #      commitada; o do disco nunca alimenta a base: divergência vira uma linha
 #      `aviso`) — origem_base = a origem_base de HEAD (registrada_e0 sem ela);
-#    - entrega legada (HEAD:ENTREGA.md sem a chave): `git merge-base --all HEAD
-#      <branch_base>` com exatamente um resultado — origem_base=
-#      inferida_leitura, nunca gravada. Mais de um, nenhum, branch_base
-#      inexistente ou fora da forma de branch (inclusive `@...` e `@{`):
-#      v9_sem_prova.
+#    - entrega legada (NENHUMA versão do ENTREGA.md alcançável de HEAD tem a
+#      chave): `git merge-base --all HEAD <branch_base>` com exatamente um
+#      resultado — origem_base=inferida_leitura, nunca gravada. Mais de um,
+#      nenhum, branch_base inexistente ou fora da forma de branch (inclusive
+#      `@...` e `@{`): v9_sem_prova.
+#    Âncora, sem reconciliação: todas as versões do ENTREGA.md alcançáveis de
+#    HEAD (`git rev-list --full-history HEAD -- <ENTREGA>`) que têm
+#    base_validada_sha têm UM único valor, e HEAD tem a chave com esse valor.
+#    Chave malformada (vazia, null, entre aspas) em qualquer versão, valores
+#    diferentes, ou HEAD sem a chave que o histórico tem (rebaixamento a
+#    legado): v9_sem_prova.
 #    Em qualquer origem, a base que já contém o trabalho é v9_sem_prova: a
 #    própria HEAD; uma base da qual é ancestral algum commit de
 #    ENTREGA.commits (de HEAD; entrada que não resolve para um único commit
 #    também é v9_sem_prova), algum commit com `Trabalho: <id>` (mensagem lida
 #    em UTF-8) ou algum commit que toca a pasta do trabalho ou
-#    docs/entregas/<id>/. Sem reconciliação, o base_validada_sha de HEAD tem
-#    de ser o da versão que criou o ENTREGA.md (o commit mais antigo com
-#    --diff-filter=A); diverge ou não determinável: v9_sem_prova.
-#    Risco residual conhecido: no legado, a ref de base movida para um commit
-#    sem nenhuma dessas marcas é aceita (a spec lê a ref nesse caso).
+#    docs/entregas/<id>/.
+#    Riscos residuais conhecidos (limite de desenho; o Git local não
+#    distingue):
+#    - legado com a ref de base movida para um commit sem nenhuma dessas
+#      marcas: aceito (a spec lê a ref nesse caso);
+#    - âncora nascida errada: o ENTREGA.md já nasce com base_validada_sha num
+#      commit só de produto (sem marca, sem tocar a pasta); todas as versões
+#      concordam e a base é aceita (o E0 lê a ref);
+#    - B1 lateral: com reconciliação, a cadeia nunca reconfere b1_sha contra a
+#      base real; um B1 forjado (descende de B0, traz produto, a ref movida no
+#      registro) desloca a base.
 # 2. Diff: `git diff --raw --no-renames --ignore-submodules=none B...HEAD` (os
 #    caminhos de `--name-only`, com os modos), caminho exato (sem quoting).
 # 3. Aceito, nesta ordem: a união de arquivos.cria + arquivos.altera de todas
@@ -185,6 +197,27 @@ awk -F'\t' '$1 == "coberto" { print $2 }' "$TMP_DIR/verificar" > "$TMP_DIR/cober
 
 ULTIMO="$(ls "$TMP_DIR/antes" | LC_ALL=C sort | sed -n '$p')"
 AVISOS="$TMP_DIR/avisos"; : > "$AVISOS"
+
+# Sem reconciliação: o base_validada_sha de TODAS as versões do ENTREGA.md
+# alcançáveis de HEAD (rev-list --full-history: sem simplificação de merge e sem
+# depender de data nem de "qual commit o criou"). Chave presente e malformada,
+# em qualquer versão: v9_sem_prova. VALORES fica com um valor por versão que
+# tem a chave; vazio, e só então, a entrega é legada.
+VALORES="$TMP_DIR/valores"; : > "$VALORES"
+if [ -z "$ULTIMO" ]; then
+  g rev-list --full-history "$HEAD_SHA" -- "$ENTREGA" > "$TMP_DIR/versoes" 2>/dev/null \
+    || sem_prova "histórico de $ENTREGA ilegível" # guarda:V9SHA
+  while IFS= read -r cv <&3; do
+    case "$(modo_em "$cv" "$ENTREGA")" in 100644|100755) ;; *) continue ;; esac
+    g cat-file blob "$cv:$ENTREGA" > "$TMP_DIR/versao.md" 2>/dev/null || sem_prova "$ENTREGA ilegível em $cv"
+    _entrega_chave_qualquer "$TMP_DIR/versao.md" base_validada_sha || continue
+    vv="$(catalogo_fm "$TMP_DIR/versao.md" base_validada_sha)"
+    printf '%s' "$vv" | grep -Eq '^[0-9a-f]{40}$' \
+      || sem_prova "$ENTREGA em $cv tem base_validada_sha malformada: ${vv:-vazia ou ilegível}"
+    printf '%s\n' "$vv" >> "$VALORES"
+  done 3< "$TMP_DIR/versoes"
+fi
+
 if [ -n "$ULTIMO" ]; then
   # com reconciliação: o b1_sha da última, do artefato validado
   num="$(printf '%s' "$ULTIMO" | sed 's/^RECONCILIACAO-BASE-0*\([0-9][0-9]*\)\.md$/\1/')"
@@ -193,8 +226,11 @@ if [ -n "$ULTIMO" ]; then
   rb_ler "$TMP_DIR/antes/$ULTIMO" > "$TMP_DIR/ultimo.lido" || sem_prova "$ULTIMO ilegível: $RB_ERRO"
   B_CADEIA="$(awk -F'\t' '$1 == "escalar" && $2 == "b1_sha" { print $3; exit }' "$TMP_DIR/ultimo.lido")"
   BASE="$B_CADEIA"; ORIGEM_BASE=reconciliacao # guarda:V9SHA
-elif _entrega_chave_qualquer "$ENTREGA_H" base_validada_sha; then
-  # sem reconciliação: a base validada de HEAD, nunca a do disco
+elif [ -s "$VALORES" ]; then # guarda:V9SHA
+  # sem reconciliação e com a chave no histórico: a base validada de HEAD,
+  # nunca a do disco; HEAD sem a chave que o histórico tem é rebaixamento
+  _entrega_chave_qualquer "$ENTREGA_H" base_validada_sha \
+    || sem_prova "HEAD:$ENTREGA não tem base_validada_sha, que versões do histórico têm: rebaixamento a legado" # guarda:V9SHA
   B_HEAD="$(catalogo_fm "$ENTREGA_H" base_validada_sha)" # guarda:V9DISCO
   printf '%s' "$B_HEAD" | grep -Eq '^[0-9a-f]{40}$' || sem_prova "base_validada_sha de HEAD não é SHA de 40 hex: ${B_HEAD:-vazia ou ilegível}"
   case "$(catalogo_fm "$ENTREGA_H" origem_base)" in
@@ -204,7 +240,10 @@ elif _entrega_chave_qualquer "$ENTREGA_H" base_validada_sha; then
   esac
   BASE="$B_HEAD"; ORIGEM_BASE="$OB_HEAD" # guarda:V9SHA
 else
-  # entrega legada: merge-base único com branch_base, só para esta leitura
+  # entrega legada (nenhuma versão alcançável tem a chave): merge-base único
+  # com branch_base, só para esta leitura
+  _entrega_chave_qualquer "$ENTREGA_H" base_validada_sha \
+    && sem_prova "HEAD:$ENTREGA tem base_validada_sha fora do histórico de versões"
   BB="$(catalogo_fm "$ENTREGA_H" branch_base)"
   # @, @{-N}, @{upstream}: atalhos do reflog e da HEAD, nunca uma branch
   case "$BB" in @*|*@\{*) sem_prova "legado: branch_base inválida em HEAD: $BB" ;; esac # guarda:V9SHA
@@ -245,18 +284,15 @@ TRAB_RE="$(printf '%s' "$TRABALHO" | sed 's/[.]/\\./g')"
 c="$(g rev-list -n1 --encoding=UTF-8 --grep="^Trabalho: $TRAB_RE\$" "$BASE" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível" # guarda:ENC
 [ -z "$c" ] || sem_prova "a base $BASE contém o commit $c com Trabalho: $TRABALHO: a base contém o trabalho" # guarda:V9SHA
 
-# (a) sem reconciliação, a base de HEAD é a que o ENTREGA.md tinha ao nascer: a
-# spec só deixa a chave mudar por reconciliação (que traz a cadeia, ancorada)
-if [ -z "$ULTIMO" ] && [ "$ORIGEM_BASE" != inferida_leitura ]; then
-  g log --diff-filter=A --format=%H "$HEAD_SHA" -- "$ENTREGA" > "$TMP_DIR/criacao" 2>/dev/null \
-    || sem_prova "histórico de $ENTREGA ilegível: o commit que o criou não é determinável"
-  CRIACAO="$(sed -n '$p' "$TMP_DIR/criacao")"
-  [ -n "$CRIACAO" ] || sem_prova "o commit que criou $ENTREGA não é determinável"
-  g cat-file blob "$CRIACAO:$ENTREGA" > "$TMP_DIR/entrega-criacao.md" 2>/dev/null \
-    || sem_prova "$ENTREGA ilegível no commit que o criou ($CRIACAO)"
-  B_CRIACAO="$(catalogo_fm "$TMP_DIR/entrega-criacao.md" base_validada_sha)"
-  [ "$B_CRIACAO" = "$BASE" ] \
-    || sem_prova "a base $BASE diverge da versão que criou $ENTREGA ($CRIACAO: ${B_CRIACAO:-ausente})" # guarda:V9SHA
+# (a) sem reconciliação, a base é uma só em todas as versões do ENTREGA.md que a
+# têm, e é a de HEAD: a spec só deixa a chave mudar por reconciliação (que traz
+# a cadeia, ancorada)
+if [ -z "$ULTIMO" ] && [ -s "$VALORES" ]; then
+  LC_ALL=C sort -u "$VALORES" > "$TMP_DIR/distintos"
+  n="$(grep -c . "$TMP_DIR/distintos")"
+  [ "$n" = 1 ] || sem_prova "as versões de $ENTREGA no histórico de HEAD têm $n bases diferentes ($(tr '\n' ' ' < "$TMP_DIR/distintos")): a base não é uma só" # guarda:V9SHA
+  [ "$BASE" = "$(sed -n 1p "$TMP_DIR/distintos")" ] \
+    || sem_prova "a base de HEAD ($BASE) diverge da do histórico de $ENTREGA ($(sed -n 1p "$TMP_DIR/distintos"))" # guarda:V9SHA
 fi
 
 # sem reconciliação: o disco que diverge de HEAD é relatado, nunca usado

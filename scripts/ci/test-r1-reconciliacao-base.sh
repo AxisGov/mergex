@@ -2311,7 +2311,7 @@ grupo_v9() {
   # ---- chave presente e inválida em HEAD; contexto divergente --------------
   d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=entrega_base_null fx_cenario "$d" || { falha "entrega_base_null não montou"; return; }
   cd "$d" || return
-  v9_sem_prova "base_validada_sha null em HEAD: v9_sem_prova" "base_validada_sha"
+  v9_sem_prova "base_validada_sha null em HEAD: v9_sem_prova" "base_validada_sha malformada"
   cd "$REPO" || return
   d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
@@ -2357,6 +2357,9 @@ _v9_reconstroi() {
   git switch -q -c atk || return 1
   git cherry-pick $(git rev-list --reverse --first-parent "$FX_B0..$FX_P1") >/dev/null 2>&1
 }
+
+# _v9_commit_rm <arquivo> — remove o arquivo num commit próprio
+_v9_commit_rm() { git rm -q -- "$1" && git commit -q -m "remove $1"; }
 
 # _v9_ambiguo — um prefixo de 4 hex que é de dois commits (gerados até colidir)
 _v9_ambiguo() {
@@ -2467,7 +2470,7 @@ grupo_v9_robusto() {
   out="$("${v[@]}" 2>/dev/null)"
   printf '%s\n' "$out" | grep -Fxq 'fora_do_plano	src/evil.ts' && ok "controle S1a: com a base de E0, evil.ts é desvio" || falha "controle S1a: $(printf '%s' "$out" | tr '\n\t' '|>')"
   _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $X/"
-  v9_sem_prova "S1b: base_validada_sha commitado diferente do da criação do ENTREGA.md" "diverge da versão que criou"
+  v9_sem_prova "S1b: base_validada_sha commitado diferente do das outras versões do ENTREGA.md" "bases diferentes"
   cd "$REPO" || return
 
   # trailer fora da forma canônica num commit lateral usado como base: (a)
@@ -2475,7 +2478,82 @@ grupo_v9_robusto() {
   cd "$d" || return
   x="$(printf 'parte do trabalho\n\nTrabalho:ft-rec\n' | git commit-tree "$FX_B0^{tree}" -p "$FX_B0")"
   _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $x/"
-  v9_sem_prova "trailer escrito de outro jeito (Trabalho:ft-rec) na base" "diverge da versão que criou"
+  v9_sem_prova "trailer escrito de outro jeito (Trabalho:ft-rec) na base" "bases diferentes"
+  cd "$REPO" || return
+
+  # ---- âncora em todas as versões do ENTREGA.md (fix round 3) --------------
+  # R3/R3b/R3c/R3d: um lado saído de X traz o ENTREGA.md com base X por merge
+  local modo_m
+  for modo_m in R3 R3b R3c R3d; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+    cd "$d" || return
+    _v9_reconstroi "chore: utilitario" || falha "reconstrução ($modo_m)"
+    cp "$FX_ENTREGA" "$t/e-$modo_m"
+    [ "$modo_m" != R3c ] || _v9_commit_rm "$FX_ENTREGA"
+    git switch -q --detach "$X" && git switch -q -c lado
+    mkdir -p docs/entregas/ft-rec
+    sed "s/^base_validada_sha: .*/base_validada_sha: $X/" "$t/e-$modo_m" > "$FX_ENTREGA"; git add -- "$FX_ENTREGA"
+    if [ "$modo_m" = R3d ]; then
+      GIT_COMMITTER_DATE='2001-01-01T00:00:00' GIT_AUTHOR_DATE='2001-01-01T00:00:00' git commit -q -m "docs: entrega"
+    else git commit -q -m "docs: entrega"; fi
+    case "$modo_m" in
+      R3b) git merge -q --no-ff --no-commit atk >/dev/null 2>&1
+           git show "lado:$FX_ENTREGA" > "$FX_ENTREGA"; git add -- "$FX_ENTREGA"; git commit -q -m "merge: traz a feature" ;;
+      R3c) git switch -q atk; git merge -q --no-ff -m "merge: traz a entrega" lado >/dev/null 2>&1 || falha "R3c: o merge não foi limpo" ;;
+      *)   git switch -q atk; git merge -q --no-ff --no-commit lado >/dev/null 2>&1
+           git show "lado:$FX_ENTREGA" > "$FX_ENTREGA"
+           [ "$modo_m" != R3d ] || printf '\nNota do merge.\n' >> "$FX_ENTREGA"
+           git add -- "$FX_ENTREGA"; git commit -q -m "merge: traz o lado" ;;
+    esac
+    [ "$(git rev-list --parents -n1 HEAD | wc -w)" = 3 ] && [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$X" ] \
+      && ok "controle $modo_m: HEAD é merge com a base X" || falha "controle $modo_m: montagem"
+    v9_sem_prova "$modo_m: ENTREGA.md trazido por merge com outra base" "bases diferentes"
+    cd "$REPO" || return
+  done
+
+  # R8: a chave tirada num commit (rebaixamento a legado) e a ref de base em X
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  _v9_reconstroi "chore: utilitario" || falha "reconstrução (R8)"
+  _v9_entrega_commit '/^base_validada_sha:/d; /^origem_base:/d; /^reconciliacoes:/d; /^portao_sha:/d'
+  git branch -f main "$X"
+  v9_sem_prova "R8: rebaixamento a legado com a ref de base em X" "rebaixamento a legado"
+  cd "$REPO" || return
+
+  # fluxo normal em P1 (E0, E1, E2): git mv e ENTREGA.md recriado com o mesmo valor
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  git switch -q -c p1 "$FX_P1"
+  out="$(printf 'base=%s\norigem_base=registrada_e0\nresultado=ok' "$FX_B0")"
+  v9_espera "fluxo normal em P1 (pre-e2, pre-e6, e8): aprova" 0 "$out"
+  git mv "$FX_ENTREGA" docs/entregas/ft-rec/ENTREGA-velho.md && git commit -q -m "move a entrega"
+  git mv docs/entregas/ft-rec/ENTREGA-velho.md "$FX_ENTREGA" && git commit -q -m "devolve a entrega"
+  v9_espera "ENTREGA.md movido e devolvido (git mv): aprova" 0 "$out"
+  cp "$FX_ENTREGA" "$t/e-p1"; _v9_commit_rm "$FX_ENTREGA"
+  cp "$t/e-p1" "$FX_ENTREGA"; _v9_commit "recria a entrega" "$FX_ENTREGA"
+  v9_espera "ENTREGA.md recriado com o mesmo valor: aprova" 0 "$out"
+  _v9_commit_rm "$FX_ENTREGA"
+  sed "s/^base_validada_sha: .*/base_validada_sha: $FX_B1/" "$t/e-p1" > "$FX_ENTREGA"; _v9_commit "recria com outra base" "$FX_ENTREGA"
+  v9_sem_prova "ENTREGA.md recriado com outro valor" "bases diferentes"
+  cd "$REPO" || return
+
+  # residual: âncora nascida errada (R5). O ENTREGA.md já nasce com a base num
+  # commit só de produto (sem marca, sem tocar a pasta); todas as versões
+  # concordam. Documentado, não corrigido.
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  git switch -q --detach "$FX_B0"
+  printf 'export const mal = 1;\n' > src/evil.ts; git add src/evil.ts; git commit -q -m "chore: utilitario"; X="$(git rev-parse HEAD)"
+  git switch -q -c atk
+  for x in $(git rev-list --reverse --first-parent "$FX_B0..$FX_P1"); do
+    git cherry-pick -n "$x" >/dev/null 2>&1
+    if git diff --cached --name-only | grep -Fxq "$FX_ENTREGA"; then
+      sed "s/^base_validada_sha: .*/base_validada_sha: $X/" "$FX_ENTREGA" > "$t/e-r5" && cat "$t/e-r5" > "$FX_ENTREGA"; git add -- "$FX_ENTREGA"
+    fi
+    git commit -q -C "$x"
+  done
+  v9_espera "residual: âncora nascida errada (comportamento atual: aprova)" 0 \
+    "$(printf 'base=%s\norigem_base=registrada_e0\nresultado=ok' "$X")"
   cd "$REPO" || return
 
   # S3 (legado, só a regra b): a ref movida para o commit do plano
@@ -2537,7 +2615,7 @@ grupo_v9_robusto() {
   for x in entrega_base_vazia entrega_base_aspas; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$x" fx_cenario "$d" || { falha "$x não montou"; return; }
     cd "$d" || return
-    v9_sem_prova "$x: v9_sem_prova, sem legado por ref" "base_validada_sha"
+    v9_sem_prova "$x: v9_sem_prova, sem legado por ref" "base_validada_sha malformada"
     cd "$REPO" || return
   done
 
