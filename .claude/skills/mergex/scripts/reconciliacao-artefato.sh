@@ -63,7 +63,7 @@ rb_diff_sha() { # <b1> <m> <caminho>
     GIT_NO_REPLACE_OBJECTS=1; GIT_GRAFT_FILE=/dev/null; export GIT_NO_REPLACE_OBJECTS GIT_GRAFT_FILE # guarda:EST
     git -C "$raiz" -c core.commitGraph=false -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false \
       -c diff.suppressBlankEmpty=false -c diff.relative=false \
-      diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames --no-relative \
+      diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames --no-relative --ignore-submodules=none \
       --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 --diff-algorithm=myers \
       --indent-heuristic "$1" "$2" -- "$3"
   ) > "$tmp" 2>/dev/null; then

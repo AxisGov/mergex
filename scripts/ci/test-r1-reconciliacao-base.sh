@@ -2328,6 +2328,157 @@ grupo_v9() {
   cd "$REPO" || return
 }
 
+# _v9_gitlink <caminho> — põe um gitlink (160000) no índice
+_v9_gitlink() { git update-index --add --cacheinfo 160000,"$FX_B0","$1"; }
+
+# _v9_gitmodules — .gitmodules com ignore = all para vendor/lib, e o plano do
+# disco declarando .gitmodules (para que só o gitlink fique de fora)
+_v9_gitmodules() {
+  local tk=docs/sprintx/features/ft-rec/sprint-01/tasks.md
+  printf '[submodule "lib"]\n\tpath = vendor/lib\n\turl = ./lib\n\tignore = all\n' > .gitmodules
+  sed 's#cria: \[tests/ui/ft-rec.test.ts\]#cria: [tests/ui/ft-rec.test.ts, .gitmodules]#' "$tk" > "$tk.v9" && cat "$tk.v9" > "$tk" && rm -f "$tk.v9"
+  git add -- .gitmodules "$tk"
+}
+
+# _v9_entrega_commit <sed> — reescreve o ENTREGA.md com o sed e commita
+_v9_entrega_commit() {
+  sed "$1" "$FX_ENTREGA" > "$FX_ENTREGA.v9" && cat "$FX_ENTREGA.v9" > "$FX_ENTREGA" && rm -f "$FX_ENTREGA.v9"
+  _v9_commit "entrega" "$FX_ENTREGA"
+}
+
+# Fix round 1: submódulo, sanidade da base, guardas da árvore de HEAD, renomeação.
+grupo_v9_robusto() {
+  local d v t out modo x plano msg r
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  v=(bash "$V9" --verificar --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec)
+  r=(bash "$RB" --registrar --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec --)
+
+  # ---- submódulo depois de M: nunca escondido, nunca isento ------------------
+  for modo in config gitmodules; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+    cd "$d" || return
+    "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1
+    _v9_gitlink vendor/lib
+    case "$modo" in config) git config diff.ignoreSubmodules all ;; gitmodules) _v9_gitmodules ;; esac
+    git commit -q -m "submodulo fora do plano"
+    v9_espera "submódulo depois de M com $modo ignore=all: fora do plano" 1 \
+      "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\tvendor/lib' "$FX_B1")"
+    cd "$REPO" || return
+  done
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1
+  _v9_gitlink docs/entregas/ft-rec/sub
+  git commit -q -m "submodulo na pasta da entrega"
+  v9_espera "submódulo na pasta da entrega não é isento" 1 \
+    "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\tdocs/entregas/ft-rec/sub' "$FX_B1")"
+  _v9_gitlink docs/sprintx/features/ft-rec/sub
+  git commit -q -m "submodulo na pasta do trabalho"
+  v9_sem_prova "submódulo na pasta do trabalho em HEAD: o plano não é lido" "submódulo (modo 160000)"
+  cd "$REPO" || return
+
+  # ---- submódulo criado DENTRO do merge M: registro, verificação e V9 --------
+  for modo in config gitmodules; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
+    cd "$d" || return
+    _v9_gitlink vendor/lib
+    case "$modo" in config) git config diff.ignoreSubmodules all ;; gitmodules) _v9_gitmodules ;; esac
+    msg="$t/m-$modo"; printf 'merge: integra a main na feature ft-rec\n\nTrabalho: ft-rec\nIntegra-base: %s\n' "$FX_B1" > "$msg"
+    git commit -q -F "$msg"
+    FX_M="$(git rev-parse HEAD)"
+    [ "$(git rev-list --parents -n1 HEAD | wc -w)" = 3 ] && ok "controle ($modo): M com dois pais" || falha "controle ($modo): M não é merge"
+    rc_motivo "submódulo no merge ($modo): --registrar reprova pelo inventário" 4 "vendor/lib" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
+    rc_motivo "submódulo no merge ($modo): o gitlink nunca é reconciliado" 4 "vendor/lib" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" vendor/lib
+    [ ! -e "$AR" ] && ok "submódulo no merge ($modo): nada registrado" || falha "submódulo no merge ($modo): registrou"
+    fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja ($modo)"
+    out="$(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec 2>/dev/null)"; x=$?
+    [ "$x" = 4 ] && printf '%s\n' "$out" | grep -q '^motivo	inventario	.*vendor/lib' \
+      && ok "submódulo no merge ($modo): --verificar reprova pelo inventário" || falha "submódulo no merge ($modo): verificar rc=$x $(printf '%s' "$out" | tr '\n\t' '|>')"
+    v9_sem_prova "submódulo no merge ($modo): V9 sem prova" "ok=false"
+    cd "$REPO" || return
+  done
+
+  # ---- base que contém o trabalho: v9_sem_prova -----------------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  cd "$d" || return
+  git branch -f main HEAD
+  v9_sem_prova "legado com a ref de base movida para HEAD" "é o próprio HEAD"
+  git branch -f main "$FX_B1"
+  _v9_entrega_commit 's#^branch_base: main$#branch_base: feature/ft-rec#'
+  v9_sem_prova "legado com branch_base = a própria branch" "é o próprio HEAD"
+  cd "$REPO" || return
+
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $FX_M/"
+  v9_sem_prova "base_validada_sha = M commitado" "a base contém o trabalho"
+  cd "$REPO" || return
+
+  # só o trailer Trabalho: um commit lateral da base com o trailer
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  x="$(printf 'parte do trabalho na base\n\nTrabalho: ft-rec\n' | git commit-tree "$FX_B0^{tree}" -p "$FX_B0")"
+  _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $x/"
+  v9_sem_prova "base com commit Trabalho: ft-rec no histórico" "Trabalho: ft-rec"
+  cd "$REPO" || return
+
+  # só ENTREGA.commits: o commit do plano (sem trailer) listado e usado como base
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  plano="$(git rev-parse "$FX_P1~4")"
+  git show -s --format=%B "$plano" | grep -q '^Trabalho:' && falha "controle: o commit do plano tem trailer" || ok "controle: o commit do plano não tem trailer"
+  _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $plano/; s/^    commit: \(.*\)$/    commit: \1\n  - seq: 2\n    task: T-01.01\n    commit: $plano/"
+  v9_sem_prova "base que contém um commit de ENTREGA.commits" "ENTREGA.commits"
+  cd "$REPO" || return
+
+  # ---- branch_base inválida (legado) ----------------------------------------
+  for x in HEAD '@{-1}' '@'; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+    cd "$d" || return
+    _v9_entrega_commit "s#^branch_base: main\$#branch_base: $x#"
+    v9_sem_prova "legado com branch_base: $x" "branch_base"
+    cd "$REPO" || return
+  done
+
+  # ---- chave presente e ilegível: nunca cai no legado por ref ---------------
+  for x in entrega_base_vazia entrega_base_aspas; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$x" fx_cenario "$d" || { falha "$x não montou"; return; }
+    cd "$d" || return
+    v9_sem_prova "$x: v9_sem_prova, sem legado por ref" "base_validada_sha"
+    cd "$REPO" || return
+  done
+
+  # ---- duas reconciliações: a base é o b1_sha da ÚLTIMA ----------------------
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "emissão do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "emissão do 002"
+  fx_entrega_sincroniza "$d" || falha "sincronização"
+  v9_espera "duas reconciliações: base é o b1_sha do 002" 0 "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=ok' "$FX_B2")"
+  cd "$REPO" || return
+
+  # ---- renomeação para a pasta isenta: o caminho antigo continua no diff ----
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1
+  git mv README.md docs/entregas/ft-rec/README.md; git commit -q -m "move produto para a pasta da entrega"
+  v9_espera "produto renomeado para docs/entregas/<id>/: o caminho antigo é desvio" 1 \
+    "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\tREADME.md' "$FX_B1")"
+  cd "$REPO" || return
+
+  # ---- guardas da árvore de HEAD (biblioteca comum) --------------------------
+  local alvo; alvo="$(mktemp -d)"; TMPS="$TMPS $alvo"
+  for x in plano_tab plano_symlink plano_nl; do
+    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_NL_ALVO="$alvo" FX_VARIANTE="$x" fx_cenario "$d" || { falha "$x não montou"; return; }
+    cd "$d" || return
+    case "$x" in plano_symlink) out="link simbólico ou submódulo" ;; *) out="caminho inválido" ;; esac
+    v9_sem_prova "$x em HEAD: v9_sem_prova" "$out"
+    cd "$REPO" || return
+  done
+}
+
 grupo_barreira() {
   local d b out rc esperado t
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
@@ -2350,9 +2501,9 @@ grupo_barreira() {
   [ "$rc" = 5 ] && ok "registrado sem checkpoint: rc 5" || falha "registrado sem checkpoint: rc=$rc"
   [ "$(printf '%s\n' "$out" | sed -n 1p)" = ok=false ] && ! printf '%s\n' "$out" | grep -q '^coberto' \
     && ok "registrado sem checkpoint: ok=false sem coberto" || falha "registrado sem checkpoint: $(printf '%s' "$out" | tr '\n\t' '|>')"
-  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$FX_ENTREGA" \
+  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $FX_ENTREGA" \
     && ok "motivo de persistência do ENTREGA.md" || falha "sem motivo do ENTREGA.md: $(printf '%s' "$out" | tr '\n\t' '|>')"
-  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$AR" \
+  printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $AR" \
     && ok "motivo de persistência do artefato" || falha "sem motivo do artefato: $(printf '%s' "$out" | tr '\n\t' '|>')"
 
   bash "$S/persistir-metodo.sh" --persistir --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --checkpoint reconciliacao-base >/dev/null 2>&1 \
@@ -2365,13 +2516,48 @@ grupo_barreira() {
   printf '\nNota acrescentada depois do commit.\n' >> "$AR"
   rc_igual "controle: o --verificar simples aceita a edição da prosa" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
   out="$("${b[@]}" 2>/dev/null)"; rc=$?
-  [ "$rc" = 5 ] && [ "$(printf '%s\n' "$out" | grep -c '^motivo')" = 1 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$AR" \
+  [ "$rc" = 5 ] && [ "$(printf '%s\n' "$out" | grep -c '^motivo')" = 1 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $AR" \
     && ok "artefato editado depois do commit: rc 5, só a persistência" || falha "artefato editado: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+
+  # o índice não é prova: assume-unchanged e skip-worktree não escondem a edição
+  local bit
+  for bit in assume-unchanged skip-worktree; do
+    git update-index "--$bit" -- "$AR"
+    git diff --quiet HEAD -- "$AR" && ok "controle: com --$bit o índice não vê a edição" || falha "controle: --$bit"
+    out="$("${b[@]}" 2>/dev/null)"; rc=$?
+    [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $AR" \
+      && ok "artefato editado com --$bit: rc 5" || falha "artefato editado com --$bit: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+    git update-index "--no-$bit" -- "$AR"
+  done
   git restore -- "$AR"
+  rc_igual "controle: restaurado, a barreira aprova" 0 "${b[@]}"
+
+  # disco devolvido ao pré-registro (ENTREGA.md de M, sem o 001), escondido do índice
+  git show "$FX_M:$FX_ENTREGA" > "$t/e-m" && cat "$t/e-m" > "$FX_ENTREGA"; mv "$AR" "$t/ar"
+  git update-index --assume-unchanged -- "$FX_ENTREGA" "$AR"
+  rc_igual "controle: o --verificar simples aprova o disco pré-registro" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  out="$("${b[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fq "motivo	5	persistencia: " \
+    && ok "disco pré-registro escondido do índice: rc 5" || falha "disco pré-registro: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+  git update-index --no-assume-unchanged -- "$FX_ENTREGA" "$AR"
+  git restore -- "$FX_ENTREGA"; mv "$t/ar" "$AR"
+  rc_igual "controle: devolvido, a barreira aprova" 0 "${b[@]}"
+
   printf '\nNota.\n' >> "$FX_ENTREGA"; git add -- "$FX_ENTREGA"
   out="$("${b[@]}" 2>/dev/null)"; rc=$?
-  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia	$FX_ENTREGA" \
+  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -Fxq "motivo	5	persistencia: $FX_ENTREGA" \
     && ok "ENTREGA.md no stage e não commitado: rc 5" || falha "ENTREGA.md no stage: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
+  git restore --staged --worktree -- "$FX_ENTREGA"
+  rc_igual "controle: ENTREGA.md devolvido, a barreira aprova" 0 "${b[@]}"
+
+  # HEAD com um artefato que o disco não tem (o ENTREGA.md, igual a HEAD, não o lista)
+  cp "$AR" docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
+  _v9_commit "artefato a mais em HEAD" docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
+  rm -f docs/entregas/ft-rec/RECONCILIACAO-BASE-002.md
+  rc_igual "controle: o --verificar simples aprova o disco" 0 bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec
+  out="$("${b[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" = 5 ] && printf '%s\n' "$out" | grep -q "^motivo	5	persistencia: .*RECONCILIACAO-BASE-002.md" \
+    && ok "conjunto de artefatos em HEAD diferente do disco: rc 5" || falha "conjunto de artefatos: rc=$rc $(printf '%s' "$out" | tr '\n\t' '|>')"
   cd "$REPO" || return
 }
 

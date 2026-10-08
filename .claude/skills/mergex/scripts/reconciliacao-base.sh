@@ -105,10 +105,12 @@
 #
 # --verificar --checkpoint reconciliacao-base (a barreira que o E2 exige, spec
 #   seção 9): o mesmo --verificar e, além dele, o ENTREGA.md e todo artefato da
-#   cadeia (os do disco e os listados no ENTREGA.md do disco) rastreados e sem
-#   alteração em relação a HEAD (`git ls-files --error-unmatch` e
-#   `git diff --quiet HEAD`). Cada um que falha: `ok=false` e
-#   `motivo<TAB>5<TAB>persistencia<TAB><arquivo>`, rc 5. Outro valor de
+#   cadeia (os do disco e os listados no ENTREGA.md do disco) em HEAD com
+#   exatamente o conteúdo do disco (`git hash-object --no-filters` contra
+#   `HEAD:<arquivo>`, nunca pelo índice), e o conjunto de
+#   RECONCILIACAO-BASE-NNN.md em HEAD igual ao do disco e ao listado no
+#   ENTREGA.md de HEAD. Cada arquivo que falha: `ok=false` e
+#   `motivo<TAB>5<TAB>persistencia: <arquivo>`, rc 5. Outro valor de
 #   --checkpoint, ou --checkpoint no --registrar: rc 64.
 #
 #   Toda prova é recalculada do Git; nenhum caminho é aceito por estar listado.
@@ -131,8 +133,9 @@ CONTRATO_SH="$AQUI/contrato-de-commit.sh"
 CATALOGO_SH="$AQUI/catalogo-de-metodo.sh"
 OWNERSHIP_SH="$AQUI/ownership-da-task.sh"
 ARTEFATO_SH="$AQUI/reconciliacao-artefato.sh"
+ARVORE_SH="$AQUI/reconciliacao-arvore.sh"
 
-for dependencia in "$TRAVA_SH" "$CONTRATO_SH" "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH"; do
+for dependencia in "$TRAVA_SH" "$CONTRATO_SH" "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH" "$ARVORE_SH"; do
   [ -r "$dependencia" ] || { printf 'reconciliacao-base: dependência indisponível: %s\n' "$dependencia" >&2; exit 1; }
 done
 # shellcheck source=trava-do-e1.sh
@@ -141,22 +144,15 @@ done
 . "$CATALOGO_SH"
 # shellcheck source=reconciliacao-artefato.sh
 . "$ARTEFATO_SH"
+# shellcheck source=reconciliacao-arvore.sh
+. "$ARVORE_SH"
 set +e
 
-# Caminho exatamente como no Git, qualquer que seja a configuração do
-# repositório: sem escape de nome (quotepath) e pathspec sempre literal. Vale
-# também para o rb_diff_sha da biblioteca, que roda neste processo.
-unset GIT_GLOB_PATHSPECS GIT_ICASE_PATHSPECS GIT_NOGLOB_PATHSPECS
-export GIT_LITERAL_PATHSPECS=1
-# (advice.graftFileDeprecated: o GIT_GRAFT_FILE abaixo não polui o stderr;
-# core.commitGraph=false: os pais vêm dos objetos, não de um commit-graph local)
-export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false \
-  GIT_CONFIG_KEY_1=advice.graftFileDeprecated GIT_CONFIG_VALUE_1=false \
-  GIT_CONFIG_KEY_2=core.commitGraph GIT_CONFIG_VALUE_2=false
-# Ancestralidade e objetos só do Git, nunca de enxertos locais: refs/replace e
-# .git/info/grafts falsificariam os pais de M. Exportado, para que os filhos
-# (contrato-de-commit.sh, ownership-da-task.sh) herdem.
-export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null # guarda:EST
+# O ambiente Git fixo (reconciliacao-arvore.sh): caminho exatamente como no
+# Git, pathspec literal, submódulo nunca ignorado, pais e objetos só do Git.
+# Vale também para o rb_diff_sha e para os filhos (contrato-de-commit.sh,
+# ownership-da-task.sh), que herdam o ambiente exportado.
+arvore_ambiente_git
 g() { git -c core.quotepath=false "$@"; }
 
 NL='
@@ -459,36 +455,12 @@ le_entrega_m() {
 # candidatas, blob por blob. Link simbólico ou submódulo dentro delas: o plano
 # não é lido (rc 5). Define RAIZ_M (físico) e PASTA (resolvida em M).
 materializa_m() {
-  local m="$1" raiz item modo caminho destino
-  mkdir -p "$2" 2>/dev/null || { falha_dura 1 ambiente 'não foi possível criar a árvore temporária de M'; return 1; }
-  # caminho absoluto físico: é o prefixo que todo destino da materialização tem
-  raiz="$(cd "$2" && pwd -P)" || { falha_dura 1 ambiente 'árvore temporária de M inacessível'; return 1; }
-  g ls-tree -r -z --full-tree "$m" -- "docs/sprintx/features/$TRABALHO" "docs/$TRABALHO" "docs/manutencao/$TRABALHO" \
-    > "$raiz.lista" 2>/dev/null || { falha_dura 4 prova "prova 3: árvore de M ilegível"; return 1; }
-  while IFS= read -r -d '' item <&3; do
-    modo="${item%% *}"; caminho="${item#*	}"
-    # a união separa os tasks.md por linha: um nome com quebra de linha (ou
-    # outro caractere de controle) desviaria a leitura para o disco
-    case "$caminho" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) falha_dura 5 arvore "pasta do trabalho em M com caminho inválido: $(printf '%s' "$caminho" | tr '[:cntrl:]' '?')"; return 1 ;; esac # guarda:P3
-    # componente vazio, `.` ou `..` (árvore forjada com git mktree) escreveria
-    # fora da árvore temporária: recusado antes de qualquer escrita
-    case "/$caminho/" in */./*|*/../*|*//*) falha_dura 5 arvore "pasta do trabalho em M com caminho inválido (componente vazio, . ou ..): $caminho"; return 1 ;; esac # guarda:P3
-    case "$modo" in
-      100644|100755) ;;
-      *) falha_dura 5 arvore "pasta do trabalho em M tem link simbólico ou submódulo (modo $modo): $caminho"; return 1 ;;
-    esac
-    mkdir -p "$raiz/$(dirname "$caminho")" 2>/dev/null || { falha_dura 4 prova "prova 3: não foi possível materializar $caminho de M"; return 1; }
-    destino="$(cd "$raiz/$(dirname "$caminho")" && pwd -P)" || { falha_dura 4 prova "prova 3: não foi possível materializar $caminho de M"; return 1; }
-    # defesa em profundidade: o diretório de destino, resolvido, fica dentro do temporário
-    case "$destino/" in "$raiz"/*) ;; *) falha_dura 5 arvore "pasta do trabalho em M: destino fora da árvore temporária: $caminho"; return 1 ;; esac # guarda:P3
-    g cat-file blob "$m:$caminho" > "$destino/${caminho##*/}" 2>/dev/null \
-      || { falha_dura 4 prova "prova 3: não foi possível ler $caminho de M"; return 1; }
-  done 3< "$raiz.lista"
-  # Sem subshell: o CATALOGO_ERRO da função chega ao motivo.
-  catalogo_pasta_do_trabalho "$raiz" "$ORIGEM" "$TRABALHO" > "$raiz.pasta" \
-    || { falha_dura 4 prova "prova 3: pasta do trabalho não determinável em M: $CATALOGO_ERRO"; return 1; }
-  PASTA="$(cat "$raiz.pasta")"
-  RAIZ_M="$raiz"
+  # a materialização e as guardas (# guarda:P3) moram em reconciliacao-arvore.sh,
+  # comuns ao portao-v9.sh; sem subshell, para ler ARVORE_*
+  arvore_materializa "$1" "$2" "$ORIGEM" "$TRABALHO" M 'prova 3: ' \
+    || { falha_dura "$ARVORE_RC" "$ARVORE_COD" "$ARVORE_ERRO"; return 1; }
+  PASTA="$ARVORE_PASTA"
+  RAIZ_M="$ARVORE_RAIZ"
 }
 
 # estrutura_m <M> <B0> <ref> — as condições estruturais (seção 5) que valem
@@ -541,7 +513,7 @@ provas() {
     { [ -z "$tb" ] || [ "$tb" = blob ]; } && { [ -z "$tm" ] || [ "$tm" = blob ]; } || reprova "arquivo: $f: não é arquivo (blob) em B1 (${tb:--}) ou em M (${tm:--})" # guarda:BLOB
 
     # prova 1: f nasceu ou mudou na base entre B0 e B1
-    if g diff --no-renames --name-status -z "$b0" "$b1" -- "$f" > "$SAIDA" 2>/dev/null; then
+    if g diff --no-renames --ignore-submodules=none --name-status -z "$b0" "$b1" -- "$f" > "$SAIDA" 2>/dev/null; then # guarda:SUB
       st="$(tr '\0' '\n' < "$SAIDA" | sed -n 1p)"
       [ -n "$st" ] || reprova "prova 1: $f: a base não criou nem alterou o caminho entre B0 e B1" # guarda:P1
       [ "$st" != D ] || reprova "prova 1: $f: a base removeu o caminho (status D); ressurreição não é ajuste" # guarda:P1D
@@ -562,7 +534,7 @@ provas() {
 
     # prova 4: diferença real entre B1 e M, com f presente em M
     g cat-file -e "$m:$f" 2>/dev/null || reprova "prova 4: $f: ausente em M (a integração removeu o caminho)" # guarda:P4
-    g diff --quiet --no-renames "$b1" "$m" -- "$f" >/dev/null 2>&1; rc_p4=$?
+    g diff --quiet --no-renames --ignore-submodules=none "$b1" "$m" -- "$f" >/dev/null 2>&1; rc_p4=$? # guarda:SUB
     [ "$rc_p4" = 1 ] || reprova "prova 4: $f: sem diferença entre B1 e M (ou diff não calculável, rc=$rc_p4)" # guarda:P4
   done 3< "$lista"
 }
@@ -577,7 +549,7 @@ herdado_da_cadeia() {
   bm="$(P="$p" awk -F'\t' '$1 == ENVIRON["P"] { b = $2 } END { print b }' "$5")"
   mant="$(P="$p" awk -F'\t' '$1 == ENVIRON["P"] { c = $3 } END { print c }' "$5")"
   { [ -n "$bm" ] && [ -n "$mant" ]; } || return 1
-  g diff --quiet --no-renames "$b0" "$b1" -- "$p" >/dev/null 2>&1 || return 1 # guarda:INV
+  g diff --quiet --no-renames --ignore-submodules=none "$b0" "$b1" -- "$p" >/dev/null 2>&1 || return 1 # guarda:INV
   { [ "$(g cat-file -t "$m:$p" 2>/dev/null)" = blob ] && [ "$(g rev-parse --verify -q "$m:$p" 2>/dev/null)" = "$bm" ]; } || return 1 # guarda:INV
   [ "$(modo_em "$m" "$p")" = "$(modo_em "$mant" "$p")" ] || return 1 # guarda:INV
 }
@@ -603,10 +575,16 @@ artefato_da_entrega() {
 # quatro provas. Não existe registro parcial.
 inventario() {
   local b0="$1" b1="$2" m="$3" lista="$4" anteriores="$5" p
-  g diff --name-only -z --no-renames "$b1" "$m" > "$INVENTARIO" 2>/dev/null \
-    || { falha_dura 4 inventario 'inventário: diff B1..M não calculável'; return 1; }
+  g diff --name-only -z --no-renames --ignore-submodules=none "$b1" "$m" > "$INVENTARIO" 2>/dev/null \
+    || { falha_dura 4 inventario 'inventário: diff B1..M não calculável'; return 1; } # guarda:SUB
   while IFS= read -r -d '' p <&3; do
     case "$p" in *"$NL"*) reprova "inventário: caminho com quebra de linha alterado pelo merge" inventario; continue ;; esac
+    # submódulo (gitlink) alterado pelo merge e não declarado em task: nunca é
+    # catálogo, artefato, herdado nem reconciliável
+    if [ "$(modo_em "$m" "$p")" = 160000 ] || [ "$(modo_em "$b1" "$p")" = 160000 ]; then
+      contem "$UNIAO" "$p" || reprova "inventário: $p: submódulo (gitlink) alterado pelo merge e não declarado em task" inventario # guarda:SUB
+      continue
+    fi
     contem "$UNIAO" "$p" || contem "$CATALOGO" "$p" || contem "$lista" "$p" || artefato_da_entrega "$p" || herdado_da_cadeia "$b0" "$b1" "$m" "$p" "$anteriores" || reprova "inventário: $p: alterado pelo merge e não declarado" inventario # guarda:INV
   done 3< "$INVENTARIO"
 }
@@ -618,7 +596,7 @@ inventario() {
 campos_caminho() {
   local b0="$1" b1="$2" m="$3" f="$4"
   CAMPO_ERRO=""
-  CAMPO_ST="$(g diff --no-renames --name-status -z "$b0" "$b1" -- "$f" 2>/dev/null | tr '\0' '\n' | sed -n 1p)"
+  CAMPO_ST="$(g diff --no-renames --ignore-submodules=none --name-status -z "$b0" "$b1" -- "$f" 2>/dev/null | tr '\0' '\n' | sed -n 1p)"
   case "$CAMPO_ST" in A|M) ;; *) CAMPO_ERRO="status de $f mudou durante o registro" ;; esac
   CAMPO_BB="$(g rev-parse --verify -q "$b1:$f" 2>/dev/null)" || { CAMPO_BB=""; [ -n "$CAMPO_ERRO" ] || CAMPO_ERRO="blob de $f em B1 ilegível"; }
   CAMPO_BM="$(g rev-parse --verify -q "$m:$f" 2>/dev/null)" || { CAMPO_BM=""; [ -n "$CAMPO_ERRO" ] || CAMPO_ERRO="blob de $f em M ilegível"; }
@@ -636,24 +614,8 @@ campos_caminho() {
 LEG_ERRO=""
 LEG_MB=""
 
-# _entrega_chave_qualquer <arquivo> <chave> — a chave de topo aparece no
-# frontmatter em qualquer forma (entre aspas, espaço antes dos dois-pontos):
-# presença que não se lê com segurança nunca vira ausência.
-_entrega_chave_qualquer() {
-  awk -v c="$2" '
-    NR == 1 { next }
-    /^---[ \t]*\r?$/ { exit }
-    {
-      l = $0; sub(/\r$/, "", l); q = ""
-      if (l ~ /^["\047]/) { q = substr(l, 1, 1); l = substr(l, 2) }
-      if (index(l, c) != 1) next
-      r = substr(l, length(c) + 1)
-      if (q != "" && substr(r, 1, 1) == q) r = substr(r, 2)
-      if (r ~ /^[ \t]*:/) { achou = 1; exit }
-    }
-    END { exit !achou }
-  ' "$1"
-}
+# _entrega_chave_qualquer <arquivo> <chave> — reconciliacao-arvore.sh: a chave
+# de topo aparece no frontmatter em qualquer forma.
 
 # legado_entrega <ENTREGA.md de P1> <P1> — a entrega em P1 é legada: sem
 # base_validada_sha, sem origem_base (o E0 grava as duas juntas) e sem nenhum
@@ -945,20 +907,45 @@ cadeia_cobertura() {
 
 # cadeia_persistida — (--verificar --checkpoint reconciliacao-base, spec 9) o
 # ENTREGA.md e todo artefato da cadeia (os do disco e os que o ENTREGA.md do
-# disco lista) estão rastreados e sem alteração em relação a HEAD, nem no
-# stage. Cada um que não está: `motivo<TAB>5<TAB>persistencia<TAB><arquivo>`.
+# disco lista) existem em HEAD como arquivo regular com exatamente o conteúdo
+# do disco — comparado por conteúdo (`git hash-object --no-filters` contra
+# `HEAD:<arquivo>`), nunca pelo índice, que assume-unchanged e skip-worktree
+# enganam; e o conjunto de RECONCILIACAO-BASE-NNN.md em HEAD é o do disco e o
+# que o ENTREGA.md de HEAD lista. Cada arquivo que falha, uma vez:
+# `motivo<TAB>5<TAB>persistencia: <arquivo>`.
 cadeia_persistida() {
-  local f
+  local f h d dir="docs/entregas/$TRABALHO"
   {
     printf '%s\n' "$ENTREGA"
-    sed "s#^#docs/entregas/$TRABALHO/#" "$TMP_DIR/artefatos"
-    [ ! -f "$TMP_DIR/lista-entrega" ] || cut -f2 "$TMP_DIR/lista-entrega" | sed '/^$/d' | sed "s#^#docs/entregas/$TRABALHO/#"
+    sed "s#^#$dir/#" "$TMP_DIR/artefatos"
+    [ ! -f "$TMP_DIR/lista-entrega" ] || cut -f2 "$TMP_DIR/lista-entrega" | sed '/^$/d' | sed "s#^#$dir/#"
   } | awk '!visto[$0]++' > "$TMP_DIR/persistidos"
+  : > "$TMP_DIR/nao-persistidos"
   while IFS= read -r f <&3; do
-    if g ls-files --error-unmatch -- "$f" >/dev/null 2>&1 && g diff --quiet HEAD -- "$f" >/dev/null 2>&1; then continue; fi # guarda:PERSIST
-    printf 'motivo\t5\tpersistencia\t%s\n' "$(printf '%s' "$f" | tr '\t\n\r' '   ')" >> "$MOTIVOS"
-    FALHA_5=1; N_MOT5=$((N_MOT5 + 1))
+    h="$(g rev-parse --verify -q "HEAD:$f" 2>/dev/null)" || h=""
+    d=""
+    case "$(modo_em HEAD "$f")" in
+      100644|100755) { [ -f "$f" ] && [ ! -L "$f" ]; } && d="$(g hash-object --no-filters -- "$f" 2>/dev/null)" ;;
+    esac
+    { [ -n "$h" ] && [ "$d" = "$h" ]; } || printf '%s\n' "$f" >> "$TMP_DIR/nao-persistidos" # guarda:PERSIST
   done 3< "$TMP_DIR/persistidos"
+  # o conjunto de artefatos: HEAD, disco e a lista do ENTREGA.md de HEAD
+  g ls-tree -z --name-only HEAD -- "$dir/" 2>/dev/null | tr '\0' '\n' | sed 's#.*/##' \
+    | grep -E '^RECONCILIACAO-BASE-[0-9]{3}\.md$' | LC_ALL=C sort > "$TMP_DIR/artefatos-head"
+  LC_ALL=C sort "$TMP_DIR/artefatos" > "$TMP_DIR/artefatos-disco"
+  LC_ALL=C comm -3 "$TMP_DIR/artefatos-head" "$TMP_DIR/artefatos-disco" | tr -d '\t' | sed "s#^#$dir/#" >> "$TMP_DIR/nao-persistidos" # guarda:PERSET
+  if g cat-file blob "HEAD:$ENTREGA" > "$TMP_DIR/entrega-head.md" 2>/dev/null \
+      && entrega_lista_reconciliacoes "$TMP_DIR/entrega-head.md" > "$TMP_DIR/lista-head" 2>/dev/null; then
+    cut -f2 "$TMP_DIR/lista-head" | sed '/^$/d' | LC_ALL=C sort | cmp -s - "$TMP_DIR/artefatos-disco" \
+      || printf '%s\n' "$ENTREGA" >> "$TMP_DIR/nao-persistidos" # guarda:PERSET
+  else
+    printf '%s\n' "$ENTREGA" >> "$TMP_DIR/nao-persistidos"
+  fi
+  awk '!visto[$0]++' "$TMP_DIR/nao-persistidos" > "$TMP_DIR/nao-persistidos.u"
+  while IFS= read -r f <&3; do
+    printf 'motivo\t5\t%s\n' "$(printf 'persistencia: %s' "$f" | tr '\t\n\r' '   ')" >> "$MOTIVOS"
+    FALHA_5=1; N_MOT5=$((N_MOT5 + 1))
+  done 3< "$TMP_DIR/nao-persistidos.u"
 }
 
 # ---------------------------------------------------------------------------
@@ -1224,7 +1211,7 @@ LIBERAR_NA_SAIDA=1
 if g rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
   para 3 'merge em andamento (MERGE_HEAD presente): conclua o commit de integração antes de registrar'
 fi
-g diff --cached --quiet 2>/dev/null || para 3 'o stage não está vazio; nada foi limpo ou adotado'
+g diff --cached --quiet --ignore-submodules=none 2>/dev/null || para 3 'o stage não está vazio; nada foi limpo ou adotado'
 
 # ---------------------------------------------------------------------------
 # M e o que alimenta as provas. Nada que esteja só no disco entra numa prova:

@@ -22,16 +22,21 @@
 #      `aviso`) — origem_base = a origem_base de HEAD (registrada_e0 sem ela);
 #    - entrega legada (HEAD:ENTREGA.md sem a chave): `git merge-base --all HEAD
 #      <branch_base>` com exatamente um resultado — origem_base=
-#      inferida_leitura, nunca gravada. Mais de um, nenhum ou branch_base
-#      inexistente: v9_sem_prova.
-# 2. Diff: `git diff --name-only --no-renames B...HEAD`, caminho exato (sem
-#    quoting).
+#      inferida_leitura, nunca gravada. Mais de um, nenhum, branch_base
+#      inexistente ou fora da forma de branch (inclusive `@...` e `@{`):
+#      v9_sem_prova.
+#    Em qualquer origem, a base que já contém o trabalho é v9_sem_prova: a
+#    própria HEAD, ou uma base da qual é ancestral algum commit de
+#    ENTREGA.commits (de HEAD) ou algum commit com `Trabalho: <id>`.
+# 2. Diff: `git diff --raw --no-renames --ignore-submodules=none B...HEAD` (os
+#    caminhos de `--name-only`, com os modos), caminho exato (sem quoting).
 # 3. Aceito, nesta ordem: a união de arquivos.cria + arquivos.altera de todas
 #    as tasks do plano da árvore de HEAD (o plano do disco não conta); as
 #    isenções de método (a pasta do trabalho resolvida em HEAD,
 #    docs/entregas/<id>/ e, só na SprintX, docs/sprintx/estimativas/HISTORICO.md);
 #    os caminhos `coberto` de `reconciliacao-base.sh --verificar`, só com
-#    `ok=true` (ok=false é v9_sem_prova).
+#    `ok=true` (ok=false é v9_sem_prova). Um submódulo (gitlink, 160000) só é
+#    aceito pela união: nunca é isento nem coberto.
 #
 # Saída (stdout):
 #   base=<sha40>
@@ -54,16 +59,7 @@ CATALOGO_SH="$AQUI/catalogo-de-metodo.sh"
 OWNERSHIP_SH="$AQUI/ownership-da-task.sh"
 ARTEFATO_SH="$AQUI/reconciliacao-artefato.sh"
 RB_SH="$AQUI/reconciliacao-base.sh"
-
-# Caminho exatamente como no Git e objetos só do Git (como em reconciliacao-base.sh).
-unset GIT_GLOB_PATHSPECS GIT_ICASE_PATHSPECS GIT_NOGLOB_PATHSPECS
-export GIT_LITERAL_PATHSPECS=1
-export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false \
-  GIT_CONFIG_KEY_1=advice.graftFileDeprecated GIT_CONFIG_VALUE_1=false \
-  GIT_CONFIG_KEY_2=core.commitGraph GIT_CONFIG_VALUE_2=false
-export GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null
-# nem o refresh oportunista do índice
-export GIT_OPTIONAL_LOCKS=0
+ARVORE_SH="$AQUI/reconciliacao-arvore.sh"
 g() { git -c core.quotepath=false "$@"; }
 
 NL='
@@ -112,14 +108,21 @@ esac
 case "$ENTREGA" in ./*) ENTREGA="${ENTREGA#./}" ;; esac
 [ "$ENTREGA" = "docs/entregas/$TRABALHO/ENTREGA.md" ] || uso "--entrega deve ser docs/entregas/$TRABALHO/ENTREGA.md"
 
-for dependencia in "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH" "$RB_SH"; do
+for dependencia in "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH" "$RB_SH" "$ARVORE_SH"; do
   [ -r "$dependencia" ] || sem_prova "dependência indisponível: $dependencia"
 done
 # shellcheck source=catalogo-de-metodo.sh
 . "$CATALOGO_SH"
 # shellcheck source=reconciliacao-artefato.sh
 . "$ARTEFATO_SH"
+# shellcheck source=reconciliacao-arvore.sh
+. "$ARVORE_SH"
 set +e
+
+# O ambiente Git fixo de reconciliacao-arvore.sh (o mesmo do
+# reconciliacao-base.sh) e nem o refresh oportunista do índice.
+arvore_ambiente_git
+export GIT_OPTIONAL_LOCKS=0
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-portao-v9.XXXXXX")" || { TMP_DIR=""; sem_prova 'não foi possível criar diretório temporário'; }
 RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || sem_prova 'fora de um repositório Git'
@@ -141,36 +144,17 @@ esac
 [ "$(catalogo_fm "$ENTREGA_H" trabalho_id)" = "$TRABALHO" ] || sem_prova 'trabalho explícito diverge de ENTREGA.trabalho_id em HEAD'
 [ "$(catalogo_fm "$ENTREGA_H" expx_tool)" = "$ORIGEM" ] || sem_prova 'origem explícita diverge de ENTREGA.expx_tool em HEAD'
 
-# chave_qualquer <arquivo> <chave> — a chave de topo aparece no frontmatter em
-# qualquer forma (entre aspas, espaço antes dos dois-pontos): presença que não
-# se lê com segurança nunca vira ausência (legado).
-chave_qualquer() {
-  awk -v c="$2" '
-    NR == 1 { next }
-    /^---[ \t]*\r?$/ { exit }
-    {
-      l = $0; sub(/\r$/, "", l); q = ""
-      if (l ~ /^["\047]/) { q = substr(l, 1, 1); l = substr(l, 2) }
-      if (index(l, c) != 1) next
-      r = substr(l, length(c) + 1)
-      if (q != "" && substr(r, 1, 1) == q) r = substr(r, 2)
-      if (r ~ /^[ \t]*:/) { achou = 1; exit }
-    }
-    END { exit !achou }
-  ' "$1"
-}
-
 # ---------------------------------------------------------------------------
-# A cadeia de reconciliação: `reconciliacao-base.sh --verificar`, com os
-# artefatos do disco fotografados antes e conferidos depois (a base sai do
-# artefato que a verificação validou).
+# A cadeia de reconciliação: `reconciliacao-base.sh --verificar`, com o
+# ENTREGA.md e os artefatos do disco fotografados antes e conferidos depois (a
+# base sai do artefato que a verificação validou).
 # ---------------------------------------------------------------------------
 DIR_E="docs/entregas/$TRABALHO"
 mkdir -p "$TMP_DIR/antes" || sem_prova 'temporário inacessível'
-foto() { # <destino> — `nome<TAB>sha256` de cada RECONCILIACAO-BASE-* do disco
+foto() { # <destino> — `nome<TAB>sha256` do ENTREGA.md e de cada RECONCILIACAO-BASE-* do disco
   local arq
   : > "$1"
-  for arq in "$DIR_E"/RECONCILIACAO-BASE-*; do
+  for arq in "$ENTREGA" "$DIR_E"/RECONCILIACAO-BASE-*; do
     [ -e "$arq" ] || [ -L "$arq" ] || continue
     printf '%s\t%s\n' "${arq##*/}" "$(rb_sha256 < "$arq" 2>/dev/null)" >> "$1"
   done
@@ -184,7 +168,7 @@ done
 bash "$RB_SH" --verificar --entrega "$ENTREGA" --origem "$ORIGEM" --trabalho "$TRABALHO" > "$TMP_DIR/verificar" 2> "$TMP_DIR/verificar.err"
 RC_VER=$?
 foto "$TMP_DIR/foto-depois"
-cmp -s "$TMP_DIR/foto-antes" "$TMP_DIR/foto-depois" || sem_prova 'os artefatos de reconciliação mudaram durante a verificação'
+cmp -s "$TMP_DIR/foto-antes" "$TMP_DIR/foto-depois" || sem_prova 'o ENTREGA.md ou os artefatos de reconciliação mudaram durante a verificação'
 [ "$(g rev-parse --verify -q 'HEAD^{commit}')" = "$HEAD_SHA" ] || sem_prova 'HEAD mudou durante a verificação'
 if [ "$RC_VER" != 0 ] || [ "$(sed -n 1p "$TMP_DIR/verificar")" != ok=true ]; then # guarda:V9OK
   awk 'index($0, "motivo\t") == 1 { print "motivo\treconciliacao-base: " substr($0, 8) }' "$TMP_DIR/verificar" > "$TMP_DIR/motivos-ver"
@@ -202,7 +186,7 @@ if [ -n "$ULTIMO" ]; then
   rb_ler "$TMP_DIR/antes/$ULTIMO" > "$TMP_DIR/ultimo.lido" || sem_prova "$ULTIMO ilegível: $RB_ERRO"
   B_CADEIA="$(awk -F'\t' '$1 == "escalar" && $2 == "b1_sha" { print $3; exit }' "$TMP_DIR/ultimo.lido")"
   BASE="$B_CADEIA"; ORIGEM_BASE=reconciliacao # guarda:V9SHA
-elif chave_qualquer "$ENTREGA_H" base_validada_sha; then
+elif _entrega_chave_qualquer "$ENTREGA_H" base_validada_sha; then
   # sem reconciliação: a base validada de HEAD, nunca a do disco
   B_HEAD="$(catalogo_fm "$ENTREGA_H" base_validada_sha)" # guarda:V9DISCO
   printf '%s' "$B_HEAD" | grep -Eq '^[0-9a-f]{40}$' || sem_prova "base_validada_sha de HEAD não é SHA de 40 hex: ${B_HEAD:-vazia ou ilegível}"
@@ -215,6 +199,8 @@ elif chave_qualquer "$ENTREGA_H" base_validada_sha; then
 else
   # entrega legada: merge-base único com branch_base, só para esta leitura
   BB="$(catalogo_fm "$ENTREGA_H" branch_base)"
+  # @, @{-N}, @{upstream}: atalhos do reflog e da HEAD, nunca uma branch
+  case "$BB" in @*|*@\{*) sem_prova "legado: branch_base inválida em HEAD: $BB" ;; esac # guarda:V9SHA
   { [ -n "$BB" ] && g check-ref-format --branch "$BB" >/dev/null 2>&1; } || sem_prova "legado: branch_base inválida em HEAD: ${BB:-ausente}"
   BB_SHA="$(g rev-parse --verify -q "$BB^{commit}" 2>/dev/null)" || sem_prova "legado: branch_base $BB inexistente"
   g merge-base --all "$HEAD_SHA" "$BB_SHA" > "$TMP_DIR/mb" 2>/dev/null || sem_prova "legado: nenhum merge-base entre HEAD e $BB"
@@ -224,6 +210,32 @@ else
 fi
 printf '%s' "$BASE" | grep -Eq '^[0-9a-f]{40}$' || sem_prova "base fora de 40 hex: ${BASE:-vazia}"
 g cat-file -e "$BASE^{commit}" 2>/dev/null || sem_prova "base $BASE não é commit deste repositório"
+
+# A base nunca contém o próprio trabalho: senão o diff esconde o que ele mudou.
+[ "$BASE" != "$HEAD_SHA" ] || sem_prova "a base $BASE é o próprio HEAD: a base contém o trabalho" # guarda:V9SHA
+# os valores `commit:` do bloco `commits` do ENTREGA.md de HEAD (só para esta
+# guarda, que só fica mais estrita com mais SHAs; a leitura canônica da lista
+# é a da V11, que este script não chama)
+awk '
+  { sub(/\r$/, "") }
+  NR == 1 { next }
+  /^---[ \t]*$/ { exit }
+  /^[A-Za-z_][A-Za-z0-9_]*:/ { em = ($0 ~ /^commits:/); next }
+  em && /^[ \t]*(-[ \t]+)?commit:[ \t]*/ {
+    v = $0; sub(/^[ \t]*(-[ \t]+)?commit:[ \t]*/, "", v); gsub(/["\047 \t]/, "", v)
+    if (v != "") print "-\t" v
+  }
+' "$ENTREGA_H" > "$TMP_DIR/commits" 2>/dev/null || sem_prova "ENTREGA.commits de HEAD ilegível"
+while IFS="$TAB" read -r _ c <&3; do
+  [ -n "$c" ] || continue
+  cs="$(g rev-parse --verify -q "$c^{commit}" 2>/dev/null)" || continue
+  if g merge-base --is-ancestor "$cs" "$BASE" 2>/dev/null; then
+    sem_prova "a base $BASE contém o commit $cs de ENTREGA.commits: a base contém o trabalho" # guarda:V9SHA
+  fi
+done 3< "$TMP_DIR/commits"
+TRAB_RE="$(printf '%s' "$TRABALHO" | sed 's/[.]/\\./g')"
+c="$(g rev-list -n1 --grep="^Trabalho: $TRAB_RE\$" "$BASE" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível"
+[ -z "$c" ] || sem_prova "a base $BASE contém o commit $c com Trabalho: $TRABALHO: a base contém o trabalho" # guarda:V9SHA
 
 # sem reconciliação: o disco que diverge de HEAD é relatado, nunca usado
 if [ -z "$ULTIMO" ]; then
@@ -237,36 +249,29 @@ fi
 # O plano de HEAD: a pasta do trabalho materializada blob por blob (as três
 # candidatas), para a união das tasks e a pasta isenta.
 # ---------------------------------------------------------------------------
-RAIZ_H="$TMP_DIR/arvore-head"
-mkdir -p "$RAIZ_H" && RAIZ_H="$(cd "$RAIZ_H" && pwd -P)" || sem_prova 'árvore temporária de HEAD inacessível'
-g ls-tree -r -z --full-tree "$HEAD_SHA" -- "docs/sprintx/features/$TRABALHO" "docs/$TRABALHO" "docs/manutencao/$TRABALHO" \
-  > "$TMP_DIR/lista-head" 2>/dev/null || sem_prova 'árvore de HEAD ilegível'
-while IFS= read -r -d '' item <&3; do
-  modo="${item%% *}"; caminho="${item#*	}"
-  case "$caminho" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) sem_prova "pasta do trabalho em HEAD com caminho inválido: $(printf '%s' "$caminho" | tr '[:cntrl:]' '?')" ;; esac
-  case "/$caminho/" in */./*|*/../*|*//*) sem_prova "pasta do trabalho em HEAD com caminho inválido (componente vazio, . ou ..): $caminho" ;; esac
-  case "$modo" in 100644|100755) ;; *) sem_prova "pasta do trabalho em HEAD tem link simbólico ou submódulo (modo $modo): $caminho" ;; esac
-  mkdir -p "$RAIZ_H/$(dirname "$caminho")" 2>/dev/null || sem_prova "não foi possível materializar $caminho de HEAD"
-  destino="$(cd "$RAIZ_H/$(dirname "$caminho")" && pwd -P)" || sem_prova "não foi possível materializar $caminho de HEAD"
-  case "$destino/" in "$RAIZ_H"/*) ;; *) sem_prova "pasta do trabalho em HEAD: destino fora da árvore temporária: $caminho" ;; esac
-  g cat-file blob "$HEAD_SHA:$caminho" > "$destino/${caminho##*/}" 2>/dev/null || sem_prova "não foi possível ler $caminho de HEAD"
-done 3< "$TMP_DIR/lista-head"
-catalogo_pasta_do_trabalho "$RAIZ_H" "$ORIGEM" "$TRABALHO" > /dev/null || sem_prova "pasta do trabalho não determinável em HEAD: $CATALOGO_ERRO"
-PASTA="$CATALOGO_PASTA"
+# (reconciliacao-arvore.sh, as mesmas guardas do registro; sem subshell)
+arvore_materializa "$HEAD_SHA" "$TMP_DIR/arvore-head" "$ORIGEM" "$TRABALHO" HEAD '' || sem_prova "$ARVORE_ERRO"
+RAIZ_H="$ARVORE_RAIZ"
+PASTA="$ARVORE_PASTA"
 bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 2> "$TMP_DIR/uniao.err" \
   || sem_prova "união das tasks de HEAD não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")" # guarda:V9UNIAO
 
 # ---------------------------------------------------------------------------
 # O diff e o conjunto aceito.
 # ---------------------------------------------------------------------------
-g diff --name-only -z --no-renames "$BASE...$HEAD_SHA" > "$TMP_DIR/diff" 2>/dev/null || sem_prova "diff $BASE...HEAD não calculável"
+# --raw: os mesmos caminhos de --name-only, um registro `:<modo> <modo> <sha>
+# <sha> <status>` seguido do caminho; os modos dizem se é submódulo
+g diff --raw -z --no-abbrev --no-renames --ignore-submodules=none "$BASE...$HEAD_SHA" > "$TMP_DIR/diff" 2>/dev/null \
+  || sem_prova "diff $BASE...HEAD não calculável" # guarda:SUB
 contem() { grep -Fxq -e "$2" "$1"; }
 : > "$TMP_DIR/fora"
-while IFS= read -r -d '' p <&3; do
+while IFS= read -r -d '' cab <&3 && IFS= read -r -d '' p <&3; do
   case "$p" in
     *"$NL"*|*"$TAB"*) printf 'fora_do_plano\t%s\n' "$(printf '%s' "$p" | tr '\t\n' '??')" >> "$TMP_DIR/fora"; continue ;;
   esac
   contem "$TMP_DIR/uniao" "$p" && continue
+  # submódulo (gitlink) fora da união: nunca isento nem coberto
+  case "$cab" in ':160000 '*|':'*' 160000 '*) printf 'fora_do_plano\t%s\n' "$p" >> "$TMP_DIR/fora"; continue ;; esac # guarda:SUB
   case "$p" in "$PASTA"/*|"$DIR_E"/*) continue ;; esac
   [ "$ORIGEM" = sprintx ] && [ "$p" = docs/sprintx/estimativas/HISTORICO.md ] && continue # guarda:V9HIST
   contem "$TMP_DIR/cobertos" "$p" && continue
