@@ -1528,7 +1528,8 @@ grupo_cadeia() {
     "$(command -v mv)" > "$t/shim-lento/mv"
   chmod +x "$t/shim-lento/mv"
   cp "$AR" "$t/janela-a1.md"; cp "$FX_ENTREGA" "$t/janela-e.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"; antes="$(_foto)"
-  env PATH="$t/shim-lento:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
+  local tdj; tdj="$(mktemp -d)"; TMPS="$TMPS $tdj"
+  env TMPDIR="$tdj" PATH="$t/shim-lento:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
   pid=$!; i=0
   while [ "$i" -lt 150 ]; do
     [ -e "$AR2" ] && ls docs/entregas/ft-rec/ENTREGA.md.registro.* >/dev/null 2>&1 && break
@@ -1542,6 +1543,7 @@ grupo_cadeia() {
   [ "$(ls -A docs/entregas/ft-rec)" = "$ls_antes" ] && ok "janela: nenhum temporário na pasta da entrega" || falha "janela: sobra: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
   [ "$(_foto)" = "$antes" ] && ok "janela: árvore como antes" || falha "janela: árvore mudou"
   bash "$TRAVA" --status >/dev/null 2>&1 && ok "janela: trava livre" || falha "janela: trava presa"
+  [ -z "$(ls -A "$tdj")" ] && ok "janela: temporário do registro removido" || falha "janela: sobrou temporário: $(ls -A "$tdj" | tr '\n' ' ')"
   rc_igual "janela: sem o shim, o M2 registra" 0 "${r[@]}" -- "$FX_NOVO3"
   cd "$REPO" || return
 
@@ -1551,7 +1553,7 @@ grupo_cadeia() {
   #   term:  SIGTERM com o mv do anterior parado
   #   kill:  SIGKILL do grupo de processos com o mv do anterior parado
   #   falha: o mv do anterior falha
-  local modo_int real_mv
+  local modo_int real_mv tdi
   real_mv="$(command -v mv)"
   for modo_int in g2 term kill falha; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
@@ -1566,15 +1568,18 @@ grupo_cadeia() {
       falha) printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */RECONCILIACAO-BASE-001.md) echo "mv: recusado de propósito" >&2; exit 1 ;; esac\nexec %s "$@"\n' "$real_mv" > "$t/shim-$modo_int/mv" ;;
     esac
     chmod +x "$t/shim-$modo_int/mv"
+    # o temporário do registro fica num TMPDIR do teste: o SIGKILL impede o
+    # encerrar do script de removê-lo, e a limpeza da suíte o remove
+    tdi="$(mktemp -d)"; TMPS="$TMPS $tdi"
     if [ "$modo_int" = falha ]; then
-      out="$(env PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" 2>&1 >/dev/null)"; c=$?
+      out="$(env TMPDIR="$tdi" PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" 2>&1 >/dev/null)"; c=$?
       { [ "$c" = 1 ] && case "$out" in *"registro efetivado"*"rode --registrar de novo"*) true ;; *) false ;; esac; } \
         && ok "falha: mv do anterior falha depois do ponto de commit: rc 1 e instrução" || falha "falha: rc=$c $out"
     else
       if [ "$modo_int" = kill ]; then
-        setsid env PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
+        setsid env TMPDIR="$tdi" PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
       else
-        env PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
+        env TMPDIR="$tdi" PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
       fi
       pid=$!; i=0
       while [ "$i" -lt 150 ]; do
@@ -1587,6 +1592,14 @@ grupo_cadeia() {
       wait "$pid" 2>/dev/null
       # SIGKILL deixa a trava C5 órfã: liberá-la é decisão humana
       [ "$modo_int" = kill ] && rm -rf "$(bash "$TRAVA" --caminho | sed 's/^trava=//')"
+    fi
+    # o temporário do registro: só o SIGKILL o deixa, e dentro do TMPDIR do
+    # teste (nunca em /tmp); nos demais modos o encerrar o removeu
+    if [ "$modo_int" = kill ]; then
+      [ "$(find "$tdi" -mindepth 1 -maxdepth 1 -name 'mergex-reconciliacao.*' | wc -l)" = 1 ] \
+        && ok "kill: a sobra do temporário ficou no TMPDIR do teste" || falha "kill: temporário fora do TMPDIR do teste: $(ls -A "$tdi" | tr '\n' ' ')"
+    else
+      [ -z "$(ls -A "$tdi")" ] && ok "$modo_int: temporário do registro removido" || falha "$modo_int: sobrou temporário: $(ls -A "$tdi" | tr '\n' ' ')"
     fi
     { [ -e "$AR2" ] && grep -q '^    arquivo: RECONCILIACAO-BASE-002.md$' "$FX_ENTREGA" && [ "$(_chave "$FX_ENTREGA" base_validada_sha)" = "$FX_B2" ] \
       && rb_validar "$AR2" ft-rec 2; } && ok "$modo_int: registro efetivado (002 e ENTREGA.md coerentes)" || falha "$modo_int: registro desfeito ou incoerente"
