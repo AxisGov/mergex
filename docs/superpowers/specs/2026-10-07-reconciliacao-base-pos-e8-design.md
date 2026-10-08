@@ -294,6 +294,28 @@ Só leitura. Para toda a cadeia `001..NNN`:
 Saída: `ok=true` e uma linha `coberto\t<caminho>\t<NNN>` por arquivo; ou `ok=false` e uma linha
 `motivo\t<código>\t<detalhe>` por falha.
 
+### `--verificar --checkpoint reconciliacao-base` (barreira do E2)
+
+```bash
+bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
+  --checkpoint reconciliacao-base --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id>
+```
+
+Faz tudo o que `--verificar` faz e exige ainda que a reconciliação esteja **persistida**:
+
+- o `ENTREGA.md` e cada artefato listado em `reconciliacoes` estão rastreados, e o conteúdo do disco
+  de cada um é igual ao de `HEAD`. A comparação é por conteúdo
+  (`git rev-parse HEAD:<f>` contra `git hash-object --no-filters <f>`), não pelo que o índice
+  informa, para que `assume-unchanged` e `skip-worktree` não a enganem;
+- o conjunto de `RECONCILIACAO-BASE-NNN.md` em `HEAD`, o do disco e o listado no `ENTREGA.md` de
+  `HEAD` são o mesmo.
+
+Falha de persistência: `ok=false` com `motivo\tpersistencia\t<arquivo>`, código 5. Outro valor de
+`--checkpoint`, ou `--checkpoint` no `--registrar`: código 64. Limite conhecido: com
+`core.autocrlf` convertendo o checkout, a comparação sem filtros reprova mesmo com o `git status`
+limpo. É falha fechada, e usar os filtros reabriria o contorno que `--no-filters` fecha.
+
 ### Códigos de saída (os dois modos)
 
 | Código | Significado |
@@ -301,8 +323,8 @@ Saída: `ok=true` e uma linha `coberto\t<caminho>\t<NNN>` por arquivo; ou `ok=fa
 | 0 | registrado / verificado |
 | 2 | trava C5 ocupada |
 | 3 | stage não vazio ou merge em andamento |
-| 4 | prova reprovada (estrutura, uma das quatro provas, inventário incompleto) |
-| 5 | contrato do artefato ou do `ENTREGA.md` inválido (numeração, encadeamento, assinatura) |
+| 4 | prova reprovada (estrutura, uma das quatro provas, inventário incompleto); também histórico que não prova: repositório raso (`estrutura[raso]`) ou objeto Git ausente, antes de qualquer prova e sem gravar nada |
+| 5 | contrato do artefato ou do `ENTREGA.md` inválido (numeração, encadeamento, assinatura); persistência (barreira) |
 | 6 | base validada indeterminável (legado ambíguo) |
 | 64 | uso incorreto |
 
@@ -324,9 +346,9 @@ O enum de `persistir-metodo.sh`, `contrato-de-commit.sh` e `catalogo-de-metodo.s
 
 - Mesma trava, mesma varredura de segredo, mesmo stage vazio na entrada, sem commit vazio.
 - Não entra em `ENTREGA.commits`, não consome `seq`, não satisfaz V11.
-- `--verificar --checkpoint reconciliacao-base` é a barreira que o E2 exige quando a entrega tem
-  reconciliação: artefatos e `ENTREGA.md` persistidos e `reconciliacao-base.sh --verificar` com
-  `ok=true`.
+- `--verificar --checkpoint reconciliacao-base` (seção 8) é a barreira que o E2 exige quando a
+  entrega tem reconciliação (`reconciliacoes` não vazia): artefatos e `ENTREGA.md` persistidos e a
+  verificação com `ok=true`. Sem essa barreira aprovada, o E2 não emite `PRONTO`.
 
 ## 10. V9 executável
 
@@ -349,6 +371,10 @@ A prosa de `02-prontidao.md` passa a mandar rodá-lo; o resultado dele é a V9.
    `ok=false` é `FALHA` registrada como `v9_sem_prova`.
 4. A V9 do hook `arquivo-fora-do-plano` (sobre `git diff --cached`) não muda de semântica; ganha
    apenas o reconhecimento do commit de integração da base (seção 12).
+5. **Histórico que não prova.** Repositório raso, ou objeto Git ausente, é `v9_sem_prova` antes de
+   qualquer cálculo, com diagnóstico explícito (`git fetch --unshallow` no raso). A história cortada
+   esconde versões do `ENTREGA.md` e commits da base.
+6. **Códigos:** 0 ok; 1 `v9` (há `fora_do_plano`); 3 `v9_sem_prova`; 64 uso. Nenhuma opção de força.
 
 ## 11. ENTREGA.md
 
@@ -389,8 +415,30 @@ Chaves novas, sempre presentes:
 3. Qualquer commit de produto, de teste, de plano, ou merge (inclusive de base nova) em
    `portao_sha..HEAD` invalida o portão. `portao_sha` ausente, não ancestral de `HEAD` ou `null`
    com `portao: pronto` também invalida.
-4. Novo `scripts/validade-do-portao.sh --verificar --entrega <ENTREGA.md>` implementa 1–3, só
-   leitura, `ok=true|false` e o primeiro commit que invalidou.
+4. Novo `scripts/validade-do-portao.sh --verificar --entrega <ENTREGA.md> [--rev <commit>]`
+   implementa 1–3. É só leitura: não grava no repositório nem adquire trava.
+   - **Revisão avaliada:** `--rev` (padrão `HEAD`). `portao`, `portao_sha` e `trabalho_id` vêm de
+     `<rev>:<ENTREGA>`, nunca do disco. Divergência com o disco gera só uma linha `aviso=`.
+   - **Saída:** `ok=true` e `primeiro_commit=-`, código 0. Ou `ok=false`, `motivo=<motivo>` e
+     `primeiro_commit=<sha40|->`, código 1. Uso incorreto: código 64.
+   - **Motivos de invalidação** (enum fechado): `portao_nao_pronto`, `portao_sha_ausente`,
+     `portao_sha_nao_ancestral`, `commit_de_produto`, `commit_merge`, `metodo_fora_do_catalogo`,
+     `historia_incompleta`, `erro_ambiente`.
+   - **`historia_incompleta`:** as provas do Git não bastam, porque a história está cortada.
+     Abrange repositório raso (`--is-shallow-repository`, ou arquivo `shallow` no diretório Git ou
+     no comum; o `GIT_SHALLOW_FILE` do ambiente é descartado) e objeto Git necessário ausente. O
+     diagnóstico indica completar a história (`git fetch --unshallow`, ou buscar os objetos que
+     faltam).
+   - **`erro_ambiente`:** o ambiente impediu a avaliação. Abrange dependência ausente, execução fora
+     de um repositório Git, temporário que não se cria, e revisão que não é commit por motivo que
+     não seja objeto ausente. O diagnóstico descreve a falha.
+   - **Os dois motivos falham fechado:** `ok=false` e código 1, nunca aprovação. Qualquer consumidor
+     (E6, E7, `pre-push`, CI) trata os dois como bloqueio, em qualquer modo, e mostra diagnósticos
+     diferentes.
+   - Um merge no intervalo é `commit_merge` no merge mais antigo, avaliado antes dos demais commits:
+     o merge é a causa, não o que ele trouxe. Commit de método que toca o plano (`tasks.md`,
+     `sprint.md`, `fases.md`, `00-PLANEJAMENTO.md`) é `metodo_fora_do_catalogo`, mesmo estando no
+     catálogo do checkpoint.
 5. **Barreira de push** (DM-184). A validade é exigida no push por três camadas, cada uma com papel
    próprio:
    - o `pre-push` do Git é a barreira **local autoritativa contra erro normal** (itens 6 e 7);
@@ -398,23 +446,41 @@ Chaves novas, sempre presentes:
      (item 8);
    - o CI com proteção de merge é a barreira **contra contorno deliberado** (item 8).
 
-   `validade-do-portao.sh` aceita `--rev <commit>` (padrão `HEAD`): lê o `ENTREGA.md` de `<rev>` e
-   avalia `portao_sha..<rev>`. As três camadas chamam o mesmo validador; nenhuma tem regra própria
-   de validade.
+   As três camadas chamam o mesmo `validade-do-portao.sh --rev`; nenhuma tem regra própria de
+   validade.
+
+   **Ordem de avaliação.** Cada etapa só começa com a anterior aprovada:
+   1. **Reconciliação verificada** (no E2, quando há reconciliação): a barreira
+      `reconciliacao-base.sh --verificar --checkpoint reconciliacao-base` com `ok=true`, e a V9
+      executável consumindo os `coberto`.
+   2. **Validade do portão:** o E2 aprovado grava `portao: pronto` e `portao_sha`. Depois disso,
+      `validade-do-portao.sh --rev <SHA>` prova que nada fora do permitido mudou entre `portao_sha`
+      e o SHA avaliado.
+   3. **Autorização do push:** o `pre-push` autoriza cada ref aplicável só com a validade `ok=true`
+      sobre o SHA enviado. O CI repete a validade sobre o SHA da cabeça do PR.
+
+   O push não reexecuta a verificação da reconciliação. Ela foi provada no E2, e a validade garante
+   que nenhum commit de produto, teste, plano ou merge entrou depois.
 6. **Instalação e ativação local do `pre-push`** (E0).
-   - A MergeX entrega o `pre-push` como executável da skill e o ativa no E0, por configuração local
-     do repositório. O procedimento é idempotente: rodar o E0 de novo com a MergeX já ativa não muda
-     nada.
-   - O E0 pode alterar a configuração Git local, mas **nunca sobrescreve nem desativa
-     silenciosamente** um `core.hooksPath` já configurado que aponte para fora da MergeX, nem um
-     `pre-push` preexistente no diretório de hooks efetivo (`git rev-parse --git-path hooks`). Ao
-     encontrar um desses que não consiga compor com segurança, o E0 falha fechado como pré-requisito
-     ausente e explica como integrar: o hook existente passa a chamar o `pre-push` da MergeX, ou o
-     diretório de hooks passa a incluí-lo.
-   - Em worktree vinculada, a ativação vale para o diretório Git comum, que é o que o Git usa para
-     hooks.
-   - **O E2 verifica a ativação**: o `pre-push` efetivo do repositório existe, é executável e invoca
-     o da MergeX. Sem essa prova o E2 não emite `PRONTO`.
+   - **Diretório efetivo:** o E0 resolve o diretório de hooks efetivo pelo próprio Git
+     (`git rev-parse --git-path hooks`), o que já respeita um `core.hooksPath` existente e o
+     diretório comum de worktrees vinculadas. **O E0 nunca altera `core.hooksPath`.**
+   - **Sem `pre-push` nesse diretório:** o E0 instala o chamador gerenciado pela MergeX, um
+     `pre-push` mínimo, identificado por um marcador próprio, que só chama o validador de push da
+     skill e propaga o código de saída dele.
+   - **Já é o chamador gerenciado:** a ativação é idempotente e não muda nada.
+   - **Existe um `pre-push` de terceiro:** o E0 não o sobrescreve, não o renomeia e não o edita
+     automaticamente. Falha fechado como pré-requisito ausente e mostra a instrução explícita de
+     composição.
+   - **Composição deliberada:** feita por quem mantém o hook existente. Esse hook passa a chamar o
+     validador de push da MergeX, repassando a entrada padrão, e propaga o código de saída dele.
+     Um hook que chama a MergeX e ignora o código de saída não conta como composto.
+   - **O E2 prova a ativação funcionalmente,** sem confiar no caminho nem na existência do arquivo.
+     Executa o `pre-push` efetivo numa prova controlada, alimentando-o com uma ref aplicável
+     sabidamente inválida, sem contato com nenhum remoto. Exige que ele chame a MergeX e bloqueie
+     com código diferente de zero. Sem essa prova o E2 não emite `PRONTO`.
+   - **Reversão:** remove apenas o chamador gerenciado pela MergeX, reconhecido pelo marcador.
+     Nunca toca num hook de terceiro, composto ou não.
 7. **Regras do `pre-push`.** Decide só com o que o Git entrega na entrada padrão (uma linha por ref:
    ref local, SHA local, ref remota, SHA remoto). Nunca analisa texto de comando de shell.
    - **Exclusão de branch** (SHA local nulo) passa. **Tag** (`refs/tags/*`) passa.
@@ -423,14 +489,20 @@ Chaves novas, sempre presentes:
      ou a ponta local de `refs/heads/<b>`. Ref fora da branch de algum trabalho passa.
    - Para cada ref aplicável, a validade roda sobre o **SHA enviado** (`--rev <SHA local>`), nunca
      sobre o `HEAD` do checkout.
-     - `portao: null` segue o modo configurado para `pr-so-com-portao` em `.expx/hooks.json`, como
-       hoje.
+     - `portao: null` segue o modo configurado para `pr-so-com-portao` em `.expx/hooks.json`, sem
+       chave nova de configuração. `bloqueio` barra, `aviso` avisa e deixa passar, `desligado`
+       deixa passar. O `pre-push`, o aviso do Claude e o CI interpretam esse mesmo modo da mesma
+       maneira, e **divergência entre os três consumidores é defeito de contrato**. O modo nunca
+       se aplica a `portao: pronto` vencido, ausente, inconsistente ou ilegível, nem a
+       `historia_incompleta` ou `erro_ambiente`: esses barram sempre.
      - `portao: pronto` com validade `ok=true` passa.
      - Portão **vencido, ausente, inconsistente ou ilegível** barra. Isso inclui o `ENTREGA.md`
        ausente no SHA enviado de uma ref aplicável e o `portao: pronto` sem `portao_sha` válido.
    - Num push com várias refs, **qualquer ref aplicável inválida barra o push inteiro**.
-   - Clone raso, objeto ausente ou histórico incompleto falha fechado, com diagnóstico explícito
-     (por exemplo, `git fetch --unshallow`).
+   - Clone raso ou objeto Git ausente: a validade devolve `historia_incompleta` e o push é barrado,
+     com diagnóstico explícito (`git fetch --unshallow`, ou buscar os objetos que faltam). Falha do
+     ambiente (`erro_ambiente`, inclusive o validador ausente) também barra, com diagnóstico
+     próprio.
    - O custo é proporcional às refs efetivamente enviadas, não à quantidade de branches ou entregas
      existentes no repositório.
 8. **Hook do Claude e CI.**
@@ -442,9 +514,11 @@ Chaves novas, sempre presentes:
      aviso e deixa o Git prosseguir até o `pre-push`**. Não é tratado como fronteira de segurança:
      o que ele não consegue determinar vira aviso, nunca bloqueio.
    - **CI — proteção de merge.** O CI roda o mesmo `validade-do-portao.sh` sobre o SHA real da cabeça
-     do PR e reprova se a validação estiver ausente, desativada ou vencida. Com a proteção de merge
-     do repositório exigindo esse check, essa é a barreira contra contorno deliberado, inclusive
-     contra `--no-verify`. É defesa adicional e não substitui o `pre-push`.
+     do PR e reprova se a validação estiver ausente, desativada, vencida, `historia_incompleta` ou
+     `erro_ambiente`. Com `portao: null`, segue o modo de `pr-so-com-portao`, como o `pre-push`. O
+     clone do CI precisa da história completa; clone raso é `historia_incompleta`. Com a proteção
+     de merge do repositório exigindo esse check, essa é a barreira contra contorno deliberado,
+     inclusive contra `--no-verify`. É defesa adicional e não substitui o `pre-push`.
    - **Escopo desta branch.** Ela entrega o validador executável compartilhado, o `pre-push`, o
      template ou ponto de integração do workflow, os testes e a documentação do contrato de
      instalação. **Não afirma que o CI está ativo** em nenhum produto: a ativação no produto e o
@@ -479,15 +553,48 @@ Chaves novas, sempre presentes:
 | Arquivo reconciliado alterado depois de `M` | Deixa de estar coberto; V9 `FALHA` |
 | Base legada ambígua | Código 6; nada gravado |
 | Portão vencido, ausente, inconsistente ou ilegível no push de uma ref aplicável | `pre-push` barra o push inteiro, em qualquer modo; o CI, quando ativo no produto, reprova o PR |
-| Clone raso ou objeto ausente no `pre-push` | `pre-push` barra, com diagnóstico |
-| `pre-push` da MergeX ausente, inativo ou não executável | E2 não emite `PRONTO` |
-| `core.hooksPath` externo ou `pre-push` preexistente que o E0 não compõe com segurança | E0 falha fechado, sem sobrescrever; explica como integrar |
+| Repositório raso ou objeto Git ausente | Validade `historia_incompleta`; V9 `v9_sem_prova`; reconciliação código 4 (`estrutura[raso]`); `pre-push` e CI barram, com diagnóstico de história incompleta |
+| Ambiente impede a avaliação (dependência ausente, fora de repositório, temporário, validador ausente) | Validade `erro_ambiente`; `pre-push` e CI barram, com diagnóstico de ambiente |
+| `pre-push` efetivo que não chama a MergeX, não propaga o código de saída ou não bloqueia a ref inválida da prova controlada | E2 não emite `PRONTO` |
+| `pre-push` de terceiro no diretório de hooks efetivo | E0 falha fechado, sem sobrescrever, renomear ou editar; mostra a instrução de composição |
+| Reconciliação registrada e não persistida, ou persistência adulterada | Barreira código 5 (`persistencia`); E2 não emite `PRONTO` |
+| Os três consumidores interpretam o modo de `portao: null` de formas diferentes | Defeito de contrato |
 | Push com `--no-verify` | Hook do Claude bloqueia quando identifica com certeza; o CI, quando ativo no produto, reprova o PR |
 | Hook do Claude incapaz de determinar o push | Avisa; a decisão fica com o `pre-push` |
 | Ferramenta ausente (`git`, `jq`) | Reprova; nunca degrada para aprovado |
 
 Não existe flag de bypass em nenhum dos executáveis. O validador de contrato procura e reprova
 qualquer opção de força nesses scripts.
+
+### 15.1 Riscos residuais conhecidos
+
+Limites de desenho que o Git local não distingue, encontrados durante a implementação e aceitos.
+A implementação mantém, para cada item que pode ser montado em fixture, um teste que fixa o
+comportamento atual, e documenta os demais no cabeçalho do executável afetado:
+
+1. **Portão reposicionado por commit de método.** O `ENTREGA.md` está no catálogo de `pre-e6` e
+   `e8`. Um commit classificado como método pode regravar `portao_sha` para um commit posterior,
+   até um de produto, e o portão volta a valer. Pelos dados atuais, isso é indistinguível do fluxo
+   legítimo em que o E2 avalia esse commit e o `pre-e6` persiste o resultado: mesmo grafo e mesmo
+   conteúdo. A validade prova que nada mudou depois de `portao_sha`, não que um E2 rodou nele.
+2. **Entrega legada sem reconciliação.** Uma ref de base movida para um commit sem nenhuma marca do
+   trabalho é aceita, porque a V9 lê a ref nesse caso. Também não é detectada uma âncora
+   originalmente incorreta: o `ENTREGA.md` que já nasce com `base_validada_sha` num commit só de
+   produto, inclusive o renomeado para o caminho canônico num ramo montado do zero.
+3. **B1 lateral.** Com reconciliação, a cadeia não reconfere `b1_sha` contra a base real. Um `B1`
+   forjado, que descende de `B0` e traz produto, com a ref movida no registro, desloca a base.
+4. **Clone raso legítimo falha fechado.** CI ou máquina com `--depth` recebe `historia_incompleta`
+   ou `v9_sem_prova` e precisa de `git fetch --unshallow` antes do E2 e do push.
+5. **Isenção por prefixo.** A V9 isenta `docs/entregas/<id>/` por prefixo, como a regra existente,
+   então um arquivo de produto colocado ali não é apontado pela V9. A validade do portão continua
+   barrando esse arquivo depois do portão (`metodo_fora_do_catalogo`).
+6. **`core.autocrlf` na barreira.** A comparação sem filtros reprova com o `git status` limpo
+   (seção 8). Falha fechado.
+7. **Hash do diff com atributos `-diff`/`binary`** (seção 7.1). Pode divergir entre clones, e o
+   `--verificar` falha fechado.
+8. **Escala resolvida pela DM-184.** A primeira implementação da barreira de push varria todas as
+   branches entregues do repositório a cada comando, e com dezenas delas estourava o prazo. O
+   `pre-push` avalia só as refs do push: o custo deixou de depender das branches existentes.
 
 ## 16. Fluxo completo depois de uma reconciliação
 
@@ -560,8 +667,9 @@ na base precisam de reconciliação.
   fechada, nunca aprovação indevida.
 - O hook de push antigo volta a ler o portão por data; a reversão reabre o defeito 1, e isso deve
   constar do PR de reversão.
-- O `pre-push` ativado pelo E0 continua chamando o executável da MergeX. A reversão desfaz essa
-  ativação pelo mesmo caminho da instalação, sem tocar em hooks de terceiros, e o PR de reversão
+- O `pre-push` ativado pelo E0 continua chamando o executável da MergeX. A reversão remove apenas o
+  chamador gerenciado pela MergeX, reconhecido pelo marcador, e nunca toca num hook de terceiro.
+  Quem compôs um hook próprio com a MergeX desfaz a composição por conta própria, e o PR de reversão
   explica o passo.
 
 ## 20. Fora de escopo
@@ -622,12 +730,19 @@ Negativos (um caso por regra):
     - push direto; `cd` com `&&` e com `||`; `bash -c`; caminho por link simbólico; várias refs num
       push; exclusão de branch; tag; ref fora da branch do trabalho;
     - portão válido, vencido, ausente e ilegível; SHA enviado diferente do `HEAD` do checkout;
-    - clone raso e objeto ausente;
+    - `portao: null` nos três modos, com o mesmo resultado no `pre-push`, no aviso do Claude e no
+      executável do CI;
+    - clone raso e objeto ausente (`historia_incompleta`); ambiente que impede a avaliação
+      (`erro_ambiente`), com diagnósticos distintos;
     - Git no Linux e Git for Windows sobre `\\wsl.localhost\...`, este quando o ambiente de teste o
       tiver (sem ele, o caso é registrado como não executado, nunca como aprovado);
     - custo proporcional às refs enviadas: o tempo não cresce com o número de branches entregues;
-    - E0 idempotente; E0 recusando sobrescrever `core.hooksPath` externo ou `pre-push` preexistente;
-      E2 sem `PRONTO` quando o `pre-push` não está ativo;
+    - E0 resolvendo o diretório efetivo, inclusive com `core.hooksPath` já configurado, sem alterá-lo;
+      E0 idempotente; E0 recusando um `pre-push` de terceiro sem sobrescrever, renomear ou editar;
+      hook composto que propaga o código de saída aceito, e o que não propaga recusado;
+    - prova funcional do E2: sem `PRONTO` quando o `pre-push` efetivo não chama a MergeX ou não
+      bloqueia a ref inválida da prova controlada;
+    - reversão removendo só o chamador gerenciado e preservando o hook de terceiro;
     - hook do Claude como aviso: bloqueia o push provadamente inválido e o `--no-verify` reconhecido;
       em UNC, `dubious ownership` ou comando indeterminado, avisa e não bloqueia.
 23. Nenhuma opção de força aceita em nenhum dos executáveis novos.
@@ -712,16 +827,36 @@ Cada um tem de reprovar ao menos um caso:
     o `pre-push`. Nenhum mecanismo exclusivamente local é prometido como incontornável.
   - **Hook do Claude `pr-so-com-portao`:** passa a ser aviso antecipado. Bloqueia só o que prova
     inválido e o `--no-verify` reconhecido; no indeterminado, avisa.
-  - **Instalação:** o E0 ativa o `pre-push` de forma idempotente e nunca sobrescreve nem desativa
-    silenciosamente um `core.hooksPath` externo ou um `pre-push` preexistente. Quando não compõe com
-    segurança, falha fechado e explica como integrar. O E2 só emite `PRONTO` com o `pre-push`
-    comprovadamente ativo.
+  - **Instalação:** o E0 usa o diretório de hooks efetivo do Git, sem nunca alterar
+    `core.hooksPath`, e instala o chamador gerenciado de forma idempotente. Diante de um `pre-push`
+    de terceiro, não sobrescreve, não renomeia e não edita: falha fechado com a instrução de
+    composição deliberada (chamar o validador e propagar o código de saída). O E2 só emite
+    `PRONTO` depois de uma prova funcional de que o `pre-push` efetivo chama a MergeX e bloqueia
+    uma ref inválida. A reversão remove só o chamador gerenciado.
+  - **Modo:** `portao: null` usa o modo existente de `pr-so-com-portao`, sem chave nova. Os três
+    consumidores o interpretam igual, e divergência entre eles é defeito de contrato.
+  - **Diagnósticos:** `historia_incompleta` (raso, objeto ausente) e `erro_ambiente` barram sempre,
+    com diagnósticos distintos.
   - **Escopo:** esta branch entrega o validador, o `pre-push`, o template de CI, os testes e a
     documentação. A ativação no produto e o empacotamento pelo ExpxDev são handoffs separados.
   - **Motivo:** a primeira implementação da Task 14, um hook do Claude que interpretava o texto do
     comando, foi rejeitada pelos testes reais. Em cinco rodadas de revisão, cada correção fechava
     os contornos apontados e a revisão seguinte achava outros (`cd` encadeado, `bash -c`, `xargs`,
     opções de `cd`, `git-push`, link simbólico, `core.worktree`). No Git for Windows sobre
-    `\\wsl.localhost\...`, o hook bloqueava pushes legítimos por `dubious ownership`. O commit
-    `78fbb10` permanece no histórico, sem reescrita; a Task 14 é refeita sobre este desenho, e as
-    Tasks 15–19 aguardam a nova Task 14 ser aprovada.
+    `\\wsl.localhost\...`, o hook bloqueava pushes legítimos por `dubious ownership`.
+  - **Histórico e plano:** o commit `78fbb10` permanece no histórico, sem reescrita, como
+    implementação rejeitada e superada da antiga Task 14. Ele não conta como aprovação de nenhuma
+    das novas tasks. A antiga Task 14 é substituída por quatro:
+    - **14:** validador por revisão (`--rev`) e protocolo do `pre-push`: refs reais, várias refs,
+      exclusão, tags, SHA enviado, modos e remoto bare de teste;
+    - **15:** ativação no E0 e prova no E2: diretório efetivo, instalação idempotente, conflito com
+      hook de terceiro, prova funcional e reversão segura;
+    - **16:** contrato de CI: executável compartilhado, template ou ponto de integração,
+      comportamento no SHA real do PR, e a documentação de que esta branch não ativa o CI no
+      produto;
+    - **17:** hook do Claude só consultivo: bloqueio antecipado só com prova, tratamento explícito
+      de `--no-verify`, aviso no indeterminado, e nenhuma leitura de shell tratada como fronteira de
+      segurança.
+
+    As antigas Tasks 15–19, ainda não iniciadas, passam a 18–22. As Tasks 1–13 continuam aprovadas,
+    e as Tasks 18–22 aguardam a aprovação das novas 14–17.
