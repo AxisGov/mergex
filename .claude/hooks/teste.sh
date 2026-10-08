@@ -775,6 +775,25 @@ caso "sem termo: npm run git-push-notifications passa com portao vencido" mergex
 git tag feature/ft-02 main >/dev/null 2>&1
 caso "tag homonima da branch: push -u origin HEAD barra (P3)" mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin HEAD')" 2
 git tag -d feature/ft-02 >/dev/null 2>&1
+# core.worktree que nao e o repositorio: a varredura usa o diretorio Git
+# comum, nunca a worktree (N2)
+git config core.worktree "$SEMGIT_T"
+caso "core.worktree alheio: push no proprio cwd barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+git config core.worktree "$SEMGIT_T/nao-existe"
+caso "core.worktree inexistente: push no proprio cwd barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+HOOK_CWD="$SEMGIT_T"
+caso "core.worktree inexistente: GIT_DIR=<repo>/.git de fora barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "GIT_DIR=$HIST_T/.git $PUSH_FT")" 2
+HOOK_CWD="$HIST_T"
+git config --unset core.worktree
+# Um diretorio que parece Git (tem .git), mas cujo diretorio comum nao se
+# resolve, nao e ignorado: barra (N2)
+mkdir -p "$SEMGIT_T/quebrado"
+printf 'gitdir: %s/nao-existe\n' "$SEMGIT_T" > "$SEMGIT_T/quebrado/.git"
+HOOK_CWD="$SEMGIT_T"
+caso "repositorio com .git que nao se resolve barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "cd $SEMGIT_T/quebrado && git push origin feature/ft-02")" 2
+caso "controle: fora de repositorio sem citar o quebrado passa" mergex/pr-so-com-portao.sh "$(bash_json 'git push')" 0
+HOOK_CWD="$HIST_T"
+rm -rf "$SEMGIT_T/quebrado"
 entrega outro feature/outro
 touch -t 203001010000 docs/entregas/outro/ENTREGA.md
 caso "vencido: entrega de outro trabalho mais recente nao libera" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
@@ -854,6 +873,29 @@ caso "repo sem MergeX: cd -P <wt> && push (P1)"  mergex/pr-so-com-portao.sh "$(b
 caso "repo sem MergeX: cd -L <wt>; push (P1)"    mergex/pr-so-com-portao.sh "$(bash_json "cd -L $WTM_T; $PUSH_FT")" 2
 caso "repo sem MergeX: cd -eP -- <wt> && push (P1)" mergex/pr-so-com-portao.sh "$(bash_json "cd -eP -- $WTM_T && $PUSH_FT")" 2
 caso "repo sem MergeX: pushd -n <wt> && push (P1)" mergex/pr-so-com-portao.sh "$(bash_json "pushd -n $WTM_T && $PUSH_FT")" 2
+# Diretorio corrente encadeado (N1): o relativo se resolve contra o diretorio
+# em vigor naquele ponto (cd anterior, -C anterior), nao contra o cwd inicial
+PAI_WTM="$(dirname "$WTM_T")"; BASE_WTM="$(basename "$WTM_T")"; BASE_HIST="$(basename "$HIST_T")"
+caso "N1: git -C <pai> -C <wt> push"            mergex/pr-so-com-portao.sh "$(bash_json "git -C $PAI_WTM -C $BASE_WTM push origin feature/ft-02")" 2
+caso "N1: git -C .. -C <wt> push"               mergex/pr-so-com-portao.sh "$(bash_json "git -C .. -C $BASE_WTM push origin feature/ft-02")" 2
+caso "N1: cd <pai> && GIT_DIR=<repo>/.git push" mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && GIT_DIR=$BASE_HIST/.git git push origin feature/ft-02")" 2
+caso "N1: cd .. && cd <wt> && push"             mergex/pr-so-com-portao.sh "$(bash_json "cd .. && cd $BASE_WTM && $PUSH_FT")" 2
+caso "N1: cd <pai> && cd <wt> && push"          mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && cd $BASE_WTM && $PUSH_FT")" 2
+caso "N1: cd <pai>; git -C <wt> push"           mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM; git -C $BASE_WTM push origin feature/ft-02")" 2
+caso "N1: cd <pai> && git --git-dir=<repo>/.git push" mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && git --git-dir=$BASE_HIST/.git push origin feature/ft-02")" 2
+caso "N1: cd <pai> && env -C <wt> git push"     mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && env -C $BASE_WTM git push origin feature/ft-02")" 2
+caso "N1: cd / && cd <relativo> && push"        mergex/pr-so-com-portao.sh "$(bash_json "cd / && cd ${WTM_T#/} && $PUSH_FT")" 2
+# `~` vira $HOME; `cd` sem argumento vai para $HOME
+HOME_REAL_T="$HOME"; export HOME="$PAI_WTM"
+caso "N1: cd /tmp && cd ~/<wt> && push"         mergex/pr-so-com-portao.sh "$(bash_json "cd / && cd ~/$BASE_WTM && $PUSH_FT")" 2
+caso "N1: cd && cd <wt> && push"                mergex/pr-so-com-portao.sh "$(bash_json "cd && cd $BASE_WTM && $PUSH_FT")" 2
+caso "N1: GIT_DIR=~/<repo>/.git push"           mergex/pr-so-com-portao.sh "$(bash_json "GIT_DIR=~/$BASE_HIST/.git git push origin feature/ft-02")" 2
+export HOME="$HOME_REAL_T"
+# Subshell: o cd de dentro nao muda o diretorio corrente de fora
+caso "N1: ( cd X ); git push"                   mergex/pr-so-com-portao.sh "$(bash_json "( cd $WTM_T ); git push origin feature/ft-02")" 2
+ln -s "$WTM_T" "$SEMX_T/link-wt"
+caso "N1: ( cd <pai> ); cd <relativo ao cwd> && push" mergex/pr-so-com-portao.sh "$(bash_json "( cd $PAI_WTM ); cd link-wt && $PUSH_FT")" 2
+rm -f "$SEMX_T/link-wt"
 # GIT_DIR/--git-dir no gitdir de uma worktree vinculada: o repositorio comum
 # e varrido (P4)
 GD_WTM="$(git -C "$WTM_T" rev-parse --absolute-git-dir)"
@@ -1025,7 +1067,34 @@ mensagem_cita "validade interrompida pelo limite: a mensagem e a do prazo (P6)" 
   "varredura do portão excedeu o prazo"
 unset FALSO_TIMEOUT_124
 export PATH="$PATH_REAL_T"
-EXPX_PORTAO_PRAZO_TESTE=0
+# SECONDS herdado do ambiente nao interfere: o hook zera o relogio no inicio
+roda_portao_env() { # <desc> <esperado> <env...> — roda o hook com o ambiente dado
+  local desc="$1" esperado="$2" obtido
+  shift 2
+  printf '%s' "$(bash_json "$PUSH_FT")" | env "$@" bash "$H/mergex/pr-so-com-portao.sh" >/dev/null 2>&1
+  obtido=$?
+  valor "$desc" "$obtido" "$esperado"
+}
+unset EXPX_PORTAO_PRAZO_TESTE
+roda_portao_env "SECONDS=1000 herdado: o portao valido passa" 0 SECONDS=1000
+printf '#!/usr/bin/env bash\nsleep 3\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
+roda_portao_env "SECONDS=-1000 herdado: o prazo continua valendo" 2 SECONDS=-1000 EXPX_PORTAO_PRAZO_TESTE=1
+# Sem `timeout` no PATH, o prazo e conferido depois da validade (PZ6)
+SEM_TIMEOUT_T="$SEMGIT_T/sem-timeout"
+mkdir -p "$SEM_TIMEOUT_T"
+IFS=: read -r -a DIRS_PATH_T <<<"$PATH"
+for D_T in "${DIRS_PATH_T[@]}"; do
+  case "$D_T" in /mnt/*|'') continue ;; esac   # WSL: pastas do Windows (lentas)
+  for F_T in "$D_T"/*; do
+    N_T="${F_T##*/}"
+    case "$N_T" in timeout|gtimeout) continue ;; esac
+    [ -x "$F_T" ] && [ ! -e "$SEM_TIMEOUT_T/$N_T" ] && ln -s "$F_T" "$SEM_TIMEOUT_T/$N_T"
+  done
+done
+valor "controle: o PATH da bancada nao tem timeout" "$(PATH="$SEM_TIMEOUT_T" command -v timeout || echo ausente)" ausente
+roda_portao_env "sem timeout: validade lenta alem do prazo barra (PZ6)" 2 PATH="$SEM_TIMEOUT_T" EXPX_PORTAO_PRAZO_TESTE=1
+rm -rf "$SEM_TIMEOUT_T"
+EXPX_PORTAO_PRAZO_TESTE=0; export EXPX_PORTAO_PRAZO_TESTE
 unset EXPX_HOOKS_BANCADA
 printf '#!/usr/bin/env bash\nsleep 2\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
 caso "fora da bancada o prazo de teste e ignorado (P6)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0

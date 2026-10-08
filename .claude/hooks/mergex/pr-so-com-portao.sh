@@ -17,7 +17,9 @@
 #      aspas, função, xargs ou subshell.
 #   2. Varredura: no repositório do cwd e em cada diretório literal citado no
 #      comando que seja outro repositório (`cd X`, `-C X`, `env -C X`,
-#      `--git-dir=X`, `--work-tree=X`, `GIT_DIR=X`), para CADA branch local, o
+#      `--git-dir=X`, `--work-tree=X`, `GIT_DIR=X`; o relativo, contra o
+#      diretório corrente daquele ponto do comando), no diretório Git COMUM
+#      (nunca pela worktree), para CADA branch local, o
 #      `docs/entregas/<id>/ENTREGA.md` da ponta dela que declara essa branch e
 #      registra `portao: pronto` tem de valer:
 #      `validade-do-portao.sh --verificar --entrega <ENTREGA> --rev <ponta>`.
@@ -36,6 +38,10 @@
 #
 # É uma barreira de AGENTE, não de segurança contra adversário. A garantia
 # forte é rodar validade-do-portao.sh no CI ou num hook `pre-push` (README).
+
+# O relógio do prazo (abaixo) começa aqui. O bash importa SECONDS do
+# ambiente: um valor herdado não pode antecipar nem desligar o prazo.
+SECONDS=0 # guarda:HKPRAZO
 
 HOOK="pr-so-com-portao"
 PADRAO="aviso"
@@ -110,49 +116,126 @@ ponta() { git -C "$1" rev-parse --verify -q "refs/heads/$2^{commit}" 2>/dev/null
 # `--chdir`, `--git-dir`, `--work-tree`, `GIT_DIR=`, `GIT_WORK_TREE=` e
 # `GIT_COMMON_DIR=`, em qualquer segmento. Um candidato que não é repositório
 # Git é ignorado; um valor com expansão não se lê (risco residual, README).
+#
+# O relativo se resolve contra o DIRETÓRIO CORRENTE daquele ponto, como no
+# shell e no git: começa no cwd do hook, muda com `cd`/`pushd` em posição de
+# comando (para os segmentos seguintes; o `cd` de dentro de `( … )` não vaza
+# para fora), e dentro de um segmento `-C`/`env -C` se compõem. `~` vira
+# $HOME e `cd` sem argumento vai para $HOME. `cd -`, `pushd +N`/`-N`, `popd`
+# ou caminho com expansão deixam o diretório corrente desconhecido: a partir
+# dali, o relativo não se resolve (risco residual, README).
 CANDIDATOS="$DIR_INICIAL
 "
-# dir_cd <cd|pushd> <args...> — DIR_CD recebe o diretório: o primeiro
-# argumento que não começa com `-` (`-P`, `-L`, `-e`, `-@`, `-n` e
-# combinações são opções), ou o que vem depois de `--`.
-DIR_CD=""
+# dir_cd <cd|pushd|popd> <args...> — DIR_CD_ESTADO: `ok` (DIR_CD tem o
+# argumento), `home` (sem argumento) ou `indef` (`cd -`, `pushd +N`/`-N`,
+# `pushd` sem argumento, `popd`). O diretório é o primeiro argumento que não
+# começa com `-` (`-P`, `-L`, `-e`, `-@`, `-n` e combinações são opções), ou
+# o que vem depois de `--`.
+DIR_CD=""; DIR_CD_ESTADO=""
 dir_cd() {
-  local t
-  DIR_CD=""
+  local t cmd
+  DIR_CD=""; DIR_CD_ESTADO=indef
+  cmd="$(expx_sem_aspas "$1")"
+  [ "$cmd" = popd ] && return 0
   shift
   while [ "$#" -gt 0 ]; do
     t="$(expx_sem_aspas "$1")"
     case "$t" in
-      --) DIR_CD="$(expx_sem_aspas "${2:-}")"; return 0 ;;
+      --) [ "$#" -ge 2 ] || break
+          DIR_CD="$(expx_sem_aspas "$2")"; DIR_CD_ESTADO=ok; return 0 ;;
+      -) return 0 ;;
+      [+-][0-9]*) [ "$cmd" = pushd ] && return 0
+                  [ "$t" != "${t#-}" ] && { shift; continue; }
+                  DIR_CD="$t"; DIR_CD_ESTADO=ok; return 0 ;;
       -?*) shift ;;
-      *) DIR_CD="$t"; return 0 ;;
+      *) DIR_CD="$t"; DIR_CD_ESTADO=ok; return 0 ;;
     esac
   done
+  [ "$cmd" = pushd ] || DIR_CD_ESTADO=home
 }
-candidato() {
-  local v
-  literal "$1" || return 0
-  v="$(absoluto "$DIR_INICIAL" "$1")" || return 0
-  CANDIDATOS="$CANDIDATOS$v
+# resolve <base> <valor> — o caminho literal contra <base>; `~` e `~/…`
+# viram $HOME. Falha com expansão ou com base desconhecida (vazia).
+resolve() {
+  local v="$2"
+  case "$v" in
+    '~') v="$HOME" ;;
+    '~/'*) v="$HOME/${v#??}" ;;
+  esac
+  literal "$v" || return 1
+  absoluto "$1" "$v"
+}
+candidato() { # <caminho absoluto>
+  [ -n "$1" ] || return 0
+  CANDIDATOS="$CANDIDATOS$1
 "
 }
+candidato_em() { # <base> <valor>
+  local v
+  v="$(resolve "$1" "$2")" && candidato "$v"
+}
+# Segmentos com a marcação de subshell: `(` e `)` viram linhas próprias.
+segmentos_com_subshell() {
+  local c="$1"
+  case "$c" in
+    *\\$'\n'*) c="$(expx_emenda_continuacao "$c")" ;;
+  esac
+  printf '%s\n' "$c" | awk '{ gsub(/[(]/, "\n(\n"); gsub(/[)]/, "\n)\n"); gsub(/[;|&`<>]/, "\n"); print }'
+}
+CORR="$DIR_INICIAL"   # diretório corrente do shell ("" = desconhecido)
+PILHA=()              # CORR de quem abriu cada `(`
 while IFS= read -r SEG; do
-  [ -n "$SEG" ] || continue
+  case "$SEG" in
+    '(') PILHA[${#PILHA[@]}]="$CORR"; continue ;; # guarda:HKCORR
+    ')') N_P="${#PILHA[@]}"
+         if [ "$N_P" -gt 0 ]; then
+           CORR="${PILHA[$((N_P - 1))]}"; unset "PILHA[$((N_P - 1))]" # guarda:HKCORR
+         else
+           CORR=""   # `)` sem `(`: ambíguo, o corrente fica desconhecido
+         fi
+         continue ;;
+  esac
   set -f
   # shellcheck disable=SC2086
   set -- $SEG
   set +f
+  CDIR="$CORR"   # diretório do comando deste segmento (`-C` se compõe)
+  PEND=()        # --git-dir/--work-tree/GIT_*=, resolvidos no fim
+  POS=1          # o próximo token está em posição de comando
   while [ "$#" -gt 0 ]; do
     T="$(expx_sem_aspas "$1")"
     case "$T" in
-      cd|pushd) dir_cd "$@"; candidato "$DIR_CD" ;; # guarda:HKOUTROS
-      -C|--chdir|--git-dir|--work-tree) candidato "$(expx_sem_aspas "${2:-}")" ;; # guarda:HKOUTROS
-      --chdir=*|--git-dir=*|--work-tree=*|GIT_DIR=*|GIT_WORK_TREE=*|GIT_COMMON_DIR=*) candidato "${T#*=}" ;; # guarda:HKOUTROS
+      cd|pushd|popd) # guarda:HKOUTROS
+        dir_cd "$@"
+        case "$DIR_CD_ESTADO" in
+          ok)   NOVO="$(resolve "$CDIR" "$DIR_CD")" || NOVO="" ;;
+          home) NOVO="$HOME" ;;
+          *)    NOVO="" ;;
+        esac
+        candidato "$NOVO"
+        if [ "$POS" = 1 ]; then CORR="$NOVO"; CDIR="$NOVO"; fi # guarda:HKCORR
+        POS=0 ;;
+      -C|--chdir) # guarda:HKOUTROS
+        NOVO="$(resolve "$CDIR" "$(expx_sem_aspas "${2:-}")")" || NOVO=""
+        CDIR="$NOVO"; candidato "$NOVO"; POS=0 ;;
+      --chdir=*)
+        NOVO="$(resolve "$CDIR" "${T#*=}")" || NOVO=""
+        CDIR="$NOVO"; candidato "$NOVO"; POS=0 ;;
+      --git-dir|--work-tree) PEND[${#PEND[@]}]="$(expx_sem_aspas "${2:-}")"; POS=0 ;;
+      --git-dir=*|--work-tree=*) PEND[${#PEND[@]}]="${T#*=}"; POS=0 ;;
+      GIT_DIR=*|GIT_WORK_TREE=*|GIT_COMMON_DIR=*) PEND[${#PEND[@]}]="${T#*=}" ;;
+      [A-Za-z_]*=*|builtin|command|'{'|'!'|if|then|else|elif|do|while|until|time) ;;
+      *) POS=0 ;;
     esac
     shift
   done
+  # O git resolve --git-dir/GIT_DIR relativos depois dos `-C`; o shell, no
+  # diretório corrente. As duas leituras viram candidatos.
+  for V in ${PEND[@]+"${PEND[@]}"}; do
+    candidato_em "$CDIR" "$V" # guarda:HKCORR
+    candidato_em "$CORR" "$V"
+  done
 done <<EOF
-$(expx_segmentos "$CMD")
+$(segmentos_com_subshell "$CMD")
 EOF
 
 VISTOS=""       # git-common-dir de cada repositório já varrido
@@ -209,18 +292,62 @@ O que fazer:
     validade a cada comando de publicação." # guarda:HKPRAZO
 }
 
-# valida <raiz> <ENTREGA> <revisão> <descrição> — só ok=true COM rc 0 passa;
-# qualquer outra resposta barra na hora, em qualquer modo.
+# comum_de <dir> — o diretório Git comum, absoluto, de <dir> (árvore,
+# subdiretório, `.git` ou gitdir de worktree vinculada). Não depende da
+# worktree: um `core.worktree` inválido não muda a resposta.
+comum_de() {
+  local c
+  c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [ -n "$c" ] || return 1
+  (cd "$c" 2>/dev/null && pwd -P)
+}
+# comum_lido <dir> — fallback: lê o `.git` mais próximo (diretório, ou
+# arquivo `gitdir:`) e o `commondir`, e confere que é um diretório Git.
+comum_lido() {
+  local x="$1" g c
+  while [ ! -e "$x/.git" ]; do
+    [ "$x" != / ] && [ -n "$x" ] && [ "$x" != . ] || return 1
+    x="$(dirname "$x")"
+  done
+  if [ -d "$x/.git" ]; then
+    g="$x/.git"
+  else
+    g="$(sed -n 's/^gitdir:[ \t]*//p' "$x/.git" 2>/dev/null | head -1)"
+    [ -n "$g" ] || return 1
+    g="$(absoluto "$x" "$g")" || return 1
+  fi
+  if [ -f "$g/commondir" ]; then
+    c="$(head -1 "$g/commondir")"
+    g="$(absoluto "$g" "$c")" || return 1
+  fi
+  git --git-dir="$g" rev-parse --git-dir >/dev/null 2>&1 || return 1
+  (cd "$g" 2>/dev/null && pwd -P)
+}
+# parece_git <dir> — <dir> ou um ancestral tem `.git`
+parece_git() {
+  local x="$1"
+  while :; do
+    [ -e "$x/.git" ] && return 0
+    [ "$x" != / ] && [ -n "$x" ] && [ "$x" != . ] || return 1
+    x="$(dirname "$x")"
+  done
+}
+
+# valida <dir do repositório> <ENTREGA> <revisão> <descrição> — só ok=true COM
+# rc 0 passa; qualquer outra resposta barra na hora, em qualquer modo. A
+# validade roda com GIT_DIR=<comum> (e a árvore nele): nunca depende da
+# worktree do repositório.
 valida() {
-  local saida rc okv mot pri resta
+  local saida rc okv mot pri resta g
   [ -f "$VALIDADE" ] || falha_portao "$4: validade-do-portao.sh ausente ao lado dos hooks"
+  g="$(comum_de "$1")" || falha_portao "$4: o diretório Git comum não se resolve"
   resta=$((PRAZO - SECONDS))
   [ "$resta" -gt 0 ] || estouro # guarda:HKPRAZO
   if [ -n "$TIMEOUT_BIN" ]; then
-    saida="$(cd "$1" 2>/dev/null && "$TIMEOUT_BIN" -k 1 "$resta" bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$?
+    saida="$(cd "$g" 2>/dev/null && GIT_DIR="$g" GIT_WORK_TREE="$g" "$TIMEOUT_BIN" -k 1 "$resta" bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$? # guarda:HKCOMUM
     case "$rc" in 124|137) estouro ;; esac
   else
-    saida="$(cd "$1" 2>/dev/null && bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$?
+    saida="$(cd "$g" 2>/dev/null && GIT_DIR="$g" GIT_WORK_TREE="$g" bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$? # guarda:HKCOMUM
   fi
   [ "$SECONDS" -lt "$PRAZO" ] || estouro # guarda:HKPRAZO
   okv="$(printf '%s\n' "$saida" | sed -n 's/^ok=//p' | head -1)"
@@ -235,17 +362,18 @@ valida() {
 
 VALIDADOS=""    # |<ponta>:<ENTREGA>| já validados nesta chamada
 
-# varre <raiz> — para cada branch local, o ENTREGA.md pronto da ponta dela
+# varre <diretório Git comum> — para cada branch local, o ENTREGA.md pronto
+# da ponta dela. Tudo com --git-dir=<comum>: a worktree não entra.
 varre() {
   local top="$1" refs objs pronto cand obj path br id
   # lstrip=2, nunca short: com uma tag homônima, `short` devolve `heads/<b>`.
-  refs="$(git -C "$top" for-each-ref --format='%(objectname) %(refname:lstrip=2)' refs/heads 2>/dev/null)" # guarda:HKVARRE
+  refs="$(git --git-dir="$top" for-each-ref --format='%(objectname) %(refname:lstrip=2)' refs/heads 2>/dev/null)" # guarda:HKVARRE
   [ -n "$refs" ] || return 0
   objs="$(printf '%s\n' "$refs" | cut -d' ' -f1 | sort -u)"
   # Um `git grep` só, sobre as pontas: `branch:` e `portao:` de cada
   # docs/entregas/<id>/ENTREGA.md (a primeira ocorrência de cada chave vale).
   # shellcheck disable=SC2086
-  pronto="$(git -C "$top" -c core.quotepath=false grep --no-color -I -E '^(branch|portao):' $objs \
+  pronto="$(git --git-dir="$top" -c core.quotepath=false grep --no-color -I -E '^(branch|portao):' $objs \
       -- 'docs/entregas/*/ENTREGA.md' 2>/dev/null | awk '
     {
       l = $0; i = index(l, ":"); o = substr(l, 1, i - 1); l = substr(l, i + 1)
@@ -278,29 +406,34 @@ $cand
 EOF
 }
 
-# top_pelo_comum <gitdir> — o gitdir de uma worktree vinculada
-# (`<repo>/.git/worktrees/<wt>`) não tem árvore própria: resolve o repositório
-# comum (`--git-common-dir`) e varre a partir da árvore principal dele.
-top_pelo_comum() {
-  local c
-  c="$(cd "$1" 2>/dev/null && git --git-dir=. rev-parse --git-common-dir 2>/dev/null)" || return 1
-  [ -n "$c" ] || return 1
-  c="$(cd "$1" 2>/dev/null && cd "$c" 2>/dev/null && pwd -P)" || return 1
-  git -C "$(dirname "$c")" rev-parse --show-toplevel 2>/dev/null
-}
-
+# Cada candidato vira o diretório Git COMUM do repositório (o gitdir de uma
+# worktree vinculada, `.git`, árvore ou subdiretório; com o pai como último
+# recurso, para um `.git` citado que não existe), e a varredura roda nele.
+# Um candidato que existe, parece Git (tem `.git`) e cujo diretório comum não
+# se resolve de jeito nenhum barra: não é ignorado.
 while IFS= read -r D; do
   [ -n "$D" ] || continue
-  TOP="$(git -C "$D" rev-parse --show-toplevel 2>/dev/null)" \
-    || TOP="$(git -C "$(dirname "$D")" rev-parse --show-toplevel 2>/dev/null)" \
-    || TOP="$(top_pelo_comum "$D")" || continue # guarda:HKCOMUM
-  [ -n "$TOP" ] || continue
-  GCD="$(cd "$TOP" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" || continue
+  GCD="$(comum_de "$D")" || GCD="$(comum_de "$(dirname "$D")")" || GCD="" # guarda:HKCOMUM
+  if [ -z "$GCD" ] && [ -e "$D" ]; then
+    GCD="$(comum_lido "$D")" || GCD=""
+    if [ -z "$GCD" ] && parece_git "$D"; then # guarda:HKCOMUM
+      barra_sempre "repositorio sem diretorio git comum" "mergex/pr-so-com-portao — repositório que não se lê
+
+Comando: $CMD
+
+O comando tem um termo de publicação, e '$D' parece um repositório Git (há um
+\`.git\` nele ou acima), mas o diretório Git comum dele não se resolve. Sem ele,
+os portões PRONTO desse repositório não podem ser conferidos.
+
+O que fazer:
+  - Confira o \`.git\` (o \`gitdir:\` aponta para um diretório que existe?) e
+    rode \`git -C '$D' rev-parse --git-common-dir\`."
+    fi
+  fi
+  [ -n "$GCD" ] || continue
   case "$VISTOS" in *"|$GCD|"*) continue ;; esac
   VISTOS="$VISTOS|$GCD|"
-  REPOS="$REPOS$TOP
-"
-  varre "$TOP"
+  varre "$GCD"
 done <<EOF
 $CANDIDATOS
 EOF

@@ -114,9 +114,33 @@ diretório literal citado no comando que seja outro repositório Git:
 - `--git-dir=X` e `--work-tree=X`;
 - `GIT_DIR=X`, `GIT_WORK_TREE=X` e `GIT_COMMON_DIR=X`.
 
-Um `X` que é o gitdir de uma worktree vinculada (`<repo>/.git/worktrees/<wt>`)
-não tem árvore própria: o hook resolve o repositório comum
-(`git --git-dir=X rev-parse --git-common-dir`) e varre a partir dele.
+**Diretório corrente encadeado.** Um `X` relativo se resolve como o shell e o
+git o resolvem: contra o diretório em vigor naquele ponto do comando, não
+contra o `cwd` inicial.
+
+- O diretório corrente começa no `cwd` do hook e muda com `cd`/`pushd` em
+  posição de comando (inclusive `builtin cd` e `command cd`), para os
+  segmentos seguintes.
+- O `cd` de dentro de um subshell `( … )` não vaza para fora. Um `)` sem `(`
+  deixa o diretório corrente desconhecido.
+- Dentro de um segmento, `-C` e `env -C` se compõem (`git -C .. -C wt`).
+  `--git-dir`, `--work-tree` e `GIT_*=` relativos se resolvem contra o
+  diretório depois dos `-C` e também contra o diretório corrente do shell;
+  as duas leituras são varridas.
+- `~` e `~/…` viram `$HOME`, e `cd` sem argumento vai para `$HOME`.
+- `cd -`, `pushd +N`/`-N`, `pushd` sem argumento, `popd` e caminho com
+  expansão deixam o diretório corrente desconhecido: dali em diante, um
+  relativo não se resolve (risco residual).
+
+**Independente da worktree.** Cada candidato vira o diretório Git **comum**
+do repositório (`git rev-parse --path-format=absolute --git-common-dir`, com
+o fallback de ler o `.git`/`gitdir:` e o `commondir`). Isso vale para árvore,
+subdiretório, `.git` e o gitdir de uma worktree vinculada
+(`<repo>/.git/worktrees/<wt>`). O `for-each-ref`, o `git grep` e a validade
+rodam com `--git-dir=<comum>` (a validade, com `GIT_DIR`/`GIT_WORK_TREE` no
+comum): um `core.worktree` inválido não tira o repositório da varredura. Um
+candidato que existe e parece Git (tem `.git` nele ou acima), mas cujo
+diretório comum não se resolve de jeito nenhum, barra com `exit 2`.
 
 Em cada repositório, para **cada branch local**, ele procura o
 `docs/entregas/<id>/ENTREGA.md` da **ponta** dessa branch que declara
@@ -153,7 +177,14 @@ execução. Ele é verificado antes de cada validade e passado a ela como limite
 (`timeout` do coreutils, quando existe). Estourou: `exit 2` em qualquer modo,
 com a mensagem `varredura do portão excedeu o prazo; rode /mergex-check ou
 apague branches abandonadas`. Só a bancada (`EXPX_HOOKS_BANCADA=1`) pode
-reduzir o prazo, por `EXPX_PORTAO_PRAZO_TESTE`; nunca aumentá-lo.
+reduzir o prazo, por `EXPX_PORTAO_PRAZO_TESTE`; nunca aumentá-lo. O relógio
+(`SECONDS`) é zerado no início do hook: um valor herdado do ambiente não
+antecipa nem desliga o prazo.
+
+**Sem `timeout` no PATH** (macOS sem coreutils, por exemplo), o prazo só é
+conferido entre as validades: antes de cada uma e depois dela. Uma validade
+isolada que passe de 60 s pode cair no timeout do harness, e o comando segue.
+Com `timeout`/`gtimeout`, a validade é cortada no prazo.
 
 O custo de cada validade cresce com os commits de método depois do portão.
 Medido no WSL (média de 3 chamadas, `git push origin main` com todos os
@@ -228,8 +259,16 @@ Fora isso, a leitura por token **não** decide a liberação de um portão
 adversário.**
 
 - **Diretório não literal.** Um diretório citado com expansão (`cd $D`,
-  `GIT_DIR=$X`) não é varrido. O hook só varre o `cwd` e os diretórios
-  literais.
+  `GIT_DIR=$X`, `~outro`) não é varrido. O hook só varre o `cwd` e os
+  diretórios literais (`~` e `~/…` são expandidos para `$HOME`).
+- **Diretório corrente desconhecido.** `cd -` (o `OLDPWD` vem da shell do
+  harness), `pushd +N`/`-N`, `pushd` sem argumento e `popd` dependem de estado
+  que o texto não mostra: o diretório de destino não é varrido, e um relativo
+  citado depois deles não se resolve.
+- **Publicação puxada pelo remoto.** Com um remoto no sistema de arquivos,
+  `git -C <remoto> fetch <wt> feature/x:feature/x` (ou `--git-dir=<remoto>
+  fetch`) grava a branch no remoto sem termo de publicação no comando, e o
+  hook não dispara. Num remoto de rede (GitHub, GitLab) não se aplica.
 - **Commit fora de ponta de branch.** Um commit que não é a ponta de nenhuma
   branch local (SHA solto, HEAD destacado, branch só no remoto) não é varrido.
   A exceção é quando ele é a origem explícita de um push para a branch local
@@ -384,8 +423,9 @@ ainda **falham abertos** sem jq: risco registrado na DM-171, fora do escopo do
 M4-A.
 
 **Timeout.** O harness cancela o hook que estoura o timeout e deixa o comando
-rodar — timeout é falha aberta. O `mergex/git-perigoso` usa 30 s, o mesmo
-timeout crítico do `sprintx/git-perigoso`. A barreira posterior, fechada, é o
+rodar — timeout é falha aberta. No Claude Code, o `mergex/git-perigoso` usa
+30 s, o mesmo timeout crítico do `sprintx/git-perigoso`; no OpenCode, ele fica
+no limite único de 10 s do plugin (`TEMPO_LIMITE`). A barreira posterior, fechada, é o
 E1 (`fechamento-do-e1.sh`): ele inventaria a árvore inteira antes do
 `git add`, então um arquivo de task irmã escrito enquanto o hook de escopo da
 skill de origem estourava o timeout ainda barra o fechamento (DM-172).
