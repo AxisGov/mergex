@@ -854,6 +854,81 @@ EOF
 
 GRAVADAS="base_validada_sha estado portao portao_sha falhas_portao causa push_feito entregue_em atualizado_em reconciliacoes"
 
+# --- apoio dos testes de interrupção -----------------------------------------
+# A ordem dos eventos é decidida por marcador, nunca por `sleep` fixo: o `mv`
+# do PATH chega ao ponto exato, grava o próprio pid no marcador e bloqueia;
+# o teste espera o marcador (com limite), sinaliza o script, espera-o com
+# `wait` e só então mata o shim que ficou órfão.
+SHIM_NOME=r1-shim-bloqueado
+
+# _shim_bloqueio <arquivo> <padrão> <antes|depois> <marcador> — escreve um
+# `mv` que, quando o último argumento casa com <padrão> (padrão de `case`),
+# roda o `mv` real primeiro (só em `depois`), grava o próprio pid em
+# <marcador> (escrita atômica) e bloqueia num `sleep` com argv[0] próprio
+# (`$SHIM_NOME`) até o teste matá-lo. Os demais `mv` passam direto.
+_shim_bloqueio() {
+  local arq="$1" padrao="$2" quando="$3" marca="$4" real
+  real="$(command -v mv)"
+  rm -f "$marca" "$marca.tmp"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do ultimo="$a"; done\n'
+    printf 'case "$ultimo" in %s)\n' "$padrao"
+    [ "$quando" = depois ] && printf '  %q "$@"\n' "$real"
+    printf '  printf "%%s\\n" "$$" > %q && %q %q %q\n' "$marca.tmp" "$real" "$marca.tmp" "$marca"
+    printf '  exec -a %s sleep 3600 ;;\nesac\n' "$SHIM_NOME"
+    printf 'exec %q "$@"\n' "$real"
+  } > "$arq"
+  chmod +x "$arq"
+}
+
+# _proc_campo <pid> <n> — campo <n> de /proc/<pid>/stat (3 = estado, 5 = pgid)
+_proc_campo() {
+  local s; s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
+  printf '%s\n' "${s##*) }" | awk -v n="$(($2 - 2))" '{ print $n }'
+}
+
+# _vivo <pid> — o processo existe e não é zumbi
+_vivo() { local st; st="$(_proc_campo "$1" 3)" && [ -n "$st" ] && [ "$st" != Z ]; }
+
+# _mata_shim <marcador> — mata o shim cujo pid está no marcador e espera ele
+# sumir (no máximo 30 s). O shim nunca sai sozinho (bloqueia), então o pid é
+# o dele; a morte é conferida, não presumida.
+_mata_shim() {
+  local p fim=$((SECONDS + 30))
+  [ -s "$1" ] || return 0
+  p="$(cat "$1")"
+  kill -KILL "$p" 2>/dev/null
+  while _vivo "$p" && [ "$SECONDS" -lt "$fim" ]; do sleep 0.05; done
+  _vivo "$p" && falha "o shim $p não morreu em 30 s"
+}
+
+# _espera_ponto <pid> <marcador> <desc> — espera o shim chegar ao ponto
+# (marcador presente): no máximo 30 s, verificando a cada 0,05 s; para antes
+# se o script já não roda. Sem o marcador, falha com mensagem clara.
+_espera_ponto() {
+  local pid="$1" marca="$2" desc="$3" fim=$((SECONDS + 30))
+  while [ ! -s "$marca" ] && [ "$SECONDS" -lt "$fim" ] && _vivo "$pid"; do sleep 0.05; done
+  [ -s "$marca" ] || falha "$desc: o shim não chegou ao ponto em 30 s, ou o registro terminou antes (sem o marcador ${marca##*/})"
+}
+
+# _interrompe <pid> <TERM|KILL> <marcador> <desc> — com o shim parado no
+# ponto (_espera_ponto antes), envia o sinal: TERM ao processo do script (o
+# filho direto do teste, nunca o shim); KILL ao grupo de processos do script
+# (iniciado com setsid, o grupo é o pid dele). Espera o script com `wait`
+# antes de qualquer afirmação e mata o shim que ficou órfão.
+_interrompe() {
+  local pid="$1" sinal="$2" marca="$3" desc="$4"
+  if [ "$sinal" = KILL ]; then
+    [ "$(_proc_campo "$pid" 5)" = "$pid" ] || falha "$desc: o registro não lidera o próprio grupo de processos"
+    kill -KILL -- -"$pid" 2>/dev/null
+  else
+    kill -TERM "$pid" 2>/dev/null
+  fi
+  wait "$pid" 2>/dev/null
+  _mata_shim "$marca"
+}
+
 grupo_entrega() {
   local d t r variante hoje1 hoje2 esperado k out c modo_antes ls_antes antes antes_commits antes_tasks
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
@@ -1003,24 +1078,20 @@ grupo_entrega() {
   done
 
   # ---- interrupção na janela entre o artefato e a troca do ENTREGA.md ------
-  # `mv` lento só para o destino ENTREGA.md; o teste mata o registro (SIGTERM)
-  # com o artefato já emitido e o temporário já ao lado do ENTREGA.md.
+  # `mv` do destino ENTREGA.md parado (marcador) antes do mv real; o teste mata
+  # o registro (SIGTERM) com o artefato já emitido e o temporário já ao lado
+  # do ENTREGA.md.
   d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   mkdir -p "$t/shim-lento"
-  printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */ENTREGA.md|ENTREGA.md) sleep 8 ;; esac\nexec %s "$@"\n' \
-    "$(command -v mv)" > "$t/shim-lento/mv"
-  chmod +x "$t/shim-lento/mv"
+  _shim_bloqueio "$t/shim-lento/mv" '*/ENTREGA.md|ENTREGA.md' antes "$t/marca-interrupcao"
   cp "$FX_ENTREGA" "$t/antes-sinal.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"; antes="$(_foto)"
   env PATH="$t/shim-lento:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 &
-  local pid=$! i=0
-  while [ "$i" -lt 100 ]; do
-    [ -e docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md ] && ls docs/entregas/ft-rec/ENTREGA.md.registro.* >/dev/null 2>&1 && break
-    sleep 0.1; i=$((i + 1))
-  done
+  local pid=$!
+  _espera_ponto "$pid" "$t/marca-interrupcao" "interrupção"
   [ -e docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md ] && ok "interrupção: artefato emitido e registro na janela" || falha "interrupção: o registro não chegou à janela"
-  kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  _interrompe "$pid" TERM "$t/marca-interrupcao" "interrupção"
   ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1 && falha "interrupção: ficou artefato órfão" || ok "interrupção: nenhum artefato"
   cmp -s "$FX_ENTREGA" "$t/antes-sinal.md" && ok "interrupção: ENTREGA.md original" || falha "interrupção: ENTREGA.md mudou"
   [ "$(ls -A docs/entregas/ft-rec)" = "$ls_antes" ] && ok "interrupção: nenhum temporário na pasta da entrega" || falha "interrupção: sobra na pasta: $(ls -A docs/entregas/ft-rec | tr '\n' ' ')"
@@ -1526,19 +1597,14 @@ grupo_cadeia() {
   cd "$d" || return
   "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
   mkdir -p "$t/shim-lento"
-  printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */ENTREGA.md|ENTREGA.md) sleep 8 ;; esac\nexec %s "$@"\n' \
-    "$(command -v mv)" > "$t/shim-lento/mv"
-  chmod +x "$t/shim-lento/mv"
+  _shim_bloqueio "$t/shim-lento/mv" '*/ENTREGA.md|ENTREGA.md' antes "$t/marca-janela"
   cp "$AR" "$t/janela-a1.md"; cp "$FX_ENTREGA" "$t/janela-e.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"; antes="$(_foto)"
   local tdj; tdj="$(mktemp -d)"; TMPS="$TMPS $tdj"
   env TMPDIR="$tdj" PATH="$t/shim-lento:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
-  pid=$!; i=0
-  while [ "$i" -lt 150 ]; do
-    [ -e "$AR2" ] && ls docs/entregas/ft-rec/ENTREGA.md.registro.* >/dev/null 2>&1 && break
-    sleep 0.1; i=$((i + 1))
-  done
+  pid=$!
+  _espera_ponto "$pid" "$t/marca-janela" "janela"
   [ -e "$AR2" ] && ok "janela: 002 emitido, antes do mv do ENTREGA.md" || falha "janela: o registro não chegou à janela"
-  kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  _interrompe "$pid" TERM "$t/marca-janela" "janela"
   [ ! -e "$AR2" ] && ok "janela: nenhum 002" || falha "janela: ficou o 002"
   cmp -s "$AR" "$t/janela-a1.md" && ok "janela: 001 intacta (ativa)" || falha "janela: 001 mudou"
   cmp -s "$FX_ENTREGA" "$t/janela-e.md" && ok "janela: ENTREGA.md intacto" || falha "janela: ENTREGA.md mudou"
@@ -1565,11 +1631,11 @@ grupo_cadeia() {
     cp "$FX_ENTREGA" "$t/int-e0.md"; cp "$AR" "$t/int-a1.md"
     mkdir -p "$t/shim-$modo_int"
     case "$modo_int" in
-      g2) printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */ENTREGA.md|ENTREGA.md) %s "$@"; rc=$?; sleep 8; exit $rc ;; esac\nexec %s "$@"\n' "$real_mv" "$real_mv" > "$t/shim-$modo_int/mv" ;;
-      term|kill) printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */RECONCILIACAO-BASE-001.md) sleep 8 ;; esac\nexec %s "$@"\n' "$real_mv" > "$t/shim-$modo_int/mv" ;;
-      falha) printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */RECONCILIACAO-BASE-001.md) echo "mv: recusado de propósito" >&2; exit 1 ;; esac\nexec %s "$@"\n' "$real_mv" > "$t/shim-$modo_int/mv" ;;
+      g2) _shim_bloqueio "$t/shim-$modo_int/mv" '*/ENTREGA.md|ENTREGA.md' depois "$t/marca-$modo_int" ;;
+      term|kill) _shim_bloqueio "$t/shim-$modo_int/mv" '*/RECONCILIACAO-BASE-001.md' antes "$t/marca-$modo_int" ;;
+      falha) printf '#!/usr/bin/env bash\nfor a in "$@"; do ultimo="$a"; done\ncase "$ultimo" in */RECONCILIACAO-BASE-001.md) echo "mv: recusado de propósito" >&2; exit 1 ;; esac\nexec %s "$@"\n' "$real_mv" > "$t/shim-$modo_int/mv"
+        chmod +x "$t/shim-$modo_int/mv" ;;
     esac
-    chmod +x "$t/shim-$modo_int/mv"
     # o temporário do registro fica num TMPDIR do teste: o SIGKILL impede o
     # encerrar do script de removê-lo, e a limpeza da suíte o remove
     tdi="$(mktemp -d)"; TMPS="$TMPS $tdi"
@@ -1583,15 +1649,10 @@ grupo_cadeia() {
       else
         env TMPDIR="$tdi" PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
       fi
-      pid=$!; i=0
-      while [ "$i" -lt 150 ]; do
-        [ -e "$AR2" ] && ! cmp -s "$FX_ENTREGA" "$t/int-e0.md" && break
-        sleep 0.1; i=$((i + 1))
-      done
+      pid=$!
+      _espera_ponto "$pid" "$t/marca-$modo_int" "$modo_int"
       { [ -e "$AR2" ] && ! cmp -s "$FX_ENTREGA" "$t/int-e0.md"; } && ok "$modo_int: chegou depois do ponto de commit" || falha "$modo_int: não chegou ao ponto de commit"
-      sleep 0.3
-      if [ "$modo_int" = kill ]; then kill -KILL -- -"$pid" 2>/dev/null; else kill -TERM "$pid" 2>/dev/null; fi
-      wait "$pid" 2>/dev/null
+      if [ "$modo_int" = kill ]; then _interrompe "$pid" KILL "$t/marca-$modo_int" "$modo_int"; else _interrompe "$pid" TERM "$t/marca-$modo_int" "$modo_int"; fi
       # SIGKILL deixa a trava C5 órfã: liberá-la é decisão humana
       [ "$modo_int" = kill ] && rm -rf "$(bash "$TRAVA" --caminho | sed 's/^trava=//')"
     fi
@@ -1791,14 +1852,12 @@ grupo_cadeia() {
   "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "kill-antes: registro do 001"
   cp "$AR" "$t/ka-a1.md"; cp "$FX_ENTREGA" "$t/ka-e.md"
   tdi="$(mktemp -d)"; TMPS="$TMPS $tdi"
-  setsid env TMPDIR="$tdi" PATH="$t/shim-lento:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
-  pid=$!; i=0
-  while [ "$i" -lt 150 ]; do
-    [ -e "$AR2" ] && ls docs/entregas/ft-rec/ENTREGA.md.registro.* >/dev/null 2>&1 && break
-    sleep 0.1; i=$((i + 1))
-  done
-  sleep 0.3
-  kill -KILL -- -"$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  mkdir -p "$t/shim-ka"
+  _shim_bloqueio "$t/shim-ka/mv" '*/ENTREGA.md|ENTREGA.md' antes "$t/marca-ka"
+  setsid env TMPDIR="$tdi" PATH="$t/shim-ka:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
+  pid=$!
+  _espera_ponto "$pid" "$t/marca-ka" "kill-antes"
+  _interrompe "$pid" KILL "$t/marca-ka" "kill-antes"
   rm -rf "$(bash "$TRAVA" --caminho | sed 's/^trava=//')"
   ls docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md.superada.* >/dev/null 2>&1 && falha "kill-antes: ficou sobra .superada" || ok "kill-antes: nenhuma sobra .superada (preparada só depois do ponto de commit)"
   { [ -e "$AR2" ] && cmp -s "$AR" "$t/ka-a1.md" && cmp -s "$FX_ENTREGA" "$t/ka-e.md"; } && ok "kill-antes: 002 órfão, 001 e ENTREGA.md intactos" || falha "kill-antes: estado inesperado"
