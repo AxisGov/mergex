@@ -35,7 +35,7 @@ CHECKPOINT=""
 
 uso() {
   printf '%s\n' \
-    'uso: persistir-metodo.sh --listar|--persistir|--verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> --checkpoint <pre-e2|pre-e6|e8>' >&2
+    'uso: persistir-metodo.sh --listar|--persistir|--verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> --checkpoint <pre-e2|reconciliacao-base|pre-e6|e8>' >&2
   exit 64
 }
 
@@ -54,7 +54,7 @@ done
 
 case "$MODO" in listar|persistir|verificar) ;; *) uso ;; esac
 case "$ORIGEM" in sprintx|runx) ;; *) uso ;; esac
-case "$CHECKPOINT" in pre-e2|pre-e6|e8) ;; *) uso ;; esac
+case "$CHECKPOINT" in pre-e2|reconciliacao-base|pre-e6|e8) ;; *) uso ;; esac
 case "$TRABALHO" in
   ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto) uso ;;
 esac
@@ -123,22 +123,8 @@ BRANCH="$(git branch --show-current 2>/dev/null)" || BRANCH=""
 [ -n "$BRANCH" ] || para 'HEAD destacado: branch não pode provar consistência'
 [ "$(fm "$RAIZ/$ENTREGA" branch)" = "$BRANCH" ] || para "branch ativa diverge de ENTREGA.branch"
 
-if [ "$ORIGEM" = sprintx ]; then
-  CANONICA="docs/sprintx/features/$TRABALHO"
-  LEGADA="docs/$TRABALHO"
-  if [ -d "$RAIZ/$CANONICA" ] && [ -d "$RAIZ/$LEGADA" ]; then
-    para "há duas pastas SprintX para $TRABALHO"
-  elif [ -d "$RAIZ/$CANONICA" ]; then
-    PASTA="$CANONICA"
-  elif [ -d "$RAIZ/$LEGADA" ]; then
-    PASTA="$LEGADA"
-  else
-    para "pasta SprintX do trabalho não existe"
-  fi
-else
-  PASTA="docs/manutencao/$TRABALHO"
-  [ -d "$RAIZ/$PASTA" ] || para "pasta RunX do trabalho não existe"
-fi
+catalogo_pasta_do_trabalho "$RAIZ" "$ORIGEM" "$TRABALHO" >/dev/null || para "$CATALOGO_ERRO" # guarda:PASTA-CATALOGO
+PASTA="$CATALOGO_PASTA"
 
 ORQUESTRADOR="$RAIZ/$PASTA/ORQUESTRADOR.md"
 [ -f "$ORQUESTRADOR" ] && [ ! -L "$ORQUESTRADOR" ] || para "$PASTA/ORQUESTRADOR.md não é arquivo regular"
@@ -696,7 +682,8 @@ confere_historico_corrente() {
 # existe, é arquivo regular e está dirty.
 TMP_CATALOGO="$(mktemp "${TMPDIR:-/tmp}/mergex-catalogo.XXXXXX")" || para 'não foi possível criar catálogo temporário'
 catalogo_metodo "$RAIZ" "$ORIGEM" "$TRABALHO" "$PASTA" "$CHECKPOINT" > "$TMP_CATALOGO" || para "$CATALOGO_ERRO"
-[ "$ORIGEM" = sprintx ] && confere_historico_corrente
+# O checkpoint reconciliacao-base nunca leva o HISTORICO global.
+[ "$ORIGEM" = sprintx ] && [ "$CHECKPOINT" != reconciliacao-base ] && confere_historico_corrente
 while IFS= read -r caminho; do
   [ -n "$caminho" ] || continue
   adiciona "$caminho"
