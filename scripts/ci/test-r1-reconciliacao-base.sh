@@ -1630,6 +1630,129 @@ grupo_cadeia() {
     cd "$REPO" || return
   done
 
+  # ---- o resíduo é reconhecido pela estrutura, nunca pelo texto ------------
+  local frase='registro interrompido: rode --registrar de novo com o mesmo --merge/M' err
+  # X1b/X1c/X2b: cadeia 001 -> 002 completa; o 001 traz a frase num valor
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "X: registro do 001"
+  "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 || falha "X: registro do 002"
+  cp "$AR" "$t/x-a1.md"; cp "$AR2" "$t/x-a2.md"
+  sed "s|^estado: superada\$|estado: $frase|" "$t/x-a1.md" > "$AR"
+  reprova "X1b: 001 com a frase no estado não completa (cadeia ilegível)" 5 "cadeia ilegível: RECONCILIACAO-BASE-001.md" -- "$FX_NOVO3"
+  sed "s|^expx_tool: sprintx\$|expx_tool: $frase|" "$t/x-a1.md" > "$AR"
+  reprova "X1c: 001 com a frase no expx_tool não completa" 5 "cadeia ilegível: RECONCILIACAO-BASE-001.md" -- "$FX_NOVO3"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" README.md || falha "X2: forja do 002"
+  sed "s|^estado: superada\$|estado: $frase|" "$t/x-a1.md" > "$AR"
+  reprova "X2b: 002 forjado com README + 001 com a frase: rc da falha real" 5 "cadeia ilegível: RECONCILIACAO-BASE-001.md" -- "$FX_NOVO3" README.md
+  rc_igual "X2b: --verificar reprova" 5 "${v[@]}"
+  cp "$t/x-a1.md" "$AR"; cp "$t/x-a2.md" "$AR2"
+  # sufixo não numérico não é sobra: o registro recusa a pasta suja (3) e a
+  # verificação, o nome fora do padrão (5)
+  cp "$AR" "$AR.superada.12a"
+  reprova "sobra com sufixo não numérico não é sobra (registro)" 3 "RECONCILIACAO-BASE-001.md.superada.12a" -- "$FX_NOVO3"
+  out="$("${v[@]}" 2>&1)"; c=$?
+  { [ "$c" = 5 ] && printf '%s\n' "$out" | grep -q 'RECONCILIACAO-BASE-001.md.superada.12a: nome fora do padrão'; } \
+    && ok "sobra com sufixo não numérico não é sobra (verificar: nome fora do padrão)" || falha "sufixo não numérico: rc=$c $(printf '%s' "$out" | tr '\n\t' '|>')"
+  rm -f "$AR.superada.12a"
+  # só a sobra, com a penúltima já superada: não é resíduo de registro
+  # interrompido (falta a penúltima ativa) e nada a remove sozinho
+  cp "$AR" "$AR.superada.777"
+  reprova "só a sobra (penúltima já superada): rc 5, nada completado" 5 "a cadeia de reconciliações existente não verifica" -- "$FX_NOVO3"
+  [ -f "$AR.superada.777" ] && ok "só a sobra: ela continua lá" || falha "só a sobra: foi removida"
+  rm -f "$AR.superada.777"
+  cd "$REPO" || return
+
+  # resíduo legítimo (o mv do anterior falha depois do ponto de commit)
+  # combinado com outra falha: nunca completa
+  _residuo() { # <dir>
+    fx_cenario "$1" && fx_segunda_base "$1" ajusta && cd "$1" || return 1
+    "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || return 1
+    env PATH="$t/shim-falha:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1
+    [ -e "$AR2" ] && grep -q '^estado: ativa$' "$AR"
+  }
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" README.md || falha "resíduo+prova: forja do 002"
+  reprova "resíduo + prova reprovada no 002: rc 4, sem conclusão" 4 "prova 1: README.md" -- "$FX_NOVO3" README.md
+  grep -q '^estado: ativa$' "$AR" && ok "resíduo + prova: o 001 continua ativa" || falha "resíduo + prova: o 001 mudou"
+  cd "$REPO" || return
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  sed -i 's/^estado: ativa$/estado: quebrado/' "$AR2"
+  reprova "resíduo + última ilegível: rc 5 cadeia ilegível, sem conclusão" 5 "cadeia ilegível: RECONCILIACAO-BASE-002.md" -- "$FX_NOVO3"
+  cd "$REPO" || return
+  # X9: resíduo + a frase num campo não assinado da última que só a
+  # verificação lê (branch): o artefato é lido, mas a falha não é resíduo
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  sed -i "s|^branch: .*|branch: \"$frase\"|" "$AR2"
+  rb_validar "$AR2" ft-rec 2 || falha "X9: o 002 com a frase no branch deveria continuar válido: $RB_ERRO"
+  reprova "X9: resíduo + frase no branch da última: rc 5, sem conclusão" 5 "branch ($frase) diverge de ENTREGA.branch" -- "$FX_NOVO3"
+  grep -q '^estado: ativa$' "$AR" && ok "X9: o 001 continua ativa" || falha "X9: o 001 mudou"
+  cd "$REPO" || return
+  # X7: sobra rastreada nunca é removida pelo registro
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  printf 'commitada\n' > "$AR.superada.99"
+  git add -f -- "$AR.superada.99" && git commit -q -m "sobra commitada" -- "$AR.superada.99" || falha "X7: commit da sobra"
+  reprova "X7: sobra rastreada: rc 5 com instrução, nada removido" 5 "sobra rastreada: RECONCILIACAO-BASE-001.md.superada.99; remova-a com um commit" -- "$FX_NOVO3"
+  { [ -f "$AR.superada.99" ] && ! git status --porcelain=v1 | grep -q '^ D'; } && ok "X7: a sobra rastreada ficou" || falha "X7: a sobra rastreada foi removida"
+  grep -q '^estado: ativa$' "$AR" && ok "X7: o 001 continua ativa" || falha "X7: o 001 mudou"
+  cd "$REPO" || return
+
+  # três elos com a ANTEPENÚLTIMA ativa: não é resíduo, não completa
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" reajusta || { falha "segunda base não montou"; return; }
+  fx_terceira_base "$d" || { falha "terceira base não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 \
+    && "${r[@]}" --merge "$FX_M2" -- "$FX_NOVO3" "$FX_NOVO1" >/dev/null 2>&1 \
+    && "${r[@]}" -- "$FX_NOVO4" >/dev/null 2>&1 || falha "antepenúltima: cadeia de três"
+  sed -i 's/^estado: superada$/estado: ativa/' "$AR"
+  err="$("${r[@]}" -- "$FX_NOVO4" 2>&1 >/dev/null)"; c=$?
+  { [ "$c" = 5 ] && ! printf '%s' "$err" | grep -q 'registro interrompido'; } \
+    && ok "antepenúltima ativa: rc 5, sem instrução de registro interrompido" || falha "antepenúltima: rc=$c $err"
+  grep -q '^estado: ativa$' "$AR" && grep -q '^estado: superada$' "$AR2" && ok "antepenúltima: nada completado" || falha "antepenúltima: estados mudaram"
+  out="$("${v[@]}" 2>&1)"
+  printf '%s' "$out" | grep -q 'registro interrompido' && falha "antepenúltima: o --verificar fala em registro interrompido" || ok "antepenúltima: o --verificar não fala em registro interrompido"
+  cd "$REPO" || return
+
+  # SIGKILL ANTES do ponto de commit: nenhuma sobra .superada; o órfão tem
+  # instrução que leva ao registro
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "kill-antes: registro do 001"
+  cp "$AR" "$t/ka-a1.md"; cp "$FX_ENTREGA" "$t/ka-e.md"
+  tdi="$(mktemp -d)"; TMPS="$TMPS $tdi"
+  setsid env TMPDIR="$tdi" PATH="$t/shim-lento:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
+  pid=$!; i=0
+  while [ "$i" -lt 150 ]; do
+    [ -e "$AR2" ] && ls docs/entregas/ft-rec/ENTREGA.md.registro.* >/dev/null 2>&1 && break
+    sleep 0.1; i=$((i + 1))
+  done
+  sleep 0.3
+  kill -KILL -- -"$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  rm -rf "$(bash "$TRAVA" --caminho | sed 's/^trava=//')"
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md.superada.* >/dev/null 2>&1 && falha "kill-antes: ficou sobra .superada" || ok "kill-antes: nenhuma sobra .superada (preparada só depois do ponto de commit)"
+  { [ -e "$AR2" ] && cmp -s "$AR" "$t/ka-a1.md" && cmp -s "$FX_ENTREGA" "$t/ka-e.md"; } && ok "kill-antes: 002 órfão, 001 e ENTREGA.md intactos" || falha "kill-antes: estado inesperado"
+  reprova "kill-antes: o ENTREGA.md.registro sobra (pasta suja)" 3 "ENTREGA.md.registro" -- "$FX_NOVO3"
+  rm -f docs/entregas/ft-rec/ENTREGA.md.registro.*
+  reprova "kill-antes: o 002 órfão, com instrução" 5 "artefato órfão de registro interrompido: RECONCILIACAO-BASE-002.md; remova-o e registre de novo" -- "$FX_NOVO3"
+  rm -f "$AR2"
+  rc_igual "kill-antes: seguida a instrução, o M2 registra" 0 "${r[@]}" -- "$FX_NOVO3"
+  cd "$REPO" || return
+  # órfão + sobra (estado de versão anterior): a instrução nomeia os dois
+  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
+  cd "$d" || return
+  "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "órfão+sobra: registro do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "órfão+sobra: emissão do órfão"
+  cp "$AR" "$AR.superada.4242"
+  reprova "órfão + sobra: a instrução nomeia os dois" 5 \
+    "artefato órfão de registro interrompido: RECONCILIACAO-BASE-002.md; remova RECONCILIACAO-BASE-002.md e RECONCILIACAO-BASE-001.md.superada.4242 e registre de novo" -- "$FX_NOVO3"
+  rm -f "$AR2" "$AR.superada.4242"
+  rc_igual "órfão + sobra: seguida a instrução, o M2 registra" 0 "${r[@]}" -- "$FX_NOVO3"
+  cd "$REPO" || return
+
   # ---- a cadeia existente é verificada antes de servir de base -------------
   d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
