@@ -22,7 +22,7 @@ importam mais, e onde um hook mal escrito faz mais estrago.
 | `branch-limpa` | `PreToolUse` | **bloqueio** | Barra criação ou troca de branch com alteração não commitada pendente |
 | `commit-por-task` | `PreToolUse` | aviso¹ | Verifica que o commit corresponde a **uma** task, `concluida` e com registro de suíte válido (`parcial` ou `verde`); e que nenhum arquivo em preparação pertence **só a outra task** da feature |
 | `arquivo-fora-do-plano` | `PreToolUse` | aviso | Compara o que está em preparação com a lista declarada na task. Artefato de método do **próprio** trabalho é isento; o de outro trabalho, não |
-| `pr-so-com-portao` | `PreToolUse` | aviso² | Barra push e abertura de PR sem `PRONTO` registrado; com algum `PRONTO` que não vale no repositório, barra todo comando de publicação |
+| `pr-so-com-portao` | `PreToolUse` | aviso² | Aviso antecipado no `git push`: avisa quando não determina o push; bloqueia só o push simples que a regra do `pre-push` prova inválido e o `--no-verify` |
 
 Os três de segurança nascem em bloqueio: segredo commitado não tem volta, e o
 falso positivo ali é raro. Os três de método nascem em aviso, e só sobem a
@@ -82,224 +82,131 @@ classificam pela mesma implementação, nunca por regras divergentes.
 A mergex só **detecta e nomeia** a condição (`arquivo_de_task_irma`). Abrir
 `B-NN` e replanejar é da sprintx.
 
-### ² A exceção do `pr-so-com-portao`: portão `pronto` que não vale
+### ² O `pr-so-com-portao`: aviso antecipado, não barreira
 
-O hook **decide pelo estado do repositório, não pela leitura do comando**. Ler
-o shell por texto nunca cobre tudo: `xargs`, função, `-c remote.*.push=`,
-subshell, plumbing. Tudo sai do Git, nunca do disco.
+A barreira de push da MergeX (DM-184; spec de reconciliação pós-E8, seção
+13, itens 5, 7 e 8) tem três camadas. As três aplicam a mesma regra,
+`scripts/portao-regras.sh`, que roda `validade-do-portao.sh --rev` sobre o SHA
+enviado, e leem o mesmo modo (`pr-so-com-portao` em `.expx/hooks.json`):
 
-**1. Gatilho largo.** O hook dispara quando o comando contém, como palavra, um
-termo de publicação:
-
-- `push`, `send-pack` ou `subtree`, também na forma do executável do
-  subcomando: `git-push`, `git-send-pack` e `git-subtree`
-  (`/usr/lib/git-core/git-push`, `"$(git --exec-path)"/git-push`);
-- `pr` ou `mr` seguido, em qualquer posição, de `create` ou `new`.
-
-A fronteira antes do termo (ou do `git-`) é o início do comando ou qualquer
-caractere fora de letra, dígito, `_` e `-`: espaço, `/`, aspas. Depois, a
-mesma. Por isso `npm run git-push-notifications` não dispara.
-
-Não importa se o termo está dentro de aspas, função, `xargs` ou subshell. O
-hook não tenta entender o comando para decidir se dispara. Sem termo de
-publicação (`git status`, `npm run push-notifications`), sai na hora.
-
-**2. Varredura do estado.** O hook varre o repositório do `cwd` e todo
-diretório literal citado no comando que seja outro repositório Git:
-
-- `cd X` e `pushd X`, com ou sem opções: o diretório é o primeiro argumento
-  que não começa com `-` (`cd -P X`, `cd -L X`, `pushd -n X`), ou o que vem
-  depois de `--` (`cd -- X`);
-- `-C X`, inclusive `env -C X`, e `--chdir X`;
-- `--git-dir=X` e `--work-tree=X`;
-- `GIT_DIR=X`, `GIT_WORK_TREE=X` e `GIT_COMMON_DIR=X`.
-
-**Diretório corrente encadeado.** Um `X` relativo se resolve como o shell e o
-git o resolvem: contra o diretório em vigor naquele ponto do comando, não
-contra o `cwd` inicial.
-
-- O diretório corrente começa no `cwd` do hook e muda com `cd`/`pushd` em
-  posição de comando (inclusive `builtin cd` e `command cd`), para os
-  segmentos seguintes.
-- O `cd` de dentro de um subshell `( … )` não vaza para fora. Um `)` sem `(`
-  deixa o diretório corrente desconhecido.
-- Dentro de um segmento, `-C` e `env -C` se compõem (`git -C .. -C wt`).
-  `--git-dir`, `--work-tree` e `GIT_*=` relativos se resolvem contra o
-  diretório depois dos `-C` e também contra o diretório corrente do shell;
-  as duas leituras são varridas.
-- `~` e `~/…` viram `$HOME`, e `cd` sem argumento vai para `$HOME`.
-- `cd -`, `pushd +N`/`-N`, `pushd` sem argumento, `popd` e caminho com
-  expansão deixam o diretório corrente desconhecido: dali em diante, um
-  relativo não se resolve (risco residual).
-
-**Independente da worktree.** Cada candidato vira o diretório Git **comum**
-do repositório (`git rev-parse --path-format=absolute --git-common-dir`, com
-o fallback de ler o `.git`/`gitdir:` e o `commondir`). Isso vale para árvore,
-subdiretório, `.git` e o gitdir de uma worktree vinculada
-(`<repo>/.git/worktrees/<wt>`). O `for-each-ref`, o `git grep` e a validade
-rodam com `--git-dir=<comum>` (a validade, com `GIT_DIR`/`GIT_WORK_TREE` no
-comum): um `core.worktree` inválido não tira o repositório da varredura. Um
-candidato que existe e parece Git (tem `.git` nele ou acima), mas cujo
-diretório comum não se resolve de jeito nenhum, barra com `exit 2`.
-
-Em cada repositório, para **cada branch local**, ele procura o
-`docs/entregas/<id>/ENTREGA.md` da **ponta** dessa branch que declara
-`branch: <essa branch>`. São um `for-each-ref` e um `git grep` sobre as
-pontas. Quando esse ENTREGA registra `portao: pronto`, o portão tem de valer:
-
-`scripts/validade-do-portao.sh --verificar --entrega <ENTREGA> --rev <ponta>`
-
-Só `ok=true` **com** código 0 conta como prova. Qualquer outra resposta barra
-com `exit 2` em **qualquer** modo, `desligado` inclusive (spec de
-reconciliação pós-E8, §4.5 e §13.5):
-
-- `ok=false`;
-- validade ausente ao lado dos hooks;
-- `erro_ambiente`;
-- código fora de 0/1.
-
-A mensagem nomeia a branch, o trabalho, o `motivo` e o `primeiro_commit`, e
-manda rodar o E2 de novo (`/mergex-check`). Se a branch estiver abandonada, a
-outra saída é apagá-la: o portão dela deixa de contar.
-
-A varredura **para na primeira falha**: o hook barra na hora e não valida o
-resto. Uma mesma ponta com o mesmo ENTREGA é validada uma vez só por chamada.
-
-**Tempo e timeout.** Um hook que estoura o `timeout` **não bloqueia**: o
-comando segue. Por isso este hook tem `timeout: 60` no `.claude/settings.json`
-e 60 s no plugin do OpenCode (`TEMPO_POR_HOOK`). No Claude Code, os outros
-hooks ficam com 10 s e o `git-perigoso` com 30 s; no OpenCode, todos os outros,
-`git-perigoso` inclusive, ficam no limite único de 10 s (`TEMPO_LIMITE`).
-
-**Prazo próprio, que falha fechado.** Como o timeout do harness libera o
-comando, o hook tem um prazo interno de **45 s**, contado desde o início da
-execução. Ele é verificado antes de cada validade e passado a ela como limite
-(`timeout` do coreutils, quando existe). Estourou: `exit 2` em qualquer modo,
-com a mensagem `varredura do portão excedeu o prazo; rode /mergex-check ou
-apague branches abandonadas`. Só a bancada (`EXPX_HOOKS_BANCADA=1`) pode
-reduzir o prazo, por `EXPX_PORTAO_PRAZO_TESTE`; nunca aumentá-lo. O relógio
-(`SECONDS`) é zerado no início do hook: um valor herdado do ambiente não
-antecipa nem desliga o prazo.
-
-**Sem `timeout` no PATH** (macOS sem coreutils, por exemplo), o prazo só é
-conferido entre as validades: antes de cada uma e depois dela. Uma validade
-isolada que passe de 60 s pode cair no timeout do harness, e o comando segue.
-Com `timeout`/`gtimeout`, a validade é cortada no prazo.
-
-O custo de cada validade cresce com os commits de método depois do portão.
-Medido no WSL (média de 3 chamadas, `git push origin main` com todos os
-portões válidos):
-
-| Situação | Tempo |
+| Camada | Papel |
 |---|---|
-| 50 portões `pronto` válidos, 2 commits de método cada | ~12 s (~0,24 s por validade) |
-| 20 portões `pronto` válidos, 12 commits de método cada | ~23,6 s (~1,2 s por validade) |
-| 40 portões `pronto` válidos, 12 commits de método cada | barra pelo prazo em ~45 s |
-| 50 portões `pronto` válidos, 12 commits de método cada | barra pelo prazo em ~45 s |
-| nenhum portão `pronto`, 50 branches (medição anterior) | ~0,5 s |
-| 50 vencidos, para na primeira (medição anterior) | ~0,5 s |
-| comando sem termo de publicação | ~20–35 ms |
+| `pre-push` do Git (`portao-push.sh`, ativado e provado pelo E0 e pelo E2) | Barreira local **autoritativa contra erro normal**. Decide pelas refs e SHAs que o Git entrega, qualquer que seja o comando que disparou o push: `cd … &&`, `bash -c`, `xargs`, função ou alias chegam iguais |
+| Este hook | **Aviso antecipado.** Antecipa o diagnóstico quando consegue provar o resultado; no resto, avisa e deixa o Git seguir até o `pre-push` |
+| CI com proteção de merge (`portao-ci.sh` e o template em `assets/ci/`) | Barreira **contra contorno deliberado**, inclusive `--no-verify`. Esta branch entrega o executável e o template e não ativa CI em produto nenhum |
 
-Branches suportadas antes do prazo: cerca de **185** portões `pronto` válidos
-simultâneos com 2 commits de método cada, e cerca de **38** com 12 commits de
-método cada. Acima disso o hook não libera mais nada: todo comando de
-publicação barra pelo prazo até as branches abandonadas serem apagadas.
+O hook não é fronteira de segurança. Ler o texto do shell nunca cobre tudo
+(alias, função, config de push, plumbing), e o que ele não consegue determinar
+vira aviso, nunca bloqueio.
 
-A validade não tem "caminho curto" para `portao_sha` igual à revisão: esse caso
-não ocorre. O `ENTREGA.md` da revisão teria de conter o SHA do próprio commit
-que o contém, e o SHA depende do conteúdo. Todo portão válido tem pelo menos o
-commit de método que o registrou no intervalo.
+**Quando ele age.** Num comando que publica: `git` como programa seguido de
+`push`, `send-pack` ou `subtree push` (com opções globais no meio), ou o
+executável `git-push`/`git-send-pack`, inclusive dentro de `bash -c`, `xargs`,
+função ou subshell. Citação (`echo push`, `git log --grep push`), outro
+programa (`docker push`, `npm run push-notifications`) e abertura de PR
+(`gh pr create`) saem na hora, calados: o PR só expõe o que já chegou ao
+remoto por um push.
 
-Isso independe do HEAD e da branch ativa. Por isso também vale:
+**1. `--no-verify` reconhecido: bloqueia** (`exit 2`, em qualquer modo,
+`desligado` inclusive). O `--no-verify` faz o Git pular o `pre-push`, e a
+mensagem diz isso e aponta o CI como a barreira contra esse contorno.
+Reconhecido é um segmento cujo programa é o `git` (ou um executor como
+`bash -c`, `env` ou `xargs`) com `push` e o `--no-verify` literal depois dele.
+`git commit --no-verify` não é push, e a citação
+(`echo "git push --no-verify"`) não executa nada.
 
-- no primeiro trabalho MergeX do projeto, quando a main ainda não tem
-  `docs/entregas`;
-- com o `ENTREGA.md` do disco apagado, editado ou não rastreado.
+**2. Bloqueia só com prova** (`exit 2`), quando tudo isto vale:
 
-A entrega de um trabalho já integrado à main não é o portão da main, porque
-declara outra branch.
+- o comando é um único `git push` simples: uma linha, sem `;`, `&&`, `||`,
+  `|`, subshell, `cd`, `-C` ou outra opção global, prefixo de ambiente, aspas
+  ou expansão;
+- as opções não mudam quais refs sobem (`-u`, `-v`, `-q`, `-o`, `--force*`,
+  `--atomic`, `--follow-tags`…). `--all`, `--mirror`, `--tags`, `--delete`,
+  `--dry-run`, `--repo` e qualquer outra deixam o push indeterminado;
+- o repositório do cwd se lê pelo Git (`git rev-parse --show-toplevel`) e não
+  tem `remote.<nome>.push` nem `remote.<nome>.mirror` configurado;
+- cada refspec resolve sem ambiguidade. A origem é `HEAD`, uma branch local
+  sem tag ou remota homônima, um SHA ou uma expressão que o Git resolve num
+  commit. O destino vem do refspec ou, sem refspec, da branch atual pelo
+  `push.default` (`simple`, `current` ou `upstream`);
+- `pr_decide_ref` dá `barra` para alguma ref por um motivo do portão:
+  - vencido: `commit_de_produto`, `commit_merge`, `metodo_fora_do_catalogo`,
+    `portao_sha_nao_ancestral`;
+  - ausente ou inconsistente: `portao_sha_ausente`, `portao_nao_pronto`
+    (inclusive `portao: bloqueado`);
+  - `historia_incompleta` ou `caminho_com_controle`;
+  - `portao: null` com o modo `bloqueio`.
 
-**Custo aceito.** Enquanto houver portão vencido no repositório, **qualquer**
-comando com termo de publicação é barrado, inclusive citações como
-`git log --grep push` e `echo push`. A mensagem diz isso e manda corrigir o
-portão. Com todos os portões válidos, esses comandos passam. Um repositório
-sem MergeX nunca é barrado por este hook.
+O hook passa a `pr_decide_ref` o SHA enviado e o SHA remoto **nulo**: lê só a
+árvore do SHA enviado e a ponta local da branch, um subconjunto do que o
+`pre-push` lê. Assim ele nunca barra o que o `pre-push` deixaria passar. Uma
+ref aplicável inválida barra o push inteiro, como no `pre-push`. A mensagem
+nomeia a ref, o SHA, o motivo e o primeiro commit, e manda rodar o E2
+(`/mergex-check`).
 
-**3. Refinamento: `null` e `bloqueado`.** A leitura por token do push, a mesma
-do `mergex/git-perigoso` (`expx_segmentos`/`expx_push_le`, em `comum/base.sh`),
-continua com dois usos:
+**3. Em qualquer outro caso, avisa e sai 0.** O aviso vai ao stderr (Claude
+Code) e ao JSON do stdout (OpenCode). Os casos:
 
-- identificar as branches que o comando empurra;
-- dar contexto à mensagem.
+- comando composto, com expansão, opção global, prefixo de ambiente ou mais de
+  uma linha;
+- cwd que o Git não lê: fora de repositório, `.git` que não se resolve,
+  caminho UNC, `dubious ownership`;
+- opção, config ou refspec que o hook não lê sem ambiguidade (origem ambígua
+  ou que não resolve, destino `HEAD`);
+- `erro_ambiente` ou `entrega_indeterminada` da regra: o ambiente impediu a
+  avaliação, e isso não prova nada sobre o push;
+- validade que não termina dentro do orçamento, ou sem `timeout` funcional;
+- `portao-regras.sh` ausente ao lado dos hooks.
 
-Quando a branch empurrada é de um trabalho cujo ENTREGA, na revisão
-empurrada, diz `null` ou `bloqueado`, vale o modo configurado, como sempre:
-`aviso` avisa, `bloqueio` barra, `desligado` não age.
+**Modo.** É o de `pr_modo_null`, o mesmo do `pre-push` e do CI. Com
+`portao: null`: `bloqueio` barra, `aviso` avisa, `desligado` passa. Modo
+inválido ou `.expx/hooks.json` ilegível valem como `bloqueio`. O modo nunca
+afrouxa o portão vencido, ausente, inconsistente ou bloqueado.
+`desligado` silencia os avisos do hook, mas não pula a regra do portão no push
+simples nem o `--no-verify`. A suíte `scripts/ci/test-r2-barreira-push.sh modo`
+dá a mesma entrada aos três consumidores e exige a mesma decisão.
 
-A abertura de PR (`gh pr create|new`, `gh -R <repo> pr create`,
-`glab mr create|new`) conta para a branch ativa, ou para a de
-`--head`/`--source-branch`. Isso só vale quando `gh`/`glab` é o programa:
-`grep 'gh pr create'` não abre PR.
+**Tempo.** O hook inteiro cabe num orçamento interno de **8 s**
+(`ORCAMENTO=8`), abaixo do `timeout` de 10 s do harness, que é o mesmo dos
+outros hooks no `.claude/settings.json` e o limite único (`TEMPO_LIMITE`) do
+plugin do OpenCode. A regra roda num processo filho com o `timeout` do
+coreutils. Ele só é aceito depois de provar, pelo comportamento, que mata um
+processo no prazo (`timeout 0.2 sleep 3` sai 124 em menos de 2 s), a mesma
+técnica de `ativacao-pre-push.sh`. Sem `timeout` funcional, ou com o
+orçamento estourado, o hook avisa e sai 0, e o processo filho morre inteiro.
 
-**Origem explícita.** Há um caso em que a leitura por token acrescenta uma
-checagem ao `pronto`: o destino é a branch de um trabalho com `pronto` e a
-origem não é a ponta local dessa branch. Exemplos: `git push origin
-<sha>:feature/x`, `HEAD~1:refs/heads/feature/x`, `main:feature/x`.
+São uma validade por ref enviada, nenhuma varredura de branches e nenhum laço
+de subida de diretório. Um cwd `//` ou UNC sem repositório avisa na hora.
 
-Nesse caso a validade roda também sobre a **origem**
-(`--rev <origem resolvida>`), porque é ela que sobe. Origem que não resolve
-num commit barra. As duas regras valem em qualquer modo. Com
-`feature/x:feature/x`, ou com o SHA da própria ponta, vale a ponta, que a
-varredura já validou.
+**Git for Windows sobre `\\wsl.localhost\...`.** O Git for Windows recusa um
+repositório do WSL sem uma exceção de `safe.directory` (`dubious ownership`).
+O hook então avisa, e a mensagem diz que a exceção na config **global** é
+pré-requisito do `pre-push` no Git for Windows:
 
-Fora isso, a leitura por token **não** decide a liberação de um portão
-`pronto`: quem decide é a varredura.
+```
+git config --global --add safe.directory '<caminho do repositório>'
+```
 
-**Riscos residuais — é uma barreira de agente, não de segurança contra
-adversário.**
+O hook tira o CR que o `jq.exe` do Windows escreve antes de comparar.
 
-- **Diretório não literal.** Um diretório citado com expansão (`cd $D`,
-  `GIT_DIR=$X`, `~outro`) não é varrido. O hook só varre o `cwd` e os
-  diretórios literais (`~` e `~/…` são expandidos para `$HOME`).
-- **Diretório corrente desconhecido.** `cd -` (o `OLDPWD` vem da shell do
-  harness), `pushd +N`/`-N`, `pushd` sem argumento e `popd` dependem de estado
-  que o texto não mostra: o diretório de destino não é varrido, e um relativo
-  citado depois deles não se resolve.
+**Limites.** O que o hook não lê vira aviso e fica com o `pre-push`:
+
+- **Alias de git.** Com `git config alias.p push`, `git p origin <branch>` não
+  é reconhecido como push e nem o aviso sai. O `pre-push` decide igual.
+- **Push que o hook não determina.** Comando composto, `cd`, `-C`,
+  `GIT_DIR=`, função, `xargs`, `bash -c`, `--all` e `--tags` avisam em vez de
+  bloquear, mesmo com o portão vencido.
 - **Publicação puxada pelo remoto.** Com um remoto no sistema de arquivos,
-  `git -C <remoto> fetch <wt> feature/x:feature/x` (ou `--git-dir=<remoto>
-  fetch`) grava a branch no remoto sem termo de publicação no comando, e o
-  hook não dispara. Num remoto de rede (GitHub, GitLab) não se aplica.
-- **Commit fora de ponta de branch.** Um commit que não é a ponta de nenhuma
-  branch local (SHA solto, HEAD destacado, branch só no remoto) não é varrido.
-  A exceção é quando ele é a origem explícita de um push para a branch local
-  de um trabalho com `pronto`. Destino sem branch local não é checado.
-- **Origem explícita só quando literal.** A checagem da origem explícita lê o
-  refspec no texto do comando. Um refspec que chega por fora do texto
-  (`echo <sha>:feature/x | xargs git push origin`) não é lido; vale só a
-  varredura da ponta local.
-- **Alias de git.** Com `git config alias.p push`, o comando `git p origin
-  <branch>` não tem termo de publicação e não dispara o hook.
-- **Ofuscação por aspas.** `git pu""sh origin <branch>` é um push para o shell,
-  mas o texto não tem o termo `push` como palavra e o hook não dispara. É a
-  mesma classe do alias.
-- **PR pela API.** `gh api repos/<o>/<r>/pulls -f head=<branch> …` abre um PR
-  sem termo de publicação no comando, e o hook não dispara. Ele só expõe o que
-  já está no remoto: o código chegou lá por um push, que passou pelo hook.
-- **Tempo.** O prazo interno de 45 s falha fechado: acima dele, o hook barra
-  em vez de deixar passar. O custo de cada validade cresce com os commits de
-  método depois do portão (E4, E5, E8 acumulam em branches entregues que
-  ficam locais). Ver a tabela acima: com muitos portões `pronto` válidos ao
-  mesmo tempo, todo comando de publicação passa a ser barrado pelo prazo até
-  as branches abandonadas serem apagadas.
+  `git -C <remoto> fetch <wt> feature/x:feature/x` grava a branch no remoto
+  sem push. Isso não passa nem pelo hook nem pelo `pre-push`: a barreira é o
+  CI.
+- **`send-pack`.** O `git send-pack` não roda o `pre-push`. O hook só avisa,
+  e a barreira é o CI.
 
-**Recomendação.** A garantia forte é rodar `validade-do-portao.sh` fora do
-agente:
-
-- num job de CI, sobre o SHA do PR;
-- ou num hook `pre-push` do Git, que recebe as refs realmente enviadas.
-
-O hook de agente evita o erro comum. O CI ou o `pre-push` fecham o que o texto
-do comando não mostra.
+A implementação anterior deste hook foi substituída pela DM-184. Ela varria o
+portão de todas as branches a cada comando, tinha um prazo de 45 s que falhava
+fechado e seguia o `cd` encadeado do texto do comando. Com dezenas de branches
+entregues, ela estourava o prazo e barrava push legítimo.
 
 ## Onde cada coisa mora
 
@@ -358,7 +265,7 @@ O modo vive em `.expx/hooks.json`, na raiz do projeto:
 |---|---|
 | `aviso` | Registra `regra_violada` no rastro e deixa passar |
 | `bloqueio` | Registra `acao_bloqueada`, sai com 2 e devolve o motivo ao modelo |
-| `desligado` | Não faz nada, nem registra — menos o portão `pronto` que não vale para a revisão publicada (²), que nenhum modo pula |
+| `desligado` | Não faz nada, nem registra — menos, no `pr-so-com-portao`, o push simples provadamente inválido e o `--no-verify` (²), que nenhum modo pula |
 
 Arquivo ausente: valem os padrões da tabela dos seis hooks. **Um hook de
 segurança nunca é rebaixado por arquivo ausente** — a ausência do arquivo não

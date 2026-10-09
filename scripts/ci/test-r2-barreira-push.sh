@@ -5,8 +5,9 @@
 # O pre-push do Git decide só pelo que o Git entrega (refs e SHAs), pela mesma
 # regra (portao-regras.sh -> validade-do-portao.sh --rev) e pelo mesmo modo
 # (pr-so-com-portao em .expx/hooks.json). Grupos: `prepush` (Task 14),
-# `ativacao` e `entrypoints` (Task 15); os de CI (16) e modo (17) entram
-# depois, na ordem de definição. Caso que depende de um ambiente ausente (Git
+# `ativacao` e `entrypoints` (Task 15), `ci` (Task 16) e `modo` (Task 17: a
+# mesma entrada no pre-push, no CI e no hook do Claude), na ordem de
+# definição. Caso que depende de um ambiente ausente (Git
 # for Windows sobre \\wsl.localhost) imprime NAO_EXECUTADO e nunca conta como ok.
 #
 # Todo push daqui é REAL, contra o remoto bare local criado no temporário do
@@ -1212,6 +1213,108 @@ grupo_ci() {
     && grep -Fq 'check de CI correspondente com a proteção de merge' "$BARREIRA_REF" \
     && grep -Fq 'os gates' "$BARREIRA_REF" \
     && ok "PR #192 fica em rascunho até instalação, CI e gates (os três itens no reference)" || falha "reference sem a condição do PR #192 com os três itens"
+  cd "$REPO" || return
+}
+
+# ---------------------------------------------------------------------------
+# Modo (Task 17): `portao: null` e os modos iguais nos três consumidores
+# ---------------------------------------------------------------------------
+
+HOOK_PR="$REPO/.claude/hooks/mergex/pr-so-com-portao.sh"
+
+# hook_decide <dir> <comando> — o hook do Claude: barra (exit 2), avisa (exit
+# 0 com aviso no stderr) ou passa (exit 0 calado)
+hook_decide() {
+  local e rc
+  e="$(jq -cn --arg c "$2" --arg w "$1" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}' \
+    | bash "$HOOK_PR" 2>&1 >/dev/null)"; rc=$?
+  case "$rc" in
+    2) printf 'barra\n' ;;
+    0) if [ -n "$e" ]; then printf 'avisa\n'; else printf 'passa\n'; fi ;;
+    *) printf 'rc%s\n' "$rc" ;;
+  esac
+}
+# pp_decide <dir> <sha> — o pre-push, por push REAL ao remoto atual (modo_igual
+# cria um bare novo antes de cada caso): barra (rc 1), avisa (rc 0 com
+# diagnóstico) ou passa (rc 0 calado)
+MD_N=0
+pp_decide() {
+  local out rc err
+  out="$(fx_push_real "$1" origin "$2:refs/heads/feature/ft-rec")"
+  rc="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  err="$(printf '%s\n' "$out" | sed -n 's/^stderr=//p')"
+  case "$rc" in
+    1) printf 'barra\n' ;;
+    0) if grep -Fq 'mergex pre-push' "$err" 2>/dev/null; then printf 'avisa\n'; else printf 'passa\n'; fi ;;
+    *) printf 'rc%s\n' "$rc" ;;
+  esac
+}
+# ci_decide <dir> <sha> — portao-ci.sh com a base do cenário (main)
+ci_decide() {
+  ci_roda "$1" "$2" feature/ft-rec
+  printf '%s\n' "$CI_OUT" | sed -n 's/^decisao=//p'
+}
+# modo_igual <desc> <passa|avisa|barra> <dir> <sha> — a MESMA entrada (a ref
+# refs/heads/feature/ft-rec com o SHA <sha>, SHA remoto nulo) no pre-push, no
+# CI e no hook (o push simples `git push origin <sha>:refs/heads/feature/ft-rec`):
+# decisões iguais, e iguais à esperada
+modo_igual() {
+  local desc="$1" esp="$2" dir="$3" sha="$4" h p c
+  # um bare novo e vazio por caso: o SHA remoto da ref é nulo, como no CI
+  MD_N=$((MD_N + 1))
+  remoto_novo "$dir" "modo$MD_N" || { falha "$desc — remoto novo"; return; }
+  [ -z "$(git -C "$FX_REMOTO" for-each-ref)" ] || { falha "$desc — o remoto novo não está vazio"; return; }
+  h="$(hook_decide "$dir" "git push origin $sha:refs/heads/feature/ft-rec")"
+  p="$(pp_decide "$dir" "$sha")"
+  c="$(ci_decide "$dir" "$sha")"
+  if [ "$h" = "$esp" ] && [ "$p" = "$esp" ] && [ "$c" = "$esp" ]; then
+    ok "$desc: pre-push, CI e hook dão $esp"
+  else
+    falha "$desc — esperava $esp nos três: pre-push=$p, ci=$c, hook=$h"
+  fi
+}
+
+grupo_modo() {
+  local t d v1 p1 n1 b1
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  [ -r "$HOOK_PR" ] || falha "pr-so-com-portao.sh: No such file ($HOOK_PR)"
+  export FX_PORTAO_PUSH="$PP"
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  d="$t/repo"
+  fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_remoto_bare "$d" || { falha "remoto bare não montou"; return; }
+  cd "$d" || return
+
+  # controles: válido passa e vencido barra nos três
+  modo "$d" aviso
+  fx_portao_em "$d" HEAD; v1="$(git rev-parse HEAD)"
+  modo_igual "controle: pronto válido" passa "$d" "$v1"
+  produto "$d" modo1; p1="$(git rev-parse HEAD)"
+  modo "$d" desligado
+  modo_igual "controle: pronto vencido barra até em desligado" barra "$d" "$p1"
+
+  # portao: null nos três modos
+  entrega_commit "$d" 's/^portao: .*/portao: null/' pre-e6; n1="$(git rev-parse HEAD)"
+  [ "$(val_motivo HEAD)" = portao_nao_pronto ] && ok "controle: portao null" || falha "controle: portao null"
+  modo "$d" bloqueio
+  modo_igual "null nos três modos: consumidores iguais (bloqueio)" barra "$d" "$n1"
+  modo "$d" aviso
+  modo_igual "null nos três modos: consumidores iguais (aviso)" avisa "$d" "$n1"
+  modo "$d" desligado
+  modo_igual "null nos três modos: consumidores iguais (desligado)" passa "$d" "$n1"
+  modo "$d" -
+  modo_igual "null sem .expx/hooks.json: o padrão aviso nos três" avisa "$d" "$n1"
+  printf '{"hooks":{"pr-so-com-portao":{"modo":"bloquear"}}}\n' > "$d/.expx/hooks.json"
+  modo_igual "null com modo inválido: falha fechada (bloqueio) nos três" barra "$d" "$n1"
+  printf '{"hooks": \n' > "$d/.expx/hooks.json"
+  modo_igual "null com .expx/hooks.json ilegível: falha fechada nos três" barra "$d" "$n1"
+
+  # portao: bloqueado barra em qualquer modo, nos três
+  entrega_commit "$d" 's/^portao: .*/portao: bloqueado/' pre-e6; b1="$(git rev-parse HEAD)"
+  for m in aviso bloqueio desligado; do
+    modo "$d" "$m"
+    modo_igual "portao: bloqueado barra em $m" barra "$d" "$b1"
+  done
   cd "$REPO" || return
 }
 

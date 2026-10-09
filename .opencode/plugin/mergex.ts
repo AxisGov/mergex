@@ -32,15 +32,6 @@ import { join, dirname } from "node:path"
 
 const TEMPO_LIMITE = 10_000
 
-/**
- * Limite próprio por hook. Hook que estoura o limite NÃO bloqueia (o comando
- * segue): o pr-so-com-portao varre o portão de cada branch e roda a validade,
- * então ganha folga — o mesmo valor do settings.json do Claude Code.
- */
-const TEMPO_POR_HOOK: Record<string, number> = {
-  "mergex/pr-so-com-portao.sh": 60_000,
-}
-
 type Carga = {
   cwd: string
   tool_name: string
@@ -79,7 +70,7 @@ function rodaHook(
     r = spawnSync("bash", [hook], {
       input: JSON.stringify(carga),
       encoding: "utf8",
-      timeout: TEMPO_POR_HOOK[caminhoRelativo] ?? TEMPO_LIMITE,
+      timeout: TEMPO_LIMITE,
       cwd: raiz,
     })
   } catch {

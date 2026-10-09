@@ -1,683 +1,457 @@
 #!/usr/bin/env bash
-# pr-so-com-portao — PreToolUse em execução de comando.
+# pr-so-com-portao — PreToolUse em execução de comando. AVISO ANTECIPADO.
 #
-# Barra o push e a abertura de pull request quando o portão de prontidão não
-# registrou PRONTO, ou quando um PRONTO registrado não vale mais.
+# Contrato: docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md,
+# seção 13, itens 5, 7 e 8 (DM-184). A barreira de push tem três camadas, todas
+# sobre a mesma regra (portao-regras.sh -> validade-do-portao.sh --rev) e o
+# mesmo modo (`pr-so-com-portao` em .expx/hooks.json):
+#   - o `pre-push` do Git (portao-push.sh): autoritativo contra erro normal;
+#     decide pelas refs e SHAs que o Git entrega, qualquer que seja o texto do
+#     comando;
+#   - este hook: só aviso antecipado. Não é fronteira de segurança;
+#   - o CI com proteção de merge: a barreira contra contorno deliberado.
 #
-# O portão (E2) barra e explica; sem ele, o trabalho incompleto chega ao
-# revisor — que é exatamente o recurso caro que a skill existe para poupar.
+# O que este hook faz, num comando que publica (`git ... push`, `send-pack`,
+# `subtree push`, inclusive dentro de `bash -c`, `xargs` ou função):
+#   1. `--no-verify` num `git push` reconhecido: bloqueia (exit 2) em qualquer
+#      modo, porque ele faria o Git pular o `pre-push`.
+#   2. Bloqueia (exit 2) só com prova: o comando é um único `git push` simples
+#      (sem `;`, `&&`, `||`, `|`, subshell, `cd`, `-C`, opção global, prefixo
+#      de ambiente nem expansão), o repositório do cwd se lê pelo Git, cada
+#      refspec resolve sem ambiguidade para a ref local, o SHA enviado e a ref
+#      de destino, e pr_decide_ref dá `barra` por um motivo do portão (vencido,
+#      ausente, inconsistente, história incompleta, `portao: null` em modo
+#      bloqueio). `erro_ambiente` e `entrega_indeterminada` não provam nada aqui:
+#      viram aviso.
+#   3. Em qualquer outro caso — comando composto, caminho UNC, `dubious
+#      ownership`, diretório que não determina o repositório, refspec que não
+#      resolve, validade que não termina dentro do orçamento — imprime um aviso e
+#      sai 0. Quem decide é o `pre-push`.
 #
-# DECIDE PELO ESTADO DO REPOSITÓRIO, NÃO PELA LEITURA DO COMANDO. Ler o shell
-# por texto nunca cobre tudo (xargs, função, config de push, subshell,
-# plumbing). Por isso:
+# O SHA remoto anterior que o hook passa a pr_decide_ref é nulo: ele lê só a
+# árvore do SHA enviado e a ponta local da branch, um subconjunto do que o
+# `pre-push` lê. Assim o hook nunca barra o que o `pre-push` deixaria passar.
 #
-#   1. Gatilho largo: o comando contém, como palavra, um termo de publicação
-#      (`push`, `send-pack`, `subtree`, também como `git-push` etc., ou
-#      `pr`/`mr` seguido de `create`/`new`), em qualquer posição — dentro de
-#      aspas, função, xargs ou subshell.
-#   2. Varredura: no repositório do cwd e em cada diretório literal citado no
-#      comando que seja outro repositório (`cd X`, `-C X`, `env -C X`,
-#      `--git-dir=X`, `--work-tree=X`, `GIT_DIR=X`; o relativo, contra o
-#      diretório corrente daquele ponto do comando), no diretório Git COMUM
-#      (nunca pela worktree), para CADA branch local, o
-#      `docs/entregas/<id>/ENTREGA.md` da ponta dela que declara essa branch e
-#      registra `portao: pronto` tem de valer:
-#      `validade-do-portao.sh --verificar --entrega <ENTREGA> --rev <ponta>`.
-#      Vencido, ausente ou que não se calcula: exit 2 em QUALQUER modo,
-#      `desligado` inclusive (spec 2026-10-07-reconciliacao-base-pos-e8, §4.5 e
-#      §13.5) — qualquer que seja o comando com termo de publicação.
-#   3. Refinamento pela leitura por token do push (comum/base.sh):
-#      a) origem explícita (`<sha>:feature/x`, `main:feature/x`) para a branch
-#         de um trabalho com `pronto`: a validade roda também sobre a ORIGEM;
-#         origem que não resolve barra — em qualquer modo;
-#      b) `null`/`bloqueado` seguem o modo configurado quando o comando
-#         empurra a branch daquele trabalho.
-#   A varredura para na primeira falha. O timeout do hook é 60 s nos dois
-#   harnesses, e hook que estoura o tempo não bloqueia: por isso o hook tem
-#   prazo próprio de 45 s, que falha FECHADO (exit 2 em qualquer modo).
+# Orçamento: o hook inteiro cabe em ORCAMENTO segundos (abaixo do timeout de
+# 10 s do harness). A validade roda num processo filho com `timeout` de
+# coreutils, aceito só depois de provar que mata um processo dentro do prazo
+# (a mesma detecção por comportamento de ativacao-pre-push.sh). Sem `timeout`
+# funcional, ou estourado o orçamento: aviso e exit 0. Nenhuma varredura de
+# branches, nenhum laço de subida de diretório: uma validade por ref enviada.
 #
-# É uma barreira de AGENTE, não de segurança contra adversário. A garantia
-# forte é rodar validade-do-portao.sh no CI ou num hook `pre-push` (README).
-
-# O relógio do prazo (abaixo) começa aqui. O bash importa SECONDS do
-# ambiente: um valor herdado não pode antecipar nem desligar o prazo.
-SECONDS=0 # guarda:HKPRAZO
+# Modo: o de pr_modo_null. `desligado` silencia os avisos; o bloqueio provado
+# segue pr_decide_ref, que o modo nunca afrouxa para portão vencido.
 
 HOOK="pr-so-com-portao"
-PADRAO="aviso"
+ORCAMENTO=8
+SECONDS=0
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../comum/base.sh
 . "$DIR/../comum/base.sh"
 # A mesma instalação publica hooks e skill lado a lado em .claude/.
-VALIDADE="$DIR/../../skills/mergex/scripts/validade-do-portao.sh"
+REGRAS="$DIR/../../skills/mergex/scripts/portao-regras.sh"
 
+# jq.exe do Windows escreve CRLF: o CR sai antes de qualquer comparação.
 ENTRADA="$(cat)"
-[ "$(printf '%s' "$ENTRADA" | jq -r '.tool_name // empty' 2>/dev/null)" = "Bash" ] || exit 0
-
-CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"
+[ "$(printf '%s' "$ENTRADA" | jq -r '.tool_name // empty' 2>/dev/null | tr -d '\r')" = "Bash" ] || exit 0
+CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null | tr -d '\r')"
 [ -n "$CMD" ] || exit 0
+CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null | tr -d '\r')"
+[ -n "$CWD" ] || CWD="$PWD"
 
 # --------------------------------------------------------------------------
-# 1. Gatilho largo — termo de publicação como palavra, em qualquer lugar
+# 1. O comando publica? (`git` como programa seguido do subcomando)
 # --------------------------------------------------------------------------
-# O executável do subcomando também conta: `/usr/lib/git-core/git-push`,
-# `"$(git --exec-path)"/git-push`, `git-send-pack`, `git-subtree`. O `git-` só
-# vale como prefixo do termo, com a mesma fronteira antes (espaço, `/`, aspas).
-P_='(^|[^A-Za-z0-9_-])'; _S='([^A-Za-z0-9_-]|$)'
-tem_termo() {
-  printf '%s' "$CMD" | grep -Eq "${P_}(git-)?(push|send-pack|subtree)${_S}" && return 0
-  printf '%s' "$CMD" | grep -Eq "${P_}(pr|mr)[^A-Za-z0-9_-](.*[^A-Za-z0-9_-])?(create|new)${_S}"
+# Por segmento (expx_segmentos), sem aspas nem barra invertida: `bash -c 'git
+# push'` e `xargs git push` publicam; `git log --grep push` e `echo push` não.
+# Entre o `git` e o subcomando só cabem opções globais (com o valor das que o
+# levam na palavra seguinte).
+G_='(^|[[:space:]/{])git(\.exe)?'
+OPT_='([[:space:]]+((-C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--config-env|--attr-source)[[:space:]]+[^[:space:]]+|-[^[:space:]]*))*'
+SUB_='[[:space:]]+(push|send-pack|subtree[[:space:]]+push)'
+GITX_='(^|[[:space:]/{])git-(push|send-pack)(\.exe)?'
+FIM_='([[:space:]]|$)'
+NV_='[[:space:]]+([^[:space:]]+[[:space:]]+)*--no-verify([[:space:]]|$)'
+
+SEGS="$(expx_segmentos "$CMD" | tr -d "\"'\\\\")"
+publica() {
+  printf '%s\n' "$SEGS" | grep -Eq -e "${G_}${OPT_}${SUB_}${FIM_}" -e "${GITX_}${FIM_}"
 }
-tem_termo || exit 0 # guarda:HKGATILHO
+publica || exit 0
 
-# Prazo próprio, que falha FECHADO. Um hook que estoura o timeout do harness
-# não bloqueia — o comando segue. Por isso a varredura tem prazo interno de
-# 45 s, contado desde o início da execução ($SECONDS), abaixo dos 60 s do
-# harness: verificado antes de cada validade e passado a ela como limite
-# (`timeout`, quando existe). Estourou: exit 2 em qualquer modo.
-# Na bancada (EXPX_HOOKS_BANCADA=1), EXPX_PORTAO_PRAZO_TESTE só REDUZ o prazo;
-# fora dela, é ignorada.
-PRAZO=45 # guarda:HKPRAZO
-if [ "${EXPX_HOOKS_BANCADA:-}" = 1 ]; then
-  case "${EXPX_PORTAO_PRAZO_TESTE:-}" in
-    ''|*[!0-9]*) ;;
-    *) [ "$((10#$EXPX_PORTAO_PRAZO_TESTE))" -lt "$PRAZO" ] && PRAZO="$((10#$EXPX_PORTAO_PRAZO_TESTE))" ;;
-  esac
-fi
-TIMEOUT_BIN="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
-
-CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
-DIR_INICIAL="${CWD:-$PWD}"
-RAIZ="$(expx_raiz "$DIR_INICIAL")"
-MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
-
-# Valor literal: sem expansão, glob nem aspas internas. O hook lê o texto.
-literal() {
-  case "$1" in
-    ''|-|*'$'*|*'`'*|*'~'*|*'*'*|*'?'*|*'['*|*'"'*|*"'"*|*'\'*) return 1 ;;
-  esac
-  return 0
-}
-absoluto() { # <base> <caminho>
-  case "$2" in
-    /*|[A-Za-z]:*) printf '%s' "$2" ;;
-    *) [ -n "$1" ] || return 1; printf '%s/%s' "$1" "$2" ;;
-  esac
-}
-nome_de_branch() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9@][A-Za-z0-9._/@-]*$'; }
-TAB="$(printf '\t')"
-ponta() { git -C "$1" rev-parse --verify -q "refs/heads/$2^{commit}" 2>/dev/null; }
-
-# --------------------------------------------------------------------------
-# 2. Varredura do estado — o cwd e os diretórios literais do comando
-# --------------------------------------------------------------------------
-# Diretórios candidatos: o cwd e todo valor literal de `cd`, `pushd`, `-C`,
-# `--chdir`, `--git-dir`, `--work-tree`, `GIT_DIR=`, `GIT_WORK_TREE=` e
-# `GIT_COMMON_DIR=`, em qualquer segmento. Um candidato que não é repositório
-# Git é ignorado; um valor com expansão não se lê (risco residual, README).
-#
-# O relativo se resolve contra o DIRETÓRIO CORRENTE daquele ponto, como no
-# shell e no git: começa no cwd do hook, muda com `cd`/`pushd` em posição de
-# comando (para os segmentos seguintes; o `cd` de dentro de `( … )` não vaza
-# para fora), e dentro de um segmento `-C`/`env -C` se compõem. `~` vira
-# $HOME e `cd` sem argumento vai para $HOME. `cd -`, `pushd +N`/`-N`, `popd`
-# ou caminho com expansão deixam o diretório corrente desconhecido: a partir
-# dali, o relativo não se resolve (risco residual, README).
-CANDIDATOS="$DIR_INICIAL
-"
-# dir_cd <cd|pushd|popd> <args...> — DIR_CD_ESTADO: `ok` (DIR_CD tem o
-# argumento), `home` (sem argumento) ou `indef` (`cd -`, `pushd +N`/`-N`,
-# `pushd` sem argumento, `popd`). O diretório é o primeiro argumento que não
-# começa com `-` (`-P`, `-L`, `-e`, `-@`, `-n` e combinações são opções), ou
-# o que vem depois de `--`.
-DIR_CD=""; DIR_CD_ESTADO=""
-dir_cd() {
-  local t cmd
-  DIR_CD=""; DIR_CD_ESTADO=indef
-  cmd="$(expx_sem_aspas "$1")"
-  [ "$cmd" = popd ] && return 0
-  shift
-  while [ "$#" -gt 0 ]; do
-    t="$(expx_sem_aspas "$1")"
-    case "$t" in
-      --) [ "$#" -ge 2 ] || break
-          DIR_CD="$(expx_sem_aspas "$2")"; DIR_CD_ESTADO=ok; return 0 ;;
-      -) return 0 ;;
-      [+-][0-9]*) [ "$cmd" = pushd ] && return 0
-                  [ "$t" != "${t#-}" ] && { shift; continue; }
-                  DIR_CD="$t"; DIR_CD_ESTADO=ok; return 0 ;;
-      -?*) shift ;;
-      *) DIR_CD="$t"; DIR_CD_ESTADO=ok; return 0 ;;
-    esac
-  done
-  [ "$cmd" = pushd ] || DIR_CD_ESTADO=home
-}
-# resolve <base> <valor> — o caminho literal contra <base>; `~` e `~/…`
-# viram $HOME. Falha com expansão ou com base desconhecida (vazia).
-resolve() {
-  local v="$2"
-  case "$v" in
-    '~') v="$HOME" ;;
-    '~/'*) v="$HOME/${v#??}" ;;
-  esac
-  literal "$v" || return 1
-  absoluto "$1" "$v"
-}
-candidato() { # <caminho absoluto>
-  [ -n "$1" ] || return 0
-  CANDIDATOS="$CANDIDATOS$1
-"
-}
-candidato_em() { # <base> <valor>
-  local v
-  v="$(resolve "$1" "$2")" && candidato "$v"
-}
-# Segmentos com a marcação de subshell: `(` e `)` viram linhas próprias.
-segmentos_com_subshell() {
-  local c="$1"
-  case "$c" in
-    *\\$'\n'*) c="$(expx_emenda_continuacao "$c")" ;;
-  esac
-  printf '%s\n' "$c" | awk '{ gsub(/[(]/, "\n(\n"); gsub(/[)]/, "\n)\n"); gsub(/[;|&`<>]/, "\n"); print }'
-}
-CORR="$DIR_INICIAL"   # diretório corrente do shell ("" = desconhecido)
-PILHA=()              # CORR de quem abriu cada `(`
-while IFS= read -r SEG; do
-  case "$SEG" in
-    '(') PILHA[${#PILHA[@]}]="$CORR"; continue ;; # guarda:HKCORR
-    ')') N_P="${#PILHA[@]}"
-         if [ "$N_P" -gt 0 ]; then
-           CORR="${PILHA[$((N_P - 1))]}"; unset "PILHA[$((N_P - 1))]" # guarda:HKCORR
-         else
-           CORR=""   # `)` sem `(`: ambíguo, o corrente fica desconhecido
-         fi
-         continue ;;
-  esac
-  set -f
-  # shellcheck disable=SC2086
-  set -- $SEG
-  set +f
-  CDIR="$CORR"   # diretório do comando deste segmento (`-C` se compõe)
-  PEND=()        # --git-dir/--work-tree/GIT_*=, resolvidos no fim
-  POS=1          # o próximo token está em posição de comando
-  while [ "$#" -gt 0 ]; do
-    T="$(expx_sem_aspas "$1")"
-    case "$T" in
-      cd|pushd|popd) # guarda:HKOUTROS
-        dir_cd "$@"
-        case "$DIR_CD_ESTADO" in
-          ok)   NOVO="$(resolve "$CDIR" "$DIR_CD")" || NOVO="" ;;
-          home) NOVO="$HOME" ;;
-          *)    NOVO="" ;;
-        esac
-        candidato "$NOVO"
-        if [ "$POS" = 1 ]; then CORR="$NOVO"; CDIR="$NOVO"; fi # guarda:HKCORR
-        POS=0 ;;
-      -C|--chdir) # guarda:HKOUTROS
-        NOVO="$(resolve "$CDIR" "$(expx_sem_aspas "${2:-}")")" || NOVO=""
-        CDIR="$NOVO"; candidato "$NOVO"; POS=0 ;;
-      --chdir=*)
-        NOVO="$(resolve "$CDIR" "${T#*=}")" || NOVO=""
-        CDIR="$NOVO"; candidato "$NOVO"; POS=0 ;;
-      --git-dir|--work-tree) PEND[${#PEND[@]}]="$(expx_sem_aspas "${2:-}")"; POS=0 ;;
-      --git-dir=*|--work-tree=*) PEND[${#PEND[@]}]="${T#*=}"; POS=0 ;;
-      GIT_DIR=*|GIT_WORK_TREE=*|GIT_COMMON_DIR=*) PEND[${#PEND[@]}]="${T#*=}" ;;
-      [A-Za-z_]*=*|builtin|command|'{'|'!'|if|then|else|elif|do|while|until|time) ;;
-      *) POS=0 ;;
-    esac
-    shift
-  done
-  # O git resolve --git-dir/GIT_DIR relativos depois dos `-C`; o shell, no
-  # diretório corrente. As duas leituras viram candidatos.
-  for V in ${PEND[@]+"${PEND[@]}"}; do
-    candidato_em "$CDIR" "$V" # guarda:HKCORR
-    candidato_em "$CORR" "$V"
-  done
-done <<EOF
-$(segmentos_com_subshell "$CMD")
-EOF
-
-VISTOS=""       # git-common-dir de cada repositório já varrido
-FALHAS=""       # uma linha por portão pronto que não vale
-REPOS=""        # raízes varridas (para o refinamento)
-
-# barra_sempre <motivo-curto> <mensagem> — exit 2 em qualquer modo
-barra_sempre() {
-  expx_barra bloqueio "$RAIZ" "$HOOK" "$1" "$2" # guarda:HKAVISO
-}
-
-# falha_portao <linha> — a primeira falha barra na hora (o resto não roda)
-falha_portao() {
-  barra_sempre "portao pronto que nao vale" "mergex/pr-so-com-portao — portão vencido no repositório
-
-Comando: $CMD
-
-O comando tem um termo de publicação (push, send-pack, subtree, pr/mr
-create|new), e há portão PRONTO que não vale para o que seria publicado:
-
-  - $1
-
-Depois do commit que o E2 avaliou (portao_sha) entrou commit que o E2 não viu
-— produto, teste, plano ou merge —, ou o portao_sha está ausente ou fora da
-história, ou a prova não pôde ser calculada. Publicar agora levaria ao revisor
-código que o portão não avaliou.
-
-Enquanto houver portão vencido, qualquer comando com termo de publicação é
-barrado — inclusive citações como \`git log --grep push\` ou \`echo push\` —, em
-qualquer modo do hook: o hook decide pelo estado do repositório, não pela
-leitura do comando.
-
-O que fazer:
-  - Rode o E2 de novo na branch acima:  /mergex-check
-  - PRONTO   → o push e o PR seguem normalmente.
-  - BLOQUEADO → a saída nomeia o que falta e onde corrigir.
-  - Se a branch estiver abandonada, apague-a: o portão dela deixa de contar."
-}
-
-# estouro — o prazo interno acabou: exit 2 em qualquer modo
-estouro() {
-  barra_sempre "varredura do portao excedeu o prazo" "mergex/pr-so-com-portao — varredura do portão excedeu o prazo; rode /mergex-check ou apague branches abandonadas
-
-Comando: $CMD
-
-A varredura valida o portão PRONTO de cada branch local, e não terminou em
-${PRAZO} s. Um hook que estoura o timeout do harness deixaria o comando passar
-sem avaliação; por isso este hook barra ao atingir o próprio prazo, em
-qualquer modo.
-
-O que fazer:
-  - Rode o E2 (/mergex-check) nas branches com portão PRONTO, ou
-  - apague as branches locais abandonadas: cada portão PRONTO custa uma
-    validade a cada comando de publicação." # guarda:HKPRAZO
-}
-
-# comum_de <dir> — o diretório Git comum, absoluto, de <dir> (árvore,
-# subdiretório, `.git` ou gitdir de worktree vinculada). Não depende da
-# worktree: um `core.worktree` inválido não muda a resposta.
-comum_de() {
-  local c
-  c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
-  [ -n "$c" ] || return 1
-  (cd "$c" 2>/dev/null && pwd -P)
-}
-# comum_lido <dir> — fallback: lê o `.git` mais próximo (diretório, ou
-# arquivo `gitdir:`) e o `commondir`, e confere que é um diretório Git.
-comum_lido() {
-  local x="$1" g c
-  while [ ! -e "$x/.git" ]; do
-    [ "$x" != / ] && [ -n "$x" ] && [ "$x" != . ] || return 1
-    x="$(dirname "$x")"
-  done
-  if [ -d "$x/.git" ]; then
-    g="$x/.git"
-  else
-    g="$(sed -n 's/^gitdir:[ \t]*//p' "$x/.git" 2>/dev/null | head -1)"
-    [ -n "$g" ] || return 1
-    g="$(absoluto "$x" "$g")" || return 1
-  fi
-  if [ -f "$g/commondir" ]; then
-    c="$(head -1 "$g/commondir")"
-    g="$(absoluto "$g" "$c")" || return 1
-  fi
-  git --git-dir="$g" rev-parse --git-dir >/dev/null 2>&1 || return 1
-  (cd "$g" 2>/dev/null && pwd -P)
-}
-# parece_git <dir> — <dir> ou um ancestral tem `.git`
-parece_git() {
-  local x="$1"
-  while :; do
-    [ -e "$x/.git" ] && return 0
-    [ "$x" != / ] && [ -n "$x" ] && [ "$x" != . ] || return 1
-    x="$(dirname "$x")"
-  done
-}
-
-# valida <dir do repositório> <ENTREGA> <revisão> <descrição> — só ok=true COM
-# rc 0 passa; qualquer outra resposta barra na hora, em qualquer modo. A
-# validade roda com GIT_DIR=<comum> (e a árvore nele): nunca depende da
-# worktree do repositório.
-valida() {
-  local saida rc okv mot pri resta g
-  [ -f "$VALIDADE" ] || falha_portao "$4: validade-do-portao.sh ausente ao lado dos hooks"
-  g="$(comum_de "$1")" || falha_portao "$4: o diretório Git comum não se resolve"
-  resta=$((PRAZO - SECONDS))
-  [ "$resta" -gt 0 ] || estouro # guarda:HKPRAZO
-  if [ -n "$TIMEOUT_BIN" ]; then
-    saida="$(cd "$g" 2>/dev/null && GIT_DIR="$g" GIT_WORK_TREE="$g" "$TIMEOUT_BIN" -k 1 "$resta" bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$? # guarda:HKCOMUM
-    case "$rc" in 124|137) estouro ;; esac
-  else
-    saida="$(cd "$g" 2>/dev/null && GIT_DIR="$g" GIT_WORK_TREE="$g" bash "$VALIDADE" --verificar --entrega "$2" --rev "$3" 2>/dev/null)"; rc=$? # guarda:HKCOMUM
-  fi
-  [ "$SECONDS" -lt "$PRAZO" ] || estouro # guarda:HKPRAZO
-  okv="$(printf '%s\n' "$saida" | sed -n 's/^ok=//p' | head -1)"
-  mot="$(printf '%s\n' "$saida" | sed -n 's/^motivo=//p' | head -1)"
-  pri="$(printf '%s\n' "$saida" | sed -n 's/^primeiro_commit=//p' | head -1)"
-  [ "$rc" = 0 ] && [ "$okv" = true ] && return 0
-  if [ "$rc" != 1 ] || [ "$okv" != false ] || [ -z "$mot" ] || [ "$mot" = erro_ambiente ]; then
-    falha_portao "$4: validade-do-portao.sh não se calcula (rc=$rc${mot:+, motivo=$mot})"
-  fi
-  falha_portao "$4: motivo=$mot, primeiro_commit=${pri:--}"
-}
-
-VALIDADOS=""    # |<ponta>:<ENTREGA>| já validados nesta chamada
-
-# varre <diretório Git comum> — para cada branch local, o ENTREGA.md pronto
-# da ponta dela. Tudo com --git-dir=<comum>: a worktree não entra.
-varre() {
-  local top="$1" refs objs pronto cand obj path br id
-  # lstrip=2, nunca short: com uma tag homônima, `short` devolve `heads/<b>`.
-  refs="$(git --git-dir="$top" for-each-ref --format='%(objectname) %(refname:lstrip=2)' refs/heads 2>/dev/null)" # guarda:HKVARRE
-  [ -n "$refs" ] || return 0
-  objs="$(printf '%s\n' "$refs" | cut -d' ' -f1 | sort -u)"
-  # Um `git grep` só, sobre as pontas: `branch:` e `portao:` de cada
-  # docs/entregas/<id>/ENTREGA.md (a primeira ocorrência de cada chave vale).
-  # shellcheck disable=SC2086
-  pronto="$(git --git-dir="$top" -c core.quotepath=false grep --no-color -I -E '^(branch|portao):' $objs \
-      -- 'docs/entregas/*/ENTREGA.md' 2>/dev/null | awk '
-    {
-      l = $0; i = index(l, ":"); o = substr(l, 1, i - 1); l = substr(l, i + 1)
-      i = index(l, ":"); p = substr(l, 1, i - 1); l = substr(l, i + 1)
-      if (p !~ /^docs\/entregas\/[^\/]+\/ENTREGA\.md$/) next
-      gsub(/\r/, "", l)
-      k = l; sub(/:.*/, "", k)
-      v = l; sub(/^[^:]*:[ \t]*/, "", v); gsub(/^["\047]|["\047]$/, "", v); sub(/[ \t]+$/, "", v)
-      c = o SUBSEP p; vistos[c] = 1
-      if (k == "branch" && !(c in B)) B[c] = v
-      if (k == "portao" && !(c in P)) P[c] = v
-    }
-    END { for (c in vistos) if (P[c] == "pronto") { split(c, a, SUBSEP); print a[1] "\t" a[2] "\t" B[c] } }')"
-  [ -n "$pronto" ] || return 0
-  # Só vale o ENTREGA que declara a própria branch em que está (a entrega de
-  # um trabalho integrado à main não é o portão da main).
-  cand="$(printf '%s\n%s\n' "$refs" "---" "$pronto" | awk '
-    $0 == "---" { fase = 1; next }
-    !fase { n = index($0, " "); R[substr($0, 1, n - 1) SUBSEP substr($0, n + 1)] = 1; next }
-    { split($0, a, "\t"); if ((a[1] SUBSEP a[3]) in R) print a[1] "\t" a[2] "\t" a[3] }')"
-  while IFS="$TAB" read -r obj path br; do
-    [ -n "$obj" ] || continue
-    # A mesma ponta com o mesmo ENTREGA só se valida uma vez por chamada.
-    case "$VALIDADOS" in *"|$obj:$path|"*) continue ;; esac
-    VALIDADOS="$VALIDADOS|$obj:$path|"
-    id="${path#docs/entregas/}"; id="${id%/ENTREGA.md}"
-    valida "$top" "$path" "$obj" "branch $br (trabalho $id, ponta $obj)" # guarda:HKREV
-  done <<EOF
-$cand
-EOF
-}
-
-# Cada candidato vira o diretório Git COMUM do repositório (o gitdir de uma
-# worktree vinculada, `.git`, árvore ou subdiretório; com o pai como último
-# recurso, para um `.git` citado que não existe), e a varredura roda nele.
-# Um candidato que existe, parece Git (tem `.git`) e cujo diretório comum não
-# se resolve de jeito nenhum barra: não é ignorado.
-while IFS= read -r D; do
-  [ -n "$D" ] || continue
-  GCD="$(comum_de "$D")" || GCD="$(comum_de "$(dirname "$D")")" || GCD="" # guarda:HKCOMUM
-  if [ -z "$GCD" ] && [ -e "$D" ]; then
-    GCD="$(comum_lido "$D")" || GCD=""
-    if [ -z "$GCD" ] && parece_git "$D"; then # guarda:HKCOMUM
-      barra_sempre "repositorio sem diretorio git comum" "mergex/pr-so-com-portao — repositório que não se lê
-
-Comando: $CMD
-
-O comando tem um termo de publicação, e '$D' parece um repositório Git (há um
-\`.git\` nele ou acima), mas o diretório Git comum dele não se resolve. Sem ele,
-os portões PRONTO desse repositório não podem ser conferidos.
-
-O que fazer:
-  - Confira o \`.git\` (o \`gitdir:\` aponta para um diretório que existe?) e
-    rode \`git -C '$D' rev-parse --git-common-dir\`."
-    fi
-  fi
-  [ -n "$GCD" ] || continue
-  case "$VISTOS" in *"|$GCD|"*) continue ;; esac
-  VISTOS="$VISTOS|$GCD|"
-  varre "$GCD"
-done <<EOF
-$CANDIDATOS
-EOF
-
-# --------------------------------------------------------------------------
-# 3. Refinamento — a leitura por token do push (comum/base.sh)
-# --------------------------------------------------------------------------
-# a) Origem explícita para a branch de um trabalho com `pronto` (ex.:
-#    `git push origin <sha>:feature/x`): a ponta local já foi varrida, mas o
-#    que sobe é a ORIGEM. Quando ela não é a ponta, a validade roda sobre ela;
-#    origem que não resolve barra. Em qualquer modo.
-# b) `null`/`bloqueado` da branch empurrada seguem o modo configurado.
-# O trabalho de cada branch sai da árvore da revisão; o `portao`, de
-# <revisão>:ENTREGA.md.
-IT_RAIZ=(); IT_BRANCH=(); IT_REV=()
-OR_RAIZ=(); OR_DST=(); OR_SRC=()
-origem() { # <raiz> <branch de destino> <origem como escrita>
-  local n="${#OR_RAIZ[@]}"
-  OR_RAIZ[$n]="$1"; OR_DST[$n]="$2"; OR_SRC[$n]="$3"
-}
-ACAO=""
-item() { # <raiz> <branch> <rev|"">
-  local n="${#IT_RAIZ[@]}"
-  IT_RAIZ[$n]="$1"; IT_BRANCH[$n]="$2"; IT_REV[$n]="$3"
-}
-
-REPO=""
-resolve_repo() {
-  local d="$DIR_SEG" i t v n
-  local args=()
-  REPO=""
-  [ -n "$d" ] && [ "$EXPX_PUSH_AMBIENTE_GIT" = 0 ] || return 1
-  n="${#EXPX_PUSH_GLOBAIS[@]}"; i=0
-  while [ "$i" -lt "$n" ]; do
-    t="${EXPX_PUSH_GLOBAIS[$i]}"; i=$((i + 1))
-    case "$t" in
-      -C|--git-dir|--work-tree)
-        v="${EXPX_PUSH_GLOBAIS[$i]:-}"; i=$((i + 1))
-        literal "$v" || return 1
-        v="$(absoluto "$d" "$v")" || return 1
-        if [ "$t" = -C ]; then d="$v"; else args[${#args[@]}]="$t=$v"; fi ;;
-      --git-dir=*|--work-tree=*)
-        v="${t#*=}"; literal "$v" || return 1
-        v="$(absoluto "$d" "$v")" || return 1
-        args[${#args[@]}]="${t%%=*}=$v" ;;
-      -c|--namespace|--exec-path|--super-prefix|--attr-source|--config-env) i=$((i + 1)) ;;
-    esac
-  done
-  REPO="$(git -C "$d" ${args[@]+"${args[@]}"} rev-parse --show-toplevel 2>/dev/null)" || { REPO=""; return 1; }
-}
-
-avalia_push() {
-  local i tok r src dst dstn amplo=0 tags=0 apaga=0 atual head b
-  ACAO="${ACAO:-push}"
-  resolve_repo || return 0
-  atual="$(git -C "$REPO" branch --show-current 2>/dev/null)"
-  head="$(git -C "$REPO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
-  i=0
-  while [ "$i" -lt "${#EXPX_PUSH_OPCOES[@]}" ]; do
-    case "${EXPX_PUSH_OPCOES[$i]}" in
-      --all|--mirror|--branches) amplo=1 ;;
-      --tags) tags=1 ;;
-      --delete) apaga=1 ;;
-      --*) ;;
-      -*d*) apaga=1 ;;
-    esac
-    i=$((i + 1))
-  done
-  [ "$apaga" = 0 ] || return 0          # remoção não publica código
-  if [ "$amplo" = 1 ]; then
-    while IFS= read -r b; do
-      [ -n "$b" ] && item "$REPO" "$b" "$(ponta "$REPO" "$b")"
-    done <<EOF
-$(git -C "$REPO" for-each-ref --format='%(refname:lstrip=2)' refs/heads 2>/dev/null)
-EOF
-    return 0
-  fi
-  if [ "${#EXPX_PUSH_REFSPECS[@]}" = 0 ]; then
-    [ "$tags" = 1 ] && return 0
-    [ -n "$atual" ] && item "$REPO" "$atual" "$head"
-    return 0
-  fi
-  i=0
-  while [ "$i" -lt "${#EXPX_PUSH_REFSPECS[@]}" ]; do
-    tok="${EXPX_PUSH_REFSPECS[$i]}"; i=$((i + 1))
-    r="${tok#+}"
-    case "$r" in
-      *:*) src="${r%%:*}"; dst="${r#*:}" ;;
-      *)   src="$r"; dst="$r" ;;
-    esac
-    dstn="${dst#refs/heads/}"
-    case "$dstn" in HEAD|@) dstn="$atual" ;; esac
-    # o par (destino, origem como escrita), para a origem explícita
-    if [ -n "$src" ] && [ -n "$dstn" ] && nome_de_branch "$dstn"; then origem "$REPO" "$dstn" "$src"; fi
-    case "$src" in
-      HEAD|@) [ -n "$atual" ] && item "$REPO" "$atual" "$head" ;;
-      *)
-        src="${src#refs/heads/}"
-        if nome_de_branch "$src" && git -C "$REPO" show-ref --verify --quiet "refs/heads/$src"; then
-          item "$REPO" "$src" "$(ponta "$REPO" "$src")"
-        fi ;;
-    esac
-    # o destino também é publicado: a branch dele, se for de um trabalho
-    if [ -n "$dstn" ] && nome_de_branch "$dstn"; then item "$REPO" "$dstn" ""; fi
-  done
-}
-
-# avalia_pr <segmento> — `gh|glab ... pr|mr ... create|new` (com flags antes
-# do subcomando, `gh -R o/r pr create`). 0 se era uma abertura de PR.
-avalia_pr() {
-  local t v achou=0 pr=0 cabeca="" proximo="" programa=1
+# programa_executa <segmento> — o programa do segmento é o git (ou um
+# executor que roda o que vem depois: `bash -c`, `xargs`, `env`...), não uma
+# citação (`echo`, `grep`, `printf`)
+programa_executa() {
+  local t b
   set -f
   # shellcheck disable=SC2086
   set -- $1
   set +f
-  for t in "$@"; do
-    v="$(expx_sem_aspas "$t")"
-    if [ -n "$proximo" ]; then cabeca="$v"; proximo=""; continue; fi
-    if [ "$achou" = 0 ]; then
-      # `gh`/`glab` como PROGRAMA (primeira palavra, ou depois de um executor
-      # como `command`/`env`), não citado (`grep 'gh pr create'`).
-      case "$v" in [_[:alpha:]]*=*) continue ;; esac
-      if [ "$programa" = 1 ]; then
-        case "${v##*/}" in
-          gh|glab) achou=1 ;;
-          *) expx_executor "${v##*/}" || programa=0 ;;
-        esac
-      fi
-      continue
-    fi
-    case "$pr:$v" in
-      0:pr|0:mr) pr=1; continue ;;
-      1:create|1:new) pr=2; continue ;;
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      [_[:alpha:]]*=*|'{'|'!'|if|then|else|elif|do|while|until|time) shift ;;
+      *) break ;;
     esac
-    if [ "$pr" = 2 ]; then
-      case "$v" in
-        -H|--head|-s|--source-branch) proximo=1 ;;
-        --head=*|--source-branch=*) cabeca="${v#*=}" ;;
-      esac
-    fi
   done
-  [ "$pr" = 2 ] || return 1
-  ACAO="${ACAO:-abertura de pull request}"
-  [ -n "$DIR_SEG" ] || return 0
-  REPO="$(git -C "$DIR_SEG" rev-parse --show-toplevel 2>/dev/null)" || return 0
-  if [ -n "$cabeca" ]; then
-    nome_de_branch "$cabeca" && item "$REPO" "$cabeca" "$(ponta "$REPO" "$cabeca")"
-  else
-    v="$(git -C "$REPO" branch --show-current 2>/dev/null)"
-    [ -n "$v" ] && item "$REPO" "$v" "$(git -C "$REPO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
-  fi
-  return 0
+  [ "$#" -gt 0 ] || return 1
+  b="${1##*/}"; b="${b%.exe}"
+  case "$b" in git|git-push|git-send-pack) return 0 ;; esac
+  expx_executor "$b"
 }
 
-DIR_SEG="$DIR_INICIAL"
-while IFS= read -r SEG; do
-  [ -n "$SEG" ] || continue
-  # `cd` literal muda o diretório dos segmentos seguintes; com expansão, o
-  # diretório deixa de ser conhecido. (Só refina a mensagem e o caso
-  # null/bloqueado: o `pronto` vencido já foi decidido pela varredura.)
-  set -f
-  # shellcheck disable=SC2086
-  set -- $SEG
-  set +f
-  while [ "$#" -gt 0 ]; do
-    case "$(expx_sem_aspas "$1")" in
-      cd|pushd)
-        dir_cd "$@"; V="$DIR_CD"
-        if literal "$V"; then DIR_SEG="$(absoluto "$DIR_SEG" "$V")" || DIR_SEG=""; else DIR_SEG=""; fi ;;
-    esac
-    shift
-  done
-  if expx_push_le "$SEG"; then
-    avalia_push
-  else
-    avalia_pr "$SEG" || true
-  fi
-done <<EOF
-$(expx_segmentos "$CMD")
+# nv_publica — algum segmento executa um push com `--no-verify` literal
+nv_publica() {
+  local s
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    printf '%s\n' "$s" | grep -Eq -e "${G_}${OPT_}${SUB_}${NV_}" -e "${GITX_}${NV_}" || continue
+    programa_executa "$s" && return 0
+  done <<EOF
+$SEGS
 EOF
+  return 1
+}
 
-# a) Origem explícita para a branch de um trabalho com `pronto`
-i=0
-while [ "$i" -lt "${#OR_RAIZ[@]}" ]; do
-  R="${OR_RAIZ[$i]}"; B="${OR_DST[$i]}"; S="${OR_SRC[$i]}"
-  i=$((i + 1))
-  PT="$(ponta "$R" "$B")"
-  [ -n "$PT" ] || continue                 # destino sem branch local: risco residual (README)
-  TID="$(expx_trabalho_por_branch_na_revisao "$R" "$B" "$PT")" || continue
-  PORTAO="$(git -C "$R" cat-file blob "$PT:docs/entregas/$TID/ENTREGA.md" 2>/dev/null | expx_frontmatter_valor /dev/stdin portao)"
-  [ "$PORTAO" = pronto ] || continue
-  case "$S" in
-    HEAD|@) SHA="$(git -C "$R" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" ;;
-    *)      SHA="$(git -C "$R" rev-parse --verify -q "$S^{commit}" 2>/dev/null)" ;;
+# --------------------------------------------------------------------------
+# Desfechos
+# --------------------------------------------------------------------------
+RAIZ=""
+TMPH=""
+trap '[ -z "$TMPH" ] || rm -rf "$TMPH"' EXIT
+
+sai_barra() { # <motivo curto> <mensagem>
+  [ -z "$RAIZ" ] || expx_rastro "$RAIZ" "acao_bloqueada" "bloqueado" "$1" "$HOOK"
+  printf '%s\n' "$2" >&2
+  exit 2
+}
+MODO=""
+# sai_aviso <motivo curto> <mensagem> — aviso nos dois canais (stderr para o
+# Claude Code, JSON no stdout para o OpenCode) e exit 0
+sai_aviso() {
+  [ -z "$RAIZ" ] || expx_rastro "$RAIZ" "regra_violada" "aviso" "$1" "$HOOK"
+  printf '%s\n' "$2" >&2
+  jq -cn --arg ctx "$2" '{hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext:$ctx}}' 2>/dev/null || true
+  exit 0
+}
+# indeterminado <motivo> [detalhe] — o hook não decide: avisa (silêncio em
+# modo desligado) e deixa o Git seguir até o pre-push
+indeterminado() {
+  [ "$MODO" != desligado ] || exit 0
+  sai_aviso "push indeterminado: $1" "mergex/pr-so-com-portao — aviso: o hook não determina este push ($1)
+
+Comando: $CMD
+${2:+
+$2
+}
+O hook do Claude é só aviso antecipado e não bloqueia o que não consegue
+provar. Quem decide é o pre-push do Git (portao-push.sh), na hora do push,
+pelas refs e SHAs que o Git entrega. Se ele barrar, rode o E2 (/mergex-check)."
+}
+
+# --------------------------------------------------------------------------
+# 2. O repositório do cwd, como o Git o lê (sem subir diretório à mão)
+# --------------------------------------------------------------------------
+ERR_RAIZ="$(git -C "$CWD" rev-parse --show-toplevel 2>&1 >/dev/null)"
+RAIZ="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null | tr -d '\r')" || RAIZ=""
+
+# --------------------------------------------------------------------------
+# 3. `--no-verify` reconhecido: bloqueia em qualquer modo
+# --------------------------------------------------------------------------
+barra_nv() {
+  sai_barra "push com --no-verify" "mergex/pr-so-com-portao — push com --no-verify barrado
+
+Comando: $CMD
+
+\`--no-verify\` faz o Git pular o pre-push, e o pre-push é a barreira local
+que confere o portão de prontidão (portao-push.sh) para cada ref enviada.
+Pular essa conferência é contorno da barreira; contra ele, o check de CI do
+portão (portao-ci.sh), onde o produto o tiver ativado com proteção de merge,
+reprova o PR. O hook barra o \`--no-verify\` em qualquer modo.
+
+O que fazer:
+  - Rode o mesmo push sem --no-verify.
+  - Se o pre-push barrar, rode o E2 (/mergex-check): PRONTO libera o push."
+}
+if nv_publica; then barra_nv; fi # guarda:HKNV
+
+if [ -z "$RAIZ" ]; then
+  case "$ERR_RAIZ" in
+    *'dubious ownership'*|*safe.directory*)
+      indeterminado "o Git recusou o repositório do cwd: dubious ownership" \
+"O Git não lê '$CWD' sem uma exceção de safe.directory (repositório de
+outro dono; no Git for Windows, todo caminho \\\\wsl.localhost\\...). A
+exceção na config global é pré-requisito do pre-push no Git for Windows:
+sem ela, o Git não roda nem o push nem o pre-push nesse repositório.
+  git config --global --add safe.directory '<caminho do repositório>'" ;;
+    *) indeterminado "o cwd não é um repositório que o Git leia" \
+"cwd: $CWD" ;;
   esac
-  [ -n "$SHA" ] || falha_portao "branch $B (trabalho $TID): a origem '$S' do push não se resolve num commit"
-  [ "$SHA" = "$PT" ] && continue          # a própria ponta: já validada na varredura
-  valida "$R" "docs/entregas/$TID/ENTREGA.md" "$SHA" "branch $B (trabalho $TID), origem explícita '$S' = $SHA" # guarda:HKORIGEM
+fi
+
+# --------------------------------------------------------------------------
+# 4. A regra compartilhada e o modo
+# --------------------------------------------------------------------------
+# shellcheck source=../../skills/mergex/scripts/portao-regras.sh
+if [ ! -r "$REGRAS" ] || ! . "$REGRAS" 2>/dev/null; then
+  indeterminado "regras do portão indisponíveis" "portao-regras.sh ausente ou ilegível ao lado dos hooks: $REGRAS"
+fi
+set +e
+MODO="$(pr_modo_null "$RAIZ" 2>/dev/null)"
+export GIT_OPTIONAL_LOCKS=0
+
+# --------------------------------------------------------------------------
+# 5. O push simples, lido sem ambiguidade
+# --------------------------------------------------------------------------
+case "$CMD" in *$'\n'*) indeterminado "comando com mais de uma linha" ;; esac
+printf '%s\n' "$CMD" | grep -Eq '^[[:space:]]*git[[:space:]]+push([[:space:]]+[A-Za-z0-9._/:@+=,^~%-]+)*[[:space:]]*$' \
+  || indeterminado "comando composto, com expansão, opção global, prefixo de ambiente ou outro programa"
+
+g() { git -C "$RAIZ" "$@"; }
+
+# Opções do push que não mudam quais refs sobem; qualquer outra é indeterminada
+REMOTO=""; TEM_REMOTO=0; SPECS=()
+set -f
+# shellcheck disable=SC2086
+set -- $CMD
+set +f
+shift 2
+FIM=0
+while [ "$#" -gt 0 ]; do
+  T="$1"; shift
+  case "$T" in '~'*) indeterminado "palavra com expansão de til: $T" ;; esac
+  if [ "$FIM" = 0 ]; then
+    case "$T" in
+      --) FIM=1; continue ;;
+      -u|--set-upstream|-v|--verbose|-q|--quiet|--progress|--no-progress|--atomic|--no-atomic|--porcelain|\
+      -4|-6|--ipv4|--ipv6|-f|--force|--force-if-includes|--no-force-if-includes|--force-with-lease|\
+      --force-with-lease=*|--no-force-with-lease|--verify|--follow-tags|--no-follow-tags|--thin|--no-thin|--push-option=*)
+        continue ;;
+      -o|--push-option) [ "$#" -gt 0 ] || indeterminado "opção sem valor: $T"; shift; continue ;;
+      --*) indeterminado "opção do push que muda as refs enviadas ou não é lida pelo hook: $T" ;;
+      -*)
+        # aglomerado curto: `-uv`; terminado em `o`, o valor vem a seguir
+        C="${T#-}"
+        if printf '%s' "$C" | grep -Eq '^[uvqf46]+$'; then continue; fi
+        if printf '%s' "$C" | grep -Eq '^[uvqf46]*o$'; then
+          [ "$#" -gt 0 ] || indeterminado "opção sem valor: $T"; shift; continue
+        fi
+        if printf '%s' "$C" | grep -Eq '^[uvqf46]*o.+$'; then continue; fi
+        indeterminado "opção do push não lida pelo hook: $T" ;;
+    esac
+  fi
+  if [ "$TEM_REMOTO" = 0 ]; then TEM_REMOTO=1; REMOTO="$T"; continue; fi
+  SPECS[${#SPECS[@]}]="$T"
+done
+: "$REMOTO"
+
+# Config que muda o destino (remote.<r>.push, remote.<r>.mirror): indeterminado
+if [ -n "$(g config --get-regexp '^remote\..*\.(push|mirror)$' 2>/dev/null)" ]; then
+  indeterminado "remote.<nome>.push ou remote.<nome>.mirror configurado: o destino depende da config"
+fi
+
+ATUAL="$(g symbolic-ref -q HEAD 2>/dev/null)" || ATUAL=""
+case "$ATUAL" in refs/heads/?*) ;; *) ATUAL="" ;; esac
+
+# sha_de <revisão> — o commit, sem aviso de ambiguidade do Git
+sha_de() {
+  local e s
+  e="$(g rev-parse --verify -q "$1^{commit}" 2>&1 >/dev/null)"
+  s="$(g rev-parse --verify -q "$1^{commit}" 2>/dev/null)" || return 1
+  [ -z "$e" ] || return 1
+  printf '%s\n' "$s"
+}
+existe_ref() { g show-ref --verify -q "$1" 2>/dev/null; }
+
+ARGS=()   # <ref local> <SHA local> <ref remota> <SHA remoto>, por ref
+ZERO_SHA=0000000000000000000000000000000000000000
+ref_enviada() { # <ref local> <sha> <ref remota>
+  g check-ref-format "$3" 2>/dev/null || indeterminado "destino que não é nome de ref válido: $3"
+  ARGS[${#ARGS[@]}]="$1"; ARGS[${#ARGS[@]}]="$2"; ARGS[${#ARGS[@]}]="$3"; ARGS[${#ARGS[@]}]="$ZERO_SHA"
+}
+
+if [ "${#SPECS[@]}" = 0 ]; then
+  # Sem refspec: a branch atual, pelo push.default
+  [ -n "$ATUAL" ] || indeterminado "push sem refspec fora de uma branch (HEAD destacado)"
+  B="${ATUAL#refs/heads/}"
+  PD="$(g config --get push.default 2>/dev/null)"
+  case "$PD" in
+    ''|simple|current) DST="$ATUAL" ;;
+    upstream|tracking)
+      DST="$(g config --get "branch.$B.merge" 2>/dev/null)"
+      case "$DST" in refs/heads/?*) ;; *) indeterminado "push.default=$PD sem upstream de branch para $B" ;; esac ;;
+    *) indeterminado "push.default=$PD: as refs enviadas dependem da config" ;;
+  esac
+  S="$(sha_de "$ATUAL")" || indeterminado "a ponta de $ATUAL não se resolve"
+  ref_enviada "$ATUAL" "$S" "$DST"
+fi
+
+for R in ${SPECS[@]+"${SPECS[@]}"}; do
+  R="${R#+}"
+  case "$R" in
+    *:*:*|*:) indeterminado "refspec que o hook não lê: $R" ;;
+    :*) continue ;;                       # exclusão: não publica código
+    *:*) SRC="${R%%:*}"; DST="${R#*:}" ;;
+    *) SRC="$R"; DST="" ;;
+  esac
+  # a origem: branch, tag ou commit, sem ambiguidade
+  TIPO=""; RL=""; SL=""
+  case "$SRC" in
+    HEAD|@)
+      [ -n "$ATUAL" ] || indeterminado "origem HEAD fora de uma branch"
+      TIPO=branch; RL="$ATUAL" ;;
+    refs/heads/?*) existe_ref "$SRC" || indeterminado "a origem não existe: $SRC"; TIPO=branch; RL="$SRC" ;;
+    refs/tags/?*) TIPO=tag ;;
+    refs/*) indeterminado "origem fora de refs/heads e refs/tags: $SRC" ;;
+    *)
+      N=0; ULT=""
+      for C in "refs/$SRC" "refs/tags/$SRC" "refs/heads/$SRC" "refs/remotes/$SRC" "refs/remotes/$SRC/HEAD"; do
+        if existe_ref "$C"; then N=$((N + 1)); ULT="$C"; fi
+      done
+      if [ "$N" -gt 1 ]; then indeterminado "origem ambígua: $SRC"
+      elif [ "$N" = 1 ] && [ "$ULT" = "refs/heads/$SRC" ]; then TIPO=branch; RL="$ULT"
+      elif [ "$N" = 1 ] && [ "$ULT" = "refs/tags/$SRC" ]; then TIPO=tag
+      elif [ "$N" = 1 ]; then indeterminado "origem fora de refs/heads e refs/tags: $ULT"
+      else TIPO=commit; RL="$SRC"
+      fi ;;
+  esac
+  if [ "$TIPO" = tag ]; then
+    case "$DST" in ''|refs/tags/*) continue ;; esac
+    indeterminado "tag empurrada para outro destino: $R"
+  fi
+  if [ "$TIPO" = commit ]; then
+    SL="$(sha_de "$SRC")" || indeterminado "a origem não se resolve num commit: $SRC"
+  else
+    SL="$(sha_de "$RL")" || indeterminado "a origem não se resolve num commit: $SRC"
+  fi
+  # o destino
+  case "$DST" in
+    '') [ "$TIPO" = branch ] || indeterminado "origem sem destino explícito: $R"
+        RR="$RL" ;;
+    refs/heads/?*) RR="$DST" ;;
+    refs/*) continue ;;                   # fora de refs/heads: não aplicável
+    HEAD|@) indeterminado "destino HEAD: $R" ;;
+    *) RR="refs/heads/$DST" ;;
+  esac
+  ref_enviada "$RL" "$SL" "$RR"
 done
 
-[ "$MODO" = "desligado" ] && exit 0
+[ "${#ARGS[@]}" -gt 0 ] || exit 0
 
-# b) `null`/`bloqueado` da branch empurrada: o modo manda
-MODO_TRAB=""; MODO_PORTAO=""
-i=0
-while [ "$i" -lt "${#IT_RAIZ[@]}" ]; do
-  R="${IT_RAIZ[$i]}"; B="${IT_BRANCH[$i]}"; V="${IT_REV[$i]}"
-  i=$((i + 1))
-  L="$V"
-  [ -n "$L" ] || L="$(ponta "$R" "$B")"
-  [ -n "$L" ] || continue
-  TID="$(expx_trabalho_por_branch_na_revisao "$R" "$B" "$L")" || continue # guarda:HKREC
-  PORTAO="$(git -C "$R" cat-file blob "$L:docs/entregas/$TID/ENTREGA.md" 2>/dev/null | expx_frontmatter_valor /dev/stdin portao)"
-  [ "$PORTAO" = pronto ] && continue
-  MODO_TRAB="$TID"; MODO_PORTAO="$PORTAO"
-  break
+# --------------------------------------------------------------------------
+# 6. A decisão de pr_decide_ref, dentro do orçamento
+# --------------------------------------------------------------------------
+# timeout_funcional — o `timeout` mata um processo dentro do prazo (detecção
+# pelo comportamento, como orcamento() de ativacao-pre-push.sh): `timeout 0.2
+# sleep 3` tem de sair 124 em menos de 2 s.
+TBIN=""
+timeout_funcional() {
+  local b ini rc
+  for b in timeout gtimeout; do
+    command -v "$b" >/dev/null 2>&1 || continue
+    ini=$SECONDS; "$b" 0.2 sleep 3 >/dev/null 2>&1; rc=$?
+    if [ "$rc" = 124 ] && [ $((SECONDS - ini)) -lt 2 ]; then TBIN="$b"; return 0; fi
+  done
+  return 1
+}
+timeout_funcional || indeterminado "sem \`timeout\` funcional para limitar a validade"
+# um segundo de folga pela granularidade de SECONDS: o hook inteiro cabe no
+# orçamento
+LIMITE=$((ORCAMENTO - 1 - SECONDS))
+[ "$LIMITE" -ge 1 ] || indeterminado "o orçamento de ${ORCAMENTO} s acabou antes da validade"
+
+TMPH="$(mktemp -d "${TMPDIR:-/tmp}/mergex-hook-portao.XXXXXX" 2>/dev/null)" || { TMPH=""; indeterminado "temporário que não se cria"; }
+
+# O processo filho decide cada ref com pr_decide_ref, num TMPDIR próprio (o
+# hook apaga tudo no fim, mesmo depois de um estouro)
+DECIDE='
+. "$1" 2>/dev/null || { printf "erro=regras\n"; exit 3; }
+set +e
+arvore_ambiente_git
+export GIT_OPTIONAL_LOCKS=0
+raiz="$2"; shift 2
+t="$TMPDIR/decisao"
+while [ "$#" -ge 4 ]; do
+  pr_decide_ref "$raiz" "$1" "$2" "$3" "$4" > "$t" 2>/dev/null
+  printf "ref=%s\nsha=%s\n" "$3" "$2"
+  cat "$t"
+  printf "diag=%s\n" "$(printf "%s" "$PR_DIAG" | tr "\n" " ")"
+  shift 4
 done
-
-[ -n "$MODO_TRAB" ] || expx_permite "$RAIZ" "$HOOK" "${ACAO:-comando} liberado"
-
-case "$MODO_PORTAO" in
-  bloqueado)
-    DETALHE="O portão barrou este trabalho. Ele não segue para revisão enquanto o que
-falta não for corrigido — a mergex não maquia entrega incompleta (regra 6)."
-    ;;
-  *)
-    DETALHE="O campo 'portao' do ENTREGA.md da revisão publicada está
-'${MODO_PORTAO:-null}': o E2 ainda não deu veredito sobre esta entrega."
-    ;;
+'
+SAIDA="$(cd "$RAIZ" 2>/dev/null && TMPDIR="$TMPH" "$TBIN" -k 1 "$LIMITE" bash -c "$DECIDE" _ "$REGRAS" "$RAIZ" "${ARGS[@]}" 2>/dev/null)"; RC=$?
+case "$RC" in
+  0) ;;
+  124|137) indeterminado "a validade do portão não terminou dentro do orçamento de ${ORCAMENTO} s" ;;
+  *) indeterminado "a decisão do portão não se calculou (código $RC)" ;;
 esac
 
-expx_barra "$MODO" "$RAIZ" "$HOOK" "$ACAO sem portao pronto ($MODO_TRAB)" \
-"mergex/pr-so-com-portao — $ACAO antes do portão de prontidão
+BARRA=""; AVISA=""; INDET=""
+REF_=""; SHA_=""; DEC_=""; MOT_=""
+fecha_ref() {
+  [ -n "$REF_" ] || return 0
+  case "$DEC_" in
+    passa) ;;
+    avisa) AVISA="$AVISA
+  - $REF_ ($SHA_): $DIAG_" ;;
+    barra)
+      case "$MOT_" in
+        erro_ambiente|entrega_indeterminada|'') INDET="$INDET
+  - $REF_ ($SHA_): $DIAG_" ;;
+        *) BARRA="$BARRA
+  - $REF_ ($SHA_): $DIAG_" ;;
+      esac ;;
+    *) INDET="$INDET
+  - $REF_ ($SHA_): decisão indeterminada" ;;
+  esac
+}
+DIAG_=""
+while IFS= read -r L; do
+  case "$L" in
+    ref=*) fecha_ref; REF_="${L#ref=}"; SHA_=""; DEC_=""; MOT_=""; DIAG_="" ;;
+    sha=*) SHA_="${L#sha=}" ;;
+    decisao=*) DEC_="${L#decisao=}" ;;
+    motivo=*) MOT_="${L#motivo=}" ;;
+    diag=*) DIAG_="${L#diag=}" ;;
+  esac
+done <<EOF
+$SAIDA
+EOF
+fecha_ref
+N_DEC="$(printf '%s\n' "$SAIDA" | grep -c '^decisao=')"
+[ "$N_DEC" -eq $(( ${#ARGS[@]} / 4 )) ] || indeterminado "a decisão do portão saiu incompleta"
 
-Trabalho: $MODO_TRAB
-Portão:   ${MODO_PORTAO:-não registrado}
+if [ -n "$BARRA" ]; then
+  sai_barra "push com portao que nao vale" "mergex/pr-so-com-portao — push barrado: o portão não vale para o que seria publicado
 
-$DETALHE
+Comando: $CMD
+$BARRA
+
+O hook leu este push sem ambiguidade e aplicou a mesma regra do pre-push
+(portao-regras.sh -> validade-do-portao.sh --rev sobre o SHA enviado). O
+pre-push barraria o mesmo push.
 
 O portão roda as onze verificações (V1..V11): tasks concluídas, suíte verde,
 dois testes por task, teste de regressão, QA, auditoria, bloqueios, modo legado,
 arquivos fora do escopo, segredo no diff e commit do E1 por task concluída.
 
 O que fazer:
-  - Rode o portão:  /mergex-check
-  - PRONTO   → o push e o PR seguem normalmente.
+  - Rode o E2 de novo:  /mergex-check
+  - PRONTO   → o push segue normalmente.
   - BLOQUEADO → a saída nomeia o que falta e onde corrigir."
+fi
+
+[ -z "$INDET" ] || indeterminado "a validade não decidiu por motivo do ambiente" "Refs:$INDET"
+
+if [ -n "$AVISA" ]; then
+  sai_aviso "push com portao null em modo aviso" "mergex/pr-so-com-portao — aviso: push antes do portão de prontidão
+
+Comando: $CMD
+$AVISA
+
+O push segue (modo aviso de pr-so-com-portao). Rode o E2 (/mergex-check)
+antes do PR: o portão roda as onze verificações (V1..V11)."
+fi
+
+exit 0

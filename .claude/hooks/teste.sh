@@ -12,7 +12,10 @@ H="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$H/../.." && pwd)"
 # shellcheck source=scripts/ci/lib/fixture-git.sh
 . "$REPO_ROOT/scripts/ci/lib/fixture-git.sh" || exit 1
-OK=0; FALHOU=0; PULADOS=0
+OK=0; FALHOU=0; PULADOS=0; NAOEXEC=0
+# Caso que depende de um ambiente ausente (Git for Windows sobre
+# \\wsl.localhost): NAO_EXECUTADO, listado a parte, nunca conta como ok.
+nao_executado() { NAOEXEC=$((NAOEXEC+1)); printf '  NAO_EXECUTADO: %s\n' "$1"; }
 
 # Os hooks leem o evento do harness com jq. Sem jq, todo hook sai cedo e por
 # 0 — o que faria a suite reportar "passou" onde nao verificou nada. Entao os
@@ -351,6 +354,8 @@ echo "pr-so-com-portao"
 # commits de método de verdade. Aqui a branch `main` casa com a entrega
 # `trab`, que não registrou portão. O trabalho sai da branch EMPURRADA e o
 # portão do ENTREGA.md commitado na revisão empurrada — nunca do disco.
+fm_chave docs/entregas/trab/ENTREGA.md portao null
+git add docs/entregas/trab/ENTREGA.md && git commit -qm "registra portao null"
 caso "portao null, modo aviso: nao barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin main')" 0
 # Uma ENTREGA sem frontmatter (sem `branch:`), não rastreada, não é o trabalho.
 mkdir -p docs/entregas/t1
@@ -694,31 +699,56 @@ git restore --worktree -- docs/entregas/ft-02/ENTREGA.md 2>/dev/null || true
 fixture_switch_exato main main || exit 1
 
 echo
-echo "pr-so-com-portao — validade (decide o estado do repositorio)"
-# Com um termo de publicacao no comando (push, send-pack, subtree, pr/mr ...
-# create|new), o hook varre o repositorio do cwd e os diretorios literais do
-# comando: para CADA branch local, o ENTREGA.md da ponta dela que declara essa
-# branch e registra `portao: pronto` tem de valer (validade-do-portao.sh --rev
-# <ponta>). Vencido, barra QUALQUER comando com termo de publicacao, em
-# qualquer modo. `null`/`bloqueado` seguem o modo, so para a branch que o
-# comando empurra. Repositorio sem MergeX nunca bloqueia.
+echo "pr-so-com-portao — aviso antecipado (bloqueia so com prova)"
+# DM-184 (spec 13.8): o hook do Claude e so aviso antecipado, nunca fronteira
+# de seguranca. Bloqueia (exit 2) so o `git push` simples, lido sem ambiguidade
+# no repositorio do cwd, cuja ref pr_decide_ref barra (a mesma regra do
+# pre-push), e o `--no-verify` num push reconhecido. Comando composto, cwd que
+# o Git nao le, refspec que nao resolve, validade que nao termina no orcamento:
+# aviso e exit 0 — quem decide e o pre-push. Nenhuma varredura de branches.
 fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
 mkdir -p .expx
 modo_portao() { printf '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"%s"}}}\n' "$1" > .expx/hooks.json; }
 PUSH_FT='git push origin feature/ft-02'
+# saida_hook <json> [env...] — roda o hook; SAIDA_H (stderr) e RC_H
+SAIDA_H=""; RC_H=""
+saida_hook() {
+  local json="$1"; shift
+  SAIDA_H="$(printf '%s' "$json" | env "$@" bash "$H/mergex/pr-so-com-portao.sh" 2>&1 >/dev/null)"; RC_H=$?
+}
 # mensagem_cita <desc> <json> <trecho>... — o stderr do hook cita cada trecho
 mensagem_cita() {
-  local desc="$1" json="$2" saida t
+  local desc="$1" json="$2" t
   shift 2
   if [ "$SEM_JQ" = "1" ]; then PULADOS=$((PULADOS+1)); printf '  pulado %s (sem jq)\n' "$desc"; return 0; fi
-  saida="$(printf '%s' "$json" | bash "$H/mergex/pr-so-com-portao.sh" 2>&1 >/dev/null)"
+  saida_hook "$json"
   for t in "$@"; do
-    case "$saida" in
+    case "$SAIDA_H" in
       *"$t"*) ;;
       *) FALHOU=$((FALHOU+1)); printf '  FALHA %s (a mensagem nao cita: %s)\n' "$desc" "$t"; return 0 ;;
     esac
   done
   OK=$((OK+1)); printf '  ok    %s\n' "$desc"
+}
+# caso_aviso <desc> <json> [env...] — exit 0 COM o aviso do hook no stderr
+AVISO_H='mergex/pr-so-com-portao — aviso'
+caso_aviso() {
+  local desc="$1" json="$2"
+  shift 2
+  if [ "$SEM_JQ" = "1" ]; then PULADOS=$((PULADOS+1)); printf '  pulado %s (sem jq)\n' "$desc"; return 0; fi
+  saida_hook "$json" "$@"
+  case "$RC_H:$SAIDA_H" in
+    0:*"$AVISO_H"*) OK=$((OK+1)); printf '  ok    %s\n' "$desc" ;;
+    *) FALHOU=$((FALHOU+1)); printf '  FALHA %s (esperava exit 0 com aviso, obteve %s: %s)\n' "$desc" "$RC_H" "$(printf '%s' "$SAIDA_H" | head -1)" ;;
+  esac
+}
+# caso_calado <desc> <json> — exit 0 sem nada no stderr (passa sem aviso)
+caso_calado() {
+  local desc="$1" json="$2"
+  if [ "$SEM_JQ" = "1" ]; then PULADOS=$((PULADOS+1)); printf '  pulado %s (sem jq)\n' "$desc"; return 0; fi
+  saida_hook "$json"
+  if [ "$RC_H" = 0 ] && [ -z "$SAIDA_H" ]; then OK=$((OK+1)); printf '  ok    %s\n' "$desc"
+  else FALHOU=$((FALHOU+1)); printf '  FALHA %s (esperava exit 0 calado, obteve %s: %s)\n' "$desc" "$RC_H" "$(printf '%s' "$SAIDA_H" | head -1)"; fi
 }
 # em_todos_os_modos <desc> <json> <exit> — aviso, bloqueio e desligado
 em_todos_os_modos() {
@@ -727,6 +757,14 @@ em_todos_os_modos() {
     modo_portao "$m"
     caso "$1 [$m]" mergex/pr-so-com-portao.sh "$2" "$3"
   done
+  modo_portao aviso
+}
+# em_todos_os_modos_avisa <desc> <json> — avisa e sai 0 em aviso e bloqueio
+# (o hook nunca bloqueia o que nao prova); em desligado, calado
+em_todos_os_modos_avisa() {
+  modo_portao aviso;     caso_aviso "$1 [aviso]" "$2"
+  modo_portao bloqueio;  caso_aviso "$1 [bloqueio]" "$2"
+  modo_portao desligado; caso_calado "$1 [desligado]" "$2"
   modo_portao aviso
 }
 
@@ -746,7 +784,7 @@ touch -t 203001010000 docs/entregas/outro/ENTREGA.md
 modo_portao bloqueio
 caso "entrega de outro trabalho mais recente nao libera" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 modo_portao aviso
-caso "entrega de outro trabalho mais recente nao barra (null em aviso)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+caso_aviso "entrega de outro trabalho mais recente nao barra (null em aviso)" "$(bash_json "$PUSH_FT")"
 rm -rf docs/entregas/outro
 
 # ---------------------------------------------------------------------------
@@ -755,43 +793,43 @@ rm -rf docs/entregas/outro
 portao_vencido_por_merge feature/ft-02 || exit 1
 MERGE_T="$(git rev-parse HEAD)"
 caso "portao vencido barra mesmo em aviso" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+em_todos_os_modos "push simples com portao vencido bloqueia" "$(bash_json "$PUSH_FT")" 2
 mensagem_cita "portao vencido: a mensagem nomeia branch, motivo, primeiro commit e o E2" "$(bash_json "$PUSH_FT")" \
   feature/ft-02 commit_merge "$MERGE_T" /mergex-check
-caso "vencido: pr create barra"             mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 2
-caso "vencido: gh -R o/r pr create barra"   mergex/pr-so-com-portao.sh "$(bash_json 'gh -R o/r pr create --fill')" 2
-caso "vencido: gh --repo o/r pr create barra" mergex/pr-so-com-portao.sh "$(bash_json 'gh --repo o/r pr create')" 2
-caso "vencido: gh pr new barra (N5)"        mergex/pr-so-com-portao.sh "$(bash_json 'gh pr new --fill')" 2
-caso "vencido: glab mr new barra (N5)"      mergex/pr-so-com-portao.sh "$(bash_json 'glab mr new --fill')" 2
-caso "vencido: send-pack barra (N6)"        mergex/pr-so-com-portao.sh "$(bash_json 'git send-pack origin refs/heads/feature/ft-02')" 2
-caso "vencido: subtree push barra (N6)"     mergex/pr-so-com-portao.sh "$(bash_json 'git subtree push --prefix src origin feature/ft-02')" 2
-# O executavel do subcomando (exec-path) tambem e termo de publicacao (P2)
-caso "vencido: /usr/lib/git-core/git-push barra (P2)" mergex/pr-so-com-portao.sh "$(bash_json '/usr/lib/git-core/git-push origin feature/ft-02')" 2
-caso "vencido: \"\$(git --exec-path)\"/git-push barra (P2)" mergex/pr-so-com-portao.sh "$(bash_json '"$(git --exec-path)"/git-push origin feature/ft-02')" 2
-caso "vencido: git-send-pack barra (P2)"    mergex/pr-so-com-portao.sh "$(bash_json 'git-send-pack origin refs/heads/feature/ft-02')" 2
-caso "vencido: 'git-subtree' conta como termo (P2)" mergex/pr-so-com-portao.sh "$(bash_json "'/usr/lib/git-core/git-subtree' --help")" 2
-caso "sem termo: npm run git-push-notifications passa com portao vencido" mergex/pr-so-com-portao.sh "$(bash_json 'npm run git-push-notifications')" 0
-# Tag com o mesmo nome da branch: a varredura le o nome da branch sem
-# ambiguidade (refname:lstrip=2, nunca refname:short) (P3)
+# Comando composto: o hook nao le o shell como fronteira; avisa e o pre-push decide
+caso_aviso "comando composto avisa e sai 0: cd <repo> && git push" "$(bash_json "cd $HIST_T && $PUSH_FT")"
+caso_aviso "comando composto avisa e sai 0: bash -c 'git push'"    "$(bash_json "bash -c '$PUSH_FT'")"
+caso_aviso "comando composto avisa e sai 0: xargs git push"        "$(bash_json 'echo feature/ft-02 | xargs git push origin')"
+mensagem_cita "comando composto: o aviso manda ao pre-push" "$(bash_json "cd $HIST_T && $PUSH_FT")" \
+  "pre-push" "/mergex-check"
+# Abertura de PR nao e push: o hook so le `git push`
+caso_calado "nao e push: gh pr create"           "$(bash_json 'gh pr create --fill')"
+caso_calado "nao e push: gh -R o/r pr create"    "$(bash_json 'gh -R o/r pr create --fill')"
+caso_calado "nao e push: gh --repo o/r pr create" "$(bash_json 'gh --repo o/r pr create')"
+caso_calado "nao e push: gh pr new"              "$(bash_json 'gh pr new --fill')"
+caso_calado "nao e push: glab mr new"            "$(bash_json 'glab mr new --fill')"
+# Outras formas de publicar: avisam
+caso_aviso "send-pack avisa"                     "$(bash_json 'git send-pack origin refs/heads/feature/ft-02')"
+caso_aviso "subtree push avisa"                  "$(bash_json 'git subtree push --prefix src origin feature/ft-02')"
+caso_aviso "/usr/lib/git-core/git-push avisa"    "$(bash_json '/usr/lib/git-core/git-push origin feature/ft-02')"
+caso_aviso "\"\$(git --exec-path)\"/git-push avisa" "$(bash_json '"$(git --exec-path)"/git-push origin feature/ft-02')"
+caso_aviso "git-send-pack avisa"                 "$(bash_json 'git-send-pack origin refs/heads/feature/ft-02')"
+caso_calado "git-subtree --help nao publica"     "$(bash_json "'/usr/lib/git-core/git-subtree' --help")"
+caso_calado "sem push: npm run git-push-notifications" "$(bash_json 'npm run git-push-notifications')"
+# Tag com o mesmo nome da branch: a origem HEAD e a branch atual, sem ambiguidade
 git tag feature/ft-02 main >/dev/null 2>&1
-caso "tag homonima da branch: push -u origin HEAD barra (P3)" mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin HEAD')" 2
+caso "tag homonima da branch: push -u origin HEAD barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push -u origin HEAD')" 2
+caso_aviso "tag homonima da branch: refspec ambiguo avisa" "$(bash_json 'git push origin feature/ft-02')"
 git tag -d feature/ft-02 >/dev/null 2>&1
-# core.worktree que nao e o repositorio: a varredura usa o diretorio Git
-# comum, nunca a worktree (N2)
-git config core.worktree "$SEMGIT_T"
-caso "core.worktree alheio: push no proprio cwd barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-git config core.worktree "$SEMGIT_T/nao-existe"
-caso "core.worktree inexistente: push no proprio cwd barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-HOOK_CWD="$SEMGIT_T"
-caso "core.worktree inexistente: GIT_DIR=<repo>/.git de fora barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "GIT_DIR=$HIST_T/.git $PUSH_FT")" 2
-HOOK_CWD="$HIST_T"
-git config --unset core.worktree
-# Um diretorio que parece Git (tem .git), mas cujo diretorio comum nao se
-# resolve, nao e ignorado: barra (N2)
+# Um .git que nao se resolve: o hook avisa (antes, barrava)
 mkdir -p "$SEMGIT_T/quebrado"
 printf 'gitdir: %s/nao-existe\n' "$SEMGIT_T" > "$SEMGIT_T/quebrado/.git"
 HOOK_CWD="$SEMGIT_T"
-caso "repositorio com .git que nao se resolve barra (N2)" mergex/pr-so-com-portao.sh "$(bash_json "cd $SEMGIT_T/quebrado && git push origin feature/ft-02")" 2
-caso "controle: fora de repositorio sem citar o quebrado passa" mergex/pr-so-com-portao.sh "$(bash_json 'git push')" 0
+caso_aviso "repositorio com .git que nao se resolve avisa" "$(bash_json "cd $SEMGIT_T/quebrado && git push origin feature/ft-02")"
+HOOK_CWD="$SEMGIT_T/quebrado"
+caso_aviso "cwd com .git que nao se resolve avisa"         "$(bash_json 'git push origin feature/ft-02')"
+HOOK_CWD="$SEMGIT_T"
+caso_aviso "fora de repositorio: git push avisa"           "$(bash_json 'git push')"
 HOOK_CWD="$HIST_T"
 rm -rf "$SEMGIT_T/quebrado"
 entrega outro feature/outro
@@ -812,100 +850,117 @@ entrega falso feature/ft-02
 caso "ENTREGA falso nao rastreado na mesma branch nao muda nada" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 rm -rf docs/entregas/falso
 
-# Qualquer forma de push, em qualquer modo (C1, C2, N1, N2, N3)
-em_todos_os_modos "git -C . push"                "$(bash_json 'git -C . push origin feature/ft-02')" 2
-em_todos_os_modos "git -c k=v push"              "$(bash_json 'git -c core.x=y push origin feature/ft-02')" 2
-em_todos_os_modos "git --work-tree . push"       "$(bash_json 'git --work-tree . push origin feature/ft-02')" 2
-em_todos_os_modos "sh -c 'git push'"             "$(bash_json "sh -c 'git push'")" 2
-em_todos_os_modos "push de tags; \\git push"     "$(bash_json 'git push origin --tags; \git push origin feature/ft-02')" 2
-em_todos_os_modos "-c remote.origin.push= (N2)"  "$(bash_json 'git -c remote.origin.push=refs/heads/feature/ft-02:refs/heads/feature/ft-02 push origin')" 2
+# Formas que o hook nao le sem ambiguidade: avisam em qualquer modo (o
+# desligado silencia), nunca bloqueiam
+em_todos_os_modos_avisa "git -C . push"               "$(bash_json 'git -C . push origin feature/ft-02')"
+em_todos_os_modos_avisa "git -c k=v push"             "$(bash_json 'git -c core.x=y push origin feature/ft-02')"
+em_todos_os_modos_avisa "git --work-tree . push"      "$(bash_json 'git --work-tree . push origin feature/ft-02')"
+em_todos_os_modos_avisa "sh -c 'git push'"            "$(bash_json "sh -c 'git push'")"
+em_todos_os_modos_avisa "push de tags; \\git push"    "$(bash_json 'git push origin --tags; \git push origin feature/ft-02')"
+em_todos_os_modos_avisa "-c remote.origin.push="      "$(bash_json 'git -c remote.origin.push=refs/heads/feature/ft-02:refs/heads/feature/ft-02 push origin')"
 git tag v1 >/dev/null 2>&1
-caso "push de tag && /usr/bin/git push"          mergex/pr-so-com-portao.sh "$(bash_json 'git push origin v1 && /usr/bin/git push origin feature/ft-02')" 2
-caso "push benigno && find -exec git push"       mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main && find . -maxdepth 0 -exec git push origin feature/ft-02 \;')" 2
-caso "push benigno; flock git push"              mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main; flock /tmp/l git push origin feature/ft-02')" 2
-caso "(cd outro); git push (N3)"                 mergex/pr-so-com-portao.sh "$(bash_json "(cd $SEMX_T); git push origin")" 2
-caso "false && cd outro; git push (N3)"          mergex/pr-so-com-portao.sh "$(bash_json "false && cd $SEMX_T; git push")" 2
-caso "funcao que empurra (N4)"                   mergex/pr-so-com-portao.sh "$(bash_json 'f(){ git push origin feature/ft-02; }; f')" 2
-caso "prefixo de ambiente qualquer"              mergex/pr-so-com-portao.sh "$(bash_json "FOO=1 $PUSH_FT")" 2
+caso_aviso "push de tag && /usr/bin/git push"     "$(bash_json 'git push origin v1 && /usr/bin/git push origin feature/ft-02')"
+caso_aviso "push benigno && find -exec git push"  "$(bash_json 'git push origin main && find . -maxdepth 0 -exec git push origin feature/ft-02 \;')"
+caso_aviso "push benigno; flock git push"         "$(bash_json 'git push origin main; flock /tmp/l git push origin feature/ft-02')"
+caso_aviso "(cd outro); git push"                 "$(bash_json "(cd $SEMX_T); git push origin")"
+caso_aviso "false && cd outro; git push"          "$(bash_json "false && cd $SEMX_T; git push")"
+caso_aviso "funcao que empurra"                   "$(bash_json 'f(){ git push origin feature/ft-02; }; f')"
+caso_aviso "prefixo de ambiente qualquer"         "$(bash_json "FOO=1 $PUSH_FT")"
+caso_aviso "push com mais de uma linha"           "$(bash_json "git status
+$PUSH_FT")"
+caso_aviso "refspec entre aspas"                  "$(bash_json 'git push origin "feature/ft-02"')"
+caso_aviso "push --all"                           "$(bash_json 'git push --all origin')"
+caso_aviso "push --dry-run"                       "$(bash_json 'git push --dry-run origin feature/ft-02')"
 
-# Custo aceito: com o portao vencido, todo comando com termo de publicacao
-# e barrado, inclusive citacao; a mensagem diz isso e manda corrigir o portao
-caso "custo: echo push barra com portao vencido"           mergex/pr-so-com-portao.sh "$(bash_json 'echo push')" 2
-caso "custo: git log --grep push barra com portao vencido" mergex/pr-so-com-portao.sh "$(bash_json 'git log --grep push')" 2
-caso "custo: push de outra branch barra com portao vencido" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main')" 2
-mensagem_cita "custo: a mensagem explica que todo termo de publicacao e barrado" "$(bash_json 'echo push')" \
-  "qualquer comando com termo de publicação" /mergex-check
-mensagem_cita "custo: a mensagem sugere apagar a branch abandonada" "$(bash_json 'echo push')" \
-  "Se a branch estiver abandonada, apague-a"
-caso "sem termo de publicacao: git status passa"           mergex/pr-so-com-portao.sh "$(bash_json 'git status')" 0
-caso "sem termo de publicacao: npm run push-notifications" mergex/pr-so-com-portao.sh "$(bash_json 'npm run push-notifications')" 0
+# Citacao e outros programas: calados (o gatilho e o git como programa)
+caso_calado "echo push nao e push"                "$(bash_json 'echo push')"
+caso_calado "git log --grep push nao e push"      "$(bash_json 'git log --grep push')"
+caso_calado "push de outra branch (nao aplicavel) passa" "$(bash_json 'git push origin main')"
+caso_calado "sem push: git status"                "$(bash_json 'git status')"
+caso_calado "sem push: npm run push-notifications" "$(bash_json 'npm run push-notifications')"
+caso_calado "sem push: docker push"               "$(bash_json 'docker push img')"
 
-# Outra arvore, outro diretorio, primeiro trabalho MergeX (N1, N3, N4)
+# Outra arvore, outro diretorio, primeiro trabalho MergeX
 fixture_switch_exato main main || exit 1
 git worktree add -q "$WTM_T" -b fixture-main-wt main >/dev/null 2>&1 || exit 1
 git worktree add -q "$WTB_T" -b fixture-sem-entregas "$(git rev-list --max-parents=0 HEAD)" >/dev/null 2>&1 || exit 1
 fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
 HOOK_CWD="$WTM_T"
 caso "cwd em outra branch: push da branch vencida barra" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-caso "xargs acrescenta o refspec (N1)"           mergex/pr-so-com-portao.sh "$(bash_json 'echo feature/ft-02 | xargs git push origin')" 2
-caso "-c remote.origin.push= da main (N2)"       mergex/pr-so-com-portao.sh "$(bash_json 'git -c remote.origin.push=refs/heads/feature/ft-02:refs/heads/feature/ft-02 push origin')" 2
-caso "cd com expansao && push"                   mergex/pr-so-com-portao.sh "$(bash_json "cd \$DIR_X && $PUSH_FT")" 2
+caso_aviso "xargs acrescenta o refspec"         "$(bash_json 'echo feature/ft-02 | xargs git push origin')"
+caso_aviso "-c remote.origin.push= da main"     "$(bash_json 'git -c remote.origin.push=refs/heads/feature/ft-02:refs/heads/feature/ft-02 push origin')"
+caso_aviso "cd com expansao && push"            "$(bash_json "cd \$DIR_X && $PUSH_FT")"
+git -C "$WTM_T" config remote.origin.push refs/heads/feature/ft-02:refs/heads/feature/ft-02
+caso_aviso "remote.origin.push configurado: push sem refspec avisa" "$(bash_json 'git push origin')"
+git -C "$WTM_T" config --unset remote.origin.push
 HOOK_CWD="$WTB_T"
-[ ! -e "$WTB_T/docs/entregas" ] && caso "controle N4: o HEAD da arvore nao tem docs/entregas" mergex/pr-so-com-portao.sh "$(bash_json 'git status')" 0
-caso "N4: funcao, sem entregas no HEAD"          mergex/pr-so-com-portao.sh "$(bash_json 'f(){ git push origin feature/ft-02; }; f')" 2
-caso "N4: ./git push, sem entregas no HEAD"      mergex/pr-so-com-portao.sh "$(bash_json './git push origin feature/ft-02')" 2
-caso "N4: GIT_DIR=x git push, sem entregas no HEAD" mergex/pr-so-com-portao.sh "$(bash_json 'GIT_DIR=x git push origin feature/ft-02')" 2
-caso "N4: xargs -I, sem entregas no HEAD"        mergex/pr-so-com-portao.sh "$(bash_json 'echo feature/ft-02 | xargs -I{} git push origin {}')" 2
-# Diretorio literal de outro repositorio citado no comando
+[ ! -e "$WTB_T/docs/entregas" ] && caso "controle: o HEAD da arvore nao tem docs/entregas" mergex/pr-so-com-portao.sh "$(bash_json 'git status')" 0
+caso "sem entregas no HEAD: push simples da branch vencida barra" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+caso_aviso "sem entregas no HEAD: funcao"       "$(bash_json 'f(){ git push origin feature/ft-02; }; f')"
+caso_aviso "sem entregas no HEAD: ./git push"   "$(bash_json './git push origin feature/ft-02')"
+caso_aviso "sem entregas no HEAD: GIT_DIR=x git push" "$(bash_json 'GIT_DIR=x git push origin feature/ft-02')"
+caso_aviso "sem entregas no HEAD: xargs -I"     "$(bash_json 'echo feature/ft-02 | xargs -I{} git push origin {}')"
+# Diretorio de outro repositorio citado no comando: avisa
 HOOK_CWD="$SEMGIT_T"
-caso "fora de repositorio: cd literal && push"   mergex/pr-so-com-portao.sh "$(bash_json "cd $HIST_T && $PUSH_FT")" 2
-caso "fora de repositorio: git -C <dir> push"    mergex/pr-so-com-portao.sh "$(bash_json "git -C $HIST_T push origin feature/ft-02")" 2
-caso "fora de repositorio: env -C <dir> git push (N3)" mergex/pr-so-com-portao.sh "$(bash_json "env -C $HIST_T git push origin feature/ft-02")" 2
-caso "fora de repositorio: GIT_DIR=<dir>/.git"   mergex/pr-so-com-portao.sh "$(bash_json "GIT_DIR=$HIST_T/.git git push origin feature/ft-02")" 2
-caso "fora de repositorio: --git-dir=<dir>/.git" mergex/pr-so-com-portao.sh "$(bash_json "git --git-dir=$HIST_T/.git push origin feature/ft-02")" 2
-caso "fora de repositorio: git push sem citar repositorio" mergex/pr-so-com-portao.sh "$(bash_json 'git push')" 0
+caso_aviso "fora de repositorio: cd literal && push"   "$(bash_json "cd $HIST_T && $PUSH_FT")"
+caso_aviso "fora de repositorio: git -C <dir> push"    "$(bash_json "git -C $HIST_T push origin feature/ft-02")"
+caso_aviso "fora de repositorio: env -C <dir> git push" "$(bash_json "env -C $HIST_T git push origin feature/ft-02")"
+caso_aviso "fora de repositorio: GIT_DIR=<dir>/.git"   "$(bash_json "GIT_DIR=$HIST_T/.git git push origin feature/ft-02")"
+caso_aviso "fora de repositorio: --git-dir=<dir>/.git" "$(bash_json "git --git-dir=$HIST_T/.git push origin feature/ft-02")"
 HOOK_CWD="$SEMX_T"
-caso "repo sem MergeX: env -C <dir vencido> git push (N3)" mergex/pr-so-com-portao.sh "$(bash_json "env -C $HIST_T git push")" 2
-caso "repo sem MergeX: push proprio nao bloqueia" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin dev')" 0
-# Opcoes de `cd`/`pushd` nao sao o diretorio (P1)
-caso "repo sem MergeX: cd -- <wt> && push (P1)"  mergex/pr-so-com-portao.sh "$(bash_json "cd -- $WTM_T && $PUSH_FT")" 2
-caso "repo sem MergeX: cd -P <wt> && push (P1)"  mergex/pr-so-com-portao.sh "$(bash_json "cd -P $WTM_T && $PUSH_FT")" 2
-caso "repo sem MergeX: cd -L <wt>; push (P1)"    mergex/pr-so-com-portao.sh "$(bash_json "cd -L $WTM_T; $PUSH_FT")" 2
-caso "repo sem MergeX: cd -eP -- <wt> && push (P1)" mergex/pr-so-com-portao.sh "$(bash_json "cd -eP -- $WTM_T && $PUSH_FT")" 2
-caso "repo sem MergeX: pushd -n <wt> && push (P1)" mergex/pr-so-com-portao.sh "$(bash_json "pushd -n $WTM_T && $PUSH_FT")" 2
-# Diretorio corrente encadeado (N1): o relativo se resolve contra o diretorio
-# em vigor naquele ponto (cd anterior, -C anterior), nao contra o cwd inicial
+caso_aviso "repo sem MergeX: env -C <dir vencido> git push" "$(bash_json "env -C $HIST_T git push")"
+caso_calado "repo sem MergeX: push proprio passa"           "$(bash_json 'git push origin dev')"
+caso_aviso "repo sem MergeX: cd -- <wt> && push"           "$(bash_json "cd -- $WTM_T && $PUSH_FT")"
+caso_aviso "repo sem MergeX: cd -P <wt> && push"           "$(bash_json "cd -P $WTM_T && $PUSH_FT")"
+caso_aviso "repo sem MergeX: cd -L <wt>; push"             "$(bash_json "cd -L $WTM_T; $PUSH_FT")"
+caso_aviso "repo sem MergeX: cd -eP -- <wt> && push"       "$(bash_json "cd -eP -- $WTM_T && $PUSH_FT")"
+caso_aviso "repo sem MergeX: pushd -n <wt> && push"        "$(bash_json "pushd -n $WTM_T && $PUSH_FT")"
 PAI_WTM="$(dirname "$WTM_T")"; BASE_WTM="$(basename "$WTM_T")"; BASE_HIST="$(basename "$HIST_T")"
-caso "N1: git -C <pai> -C <wt> push"            mergex/pr-so-com-portao.sh "$(bash_json "git -C $PAI_WTM -C $BASE_WTM push origin feature/ft-02")" 2
-caso "N1: git -C .. -C <wt> push"               mergex/pr-so-com-portao.sh "$(bash_json "git -C .. -C $BASE_WTM push origin feature/ft-02")" 2
-caso "N1: cd <pai> && GIT_DIR=<repo>/.git push" mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && GIT_DIR=$BASE_HIST/.git git push origin feature/ft-02")" 2
-caso "N1: cd .. && cd <wt> && push"             mergex/pr-so-com-portao.sh "$(bash_json "cd .. && cd $BASE_WTM && $PUSH_FT")" 2
-caso "N1: cd <pai> && cd <wt> && push"          mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && cd $BASE_WTM && $PUSH_FT")" 2
-caso "N1: cd <pai>; git -C <wt> push"           mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM; git -C $BASE_WTM push origin feature/ft-02")" 2
-caso "N1: cd <pai> && git --git-dir=<repo>/.git push" mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && git --git-dir=$BASE_HIST/.git push origin feature/ft-02")" 2
-caso "N1: cd <pai> && env -C <wt> git push"     mergex/pr-so-com-portao.sh "$(bash_json "cd $PAI_WTM && env -C $BASE_WTM git push origin feature/ft-02")" 2
-caso "N1: cd / && cd <relativo> && push"        mergex/pr-so-com-portao.sh "$(bash_json "cd / && cd ${WTM_T#/} && $PUSH_FT")" 2
-# `~` vira $HOME; `cd` sem argumento vai para $HOME
-HOME_REAL_T="$HOME"; export HOME="$PAI_WTM"
-caso "N1: cd /tmp && cd ~/<wt> && push"         mergex/pr-so-com-portao.sh "$(bash_json "cd / && cd ~/$BASE_WTM && $PUSH_FT")" 2
-caso "N1: cd && cd <wt> && push"                mergex/pr-so-com-portao.sh "$(bash_json "cd && cd $BASE_WTM && $PUSH_FT")" 2
-caso "N1: GIT_DIR=~/<repo>/.git push"           mergex/pr-so-com-portao.sh "$(bash_json "GIT_DIR=~/$BASE_HIST/.git git push origin feature/ft-02")" 2
-export HOME="$HOME_REAL_T"
-# Subshell: o cd de dentro nao muda o diretorio corrente de fora
-caso "N1: ( cd X ); git push"                   mergex/pr-so-com-portao.sh "$(bash_json "( cd $WTM_T ); git push origin feature/ft-02")" 2
-ln -s "$WTM_T" "$SEMX_T/link-wt"
-caso "N1: ( cd <pai> ); cd <relativo ao cwd> && push" mergex/pr-so-com-portao.sh "$(bash_json "( cd $PAI_WTM ); cd link-wt && $PUSH_FT")" 2
-rm -f "$SEMX_T/link-wt"
-# GIT_DIR/--git-dir no gitdir de uma worktree vinculada: o repositorio comum
-# e varrido (P4)
+caso_aviso "git -C <pai> -C <wt> push"            "$(bash_json "git -C $PAI_WTM -C $BASE_WTM push origin feature/ft-02")"
+caso_aviso "git -C .. -C <wt> push"               "$(bash_json "git -C .. -C $BASE_WTM push origin feature/ft-02")"
+caso_aviso "cd <pai> && GIT_DIR=<repo>/.git push" "$(bash_json "cd $PAI_WTM && GIT_DIR=$BASE_HIST/.git git push origin feature/ft-02")"
+caso_aviso "cd .. && cd <wt> && push"             "$(bash_json "cd .. && cd $BASE_WTM && $PUSH_FT")"
+caso_aviso "cd <pai> && cd <wt> && push"          "$(bash_json "cd $PAI_WTM && cd $BASE_WTM && $PUSH_FT")"
+caso_aviso "cd <pai>; git -C <wt> push"           "$(bash_json "cd $PAI_WTM; git -C $BASE_WTM push origin feature/ft-02")"
+caso_aviso "cd <pai> && git --git-dir=<repo>/.git push" "$(bash_json "cd $PAI_WTM && git --git-dir=$BASE_HIST/.git push origin feature/ft-02")"
+caso_aviso "cd <pai> && env -C <wt> git push"     "$(bash_json "cd $PAI_WTM && env -C $BASE_WTM git push origin feature/ft-02")"
+caso_aviso "cd / && cd <relativo> && push"        "$(bash_json "cd / && cd ${WTM_T#/} && $PUSH_FT")"
+caso_aviso "cd / && cd ~/<wt> && push"            "$(bash_json "cd / && cd ~/$BASE_WTM && $PUSH_FT")"
+caso_aviso "cd && cd <wt> && push"                "$(bash_json "cd && cd $BASE_WTM && $PUSH_FT")"
+caso_aviso "GIT_DIR=~/<repo>/.git push"           "$(bash_json "GIT_DIR=~/$BASE_HIST/.git git push origin feature/ft-02")"
+caso_aviso "( cd X ); git push"                   "$(bash_json "( cd $WTM_T ); git push origin feature/ft-02")"
 GD_WTM="$(git -C "$WTM_T" rev-parse --absolute-git-dir)"
 HOOK_CWD="$SEMGIT_T"
-caso "fora de repositorio: GIT_DIR=<gitdir de worktree vinculada> (P4)" mergex/pr-so-com-portao.sh "$(bash_json "GIT_DIR=$GD_WTM git push origin feature/ft-02")" 2
-caso "fora de repositorio: --git-dir=<gitdir de worktree vinculada> (P4)" mergex/pr-so-com-portao.sh "$(bash_json "git --git-dir=$GD_WTM push origin feature/ft-02")" 2
+caso_aviso "fora de repositorio: GIT_DIR=<gitdir de worktree vinculada>"     "$(bash_json "GIT_DIR=$GD_WTM git push origin feature/ft-02")"
+caso_aviso "fora de repositorio: --git-dir=<gitdir de worktree vinculada>"   "$(bash_json "git --git-dir=$GD_WTM push origin feature/ft-02")"
 HOOK_CWD="$HIST_T"
 git worktree remove --force "$WTM_T" || exit 1
 git worktree remove --force "$WTB_T" || exit 1
 git branch -q -D fixture-main-wt fixture-sem-entregas
+
+# cwd que nao e repositorio, em forma UNC: aviso rapido, sem laco de subida de
+# diretorio (`dirname //` e `//` em alguns sistemas)
+for CWD_UNC in '//' '//wsl.localhost/mergex-nao-existe/x'; do
+  HOOK_CWD="$CWD_UNC"
+  T0_UNC=$SECONDS
+  caso_aviso "cwd UNC sem repositorio nao entra em laco ($CWD_UNC)" "$(bash_json "$PUSH_FT")"
+  valor "cwd UNC sem repositorio: termina em menos de 2 s ($CWD_UNC)" "$([ $((SECONDS - T0_UNC)) -lt 2 ] && echo sim || echo nao)" sim
+done
+HOOK_CWD="$HIST_T"
+
+# dubious ownership: o Git recusa o repositorio do cwd (dono diferente, sem
+# safe.directory). Config global VAZIA e temporaria, so no processo do hook.
+GLOBAL_VAZIA_T="$SEMGIT_T/global-vazia"
+: > "$GLOBAL_VAZIA_T"
+caso_aviso "dubious ownership avisa e sai 0" "$(bash_json "$PUSH_FT")" \
+  GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+case "$SAIDA_H" in
+  *safe.directory*) OK=$((OK+1)); printf '  ok    %s\n' "dubious ownership: o aviso cita safe.directory na config global" ;;
+  *) FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "dubious ownership: o aviso nao cita safe.directory" ;;
+esac
+GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$HIST_T" rev-parse --show-toplevel >/dev/null 2>&1 \
+  && { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "controle: o Git aceitou o repositorio com dono diferente"; } \
+  || { OK=$((OK+1)); printf '  ok    %s\n' "controle: o Git recusa o repositorio (dubious ownership)"; }
 
 # Entrega legada: pronto sem portao_sha nunca libera
 portao_sem_sha feature/ft-02 || exit 1
@@ -917,12 +972,16 @@ mensagem_cita "pronto legado: a mensagem nomeia portao_sha_ausente" "$(bash_json
 # ---------------------------------------------------------------------------
 portao_valido_com_metodo feature/ft-02 || exit 1
 caso "portao valido com commit so de metodo libera" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+caso_calado "push simples com portao valido passa" "$(bash_json "$PUSH_FT")"
 for C in 'git push' 'git push -u origin feature/ft-02' 'git push origin HEAD:feature/ft-02' \
          'git push origin HEAD:refs/heads/feature/ft-02' 'git push origin feature/ft-02:feature/ft-02' \
-         'git push origin refs/heads/feature/ft-02' 'git -C . push origin feature/ft-02' \
-         'git push -o main origin feature/ft-02' 'git push -uo main origin feature/ft-02' \
-         "sh -c 'git push'" 'gh pr create --fill' 'gh -R o/r pr create --fill' 'gh pr new --fill' 'glab mr new --fill' \
-         'git push origin main' 'git push --tags' 'git push --all origin' \
+         'git push origin refs/heads/feature/ft-02' 'git push -o main origin feature/ft-02' \
+         'git push -uo main origin feature/ft-02' 'git push origin main' 'git push origin v1' \
+         'git push origin :feature/velha' 'git push --follow-tags origin feature/ft-02'; do
+  caso_calado "portao valido: $C" "$(bash_json "$C")"
+done
+for C in 'git -C . push origin feature/ft-02' "sh -c 'git push'" 'gh pr create --fill' 'gh -R o/r pr create --fill' \
+         'gh pr new --fill' 'glab mr new --fill' 'git push --tags' 'git push --all origin' \
          'GIT_DIR=.git git push origin feature/ft-02' 'cd $DIR_X && git push origin feature/ft-02' \
          "cd $HIST_T && git push origin feature/ft-02" 'echo push' 'git log --grep push' \
          'git commit -m "antes do git push"' 'echo "git push origin feature/ft-02"' 'docker push img' \
@@ -930,8 +989,24 @@ for C in 'git push' 'git push -u origin feature/ft-02' 'git push origin HEAD:fea
          "cd -P $HIST_T && git push origin feature/ft-02" "cd -- $HIST_T && git push origin feature/ft-02"; do
   caso "portao valido: $C" mergex/pr-so-com-portao.sh "$(bash_json "$C")" 0
 done
-# Origem explicita para a branch de um trabalho com `pronto`: quando nao e a
-# ponta local dessa branch, a validade roda sobre a ORIGEM (--rev <origem>).
+
+# --no-verify num push reconhecido: bloqueia em qualquer modo (o pre-push
+# seria pulado; o CI e a barreira contra esse contorno)
+caso "--no-verify reconhecido bloqueia"                    mergex/pr-so-com-portao.sh "$(bash_json 'git push --no-verify origin feature/ft-02')" 2
+em_todos_os_modos "--no-verify no fim do push bloqueia"    "$(bash_json 'git push origin feature/ft-02 --no-verify')" 2
+caso "--no-verify em comando composto bloqueia"            mergex/pr-so-com-portao.sh "$(bash_json "cd $HIST_T && git push --no-verify origin feature/ft-02")" 2
+caso "--no-verify dentro de sh -c bloqueia"                mergex/pr-so-com-portao.sh "$(bash_json "sh -c 'git push --no-verify'")" 2
+caso "--no-verify com /usr/bin/git bloqueia"               mergex/pr-so-com-portao.sh "$(bash_json '/usr/bin/git push --no-verify origin feature/ft-02')" 2
+caso "--no-verify com opcao global bloqueia"               mergex/pr-so-com-portao.sh "$(bash_json 'git -c core.x=y push --no-verify')" 2
+caso "--no-verify com git-push bloqueia"                   mergex/pr-so-com-portao.sh "$(bash_json '/usr/lib/git-core/git-push --no-verify origin feature/ft-02')" 2
+caso "--no-verify fora de repositorio bloqueia"            mergex/pr-so-com-portao.sh "$(jq -cn --arg c 'git push --no-verify' --arg w "$SEMGIT_T" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}')" 2
+mensagem_cita "--no-verify: a mensagem explica o pre-push pulado e o CI" "$(bash_json 'git push --no-verify origin feature/ft-02')" \
+  "--no-verify" "pula" "pre-push" "CI" "/mergex-check"
+caso_calado "--no-verify em git commit nao e push"         "$(bash_json 'git commit --no-verify -m x')"
+caso "citacao de --no-verify nao bloqueia"                 mergex/pr-so-com-portao.sh "$(bash_json 'echo "git push --no-verify"')" 0
+caso_calado "git log --grep=--no-verify nao bloqueia"      "$(bash_json 'git log --grep=--no-verify')"
+
+# Origem explicita: a validade roda sobre o SHA enviado
 fixture_switch_exato fixture-produto -c fixture-produto || exit 1
 printf 'produto solto\n' > src/solto.ts
 git add src/solto.ts && git commit -qm "feat: produto solto" || exit 1
@@ -948,9 +1023,8 @@ caso "origem explicita: HEAD~1:refs/heads/feature/ft-02 validada pela origem" me
 caso "origem explicita: feature/ft-02:feature/ft-02 ok" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02:feature/ft-02')" 0
 caso "origem explicita: SHA da propria ponta ok" mergex/pr-so-com-portao.sh "$(bash_json "git push origin $(git rev-parse HEAD):feature/ft-02")" 0
 caso "origem explicita: outra branch (main) barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main:feature/ft-02')" 2
-caso "origem explicita que nao se resolve barra" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin nao-existe:feature/ft-02')" 2
-# A ponta da branch decide, nao o HEAD de outra arvore: uma arvore cujo HEAD
-# esta vencido (outra branch) nao barra a branch do trabalho valida
+caso_aviso "origem explicita que nao se resolve avisa (o git recusa sozinho)" "$(bash_json 'git push origin nao-existe:feature/ft-02')"
+# A ponta da branch decide, nao o HEAD de outra arvore
 git branch -q fixture-vencida HEAD
 git worktree add -q "$WTX_T" fixture-vencida >/dev/null 2>&1 || exit 1
 printf 'produto na outra arvore\n' > "$WTX_T/src/outra-arvore.ts"
@@ -969,51 +1043,56 @@ mensagem_cita "produto depois do portao: commit_de_produto no proprio commit" "$
   commit_de_produto "$(git rev-parse HEAD)"
 modo_portao bloqueio
 caso "portao vencido em bloqueio tambem barra"     mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-# spec §4.5: nenhum modo de hook pula a validade do portao — nem o desligado
+# o modo nunca afrouxa o portao vencido (a mesma regra do pre-push)
 modo_portao desligado
 caso "desligado nao pula a validade do portao"     mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 
-# null e bloqueado (commitados): o modo manda, so para a branch empurrada
+# null e bloqueado (commitados): pr_decide_ref decide, como no pre-push
 portao_commita feature/ft-02 null || exit 1
 modo_portao aviso
-caso "null em aviso: comportamento de antes (passa)"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
-caso "null em aviso: push --all nao barra"              mergex/pr-so-com-portao.sh "$(bash_json 'git push --all origin')" 0
+caso_aviso "null em aviso: avisa e passa"                "$(bash_json "$PUSH_FT")"
+caso_aviso "null em aviso: push --all avisa"             "$(bash_json 'git push --all origin')"
 modo_portao bloqueio
-caso "null em bloqueio: comportamento de antes (barra)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+caso "null em bloqueio: barra"                          mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 caso "null em bloqueio: push de outra branch nao e do trabalho" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin main')" 0
 caso "null em bloqueio: citacao nao e push da branch"   mergex/pr-so-com-portao.sh "$(bash_json 'echo push')" 0
 caso "null em bloqueio: grep 'gh pr create' nao e PR"   mergex/pr-so-com-portao.sh "$(bash_json "grep -n 'gh pr create' README.md")" 0
-caso "null em bloqueio: gh pr create barra"             mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 2
+caso "null em bloqueio: gh pr create nao e push"        mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 0
 modo_portao desligado
-caso "null com o hook desligado: nao age"               mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+caso_calado "null com o hook desligado: nao age"        "$(bash_json "$PUSH_FT")"
 portao_commita feature/ft-02 bloqueado || exit 1
 modo_portao bloqueio
-caso "bloqueado em bloqueio: comportamento de antes (barra)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+caso "bloqueado em bloqueio: barra" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 modo_portao aviso
-caso "bloqueado em aviso: comportamento de antes (passa)"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+caso "bloqueado em aviso: barra (o modo so vale para null)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 # o disco pronto nao promove nada: vale o bloqueado da ponta
 fm_chave docs/entregas/ft-02/ENTREGA.md portao pronto
 modo_portao bloqueio
-caso "disco pronto com a ponta bloqueada: segue o modo" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+caso "disco pronto com a ponta bloqueada: barra" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 fixture_restaurar_tracked docs/entregas/ft-02/ENTREGA.md || exit 1
 modo_portao aviso
 
-# Instalacao sem validade-do-portao.sh: com pronto, barra em qualquer modo.
-# Os hooks copiados para uma arvore sem .claude/skills.
+# ---------------------------------------------------------------------------
+# Instalacao: as regras ao lado dos hooks, e a validade substituida
+# ---------------------------------------------------------------------------
 portao_valido_com_metodo feature/ft-02 || exit 1
 caso "controle: portao valido de novo libera"      mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
-INST_T="$SEMGIT_T/instalacao/.claude/hooks"
+INST_R="$SEMGIT_T/instalacao/.claude"
+INST_T="$INST_R/hooks"
 mkdir -p "$INST_T/comum" "$INST_T/mergex"
 cp "$H/comum/base.sh" "$INST_T/comum/base.sh"
 cp "$H/mergex/pr-so-com-portao.sh" "$INST_T/mergex/pr-so-com-portao.sh"
 H_REAL="$H"; H="$INST_T"
-caso "validade ausente com pronto barra"           mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-mensagem_cita "validade ausente: a mensagem nomeia o script" "$(bash_json "$PUSH_FT")" validade-do-portao.sh
+caso_aviso "regras ausentes ao lado dos hooks: avisa" "$(bash_json "$PUSH_FT")"
+mensagem_cita "regras ausentes: o aviso nomeia portao-regras.sh" "$(bash_json "$PUSH_FT")" portao-regras.sh
+caso "regras ausentes: --no-verify continua barrado" mergex/pr-so-com-portao.sh "$(bash_json 'git push --no-verify origin feature/ft-02')" 2
 
-# O hook passa a ponta de cada branch (--rev <sha40>) para a validade: um
-# substituto que so diz ok=true quando recebe --rev com o SHA de HEAD.
-mkdir -p "$SEMGIT_T/instalacao/.claude/skills/mergex/scripts"
-STUB_T="$SEMGIT_T/instalacao/.claude/skills/mergex/scripts/validade-do-portao.sh"
+# Com os scripts da skill copiados, a validade vira um substituto
+mkdir -p "$INST_R/skills/mergex"
+cp -R "$REPO_ROOT/.claude/skills/mergex/scripts" "$INST_R/skills/mergex/scripts"
+STUB_T="$INST_R/skills/mergex/scripts/validade-do-portao.sh"
+CHAMADAS_T="$SEMGIT_T/chamadas-validade"
+# O hook passa --rev com o SHA enviado (a ponta da branch empurrada)
 cat > "$STUB_T" <<'STUB'
 #!/usr/bin/env bash
 esperado="$(git rev-parse HEAD)"; rev=""
@@ -1021,65 +1100,20 @@ while [ "$#" -gt 0 ]; do case "$1" in --rev) rev="${2:-}"; shift 2 ;; *) shift ;
 [ "$rev" = "$esperado" ] && { printf 'ok=true\nprimeiro_commit=-\n'; exit 0; }
 printf 'ok=false\nmotivo=commit_de_produto\nprimeiro_commit=-\n'; exit 1
 STUB
-caso "o hook passa --rev com a ponta (push)"       mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
-caso "o hook passa --rev com a ponta (pr create)"  mergex/pr-so-com-portao.sh "$(bash_json 'gh pr create --fill')" 0
+caso_calado "o hook passa --rev com a ponta (push)"       "$(bash_json "$PUSH_FT")"
+caso "o hook passa --rev com a origem explicita: HEAD~1 barra pelo substituto" mergex/pr-so-com-portao.sh "$(bash_json 'git push origin HEAD~1:refs/heads/feature/ft-02')" 2
 printf '#!/usr/bin/env bash\nprintf "ok=false\\nmotivo=erro_ambiente\\nprimeiro_commit=-\\naviso=sem git\\n"; exit 1\n' > "$STUB_T"
-caso "validade com erro_ambiente e pronto barra"   mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+caso_aviso "validade com erro_ambiente avisa (nao prova nada)" "$(bash_json "$PUSH_FT")"
 printf '#!/usr/bin/env bash\nexit 64\n' > "$STUB_T"
-caso "validade com uso invalido e pronto barra"    mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+caso_aviso "validade com uso invalido avisa"          "$(bash_json "$PUSH_FT")"
 printf '#!/usr/bin/env bash\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 1\n' > "$STUB_T"
-caso "validade ok=true com rc 1 barra"             mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-# Prazo proprio (P6): timeout do harness LIBERA o comando, entao o hook tem um
-# prazo interno de 45 s que falha FECHADO. Na bancada, EXPX_PORTAO_PRAZO_TESTE
-# so reduz o prazo (nunca o relaxa), e so vale com EXPX_HOOKS_BANCADA=1.
-printf '#!/usr/bin/env bash\nsleep 8\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
-export EXPX_HOOKS_BANCADA=1 EXPX_PORTAO_PRAZO_TESTE=1
-T0_PRAZO=$SECONDS
-caso "prazo estourado barra (P6)"                  mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-valor "prazo estourado: a validade lenta e interrompida" "$([ $((SECONDS - T0_PRAZO)) -lt 6 ] && echo sim || echo nao)" sim
-mensagem_cita "prazo estourado: a mensagem" "$(bash_json "$PUSH_FT")" \
-  "varredura do portão excedeu o prazo; rode /mergex-check ou apague branches abandonadas"
-modo_portao desligado
-caso "prazo estourado barra tambem em desligado (P6)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-modo_portao aviso
-# Prazo ja esgotado antes da validade: barra sem chama-la
-PRAZO_CHAMADAS_T="$SEMGIT_T/chamadas-prazo"
-: > "$PRAZO_CHAMADAS_T"
-printf '#!/usr/bin/env bash\necho x >> %s\nsleep 8\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' "$PRAZO_CHAMADAS_T" > "$STUB_T"
-EXPX_PORTAO_PRAZO_TESTE=0
-caso "prazo esgotado antes da validade barra (P6)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-valor "prazo esgotado: a validade nao e chamada" "$(wc -l < "$PRAZO_CHAMADAS_T" | tr -d ' ')" 0
-# Um `timeout` falso no PATH registra o limite que o hook passa a validade.
-FALSO_T="$SEMGIT_T/falso-timeout"
-mkdir -p "$FALSO_T"
-printf '#!/usr/bin/env bash\n[ "$1" = -k ] && shift 2\necho "$1" >> %s/limites\nshift\n[ -n "${FALSO_TIMEOUT_124:-}" ] && exit 124\nexec "$@"\n' "$FALSO_T" > "$FALSO_T/timeout"
-chmod +x "$FALSO_T/timeout"
-printf '#!/usr/bin/env bash\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
-PATH_REAL_T="$PATH"; export PATH="$FALSO_T:$PATH"
-EXPX_PORTAO_PRAZO_TESTE=100
-: > "$FALSO_T/limites"
-caso "prazo de teste acima de 45 (P6): o portao valido passa" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
-valor "prazo de teste nunca relaxa o prazo: o limite passado fica em 45 s ou menos" \
-  "$(awk 'NR == 1 { print ($1 >= 1 && $1 <= 45) ? "sim" : "nao:" $1 }' "$FALSO_T/limites")" sim
-# A validade interrompida pelo limite (rc 124) e estouro do prazo, nao erro
-export FALSO_TIMEOUT_124=1
-mensagem_cita "validade interrompida pelo limite: a mensagem e a do prazo (P6)" "$(bash_json "$PUSH_FT")" \
-  "varredura do portão excedeu o prazo"
-unset FALSO_TIMEOUT_124
-export PATH="$PATH_REAL_T"
-# SECONDS herdado do ambiente nao interfere: o hook zera o relogio no inicio
-roda_portao_env() { # <desc> <esperado> <env...> — roda o hook com o ambiente dado
-  local desc="$1" esperado="$2" obtido
-  shift 2
-  printf '%s' "$(bash_json "$PUSH_FT")" | env "$@" bash "$H/mergex/pr-so-com-portao.sh" >/dev/null 2>&1
-  obtido=$?
-  valor "$desc" "$obtido" "$esperado"
-}
-unset EXPX_PORTAO_PRAZO_TESTE
-roda_portao_env "SECONDS=1000 herdado: o portao valido passa" 0 SECONDS=1000
-printf '#!/usr/bin/env bash\nsleep 3\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
-roda_portao_env "SECONDS=-1000 herdado: o prazo continua valendo" 2 SECONDS=-1000 EXPX_PORTAO_PRAZO_TESTE=1
-# Sem `timeout` no PATH, o prazo e conferido depois da validade (PZ6)
+caso_aviso "validade ok=true com rc 1 avisa"          "$(bash_json "$PUSH_FT")"
+printf '#!/usr/bin/env bash\nprintf "ok=false\\nmotivo=commit_de_produto\\nprimeiro_commit=-\\n"; exit 1\n' > "$STUB_T"
+caso "validade ok=false barra (prova)"                mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
+
+# Sem `timeout` funcional: avisa sem chamar a validade
+: > "$CHAMADAS_T"
+printf '#!/usr/bin/env bash\necho x >> %s\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' "$CHAMADAS_T" > "$STUB_T"
 SEM_TIMEOUT_T="$SEMGIT_T/sem-timeout"
 mkdir -p "$SEM_TIMEOUT_T"
 IFS=: read -r -a DIRS_PATH_T <<<"$PATH"
@@ -1092,31 +1126,124 @@ for D_T in "${DIRS_PATH_T[@]}"; do
   done
 done
 valor "controle: o PATH da bancada nao tem timeout" "$(PATH="$SEM_TIMEOUT_T" command -v timeout || echo ausente)" ausente
-roda_portao_env "sem timeout: validade lenta alem do prazo barra (PZ6)" 2 PATH="$SEM_TIMEOUT_T" EXPX_PORTAO_PRAZO_TESTE=1
+caso_aviso "sem timeout no PATH: avisa e sai 0" "$(bash_json "$PUSH_FT")" PATH="$SEM_TIMEOUT_T"
+valor "sem timeout no PATH: a validade nao e chamada" "$(wc -l < "$CHAMADAS_T" | tr -d ' ')" 0
+# um `timeout` que nao mata (so executa o comando) nao e funcional
+printf '#!/usr/bin/env bash\n[ "$1" = -k ] && shift 2\nshift\nexec "$@"\n' > "$SEM_TIMEOUT_T/timeout"
+chmod +x "$SEM_TIMEOUT_T/timeout"
+caso_aviso "timeout que nao mata: avisa e sai 0" "$(bash_json "$PUSH_FT")" PATH="$SEM_TIMEOUT_T"
+valor "timeout que nao mata: a validade nao e chamada" "$(wc -l < "$CHAMADAS_T" | tr -d ' ')" 0
 rm -rf "$SEM_TIMEOUT_T"
-EXPX_PORTAO_PRAZO_TESTE=0; export EXPX_PORTAO_PRAZO_TESTE
-unset EXPX_HOOKS_BANCADA
-printf '#!/usr/bin/env bash\nsleep 2\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
-caso "fora da bancada o prazo de teste e ignorado (P6)" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
-unset EXPX_PORTAO_PRAZO_TESTE
-valor "prazo padrao do hook e 45 s" "$(grep -c '^PRAZO=45 # guarda:HKPRAZO$' "$H_REAL/mergex/pr-so-com-portao.sh")" 1
-# Para na primeira falha: com dois portoes `pronto` no repositorio, uma
-# validade que reprova roda uma vez so.
-fixture_switch_exato feature/outro -c feature/outro || exit 1
-entrega outro feature/outro
-fm_chave docs/entregas/outro/ENTREGA.md portao pronto
-git add docs/entregas/outro/ENTREGA.md && git commit -qm "entrega outro pronta" || exit 1
-fixture_switch_exato feature/ft-02 feature/ft-02 || exit 1
-CHAMADAS_T="$SEMGIT_T/chamadas-validade"
+
+# hook nao varre branches: 50 branches entregues com `pronto`, uma validade so
+BASE_50="$(git rev-parse main)"
+I_T=1
+while [ "$I_T" -le 50 ]; do
+  B_T="$(printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: b%s\nentregue_por: mergex\nbranch: feature/b%s\nbranch_base: main\nportao: pronto\nportao_sha: %s\n---\n' "$I_T" "$I_T" "$BASE_50" | git hash-object -w --stdin)" || exit 1
+  rm -f "$SEMGIT_T/idx-50"
+  GIT_INDEX_FILE="$SEMGIT_T/idx-50" git read-tree "$BASE_50" || exit 1
+  GIT_INDEX_FILE="$SEMGIT_T/idx-50" git update-index --add --cacheinfo "100644,$B_T,docs/entregas/b$I_T/ENTREGA.md" || exit 1
+  C_T="$(git commit-tree "$(GIT_INDEX_FILE="$SEMGIT_T/idx-50" git write-tree)" -p "$BASE_50" -m "entrega b$I_T")" || exit 1
+  git update-ref "refs/heads/feature/b$I_T" "$C_T" || exit 1
+  I_T=$((I_T + 1))
+done
+rm -f "$SEMGIT_T/idx-50"
+valor "controle: 50 branches entregues com portao pronto" "$(git for-each-ref --format=x 'refs/heads/feature/b*' | wc -l | tr -d ' ')" 50
 : > "$CHAMADAS_T"
-printf '#!/usr/bin/env bash\necho x >> %s\nprintf "ok=false\\nmotivo=commit_de_produto\\nprimeiro_commit=-\\n"; exit 1\n' "$CHAMADAS_T" > "$STUB_T"
-caso "dois portoes pronto e o primeiro reprova: barra" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
-valor "para na primeira falha: uma validade so" "$(wc -l < "$CHAMADAS_T" | tr -d ' ')" 1
-git branch -q -D feature/outro
+caso_calado "hook nao varre branches: push da branch valida passa" "$(bash_json "$PUSH_FT")"
+valor "hook nao varre branches: no maximo uma chamada da validade" "$([ "$(wc -l < "$CHAMADAS_T" | tr -d ' ')" -le 1 ] && echo sim || echo "nao: $(wc -l < "$CHAMADAS_T" | tr -d ' ')")" sim
+: > "$CHAMADAS_T"
+caso_calado "hook nao varre branches: push de outra branch calado" "$(bash_json 'git push origin main')"
+valor "hook nao varre branches: ref nao aplicavel, nenhuma chamada" "$(wc -l < "$CHAMADAS_T" | tr -d ' ')" 0
+for I_T in $(git for-each-ref --format='%(refname)' 'refs/heads/feature/b*'); do git update-ref -d "$I_T"; done
+
+# validade lenta nao segura o comando: a substituta dorme 120 s; o hook sai 0
+# com aviso dentro do orcamento, sem processo orfao; e o push real seguinte e
+# barrado pelo pre-push (que usa a validade de verdade)
+printf 'produto vencido para o push real\n' > src/lento.ts
+git add src/lento.ts && git commit -qm "feat: produto para o push real" || exit 1
+printf '#!/usr/bin/env bash\nsleep 3119\nprintf "ok=true\\nprimeiro_commit=-\\n"; exit 0\n' > "$STUB_T"
+T0_LENTO=$SECONDS
+caso_aviso "validade lenta nao segura o comando: avisa e sai 0" "$(bash_json "$PUSH_FT")"
+DUR_LENTO=$((SECONDS - T0_LENTO))
+valor "validade lenta nao segura o comando: menos de 9 s (${DUR_LENTO} s)" "$([ "$DUR_LENTO" -lt 9 ] && echo sim || echo nao)" sim
+case "$SAIDA_H" in
+  *"orçamento de 8 s"*) OK=$((OK+1)); printf '  ok    %s\n' "validade lenta: o aviso nomeia o orcamento de 8 s" ;;
+  *) FALHOU=$((FALHOU+1)); printf '  FALHA %s (%s)\n' "validade lenta: o aviso nao nomeia o orcamento" "$(printf '%s' "$SAIDA_H" | head -1)" ;;
+esac
+N_T=0; while [ "$N_T" -lt 5 ] && pgrep -f '^sleep 3119$' >/dev/null 2>&1; do sleep 1; N_T=$((N_T + 1)); done
+if pgrep -f '^sleep 3119$' >/dev/null 2>&1; then
+  FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "validade lenta: processo orfao da validade"; pkill -f '^sleep 3119$'
+else OK=$((OK+1)); printf '  ok    %s\n' "validade lenta: nenhum processo orfao"; fi
 H="$H_REAL"
+REMOTO_LENTO_T="$SEMGIT_T/remoto-lento.git"
+git init -q --bare "$REMOTO_LENTO_T"
+ATV_T="$REPO_ROOT/.claude/skills/mergex/scripts/ativacao-pre-push.sh"
+GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" bash "$ATV_T" --instalar --entrega docs/entregas/ft-02/ENTREGA.md >/dev/null 2>&1
+valor "controle: pre-push instalado pelo E0 (ativacao-pre-push --instalar)" "$?" 0
+GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" git push -q "$REMOTO_LENTO_T" feature/ft-02 >/dev/null 2>&1
+valor "validade lenta: o git push real seguinte e barrado pelo pre-push" "$?" 1
+valor "validade lenta: nada chegou ao remoto" "$(git -C "$REMOTO_LENTO_T" for-each-ref | wc -l | tr -d ' ')" 0
+GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" bash "$ATV_T" --reverter --entrega docs/entregas/ft-02/ENTREGA.md >/dev/null 2>&1
+rm -rf "$REMOTO_LENTO_T"
 rm -rf "$SEMGIT_T/instalacao"
 
-# Worktree vinculada (.git e arquivo): mesma varredura, mesma validade
+# Git for Windows sobre \\wsl.localhost\...: o hook roda pelo Git Bash do
+# Windows, com o cwd UNC. Sem o ambiente: NAO_EXECUTADO (nunca conta como ok).
+gfw_hook() { # <desc> <com|sem> — exige exit 0; deixa a saida em GFW_SAIDA
+  local desc="$1" safe="$2" gb="/mnt/c/Program Files/Git/bin/bash.exe" w hk j r
+  GFW_SAIDA=""
+  command -v wslpath >/dev/null 2>&1 || { nao_executado "$desc — sem wslpath (fora do WSL)"; return 1; }
+  [ -f "$gb" ] || { nao_executado "$desc — Git Bash do Windows ausente ($gb)"; return 1; }
+  "$gb" -c 'command -v git >/dev/null && command -v jq >/dev/null' >/dev/null 2>&1 \
+    || { nao_executado "$desc — o Git Bash do Windows nao executa pelo interop, ou sem git/jq nele"; return 1; }
+  w="$(wslpath -w "$HIST_T")"; hk="$(wslpath -w "$H/mergex/pr-so-com-portao.sh" | tr '\\' '/')"
+  case "$w" in '\\'*) ;; *) nao_executado "$desc — o cenario nao tem caminho UNC ($w)"; return 1 ;; esac
+  j="$SEMGIT_T/gfw.json"; r="$SEMGIT_T/gfw-roda.sh"
+  jq -cn --arg c "$PUSH_FT" --arg w "$w" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}' > "$j"
+  cat > "$r" <<'EOF'
+# Git Bash do Windows: <hook> <json> <com|sem> <repositorio UNC com />
+# Config global TEMPORARIA so neste processo (GIT_CONFIG_GLOBAL): a config
+# global do usuario nao e lida nem escrita.
+g="$(mktemp)" || exit 91
+if [ "$3" = com ]; then printf '[safe]\n\tdirectory = %%(prefix)/%s\n' "$4" > "$g"; else : > "$g"; fi
+export GIT_CONFIG_GLOBAL="$(cygpath -m "$g")"
+e="$(mktemp)" || exit 92
+ini=$SECONDS
+bash "$1" < "$2" > /dev/null 2> "$e"; rc=$?
+printf 'uname=%s\nrc=%s\nt=%s\n' "$(uname -s)" "$rc" "$((SECONDS - ini))"
+sed 's/^/err=/' "$e"
+rm -f "$g" "$e"
+EOF
+  GFW_SAIDA="$("$gb" "$(wslpath -w "$r")" "$hk" "$(wslpath -w "$j")" "$safe" "$(printf '%s' "$w" | tr '\\' '/')" 2>&1)"
+  rm -f "$j" "$r"
+  case "$(printf '%s\n' "$GFW_SAIDA" | sed -n 's/^uname=//p')" in
+    MINGW*|MSYS*) ;;
+    *) FALHOU=$((FALHOU+1)); printf '  FALHA %s (nao rodou no Git Bash: %s)\n' "$desc" "$(printf '%s' "$GFW_SAIDA" | tr '\n' '|')"; return 1 ;;
+  esac
+  if [ "$(printf '%s\n' "$GFW_SAIDA" | sed -n 's/^rc=//p')" = 0 ]; then
+    OK=$((OK+1)); printf '  ok    %s (%s s)\n' "$desc" "$(printf '%s\n' "$GFW_SAIDA" | sed -n 's/^t=//p')"; return 0
+  fi
+  FALHOU=$((FALHOU+1)); printf '  FALHA %s (%s)\n' "$desc" "$(printf '%s' "$GFW_SAIDA" | tr '\n' '|')"; return 1
+}
+portao_valido_com_metodo feature/ft-02 || exit 1
+caso "controle: portao valido para o push legitimo do Git for Windows" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 0
+if gfw_hook "git for windows sobre UNC: aviso sem bloqueio (sem safe.directory)" sem; then
+  case "$GFW_SAIDA" in
+    *"err=mergex/pr-so-com-portao — aviso"*safe.directory*) OK=$((OK+1)); printf '  ok    %s\n' "git for windows sobre UNC: dubious ownership avisa e cita safe.directory na config global" ;;
+    *) FALHOU=$((FALHOU+1)); printf '  FALHA %s (%s)\n' "git for windows sobre UNC: o aviso nao cita safe.directory" "$(printf '%s' "$GFW_SAIDA" | tr '\n' '|')" ;;
+  esac
+fi
+[ -z "${MERGEX_GFW_SAIDA:-}" ] || printf '%s\n' "$GFW_SAIDA" > "$MERGEX_GFW_SAIDA.sem"
+if gfw_hook "regressao do falso bloqueio desta maquina: portao valido sobre UNC passa (com safe.directory)" com; then
+  case "$GFW_SAIDA" in
+    *"barrado"*) FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "git for windows: mensagem de bloqueio num push legitimo" ;;
+    *) OK=$((OK+1)); printf '  ok    %s\n' "git for windows sobre UNC: nenhuma mensagem de bloqueio no push legitimo" ;;
+  esac
+fi
+[ -z "${MERGEX_GFW_SAIDA:-}" ] || printf '%s\n' "$GFW_SAIDA" > "$MERGEX_GFW_SAIDA.com"
+
+# Worktree vinculada (.git e arquivo): mesma regra
 rm -f .expx/hooks.json
 fixture_switch_exato main main || exit 1
 git worktree add -q "$WTH_T" feature/ft-02 >/dev/null 2>&1 || exit 1
@@ -1126,10 +1253,12 @@ printf 'produto na worktree\n' > "$WTH_T/src/na-worktree.ts"
 git -C "$WTH_T" add src/na-worktree.ts && git -C "$WTH_T" commit -qm "feat: produto na worktree" || exit 1
 caso "worktree vinculada: portao vencido barra em aviso" mergex/pr-so-com-portao.sh "$(bash_json "$PUSH_FT")" 2
 mkdir -p "$WTH_T/.expx"
-for MODO_WT in aviso bloqueio desligado; do
+for MODO_WT in aviso bloqueio; do
   printf '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"%s"}}}\n' "$MODO_WT" > "$WTH_T/.expx/hooks.json"
-  caso "worktree vinculada: git -C . push vencido barra [$MODO_WT]" mergex/pr-so-com-portao.sh "$(bash_json 'git -C . push origin feature/ft-02')" 2
+  caso_aviso "worktree vinculada: git -C . push vencido avisa [$MODO_WT]" "$(bash_json 'git -C . push origin feature/ft-02')"
 done
+printf '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"desligado"}}}\n' > "$WTH_T/.expx/hooks.json"
+caso_calado "worktree vinculada: git -C . push vencido calado [desligado]" "$(bash_json 'git -C . push origin feature/ft-02')"
 rm -rf "$WTH_T/.expx"
 HOOK_CWD="$HIST_T"
 git worktree remove --force "$WTH_T" || exit 1
@@ -1169,15 +1298,19 @@ caso "tasks.md ausente barra ownership" mergex/commit-por-task.sh "$(bash_json "
 
 echo
 echo "registro dos hooks — tempo do pr-so-com-portao"
-# Hook que estoura o timeout NAO bloqueia (o comando segue): a varredura do
-# portao precisa de folga. 60 s nos dois harnesses.
-valor "settings.json: timeout do pr-so-com-portao e 60" \
-  "$(jq -r '.. | objects | select(has("command")) | select(.command | contains("mergex/pr-so-com-portao.sh")) | .timeout' "$REPO_ROOT/.claude/settings.json")" 60
-valor "OpenCode: limite do pr-so-com-portao e 60 s" \
-  "$(grep -c '"mergex/pr-so-com-portao.sh": 60_000' "$REPO_ROOT/.opencode/plugin/mergex.ts")" 1
+# O hook e consultivo e cabe no proprio orcamento (8 s): o timeout dele volta a
+# 10 s, como os demais, nos dois harnesses (sem limite proprio no OpenCode).
+valor "settings.json: timeout do pr-so-com-portao e 10" \
+  "$(jq -r '.. | objects | select(has("command")) | select(.command | contains("mergex/pr-so-com-portao.sh")) | .timeout' "$REPO_ROOT/.claude/settings.json")" 10
+valor "OpenCode: nenhum limite proprio por hook (o pr-so-com-portao fica nos 10 s)" \
+  "$(grep -c 'TEMPO_POR_HOOK\|60_000' "$REPO_ROOT/.opencode/plugin/mergex.ts")" 0
+valor "OpenCode: limite unico de 10 s" "$(grep -c '^const TEMPO_LIMITE = 10_000$' "$REPO_ROOT/.opencode/plugin/mergex.ts")" 1
+valor "hook: orcamento interno de 8 s" "$(grep -c '^ORCAMENTO=8$' "$H/mergex/pr-so-com-portao.sh")" 1
 
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADOS"
 [ "$PULADOS" = "0" ] || printf 'ATENCAO: %d caso(s) nao foram verificados nesta maquina.\n' "$PULADOS"
+# NAO_EXECUTADO nunca conta como ok: fica listado a parte
+[ "$NAOEXEC" = "0" ] || printf '%d caso(s) NAO_EXECUTADO (nao contados como ok)\n' "$NAOEXEC"
 [ "$FALHOU" = "0" ]
