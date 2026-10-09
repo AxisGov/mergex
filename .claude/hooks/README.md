@@ -84,10 +84,13 @@ bloquear só com prova.
 - `arquivo-fora-do-plano`: numa integração válida, avalia só os caminhos que
   diferem do segundo pai (`git diff --cached MERGE_HEAD`) — o que a resolução
   acrescenta, não tudo o que veio da base. O arquivo nascido na base e ajustado
-  pela integração só deixa de ser fora do plano pela reconciliação de base. A gramática vem de uma única
-implementação, `scripts/contrato-de-commit.sh`: commit de método válido não é
-interpretado como E1 e segue para o hook de escopo, sem cobrar status/suíte de
-task. Sem nenhuma das duas declarações, o hook não inventa a classe.
+  pela integração só deixa de ser fora do plano pela reconciliação de base.
+
+A gramática das três classes vem de uma única implementação,
+`scripts/contrato-de-commit.sh`: commit de método válido não é interpretado
+como E1 e segue para o hook de escopo, sem cobrar status/suíte de task.
+Sem nenhuma das três declarações (task, método ou integração), o hook não
+inventa a classe.
 
 A task que está fechando sai do `Task:` validado e **nunca é adivinhada**. O
 contrato inteiro está em

@@ -64,13 +64,17 @@ O `pr-so-com-portao` é consultivo: é aviso antecipado no `git push`, bloqueia 
 o push que prova inválido e o `--no-verify` reconhecido, e no indeterminado
 avisa e deixa o Git seguir. Não é barreira (DM-184).
 
-Uma única condição de método barra **mesmo em aviso** entre os hooks do Claude:
-commitar, no fechamento
+Entre as condições de commit, uma única barra **mesmo em aviso**, no
+`commit-por-task`: commitar, no fechamento
 de uma task, um arquivo que **só outra task da feature declara**. Ele não é
 desvio — foi planejado, só que noutra task —, e deixá-lo passar criaria um
 commit parcial enganoso, que o histórico não desfaz. Tire-o do índice
 (`git restore --staged`), **não o apague e não o restaure**, e leve a condição
 ao planejamento: quem abre bloqueio e replaneja é a sprintx.
+
+O `pr-so-com-portao`, que é consultivo, também sai 2 em qualquer modo, mas só
+em dois casos provados: o `--no-verify` reconhecido num `git push` e o push
+simples que a regra do portão prova inválido. No resto, só avisa.
 
 Fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo
 (DM-184): ativado pelo E0 e provado pelo E2, ele é a barreira local contra erro

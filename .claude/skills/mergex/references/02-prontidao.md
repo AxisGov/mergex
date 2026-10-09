@@ -333,6 +333,8 @@ bash .claude/skills/mergex/scripts/registrar-portao.sh \
   --origem <sprintx|runx> --trabalho <trabalho_id> --resultado bloqueado --falhas v7 v1
 ```
 
+O `--resultado bloqueado` também grava `portao_sha` = `HEAD` avaliado, junto com `portao: bloqueado` e `falhas_portao`. Isso não tem efeito na validade: `validade-do-portao.sh` dá `portao_nao_pronto` antes de olhar `portao_sha`, e um portão bloqueado nunca vale para push.
+
 **`BLOQUEADO` encerra as etapas de entrega e segue apenas ao E8 para registrar e persistir o bloqueio.** Não classifique o diff (E3), não monte a descrição do PR (E4), não gere o pacote de QA (E5), não faça push (E6), não abra PR (E7): **nenhuma dessas etapas executa.**
 
 O E8 roda em **fechamento bloqueado** (`references/08-registro.md`): grava `estado: bloqueado`, preserva `portao: bloqueado`, e commita esse registro para que o bloqueio sobreviva ao worktree. Ele **não publica a branch** — o portão proibiu o E6, e o fechamento não fura essa proibição. Ir ao E8 **não é continuar a entrega**: é finalizar e persistir o bloqueio.
@@ -346,7 +348,7 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | `tasks.md` sem frontmatter | Leia da prosa e registre o aviso; se não for possível determinar o status, é `FALHA` em V1 |
 | `QA.md` ausente em trabalho da runx | `FALHA` em V5 — a entrega ainda não passou pelo E4 da runx |
 | `PERFIL.md` ausente | V8 inteira é `n/a`; não invente modo legado |
-| Sem versionador | V9 e V10 rodam sobre árvore e tasks; as demais não mudam |
+| Sem versionador | `portao-v9.sh` exige Git: fora de um repositório ele sai `v9_sem_prova` com o motivo `fora de um repositório Git` (código `3`). Por isso, com `versionado: false`, não o rode: V9 e V10 seguem a regra em prosa sobre os arquivos declarados nas tasks e a árvore de trabalho ("Repositório sem versionador", na V10); as demais não mudam |
 | Branch base indisponível para o diff da V10 | Use `git diff HEAD~<n>..HEAD` sobre os commits do trabalho registrados no `ENTREGA.md`; registre a imprecisão como aviso. A V9 não usa o nome da base: o que ela não consegue provar é `v9_sem_prova` |
 | `portao-v9.sh` devolve `v9_sem_prova` (código `3`) | `FALHA` em V9, registrada como `v9_sem_prova`, com os `motivo` do script. Raso: `git fetch --unshallow` e o E2 de novo |
 | Barreira `reconciliacao-base` reprovada | E2 não emite `PRONTO`; relate os `motivo`; persistência pendente se resolve com o checkpoint explícito `reconciliacao-base`, fora do portão |

@@ -1501,6 +1501,12 @@ done
 # Hooks README: validade do portão e a biblioteca da integração
 grep -Fq 'comum/integracao-da-mensagem.sh' "$hooks_readme" || fail 'hooks README não cita comum/integracao-da-mensagem.sh'
 grep -Fq 'validade-do-portao.sh' "$hooks_readme" || fail 'hooks README sem a validade do portão'
+grep -Fq 'Sem nenhuma das três declarações' "$hooks_readme" || fail 'hooks README ainda fala em duas classes de mensagem'
+# O bloqueado também grava portao_sha, sem efeito na validade; a V9 executável exige Git
+for f in "$prontidao" "$schema"; do
+  grep -Fq '`--resultado bloqueado` também grava `portao_sha`' "$f" || fail "$f não diz que o bloqueado também grava portao_sha"
+done
+grep -Fq '`fora de um repositório Git`' "$prontidao" || fail '02-prontidao não diz o que portao-v9.sh faz sem versionador'
 
 # pr-so-com-portao é consultivo: AGENTS.md e SKILL.md o descrevem assim, e a
 # exceção "mesmo em aviso" ganha a ressalva do pre-push (DM-184)
@@ -1511,17 +1517,40 @@ for f in AGENTS.md "$skill"; do
 done
 grep -Fq 'Regra 6 — sem `PRONTO` no portão, não sobe e não abre PR' "$skill" \
   && fail 'SKILL.md ainda trata pr-so-com-portao como barreira do push'
-# Nenhum texto versionado trata o hook como barreira autoritativa: uma linha que
-# o cita junto de "autoritativ" só é aceita quando o próprio texto o qualifica
-# como consultivo / aviso antecipado. Spec e plano ficam de fora: são o registro
-# da decisão e citam a regra para proibi-la.
-pr_autoritativo="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' \
+# A task irmã do commit-por-task NÃO é a única condição de hook do Claude que sai
+# 2 em qualquer modo: o pr-so-com-portao também sai 2 no --no-verify reconhecido e
+# no push que prova inválido. Nenhum texto pode voltar a dizer que é a única.
+for f in AGENTS.md "$skill"; do
+  grep -Fq 'única dos hooks do Claude' "$f" && fail "$f diz que a task irmã é a única condição dos hooks do Claude que barra em qualquer modo"
+  grep -Fq 'mesmo em aviso** entre os hooks do Claude' "$f" && fail "$f diz que a task irmã é a única condição dos hooks do Claude que barra em qualquer modo"
+  grep -Fq 'também sai 2 em qualquer modo' "$f" || fail "$f não diz que o pr-so-com-portao também sai 2 em qualquer modo nos dois casos provados"
+done
+# Nenhum texto versionado trata o hook como barreira: numa linha que cita
+# `pr-so-com-portao`, "é barreira" e "barra o push" reprovam sempre (as negações
+# literais "não é barreira", "não barreira" e "nunca é barreira" são retiradas
+# antes); "autoritativ" só passa quando a mesma linha o qualifica como consultivo
+# ou aviso antecipado (é a linha que contrapõe o pre-push autoritativo ao hook).
+# Spec, plano e as suítes (inclusive .claude/hooks/teste.sh, cujos nomes de caso
+# dizem "barra o push") ficam de fora: são o registro da decisão e citam a regra para
+# proibi-la. Como na varredura CIATIVO, o grep sai 1 sem achado e 2 em erro, e só
+# o erro (ou o de git ls-files/xargs) derruba a varredura.
+pr_linhas="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' \
     ':!scripts/ci/mutacao-*' ':!scripts/ci/lib/*' ':!scripts/ci/fixtures/*' ':!docs/superpowers/*' \
-  | xargs -0 sh -c 'grep -nIE -- "pr-so-com-portao" "$@"; [ "$?" -le 1 ]' _ \
-  | grep -iE 'autoritativ' | grep -viE 'consultiv|aviso antecipado' || true)"
-[ -z "$pr_autoritativo" ] || fail "DM-184: texto trata pr-so-com-portao como barreira autoritativa: $(printf '%s' "$pr_autoritativo" | tr '\n' ' ')"
+    ':!.claude/hooks/teste.sh' \
+  | xargs -0 sh -c 'grep -nIF -- "pr-so-com-portao" "$@"; [ "$?" -le 1 ]' _)" \
+  || fail 'DM-184: a varredura de textos que tratam pr-so-com-portao como barreira falhou'
+pr_autoritativo="$(printf '%s\n' "$pr_linhas" | awk '{
+  l = tolower($0)
+  gsub(/não é barreira|não barreira|nunca é barreira|não É barreira/, "", l)
+  if (l ~ /é barreira|É barreira|barra o push/) { print; next }
+  if (l ~ /autoritativ/ && l !~ /consultiv|aviso antecipado/) print
+}')"
+[ -z "$pr_autoritativo" ] || fail "DM-184: texto trata pr-so-com-portao como barreira: $(printf '%s' "$pr_autoritativo" | tr '\n' ' ')"
 
-# Nenhum executável da skill aceita opção de bypass (varredura; sem guarda)
+# Nenhum executável da skill aceita opção de bypass (varredura; sem guarda).
+# Limite: só pega a opção longa escrita literalmente em scripts/*.sh (não lê
+# opção curta, nome montado em variável, variável de ambiente nem os hooks); o
+# que ela não cobre fica com as varreduras por executável acima e com os testes.
 if grep -nE -- '--(force|sem-prova|bypass)' "$SKILL_DIR"/scripts/*.sh; then fail "flag de bypass encontrada"; fi
 
 printf 'contract checks passed\n'

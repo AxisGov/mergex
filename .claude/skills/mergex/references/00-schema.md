@@ -158,7 +158,7 @@ entregue_em: 2026-08-29
 | `base_validada_sha` | SHA de 40 hex da base em que o trabalho foi validado; gravado no E0 (`git merge-base HEAD <branch_base>`); atualizado pelo `reconciliacao-base.sh --registrar` para o `b1_sha` registrado. Nunca nome de ref. `null` sem versionador |
 | `origem_base` | `registrada_e0` \| `inferida_legado` (gravado uma única vez, pela primeira reconciliação de uma entrega anterior a esta chave — DM-183) |
 | `reconciliacoes` | Lista `{numero, arquivo, b1_sha, m_sha}`, na ordem da cadeia; `[]` sem reconciliação. Escrita só pelo `--registrar` |
-| `portao_sha` | SHA de 40 hex do `HEAD` que o E2 avaliou, gravado com `portao` só por `registrar-portao.sh`; `null` antes do E2 e depois de um `--registrar`. O portão vale só para ele e para os commits de método `pre-e6`/`e8` de um pai que o seguem (DM-181) |
+| `portao_sha` | SHA de 40 hex do `HEAD` que o E2 avaliou, gravado com `portao` só por `registrar-portao.sh`; `null` antes do E2 e depois de um `--registrar`. O `--resultado bloqueado` também grava `portao_sha` = `HEAD` avaliado, sem efeito na validade (`portao_nao_pronto` vem antes do SHA). O portão vale só para ele e para os commits de método `pre-e6`/`e8` de um pai que o seguem (DM-181) |
 | `commits` | Um item por task commitada, na ordem em que fecharam, cada um com a chave de ordem `seq`; `[]` sem versionador. Ver "A ordem de registro" |
 | `modulo_afetado` | Os módulos que a entrega toca (ver abaixo) |
 | `arquivos_alterados` | **O diff real** — ver abaixo. É o campo mais importante deste kind |

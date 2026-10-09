@@ -161,8 +161,10 @@ Os de segurança nascem em bloqueio: segredo commitado não tem volta. Os de
 método nascem em aviso e só sobem depois de rodarem sem falso positivo — hook
 que atrapalha é desinstalado, e junto com ele vão os que funcionavam.
 
-A condição de task irmã do `commit-por-task` é a única dos hooks do Claude que
-barra mesmo em aviso. Fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo (DM-184):
+Entre as condições de commit, a de task irmã do `commit-por-task` é a única que
+barra mesmo em aviso. O `pr-so-com-portao`, que é consultivo, também sai 2 em qualquer modo, mas só
+nos dois casos provados: o `--no-verify` reconhecido e o push simples que a regra
+do portão prova inválido; no resto, só avisa. Fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo (DM-184):
 ele é a barreira local autoritativa contra erro normal, e o CI com proteção de
 merge, quando o produto o ativar, é a barreira contra contorno deliberado
 (`references/12-barreira-de-push.md`).
