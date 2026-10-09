@@ -85,6 +85,8 @@ bloquear só com prova.
   diferem do segundo pai (`git diff --cached MERGE_HEAD`) — o que a resolução
   acrescenta, não tudo o que veio da base. O arquivo nascido na base e ajustado
   pela integração só deixa de ser fora do plano pela reconciliação de base.
+  Por isso, com o hook em `bloqueio`, o commit de `M` com arquivo reconciliável é barrado: esse commit
+  precisa do hook em `aviso`, e a cobertura vem depois, pelo `--registrar`.
 
 A gramática das três classes vem de uma única implementação,
 `scripts/contrato-de-commit.sh`: commit de método válido não é interpretado

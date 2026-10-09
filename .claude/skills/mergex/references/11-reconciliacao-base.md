@@ -306,6 +306,9 @@ preserva `commits`, `criado_em`, `pr_url`, `pr_estado`, `desvios`. `base_validad
 
 1. Merge normal da base nova, resolução semântica, testes focados e revisão da resolução.
 2. Commit de integração `M` (classe integração de base, `references/01-commits.md`).
+   Nesse commit o `arquivo-fora-do-plano` acusa os caminhos que a reconciliação vai cobrir (o arquivo
+   da base ajustado na resolução está fora do plano por definição). Com o hook em `bloqueio`, quem faz
+   o commit de `M` precisa do hook em `aviso` para esse commit; a cobertura vem depois, pelo `--registrar`.
 3. Gate completo do repositório (o do `ORQUESTRADOR.md`) sobre `HEAD`.
 4. `reconciliacao-base.sh --registrar` com os caminhos ajustados.
 5. Checkpoint `reconciliacao-base`.

@@ -3544,7 +3544,7 @@ grupo_invariantes() {
 # Ordem de definição: lida do próprio arquivo (declare -F ordenaria por nome).
 GRUPOS="$(sed -n 's/^grupo_\([a-z0-9_]*\)() {.*/\1/p' "${BASH_SOURCE[0]}" | tr '\n' ' ')"
 
-[ "$#" -ge 1 ] || { echo "uso: $0 <grupo>... | todos" >&2; exit 64; }
+[ "$#" -ge 1 ] || set -- todos
 
 SEL=""
 for g in "$@"; do
