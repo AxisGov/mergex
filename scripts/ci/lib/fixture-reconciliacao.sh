@@ -123,6 +123,16 @@
 #                         merge de integração: a linha de primeiro pai de P1
 #                         desde o merge-base contém merge
 #   base_com_pai          um commit raiz (RAIZ.md) antes de B0: B0 tem pai
+#   lateral_reverte       um commit raiz com o README.md antigo antes de B0 (B0
+#                         o reescreve); um ramo lateral parte da raiz sem
+#                         mudança própria, e a feature o integra, antes do
+#                         merge de integração, num merge (P1) cuja resolução
+#                         desfaz o README.md para a versão da raiz; a base
+#                         altera o README.md entre B0 e B1 e M o ajusta (como
+#                         base_alterou). Na linha de primeiro pai de P1 só esse
+#                         merge toca o README.md; o histórico completo (sem
+#                         --first-parent) segue o lado lateral, igual à raiz, e
+#                         não vê toque nenhum
 #   entrega_sem_base      o ENTREGA.md (não legado) perde base_validada_sha e
 #                         mantém origem_base
 #   entrega_base_vazia    base_validada_sha presente e vazia
@@ -228,7 +238,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -270,6 +280,14 @@ _fx_corpo() {
       printf '# Raiz\n' > RAIZ.md
       git add RAIZ.md
       _fx_msg "$msg" "chore: raiz"
+      _fx_commit "$msg"
+    fi
+    # lateral_reverte: um commit raiz com o README.md antigo antes de B0 (B0
+    # o reescreve); o ramo lateral parte daqui e o carrega intacto
+    if [ "$var" = lateral_reverte ]; then
+      printf '# Projeto antigo\n' > README.md
+      git add README.md
+      _fx_msg "$msg" "chore: raiz com o README.md antigo"
       _fx_commit "$msg"
     fi
 
@@ -362,6 +380,22 @@ _fx_corpo() {
         fixture_switch_exato feature/ft-rec feature/ft-rec
         git merge -q --no-ff -m "merge: traz a base intermediaria" main
         FX_P1="$(git rev-parse HEAD)" ;;
+      lateral_reverte)
+        # ramo lateral anterior a B0: parte da raiz, sem mudança própria (um
+        # commit vazio, para o inventário de M não ganhar caminho novo), com o
+        # README.md antigo. A feature o integra num merge comum e a resolução
+        # desfaz o README.md para a versão da raiz: esse merge vira P1
+        fixture_switch_exato lateral -c lateral "$FX_B0^"
+        _fx_msg "$msg" "chore: ramo lateral anterior a B0"
+        git commit -q --allow-empty -F "$msg"
+        fixture_switch_exato feature/ft-rec feature/ft-rec
+        git merge -q --no-ff --no-commit lateral
+        [ -f .git/MERGE_HEAD ]
+        git show lateral:README.md > README.md
+        git add README.md
+        _fx_msg "$msg" "merge: traz o ramo lateral e desfaz o README.md"
+        _fx_commit "$msg"
+        FX_P1="$(git rev-parse HEAD)" ;;
     esac
 
     # main avança: dois testes novos + mesma linha de painel.ts
@@ -377,7 +411,7 @@ _fx_corpo() {
       caminho_especial)
         printf 'export const casoEspecial = "base";\n' > "$FX_ESPECIAL"
         git add -- "$FX_ESPECIAL" ;;
-      base_alterou)
+      base_alterou|lateral_reverte)
         printf '# Projeto\n\nSeção da base.\n' > README.md
         git add README.md ;;
       diretorio)
@@ -471,7 +505,7 @@ _fx_corpo() {
       caminho_especial)
         printf 'export const casoEspecial = "base";\nexport const ajusteEspecial = "ft-rec";\n' > "$FX_ESPECIAL"
         git add -- "$FX_ESPECIAL" ;;
-      base_alterou)
+      base_alterou|lateral_reverte)
         printf '# Projeto\n\nSeção da base, ajustada para a feature.\n' > README.md
         git add README.md ;;
       diretorio)
@@ -549,7 +583,7 @@ _fx_monta() {
   FX_LISTA_VARIANTE="$FX_NOVO1
 $FX_NOVO2"
   case "$var" in
-    base_removeu|renomeado|base_alterou|tipo_mudou) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
+    base_removeu|renomeado|base_alterou|tipo_mudou|lateral_reverte) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
 README.md" ;;
     diretorio) FX_LISTA_VARIANTE="$FX_LISTA_VARIANTE
 tests/base/x.ts

@@ -533,8 +533,8 @@ provas() {
     fi
 
     # prova 2: a feature não tocou f antes do merge
-    if g rev-list --first-parent "$p1" "^$inicio" -- "$f" > "$SAIDA" 2>/dev/null; then
-      [ ! -s "$SAIDA" ] || reprova "prova 2: $f: a feature tocou o caminho antes do merge ($(sed -n 1p "$SAIDA"))" # guarda:P2FP
+    if g rev-list --first-parent "$p1" "^$inicio" -- "$f" > "$SAIDA" 2>/dev/null; then # guarda:P2FP
+      [ ! -s "$SAIDA" ] || reprova "prova 2: $f: a feature tocou o caminho antes do merge ($(sed -n 1p "$SAIDA"))"
     else
       reprova "prova 2: $f: histórico da feature não calculável"
     fi

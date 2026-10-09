@@ -774,6 +774,39 @@ EOF
     "$FX_NOVO1" "$FX_NOVO2" tests/base/x.ts tests/base/y.ts tests/base/
   registra_ok "controle: só os arquivos do diretório registram" "$FX_NOVO1" "$FX_NOVO2" tests/base/x.ts tests/base/y.ts
   cd "$REPO" || return
+
+  # prova 2 anda só pela linha de primeiro pai (spec, seção 6). Antes de M, a
+  # feature integrou um ramo lateral anterior a B0 num merge cuja resolução
+  # desfez o README.md para a versão anterior a B0: na linha de primeiro pai
+  # esse merge toca o README.md (a prova reprova); no histórico completo o git
+  # segue o lado lateral, igual à raiz, e não vê toque nenhum (sem
+  # --first-parent a prova aprovaria). O --registrar nem chega à prova: a
+  # ordem barra o merge lateral antes de M. O --verificar, sobre um 001
+  # forjado, chega à prova e tem de reprovar.
+  local v VT
+  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  FX_VARIANTE=lateral_reverte fx_cenario "$d" || { falha "variante lateral_reverte não montou"; return; }
+  cd "$d" || return
+  [ "$(git rev-list --parents -n1 "$FX_P1" | wc -w)" = 3 ] && git merge-base --is-ancestor "$FX_B0" "$FX_P1" \
+    && ! git merge-base --is-ancestor "$FX_B0" "$FX_P1^2" \
+    && ok "controle: P1 é um merge lateral (segundo pai anterior a B0) e B0 é ancestral de P1" || falha "controle: lateral_reverte: estrutura de P1"
+  [ "$(git show "$FX_P1:README.md")" = "$(git show "$FX_B0^:README.md")" ] && [ "$(git show "$FX_P1:README.md")" != "$(git show "$FX_B0:README.md")" ] \
+    && ok "controle: o merge lateral desfez o README.md para a versão anterior a B0" || falha "controle: README.md em P1"
+  [ "$(git rev-list --first-parent "$FX_P1" "^$FX_B0" -- README.md)" = "$FX_P1" ] \
+    && ok "controle: pela linha de primeiro pai, só o merge lateral toca o README.md" \
+    || falha "controle: linha de primeiro pai: $(git rev-list --first-parent "$FX_P1" "^$FX_B0" -- README.md | tr '\n' ' ')"
+  [ -z "$(git rev-list "$FX_P1" "^$FX_B0" -- README.md)" ] \
+    && ok "controle: sem --first-parent o git segue o lado lateral e não vê o toque" \
+    || falha "controle: histórico completo: $(git rev-list "$FX_P1" "^$FX_B0" -- README.md | tr '\n' ' ')"
+  reprova "lateral_reverte: o registro para na ordem (merge lateral antes de M), antes das provas" 5 \
+    "ordem: o merge $FX_P1, anterior a M $FX_M" "$FX_NOVO1" "$FX_NOVO2" README.md
+  fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" README.md && fx_entrega_sincroniza "$d" || falha "lateral_reverte: forja do 001"
+  v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec); VT="$t"
+  v_motivo "prova 2: merge lateral que desfez o README.md antes de M reprova no --verificar (só a linha de primeiro pai o vê)" 4 prova \
+    "prova 2: README.md: a feature tocou o caminho antes do merge ($FX_P1)"
+  [ "$("${v[@]}" 2>/dev/null | grep -c '^motivo	prova	.*prova 2: ')" = 1 ] \
+    && ok "prova 2: só o README.md reprova; NOVO1 e NOVO2 passam" || falha "prova 2: motivos: $("${v[@]}" 2>/dev/null | tr '\n\t' '|>')"
+  cd "$REPO" || return
   for variante in caminho_especial base_alterou; do
     d="$(mktemp -d)"; TMPS="$TMPS $d"
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }

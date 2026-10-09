@@ -26,14 +26,21 @@
 #     caminho do SHA é mantido (fluxo, não guarda); as demais guardas, `:`;
 #   - PPSHA: o `pre-push` passa `git rev-parse HEAD` (o checkout) no lugar do
 #     SHA enviado a `pr_decide_ref`, e `--rev "$sl"` some (a validade cai no
-#     HEAD padrão).
-# Exceções com semântica própria (plano, Task 21):
+#     HEAD padrão);
+#   - P2FP: a linha marcada é a do `rev-list` da prova 2; a mutação é a literal
+#     da tabela, que só remove `--first-parent` dela.
+# Exceções com semântica própria (plano, Task 21, e decisão do controlador):
 #   - SEQ: a linha marcada (CHAVES_GRAVADAS) fica; o mutante ACRESCENTA ao
 #     registro, logo depois de `entrega_reconciliacoes`, uma chamada a
-#     `sequencia-de-commits.sh` (opção de acrescentar item) sobre o ENTREGA.md novo
-#     (o nome da opção vem partido neste arquivo: o validador do contrato
-#     lista os escritores de ENTREGA.commits pelo literal, e esta matriz não
-#     é escritor; só a cópia mutada passa a ser);
+#     `sequencia-de-commits.sh --acrescentar` sobre o ENTREGA.md novo (este
+#     arquivo está na lista de escritores esperados do validador do contrato);
+#   - ATVHP: a linha marcada fica; o mutante ACRESCENTA ao braço `instalar)`
+#     de ativacao-pre-push.sh um `git config core.hooksPath` (o E0 grava
+#     core.hooksPath);
+#   - ATVSOB: a guarda `! existe || gerenciado || terceiro` vira `:` E o
+#     `set -C` da instalação é desfeito: o chamador gerenciado é escrito POR
+#     CIMA do pre-push de terceiro (sobrescrita de verdade, que as checagens de
+#     hash da bancada têm de pegar);
 #   - CIATIVO: a verificação vira `:` e a frase-alvo entra no reference
 #     12-barreira-de-push.md;
 #   - E2SEMHOOK: as linhas de registrar-portao.sh e de persistir-metodo.sh são
@@ -42,7 +49,14 @@
 # Morto: alguma suíte alvo sai com rc != 0 POR FALHA DE CASO (linha `  FALHA`
 # e resumo `<n> ok, <m> falha(s)` com m > 0; no validador do contrato,
 # `contract check failed:`). rc != 0 sem falha de caso é erro de ambiente:
-# não conta como morto.
+# não conta como morto. Um erro de execução do script mutado DENTRO de um caso
+# (rc inesperado, variável não definida, comando ausente) aparece como caso
+# reprovado e conta como morto: o `bash -n` prévio só pega erro de sintaxe.
+#
+# Diafonia: `r2 ativacao`, `r2 entrypoints` e `.claude/hooks/teste.sh` fazem
+# `pgrep`/`pkill` global de `sleep 3077`/`sleep 3119`. As suítes e os mutantes
+# que as usam rodam em SÉRIE, sozinhos, depois do lote paralelo (no controle e
+# na matriz).
 #
 # Uso: bash scripts/ci/mutacao-r1-reconciliacao-base.sh [controle | <ID>]
 #   sem argumento: controle + os 25 mutantes; `controle`: só o controle;
@@ -70,7 +84,7 @@ MATRIZ='1|P1|r1:provas|prova 1 desligada
 13|PPSHA|r2:prepush|pre-push valida o HEAD do checkout em vez do SHA enviado
 14|PPMODO|r2:prepush|pre-push deixa o modo aviso afrouxar pronto vencido
 15|LEG2|r1:legado|legado aceita dois merge-bases
-16|SEQ|r1:entrega r1:invariantes|registro grava seq (sequencia-de-commits.sh, opção de acrescentar)
+16|SEQ|r1:entrega r1:invariantes|registro grava seq (sequencia-de-commits.sh --acrescentar)
 17|O10|atencao|O10 permite faixa média
 18|PPMULTI|r2:prepush|pre-push ignora uma segunda ref inválida
 19|VALOBJ|r1:portao r2:prepush|objeto Git ausente classificado como erro_ambiente
@@ -138,6 +152,7 @@ neutraliza() {
           next
         }
         if (id == "V9SHA" && corpo ~ /^elif /) { print ind corpo " " m; next }
+        if (id == "P2FP") { sub(/ --first-parent /, " ", corpo); print ind corpo " " m; next }
         if (id == "PPSHA" && corpo ~ /^pr_decide_ref /) {
           gsub(/"\$sha_local"/, "\"$(git -C \"$RAIZ\" rev-parse HEAD)\"", corpo)
           print ind corpo " " m
@@ -171,16 +186,36 @@ insere_depois() {
 }
 
 aplica() { # <dir> <ID>
-  local d="$1" id="$2" rb ref
+  local d="$1" id="$2" rb ref atv
+  atv="$d/.claude/skills/mergex/scripts/ativacao-pre-push.sh"
   case "$id" in
     SEQ)
       rb="$d/.claude/skills/mergex/scripts/reconciliacao-base.sh"
       insere_depois "$rb" \
         'entrega_reconciliacoes "$ENTREGA_NOVO" "$TMP_DIR/reconciliacoes.tsv" || para 5 "ENTREGA.md: $ENTREGA_ERRO"' \
-        'bash "$AQUI/sequencia-de-commits.sh" -''-acrescentar "$ENTREGA_NOVO" T-01.01 "$M" >/dev/null # mutante SEQ' \
+        'bash "$AQUI/sequencia-de-commits.sh" --acrescentar "$ENTREGA_NOVO" T-01.01 "$M" >/dev/null # mutante SEQ' \
         || { echo 'SEQ: ponto do registro não encontrado' >&2; return 1; }
       [ "$(conta "$d" '# mutante SEQ')" = 1 ] || { echo 'SEQ: chamada não inserida' >&2; return 1; }
-      echo "SEQ: chamada de acrescentar inserida em .claude/skills/mergex/scripts/reconciliacao-base.sh"
+      echo "SEQ: chamada a --acrescentar inserida em .claude/skills/mergex/scripts/reconciliacao-base.sh"
+      ;;
+    P2FP)
+      neutraliza "$d" P2FP || return 1
+      [ "$(grep -c -- '--first-parent .*# mutante P2FP' "$d/.claude/skills/mergex/scripts/reconciliacao-base.sh")" = 0 ] \
+        || { echo 'P2FP: --first-parent continua na linha marcada' >&2; return 1; }
+      ;;
+    ATVHP)
+      insere_depois "$atv" '  instalar)' \
+        '    git -C "$RAIZ" config core.hooksPath "$HOOKS" # mutante ATVHP' \
+        || { echo 'ATVHP: braço instalar) não encontrado' >&2; return 1; }
+      [ "$(conta "$d" '# mutante ATVHP')" = 1 ] || { echo 'ATVHP: config não inserida' >&2; return 1; }
+      echo "ATVHP: git config core.hooksPath inserido no braço instalar) de ativacao-pre-push.sh"
+      ;;
+    ATVSOB)
+      neutraliza "$d" ATVSOB || return 1
+      [ "$(grep -c '( set -C; LINHA=' "$atv")" = 1 ] || { echo 'ATVSOB: set -C da instalação não encontrado' >&2; return 1; }
+      sed 's/( set -C; LINHA=/( LINHA=/' "$atv" > "$atv.mut" && cat "$atv.mut" > "$atv" && rm -f "$atv.mut" || return 1
+      [ "$(grep -c 'set -C' "$atv")" = 0 ] || { echo 'ATVSOB: set -C continua' >&2; return 1; }
+      echo "ATVSOB: set -C da instalação desfeito em ativacao-pre-push.sh"
       ;;
     CIATIVO)
       neutraliza "$d" CIATIVO || return 1
@@ -260,19 +295,33 @@ executa() {
 }
 
 # controle <tokens...> — cada suíte numa cópia sem mutação; todas verdes
+# serial <tokens> — algum token usa pgrep/pkill global (ver cabeçalho)?
+serial() {
+  case " $* " in *" r2:ativacao "*|*" r2:entrypoints "*|*" hooks "*) return 0 ;; esac
+  return 1
+}
+
+controle_um() { # <token>
+  local t="$1" d
+  d="$(copia "ctl-${t//:/-}")" || { echo "$t|copia" > "$RAIZ_TMP/ctl/${t//:/-}"; return; }
+  suite "$d" "$t" > "$RAIZ_TMP/ctl/${t//:/-}.log" 2>&1
+  echo "$t|$?" > "$RAIZ_TMP/ctl/${t//:/-}"
+  rm -rf "$d"
+}
+
 controle() {
   local t ativos=0 verde=0 linha
   for t in "$@"; do
-    (
-      d="$(copia "ctl-${t//:/-}")" || { echo "$t|copia" > "$RAIZ_TMP/ctl/${t//:/-}"; exit; }
-      suite "$d" "$t" > "$RAIZ_TMP/ctl/${t//:/-}.log" 2>&1
-      echo "$t|$?" > "$RAIZ_TMP/ctl/${t//:/-}"
-      rm -rf "$d"
-    ) < /dev/null &
+    serial "$t" && continue
+    ( controle_um "$t" ) < /dev/null &
     ativos=$((ativos + 1))
     if [ "$ativos" -ge "$PARALELO" ]; then wait; ativos=0; fi
   done
   wait
+  for t in "$@"; do
+    serial "$t" || continue
+    ( controle_um "$t" ) < /dev/null
+  done
   for t in "$@"; do
     linha="$(cat "$RAIZ_TMP/ctl/${t//:/-}" 2>/dev/null)"
     if [ "$linha" = "$t|0" ]; then echo "ok    controle $t"
@@ -306,6 +355,8 @@ echo
 ativos=0
 while IFS='|' read -r n id toks _desc; do
   [ -n "$n" ] || continue
+  # shellcheck disable=SC2086
+  serial $toks && continue
   ( executa "$n" "$id" "$toks" ) < /dev/null &
   ativos=$((ativos + 1))
   if [ "$ativos" -ge "$PARALELO" ]; then wait; ativos=0; fi
@@ -313,6 +364,15 @@ done <<EOF
 $SEL
 EOF
 wait
+# os que usam pgrep/pkill global: um de cada vez, sem nada em paralelo
+while IFS='|' read -r n id toks _desc; do
+  [ -n "$n" ] || continue
+  # shellcheck disable=SC2086
+  serial $toks || continue
+  ( executa "$n" "$id" "$toks" ) < /dev/null
+done <<EOF
+$SEL
+EOF
 # mutante sem resultado (subshell morto no meio): invalido, nunca omitido
 while IFS='|' read -r n id toks _desc; do
   [ -n "$n" ] && [ ! -f "$RAIZ_TMP/res/$n.res" ] || continue

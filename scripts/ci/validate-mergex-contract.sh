@@ -839,7 +839,7 @@ grep -Fq '**Leitura não trava nada**' "$commits" \
 # `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
 escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-r1-reconciliacao-base.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$escritores" = "$esperado" ] \
   || fail "unexpected executable writer of ENTREGA.commits: $escritores"
 grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
