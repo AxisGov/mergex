@@ -995,7 +995,7 @@ equivale() {
 }
 
 grupo_ci() {
-  local t d v1 p1 vv x pn n1 c a o e frase mainsha co orf
+  local t d v1 p1 vv x pn n1 c a o e frase mainsha co orf ordem pais mg
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   [ -r "$CI" ] || falha "portao-ci.sh: No such file ($CI)"
   export FX_PORTAO_PUSH="$PP"
@@ -1047,8 +1047,25 @@ grupo_ci() {
   CI_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ci_rc "ci: --base que não é objeto no clone: historia_incompleta barra" 1 "$co" "$pn" feature/ft-rec
   ci_err_tem "ci: --base ausente: diagnóstico historia_incompleta" "historia_incompleta"
   orf="$(git -C "$co" commit-tree "$(git -C "$co" hash-object -t tree -w /dev/null)" -m orfao)"
-  CI_BASE="$orf" ci_rc "ci: --base sem merge-base com o SHA: historia_incompleta barra" 1 "$co" "$pn" feature/ft-rec
-  ci_err_tem "ci: sem merge-base: diagnóstico historia_incompleta" "historia_incompleta"
+  # sem merge-base (clone completo): a história do PR é a do SHA inteiro, sem fechar à toa
+  CI_BASE="$orf" ci_rc "ci: --base sem merge-base, SHA que apaga um ENTREGA.md da própria história: barra (história inteira)" 1 "$co" "$pn" feature/ft-rec
+  ci_err_tem "ci: sem merge-base: a história inteira acha o ENTREGA.md apagado" "portao_nao_pronto"
+  CI_BASE="$mainsha" ci_rc "ci: branch órfã sem merge-base e sem ENTREGA.md na história não é aplicável: passa" 0 "$co" "$orf" feature/ft-rec
+  case "$CI_OUT" in *motivo=ref_nao_aplicavel*) ok "ci: branch órfã: motivo ref_nao_aplicavel" ;; *) falha "branch órfã: $(printf '%s' "$CI_OUT $CI_ERR" | tr '\n' '|')" ;; esac
+  # merge cuja árvore descarta o docs/entregas do PR (git rev-list simplificaria a história)
+  for ordem in vv_main main_vv; do
+    case "$ordem" in vv_main) pais="-p $vv -p $mainsha" ;; main_vv) pais="-p $mainsha -p $vv" ;; esac
+    # a árvore de vv com o docs/entregas da main (que não o tem): TREESAME à main nesse caminho
+    [ -z "$(git -C "$d" ls-tree "$mainsha" -- docs/entregas)" ] || falha "controle: a main tem docs/entregas"
+    mg="$( GIT_INDEX_FILE="$t/idx-mg" git -C "$d" read-tree "$vv" \
+      && GIT_INDEX_FILE="$t/idx-mg" git -C "$d" rm -r -q -f --cached docs/entregas \
+      && git -C "$d" commit-tree "$(GIT_INDEX_FILE="$t/idx-mg" git -C "$d" write-tree)" $pais -m "merge descarta docs/entregas ($ordem)"; rm -f "$t/idx-mg" )"
+    [ -n "$mg" ] && [ -z "$(git -C "$d" ls-tree "$mg" -- docs/entregas)" ] && ok "controle: merge ($ordem) sem docs/entregas, como a main" || { falha "controle: merge $ordem não montou"; continue; }
+    git -C "$d" update-ref "refs/tmp/mg-$ordem" "$mg" && git -C "$co" fetch -q "$d" "refs/tmp/mg-$ordem:refs/tmp/mg-$ordem" \
+      || { falha "merge $ordem não montou"; continue; }
+    CI_BASE="$mainsha" EQ_CIDIR="$co" equivale "ci reprova o merge que descarta o ENTREGA.md do PR ($ordem; clone sem refs/heads)" barra "$d" "$mg"
+    ci_err_tem "merge ($ordem): diagnóstico do portão não pronto" "portao_nao_pronto"
+  done
   CI_BASE="$pn" ci_rc "ci: base igual ao SHA sem ENTREGA.md declarando: não aplicável (controle da regra de aplicabilidade)" 0 "$co" "$pn" feature/ft-rec
 
   # historia_incompleta: clone raso, com a mesma entrada no pre-push e no CI

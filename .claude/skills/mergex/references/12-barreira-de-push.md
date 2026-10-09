@@ -156,9 +156,14 @@ bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha <sha40> --bran
   checkout está não entra.
 - **Aplicabilidade pela história do PR (`--base`).** O clone de um CI não tem `refs/heads/*` locais
   nem SHA remoto anterior. Se o SHA não declara a branch, o CI consulta os `ENTREGA.md` do
-  merge-base entre `--base` e `--sha` e dos commits do PR que tocam `docs/entregas`; o mais recente que
-  declara `branch: <nome>` faz o papel do SHA remoto anterior. Assim um commit que apaga o `ENTREGA.md`
-  reprova, como no `pre-push`. `--base` que não é objeto no clone, ou sem merge-base com `--sha`, é
+  merge-base entre `--base` e `--sha` e dos commits do PR que tocam `docs/entregas`, lidos com a
+  história completa (`--full-history`, sem simplificar: um merge cuja árvore descarta o
+  `docs/entregas` do PR não esconde os commits que o tocaram); o mais recente que declara
+  `branch: <nome>` faz o papel do SHA remoto anterior. Assim um commit que apaga o `ENTREGA.md`
+  reprova, como no `pre-push`. `--base` que não é objeto no clone é `historia_incompleta`. Sem
+  merge-base com `--sha` (branch órfã), num clone completo, a história do PR é a do `--sha` inteiro:
+  a ref só é aplicável se algum commit dela declara a branch, e um PR legítimo sem `ENTREGA.md` não
+  é barrado à toa. Sem merge-base num clone raso, a leitura não é confiável e fecha como
   `historia_incompleta`.
 - **Códigos:** `0` passa ou avisa; `1` barra (o diagnóstico vai a stderr, com textos distintos para
   `historia_incompleta`, que manda completar a história, e para `erro_ambiente`); `64` uso (inclui

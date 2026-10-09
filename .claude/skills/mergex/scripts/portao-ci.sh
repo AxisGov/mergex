@@ -122,11 +122,18 @@ pr_decide_ref "$RAIZ" "$REF" "$SHA" "$REF" "$NULO" > "$TMP" # guarda:CISHA
 # SHA sem ENTREGA.md que declare a branch: a história do PR decide a aplicabilidade
 if [ "$(sed -n 's/^motivo=//p' "$TMP")" = ref_nao_aplicavel ]; then
   MB="$(git merge-base "$BASE" "$SHA" 2>/dev/null)"
-  if [ -z "$MB" ]; then
-    _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [sem merge-base entre a base $BASE e $SHA]" > "$TMP"
+  # --full-history: sem simplificação, um merge cuja árvore descarta o docs/entregas
+  # do PR continua listando os commits que o tocaram
+  if [ -n "$MB" ]; then
+    { git rev-list --full-history "$MB..$SHA" -- docs/entregas 2>/dev/null; printf '%s\n' "$MB"; } > "$TMP.revs" # guarda:CIFULL
+  elif [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ]; then
+    # branch órfã (sem ancestral comum com a base) num clone completo: a história
+    # do PR é a do SHA inteiro
+    git rev-list --full-history "$SHA" -- docs/entregas > "$TMP.revs" 2>/dev/null
+  else
+    _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [sem merge-base entre a base $BASE e $SHA num clone raso ou ilegível]" > "$TMP"
     final
   fi
-  { git rev-list "$MB..$SHA" -- docs/entregas 2>/dev/null; printf '%s\n' "$MB"; } > "$TMP.revs"
   ANTERIOR=""
   PR_FALTA=0; PR_CTRL=0
   while read -r rev; do
