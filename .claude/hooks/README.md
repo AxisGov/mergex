@@ -241,9 +241,9 @@ O hook tira o CR que o `jq.exe` do Windows escreve antes de comparar.
 - **Publicação puxada pelo remoto.** Com um remoto no sistema de arquivos,
   `git -C <remoto> fetch <wt> feature/x:feature/x` grava a branch no remoto
   sem push. Isso não passa nem pelo hook nem pelo `pre-push`: a barreira é o
-  CI.
+  CI, nos limites da seção 15.1, itens 1 e 12.
 - **`send-pack`.** O `git send-pack` não roda o `pre-push`. O hook só avisa,
-  e a barreira é o CI.
+  e a barreira é o CI, nos limites da seção 15.1, itens 1 e 12.
 
 A implementação anterior deste hook foi substituída pela DM-184. Ela varria o
 portão de todas as branches a cada comando, tinha um prazo de 45 s que falhava

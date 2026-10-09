@@ -199,6 +199,20 @@ decisão da ref é a agregada. Sem a parcela (a) e com (b) e (c) vazias, se a á
 aplicabilidade não está provada, e o diagnóstico sugere `git remote set-head <remoto> --auto`. Sem
 `ENTREGA.md` na árvore, passa. Qualquer ref que barra barra o push inteiro.
 
+**Falso bloqueio por base defasada (limite do `pre-push`).** A parcela (a) usa sempre
+`refs/remotes/<remoto>/HEAD`. Se essa ref está **defasada** (o `fetch` foi tarde e a base já
+avançou além do que a branch integrou), ou **não é a base de integração** da branch (branch
+empilhada sobre outra feature, fluxo por `develop`), as entregas trazidas pela base entram na
+seleção; toda entrega integrada por merge está vencida (`commit_merge`) e a de baixo da pilha, vencida
+pelos commits da de cima (`commit_de_produto`). O push de um SHA **válido** é então barrado: falha
+fechada, nunca aprovação, e a decisão não muda. O diagnóstico cita a base usada
+(`refs/remotes/<remoto>/HEAD` e o SHA dela), diz que, se essa base está defasada ou não é a base de
+integração da branch, entregas trazidas pela base podem ter sido selecionadas, e manda rodar
+`git fetch <remoto>` e `git remote set-head <remoto> -a` antes de rodar o E2 de novo. O outro lado do
+limite é a ausência da ref: sem `refs/remotes/<remoto>/HEAD` (repositório com `git remote add`, não
+`git clone`) e sem outra parcela que alcance a árvore, o `pre-push` só avisa com
+`cobertura_indeterminada` e não barra.
+
 **Chamador gerenciado sem o validador.** O `pre-push` instalado pelo E0 confere que
 `portao-push.sh` existe no checkout antes de chamá-lo. Sem ele (branch anterior à instalação da
 skill, skill removida), barra com a mensagem

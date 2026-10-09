@@ -509,7 +509,7 @@ pr_decide_entrega() {
   # erro de ambiente, e a validade nem roda
   id="${ent#docs/entregas/}"; id="${id%/ENTREGA.md}"
   _pr_id_valido "$id" \
-    || { _pr_sai barra entrega_indeterminada "$ent" "$(_pr_diag_invalido entrega_indeterminada): o id '$id' em $ent está fora da gramática de trabalho ([A-Za-z0-9._-], sem começar por '.', sem nome reservado); renomeie o diretório da entrega"; return; }
+    || { _pr_sai barra entrega_indeterminada "$ent" "não foi possível determinar o ENTREGA.md da entrega (entrega_indeterminada): o id '$id' em $ent está fora da gramática de trabalho ([A-Za-z0-9._-], sem começar por '.', sem nome reservado); renomeie o diretório da entrega"; return; }
   [ -r "$PR_VALIDADE" ] \
     || { _pr_sai barra erro_ambiente "$ent" "$(_pr_diag_invalido erro_ambiente): validador ausente: $PR_VALIDADE"; return; }
   set -- --verificar --entrega "$ent"
@@ -587,10 +587,22 @@ _pr_barra_selecao() {
   esac
 }
 
+# _pr_nota_base <remoto> <base> — a decisão do pre-push que barra ou avisa passa
+# a citar a base da parcela (a): refs/remotes/<remoto>/HEAD e o SHA dela. Se a
+# base está defasada ou não é a base de integração da branch, entregas trazidas
+# pela base podem ter sido selecionadas (falso bloqueio, nunca aprovação). Só
+# acrescenta texto ao diagnóstico: a decisão não muda.
+_pr_nota_base() {
+  case "${PR_DEC:-}" in barra|avisa) ;; *) return 0 ;; esac
+  PR_DIAG="$PR_DIAG [base da seleção: refs/remotes/$1/HEAD = $2; se essa base está defasada ou não é a base de integração desta branch, entregas trazidas pela base podem ter sido selecionadas: rode 'git fetch $1' e 'git remote set-head $1 -a' antes de rodar o E2 (/mergex-check) de novo]"
+  if [ "$PR_DEC" = barra ]; then PR_ERRO="$PR_DIAG"; fi
+  return 0
+}
+
 # _pr_decide_push <raiz> <sha_local> <ref_remota> <sha_remoto> <remoto> — a
 # ref refs/heads/<b> do pre-push: a união das parcelas (a), (b) e (c)
 _pr_decide_push() {
-  local raiz="$1" sl="$2" rr="$3" sr="$4" remoto="$5" b tmp base tem_a=0 rcb=0 motivo erro e
+  local raiz="$1" sl="$2" rr="$3" sr="$4" remoto="$5" b tmp base tem_a=0 rcb=0 motivo erro e rcd
   case "$rr" in refs/heads/?*) b="${rr#refs/heads/}" ;; *) _pr_sai passa ref_nao_aplicavel - ""; return ;; esac
   : "$b"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/mergex-portao-push-sel.XXXXXX")" \
@@ -601,7 +613,7 @@ _pr_decide_push() {
   base="$(_pr_g -C "$raiz" rev-parse -q --verify "refs/remotes/$remoto/HEAD^{commit}" 2>/dev/null)" || base=""
   if [ -n "$base" ]; then
     tem_a=1
-    pr_entregas_do_intervalo "$raiz" "$base" "$sl" >> "$tmp/lista" || { motivo="$PR_SEL_MOTIVO"; erro="$PR_ERRO"; rm -rf "$tmp"; _pr_barra_selecao "$motivo" "$erro"; return; } # guarda:PPBASE
+    pr_entregas_do_intervalo "$raiz" "$base" "$sl" >> "$tmp/lista" || { motivo="$PR_SEL_MOTIVO"; erro="$PR_ERRO"; rm -rf "$tmp"; _pr_barra_selecao "$motivo" "$erro"; _pr_nota_base "$remoto" "$base"; return; } # guarda:PPBASE
   fi
   # (b) a regra legada pelo nome
   PR_ENTREGA=""; PR_FALTA=0; PR_CTRL=0
@@ -625,7 +637,9 @@ _pr_decide_push() {
   set --
   while IFS= read -r e; do [ -n "$e" ] && set -- "$@" "$e"; done < "$tmp/entregas"
   rm -rf "$tmp"
-  pr_decide_entregas "$raiz" "$sl" "$@"
+  pr_decide_entregas "$raiz" "$sl" "$@"; rcd=$?
+  [ "$tem_a" = 0 ] || _pr_nota_base "$remoto" "$base"
+  return "$rcd"
 }
 
 pr_decide_ref() {

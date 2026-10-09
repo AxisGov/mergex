@@ -536,6 +536,46 @@ grupo_prepush() {
   push_espera "push que apaga o ENTREGA da branch de mesmo nome barra pelo nome sem base" 1 "$vA" "$d3" origin "$pR:refs/heads/feature/ft-rec"
   err_tem "apaga o ENTREGA: diagnóstico portao_nao_pronto" "portao_nao_pronto"
   cd "$REPO" || return
+
+  # ---- DM-185 (revisão final, I1): base defasada no pre-push --------------------------------
+  # refs/remotes/<remoto>/HEAD atrás da base que a feature integrou: a parcela (a)
+  # traz a entrega ft-y, já integrada por merge, e o push de um SHA VÁLIDO é
+  # barrado (falha fechada, nunca aprovação). O diagnóstico cita a base usada
+  # (a ref e o SHA), diz que ela pode estar defasada ou não ser a base de
+  # integração, e manda 'git fetch' e 'git remote set-head -a' antes do E2.
+  local t4 d4 m0 m2 yb vr dec4
+  t4="$(mktemp -d)"; TMPS="$TMPS $t4"; d4="$t4/repo"
+  fx_cenario "$d4" || { falha "cenário DM-185 (base defasada) não montou"; return; }
+  fx_remoto_bare "$d4" || { falha "remoto bare (base defasada)"; return; }
+  modo "$d4" aviso
+  cd "$d4" || return
+  m0="$(git rev-parse main)"
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1 && git remote set-head origin main >/dev/null 2>&1 \
+    && ok "controle: base defasada: origin/HEAD na main antiga" || falha "controle: base defasada: origin/HEAD não montou"
+  fx_portao_em "$d4" HEAD
+  git switch -q -c feature/ft-y "$m0" && entrega_em "$d4" ft-y feature/ft-y 's/^trabalho_id: .*/&/' feature/ft-rec \
+    && git commit -q -m "docs: entrega ft-y" && produto "$d4" ft-y-1; yb="$(git rev-parse HEAD)"
+  git switch -q main && git merge -q --no-ff --no-edit "$yb" >/dev/null 2>&1; m2="$(git rev-parse HEAD)"
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1
+  git switch -q feature/ft-rec && git merge -q --no-ff --no-edit "$m2" >/dev/null 2>&1; fx_portao_em "$d4" HEAD; vr="$(git rev-parse HEAD)"
+  git update-ref refs/remotes/origin/main "$m0"
+  [ "$(val_motivo "$vr")" = ok ] && [ "$(git rev-parse -q --verify 'refs/remotes/origin/HEAD^{commit}')" = "$m0" ] \
+    && git cat-file -e "$vr:docs/entregas/ft-y/ENTREGA.md" 2>/dev/null \
+    && ok "controle: vr (feature reconciliada) é válido; origin/HEAD = main antiga; a árvore tem a entrega ft-y da base" || falha "controle: base defasada: vr/origin/HEAD"
+  dec4="$( . "$REGRAS" || exit 9; arvore_ambiente_git; pr_decide_ref "$d4" refs/heads/feature/ft-rec "$vr" refs/heads/feature/ft-rec "$ZERO" origin; printf 'rc=%s\n' "$?" )"
+  case "$dec4" in *decisao=barra*motivo=commit_merge*rc=1) ok "base defasada: a decisão é barra/commit_merge (rc 1); falha fechada, a decisão não muda" ;; *) falha "base defasada: decisão: $(printf '%s' "$dec4" | tr '\n' '|')" ;; esac
+  push_espera "base defasada barra o push do SHA válido (falso bloqueio, nunca aprovação)" 1 - "$d4" origin "$vr:refs/heads/feature/ft-rec"
+  err_tem "base defasada: o diagnóstico cita a entrega selecionada pela base" "docs/entregas/ft-y/ENTREGA.md"
+  err_tem "base defasada: o diagnóstico cita refs/remotes/origin/HEAD" "refs/remotes/origin/HEAD"
+  err_tem "base defasada: o diagnóstico cita o SHA da base usada" "$m0"
+  err_tem "base defasada: o diagnóstico diz que a base pode estar defasada ou não ser a de integração" "defasada ou não é a base de integração"
+  err_tem "base defasada: o diagnóstico manda git fetch origin" "git fetch origin"
+  err_tem "base defasada: o diagnóstico manda git remote set-head origin -a" "git remote set-head origin -a"
+  err_tem "base defasada: o diagnóstico manda isso antes de rodar o E2 de novo" "antes de rodar o E2"
+  git update-ref refs/remotes/origin/main "$m2"
+  push_espera "controle: com a base atualizada (fetch + set-head) o mesmo push passa" 0 "$vr" "$d4" origin "$vr:refs/heads/feature/ft-rec"
+  err_sem "base atualizada: nenhum diagnóstico da barreira" "mergex pre-push"
+  cd "$REPO" || return
 }
 
 # ---------------------------------------------------------------------------
@@ -1251,6 +1291,19 @@ rc=0 motivo=" ] && ok "seleção P/C/M: pr_entregas_do_intervalo seleciona ft-re
   ci_err_tem "id fora da gramática: o diagnóstico cita o id inválido" "ação x"
   ci_err_sem "id fora da gramática: não é erro de ambiente" "erro de ambiente"
   ci_out_tem "id fora da gramática: entrega indexada" "entrega[1]=docs/entregas/ação x/ENTREGA.md"
+  ci_err_tem "id fora da gramática: o diagnóstico fala da entrega" "ENTREGA.md da entrega (entrega_indeterminada)"
+  ci_err_sem "id fora da gramática: o diagnóstico da decisão por entrega não fala de ref" "ENTREGA.md da ref"
+  # erro_ambiente da seleção (merge-base não calculável, com os objetos presentes):
+  # barra, sem executar a validade, e o resumo traz quantidade_entregas=0
+  mkdir -p "$t/dm-gitstub-mb" && printf '#!/usr/bin/env bash\ncase "$*" in *merge-base*) exit 2 ;; esac\nexec %q "$@"\n' "$(command -v git)" > "$t/dm-gitstub-mb/git" \
+    && chmod +x "$t/dm-gitstub-mb/git" || falha "git de mentira (merge-base) não montou"
+  : > "$CI_LOG"; head="$PATH"; PATH="$t/dm-gitstub-mb:$PATH"
+  CI_BASE="$mainsha" ci_roda "$dm" "$p1" feature/ft-rec "$CI_INSTR/portao-ci.sh"; PATH="$head"
+  [ "$CI_RC" = 1 ] && [ "$(grep -c . "$CI_LOG")" = 0 ] \
+    && case "$CI_OUT" in *decisao=barra*motivo=erro_ambiente*) true ;; *) false ;; esac \
+    && ok "seleção com erro_ambiente (merge-base não calculável) barra sem executar a validade" || falha "seleção erro_ambiente: rc=$CI_RC $(printf '%s' "$CI_OUT $CI_ERR" | tr '\n' '|')"
+  ci_out_tem "seleção com erro_ambiente: a saída traz quantidade_entregas=0" "quantidade_entregas=0"
+  ci_err_tem "seleção com erro_ambiente: diagnóstico erro_ambiente" "erro_ambiente"
   ci_val "merge que altera o ENTREGA contra os dois pais barra" 1 barra commit_merge 1 "$ci" "$MM" feature/ft-rec "$vv"
   ci_val "merge que apaga um ENTREGA da base barra" 1 barra portao_nao_pronto 1 "$ci" "$MD" feature/ft-rec "$vv"
   ci_val "cria e apaga no PR barra" 1 barra portao_nao_pronto 1 "$ci" "$CA" feature/nova "$mainsha"
