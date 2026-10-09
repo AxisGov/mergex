@@ -2,7 +2,8 @@
 # validade-do-portao — o portão `pronto` do E2 ainda vale para a revisão?
 #
 # Contrato: docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md,
-# seção 13. Consumido pelo hook de push (pr-so-com-portao) e pelo E6/E7.
+# seção 13. Consumido pela barreira de push (portao-regras.sh: pre-push, hook
+# pr-so-com-portao e CI) e pelo E6/E7.
 #
 # Uso:
 #   validade-do-portao.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md [--rev <commit>]
@@ -11,9 +12,9 @@
 # stage vazio; os temporários (fora do repositório) saem em toda saída.
 #
 # Revisão avaliada: `--rev <commit>` (padrão HEAD), resolvida para o SHA do
-# commit. O hook de push passa o commit que o push publica, que nem sempre é o
-# HEAD. Abaixo, "HEAD" é essa revisão. Uma revisão que não se resolve para um
-# commit é erro_ambiente.
+# commit. O pre-push passa o SHA que o push publica, que nem sempre é o HEAD.
+# Abaixo, "HEAD" é essa revisão. Uma revisão que não se resolve para um commit
+# é erro_ambiente, salvo quando é objeto ausente (historia_incompleta, abaixo).
 #
 # Fonte: `portao`, `portao_sha`, `trabalho_id` e `expx_tool` vêm de
 # <rev>:<ENTREGA> (a versão commitada, que é a que o push envia). O ENTREGA.md
@@ -83,13 +84,26 @@
 #                           contexto inválido;
 #   erro_ambiente           nada se pôde avaliar: dependência ausente, fora de
 #                           um repositório Git, temporário que não se cria,
-#                           revisão (HEAD ou --rev) que não é um commit
-#                           ou rev-list que falha; com um
+#                           revisão (HEAD ou --rev) que não é um commit por
+#                           motivo que não seja objeto ausente, ou rev-list
+#                           que falha com a história inteira; com um
 #                           `aviso=` que descreve a falha;
 #   portao_sha_ausente      portao_sha ausente, vazio, null ou fora de 40 hex;
 #   portao_sha_nao_ancestral  portao_sha inexistente ou não ancestral de HEAD;
-#   historia_incompleta     repositório raso (a história cortada esconde
-#                           commits): rode `git fetch --unshallow`.
+#   historia_incompleta     a história está cortada: repositório raso (rode
+#                           `git fetch --unshallow`) ou objeto Git necessário
+#                           ausente (busque os objetos que faltam). Objeto
+#                           necessário ausente (guarda VALOBJ), num repositório
+#                           Git legível: o commit para o qual um NOME de
+#                           revisão (ref, HEAD) aponta; ou um objeto que falta
+#                           ao percorrer a história de HEAD, quando a
+#                           ancestralidade de portao_sha ou o rev-list do
+#                           intervalo falha. Um SHA literal sem objeto não é
+#                           distinguível de um SHA que nunca existiu: continua
+#                           erro_ambiente (--rev) ou portao_sha_nao_ancestral.
+#                           O diagnóstico vem num `aviso=`.
+# Os dois motivos de falha (historia_incompleta e erro_ambiente) falham
+# fechado: ok=false e rc 1; todo consumidor os trata como bloqueio.
 # Códigos: 0 válido; 1 inválido; 64 uso. Nenhuma opção de força.
 #
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
@@ -132,6 +146,19 @@ invalido() {
   exit 1
 }
 ambiente() { aviso "$1"; invalido erro_ambiente; }
+objeto_ausente() {
+  aviso "$1: objeto Git ausente, história incompleta; busque os objetos que faltam (git fetch) ou rode git fetch --unshallow"
+  invalido historia_incompleta
+}
+# A história de <rev> se percorre inteira (só commits)? Chamada só nos caminhos
+# de falha: o custo de percorrer a história não entra no caminho válido.
+historia_integra() { g rev-list "$REV_SHA" >/dev/null 2>&1; }
+# Uma falha do Git depois de resolvida a revisão: objeto ausente
+# (historia_incompleta) ou ambiente (erro_ambiente).
+ambiente_ou_objeto() {
+  historia_integra || objeto_ausente "$1" # guarda:VALOBJ
+  ambiente "$1"
+}
 
 MODO=""; ENTREGA=""; REV=""; REV_DADA=0
 while [ "$#" -gt 0 ]; do
@@ -183,7 +210,13 @@ esac
 # história cortada esconde commits: antes de qualquer leitura
 arvore_recusa_raso || { aviso "$ARVORE_ERRO"; invalido historia_incompleta; } # guarda:PTRASO
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-validade-portao.XXXXXX")" || { TMP_DIR=""; ambiente 'não foi possível criar diretório temporário'; }
-REV_SHA="$(g rev-parse --verify -q "$REV^{commit}" 2>/dev/null)" || ambiente "$REV não é um commit"
+if ! REV_SHA="$(g rev-parse --verify -q "$REV^{commit}" 2>/dev/null)"; then
+  # um NOME (ref, HEAD) que aponta para um objeto que falta; um SHA literal sem
+  # objeto não se distingue de um que nunca existiu
+  case "$REV" in *[!0-9a-f]*) REV_ALVO="$(g rev-parse --verify -q "$REV" 2>/dev/null)" ;; *) REV_ALVO="" ;; esac
+  [ -z "$REV_ALVO" ] || g cat-file -e "$REV_ALVO" 2>/dev/null || objeto_ausente "$REV aponta para $REV_ALVO" # guarda:VALOBJ
+  ambiente "$REV não é um commit"
+fi
 
 modo_em() { g ls-tree -z "$1" -- "$2" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .*//p'; }
 
@@ -217,6 +250,9 @@ fi
 
 [ "$PORTAO" = pronto ] || invalido portao_nao_pronto # guarda:PTPRONTO
 printf '%s' "$PS" | grep -Eq '^[0-9a-f]{40}$' || invalido portao_sha_ausente # guarda:PTSHA
+# portao_sha sem objeto ou fora da ancestralidade: antes de concluir, a
+# história de <rev> se percorre? Senão, o que falta é objeto (VALOBJ).
+{ g cat-file -e "$PS^{commit}" && g merge-base --is-ancestor "$PS" "$REV_SHA"; } 2>/dev/null || historia_integra || objeto_ausente "a história de $REV não se percorre" # guarda:VALOBJ
 g cat-file -e "$PS^{commit}" 2>/dev/null || invalido portao_sha_nao_ancestral # guarda:PTANC
 g merge-base --is-ancestor "$PS" "$REV_SHA" 2>/dev/null || invalido portao_sha_nao_ancestral # guarda:PTANC
 
@@ -226,11 +262,11 @@ g merge-base --is-ancestor "$PS" "$REV_SHA" 2>/dev/null || invalido portao_sha_n
 # ---------------------------------------------------------------------------
 # Primeiro os merges: um merge no intervalo é a causa, antes do que ele trouxe.
 g rev-list --merges --topo-order --reverse "$PS..$REV_SHA" > "$TMP_DIR/merges" 2>/dev/null \
-  || ambiente "rev-list --merges $PS..$REV não calculável"
+  || ambiente_ou_objeto "rev-list --merges $PS..$REV não calculável"
 PRIMEIRO_MERGE="$(sed -n 1p "$TMP_DIR/merges")"
 [ -z "$PRIMEIRO_MERGE" ] || invalido commit_merge "$PRIMEIRO_MERGE" # guarda:PTMERGE
 g rev-list --reverse --topo-order "$PS..$REV_SHA" > "$TMP_DIR/commits" 2>/dev/null \
-  || ambiente "rev-list $PS..$REV não calculável" # guarda:PTLISTA
+  || ambiente_ou_objeto "rev-list $PS..$REV não calculável" # guarda:PTLISTA
 i=0
 while IFS= read -r c <&3; do
   [ -n "$c" ] || continue

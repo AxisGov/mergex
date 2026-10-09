@@ -23,6 +23,11 @@
 #   fx_commit_metodo <dir> <checkpoint> <caminho>...  commit de método que
 #                               acrescenta uma linha a cada caminho
 #   fx_commit_solto <dir>       commit fora da história de HEAD (imprime o SHA)
+#   fx_remoto_bare <dir>        remoto.git bare ao lado de <dir> (no temporário
+#                               do teste), como `origin` de <dir>: FX_REMOTO
+#   fx_push_real <dir> <args do git push>...  `git push` real com o pre-push
+#                               apontando para portao-push.sh (chamador mínimo
+#                               da fixture); imprime rc=, ref= e stderr=
 #
 # Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
 # o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
@@ -857,4 +862,64 @@ fx_commit_solto() {
     sha="$(git rev-parse HEAD)" || exit 1
     fixture_switch_exato feature/ft-rec feature/ft-rec || exit 1
     printf '%s\n' "$sha" )
+}
+
+# ---------------------------------------------------------------------------
+# Barreira de push (DM-184): remoto bare local e push real
+# ---------------------------------------------------------------------------
+
+# Validador de push da própria skill: o padrão do chamador mínimo.
+_FXR_PORTAO_PUSH="$(cd "$_FXR_LIB/../../.." && pwd)/.claude/skills/mergex/scripts/portao-push.sh"
+
+# fx_remoto_bare <dir> — cria `remoto.git` bare ao lado de <dir> (no mesmo
+# diretório pai, que é o temporário do teste), aponta o `origin` do repositório
+# <dir> para ele e exporta FX_REMOTO (caminho absoluto). Nunca toca rede nem o
+# remoto de outro repositório. Falha se o remoto já existe.
+fx_remoto_bare() {
+  local dir="$1" r
+  [ -n "$dir" ] && [ -e "$dir/.git" ] || return 64
+  r="$(cd "$dir/.." && pwd)/remoto.git" || return 1
+  [ ! -e "$r" ] || return 1
+  git init -q --bare "$r" || return 1
+  if git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+    git -C "$dir" remote set-url origin "$r" || return 1
+  else
+    git -C "$dir" remote add origin "$r" || return 1
+  fi
+  FX_REMOTO="$r"
+  export FX_REMOTO
+}
+
+# _fx_pre_push_minimo <dir> <portao-push> — o chamador mínimo da fixture (o
+# oficial, com marcador e ativação pelo E0, é da Task 15): um `pre-push` que só
+# repassa a entrada padrão ao validador de push e propaga o código de saída.
+# Fica em <diretório Git comum>/hooks-fx, com core.hooksPath LOCAL do
+# repositório de teste apontando para ele (um hooksPath global não o desvia).
+_fx_pre_push_minimo() {
+  local dir="$1" pp="$2" hd
+  hd="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/hooks-fx" || return 1
+  mkdir -p "$hd" || return 1
+  { printf '#!/usr/bin/env bash\n# chamador mínimo da fixture de teste\n'
+    printf 'exec bash %q --pre-push "$@"\n' "$pp"
+  } > "$hd/pre-push" || return 1
+  chmod +x "$hd/pre-push" || return 1
+  git -C "$dir" config core.hooksPath "$hd"
+}
+
+# fx_push_real <dir> <args do git push>... — roda `git push <args>` REAL no
+# repositório <dir>, com o pre-push apontando para FX_PORTAO_PUSH (padrão: o
+# portao-push.sh da skill). Imprime:
+#   rc=<código do git push>
+#   ref=<SHA da ref FX_PUSH_REF no `origin` depois do push | ->
+#   stderr=<arquivo com o stderr do push, no diretório Git comum de <dir>>
+# FX_PUSH_REF padrão: refs/heads/feature/ft-rec. rc 1 se o chamador não instala.
+fx_push_real() {
+  local dir="$1" rc ref err alvo="${FX_PUSH_REF:-refs/heads/feature/ft-rec}"
+  [ -n "$dir" ] && [ "$#" -ge 2 ] || return 64
+  shift
+  _fx_pre_push_minimo "$dir" "${FX_PORTAO_PUSH:-$_FXR_PORTAO_PUSH}" || return 1
+  err="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/fx-push-stderr" || return 1
+  git -C "$dir" push "$@" > /dev/null 2> "$err"; rc=$?
+  ref="$(git -C "$dir" ls-remote origin "$alvo" 2>/dev/null | awk -v r="$alvo" '$2 == r { print $1 }')"
+  printf 'rc=%s\nref=%s\nstderr=%s\n' "$rc" "${ref:--}" "$err"
 }

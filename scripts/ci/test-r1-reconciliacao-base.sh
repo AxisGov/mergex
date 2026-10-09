@@ -3243,6 +3243,30 @@ docs/entregas/ft-rec/PR.md"
   [ "$(git rev-parse --is-shallow-repository)" = true ] && ok "controle: clone raso" || falha "controle: clone não é raso"
   pt_espera "repositório raso: historia_incompleta" 1 ok=false historia_incompleta -
   cd "$REPO" || return
+
+  # ---- objeto Git necessário ausente (numa cópia; objetos soltos) ---------------
+  cd "$d" || return
+  fx_portao_em "$d" HEAD
+  local o f
+  for x in head portao_sha; do
+    rm -rf "$t/obj"; cp -a "$d" "$t/obj"
+    case "$x" in head) o="$(git rev-parse HEAD)" ;; portao_sha) o="$(git rev-parse HEAD~1)" ;; esac
+    f="$t/obj/.git/objects/$(printf '%s' "$o" | cut -c1-2)/$(printf '%s' "$o" | cut -c3-)"
+    [ -f "$f" ] && ok "controle: o commit $x é objeto solto na cópia" || falha "controle: commit $x não é solto"
+    rm -f "$f"
+    cd "$t/obj" || return
+    pt_espera "objeto ausente é historia_incompleta, não erro_ambiente ($x removido)" 1 ok=false historia_incompleta -
+    out="$("${p[@]}" 2>/dev/null)"
+    printf '%s\n' "$out" | grep -q '^aviso=.*objeto Git ausente' && ok "objeto ausente ($x): aviso= próprio" || falha "objeto ausente ($x) sem aviso: $(printf '%s' "$out" | tr '\n' '|')"
+    cd "$d" || return
+  done
+  PT_REV=0123456789abcdef0123456789abcdef01234567 pt_espera "controle: --rev inexistente com a história inteira continua erro_ambiente" 1 ok=false erro_ambiente -
+
+  # ---- risco residual 5: isenção por prefixo da V9 não vale para a validade --------
+  fx_portao_em "$d" HEAD
+  fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/x.ts
+  pt_espera "isenção por prefixo: .ts em docs/entregas depois do portão invalida" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+  cd "$REPO" || return
 }
 
 # ---------------------------------------------------------------------------
