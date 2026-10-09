@@ -1223,14 +1223,17 @@ grupo_ci() {
 HOOK_PR="$REPO/.claude/hooks/mergex/pr-so-com-portao.sh"
 
 # hook_decide <dir> <comando> — o hook do Claude: barra (exit 2), avisa (exit
-# 0 com aviso no stderr) ou passa (exit 0 calado)
+# 0 com o aviso do hook no stderr) ou passa (exit 0 calado). Qualquer outro
+# stderr com exit 0 (erro de shell, aviso estranho) não é decisão: falha.
 hook_decide() {
   local e rc
   e="$(jq -cn --arg c "$2" --arg w "$1" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}' \
     | bash "$HOOK_PR" 2>&1 >/dev/null)"; rc=$?
-  case "$rc" in
-    2) printf 'barra\n' ;;
-    0) if [ -n "$e" ]; then printf 'avisa\n'; else printf 'passa\n'; fi ;;
+  case "$rc:$e" in
+    2:*) printf 'barra\n' ;;
+    0:) printf 'passa\n' ;;
+    '0:mergex/pr-so-com-portao — aviso'*) printf 'avisa\n' ;;
+    0:*) printf 'stderr-inesperado(%s)\n' "$(printf '%s' "$e" | head -1)" ;;
     *) printf 'rc%s\n' "$rc" ;;
   esac
 }

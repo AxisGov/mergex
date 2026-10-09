@@ -63,28 +63,28 @@ CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null | tr -d '\r')"
 # --------------------------------------------------------------------------
 # 1. O comando publica? (`git` como programa seguido do subcomando)
 # --------------------------------------------------------------------------
-# Por segmento (expx_segmentos), sem aspas nem barra invertida: `bash -c 'git
-# push'` e `xargs git push` publicam; `git log --grep push` e `echo push` não.
-# Entre o `git` e o subcomando só cabem opções globais (com o valor das que o
-# levam na palavra seguinte).
+# Por segmento (expx_segmentos), sem aspas nem barra invertida. O casamento
+# começa no PROGRAMA do segmento (depois de atribuições e palavras-chave):
+# quando ele é o `git`, o subcomando vem logo depois dele, só com opções globais
+# no meio (com o valor das que o levam na palavra seguinte); `git commit -m "…
+# git push …"` não publica. Quando o programa é um executor (`bash -c`,
+# `xargs`, `env`, `nice`…), o `git push` pode estar em qualquer posição. Outro
+# programa (`echo`, `grep`, `gh`) só cita: não publica.
 G_='(^|[[:space:]/{])git(\.exe)?'
 OPT_='([[:space:]]+((-C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--config-env|--attr-source)[[:space:]]+[^[:space:]]+|-[^[:space:]]*))*'
 SUB_='[[:space:]]+(push|send-pack|subtree[[:space:]]+push)'
 GITX_='(^|[[:space:]/{])git-(push|send-pack)(\.exe)?'
 FIM_='([[:space:]]|$)'
-NV_='[[:space:]]+([^[:space:]]+[[:space:]]+)*--no-verify([[:space:]]|$)'
+# `--no-verify` e os prefixos únicos que o Git aceita para ele (`--no-ver`
+# colide com `--no-verbose`)
+NV_='[[:space:]]+([^[:space:]]+[[:space:]]+)*--no-veri(fy?)?([[:space:]]|$)'
 
 SEGS="$(expx_segmentos "$CMD" | tr -d "\"'\\\\")"
-publica() {
-  printf '%s\n' "$SEGS" | grep -Eq -e "${G_}${OPT_}${SUB_}${FIM_}" -e "${GITX_}${FIM_}"
-}
-publica || exit 0
 
-# programa_executa <segmento> — o programa do segmento é o git (ou um
-# executor que roda o que vem depois: `bash -c`, `xargs`, `env`...), não uma
-# citação (`echo`, `grep`, `printf`)
-programa_executa() {
-  local t b
+# programa_casa <segmento> <cauda ERE> — o segmento executa um push cujo resto
+# casa a cauda (FIM_: só publicar; NV_: com --no-verify)
+programa_casa() {
+  local s="$1" cauda="$2" b
   set -f
   # shellcheck disable=SC2086
   set -- $1
@@ -97,22 +97,30 @@ programa_executa() {
   done
   [ "$#" -gt 0 ] || return 1
   b="${1##*/}"; b="${b%.exe}"
-  case "$b" in git|git-push|git-send-pack) return 0 ;; esac
-  expx_executor "$b"
+  case "$b" in
+    git) printf '%s\n' "$*" | grep -Eq "^[^[:space:]]*${OPT_}${SUB_}${cauda}" ;;
+    git-push|git-send-pack) printf '%s\n' "$*" | grep -Eq "^[^[:space:]]*${cauda}" ;;
+    *) expx_executor "$b" || return 1
+       printf '%s\n' "$s" | grep -Eq -e "${G_}${OPT_}${SUB_}${cauda}" -e "${GITX_}${cauda}" ;;
+  esac
 }
-
-# nv_publica — algum segmento executa um push com `--no-verify` literal
-nv_publica() {
+# algum_segmento <cauda ERE>
+algum_segmento() {
   local s
   while IFS= read -r s; do
     [ -n "$s" ] || continue
-    printf '%s\n' "$s" | grep -Eq -e "${G_}${OPT_}${SUB_}${NV_}" -e "${GITX_}${NV_}" || continue
-    programa_executa "$s" && return 0
+    programa_casa "$s" "$1" && return 0
   done <<EOF
 $SEGS
 EOF
   return 1
 }
+publica() { algum_segmento "$FIM_"; }
+publica || exit 0
+
+# nv_publica — algum segmento executa um push com `--no-verify` (ou prefixo
+# único dele)
+nv_publica() { algum_segmento "$NV_"; }
 
 # --------------------------------------------------------------------------
 # Desfechos

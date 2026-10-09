@@ -110,10 +110,12 @@ remoto por um push.
 **1. `--no-verify` reconhecido: bloqueia** (`exit 2`, em qualquer modo,
 `desligado` inclusive). O `--no-verify` faz o Git pular o `pre-push`, e a
 mensagem diz isso e aponta o CI como a barreira contra esse contorno.
-Reconhecido é um segmento cujo programa é o `git` (ou um executor como
-`bash -c`, `env` ou `xargs`) com `push` e o `--no-verify` literal depois dele.
-`git commit --no-verify` não é push, e a citação
-(`echo "git push --no-verify"`) não executa nada.
+Reconhecido é um segmento cujo programa é o `git`, seguido do `push` (só
+opções globais no meio) e do `--no-verify` ou de um prefixo único dele que o
+Git aceita (`--no-veri`, `--no-verif`); ou um executor como `bash -c`, `env`,
+`nice` ou `xargs` que roda esse push. `git commit --no-verify` não é push, e a
+citação (`echo "git push --no-verify"`, `git commit -m "… git push
+--no-verify"`, `git log --grep …`) não executa nada: sai calada.
 
 **2. Bloqueia só com prova** (`exit 2`), quando tudo isto vale:
 
@@ -174,6 +176,8 @@ coreutils. Ele só é aceito depois de provar, pelo comportamento, que mata um
 processo no prazo (`timeout 0.2 sleep 3` sai 124 em menos de 2 s), a mesma
 técnica de `ativacao-pre-push.sh`. Sem `timeout` funcional, ou com o
 orçamento estourado, o hook avisa e sai 0, e o processo filho morre inteiro.
+Sem `timeout` funcional (macOS sem coreutils, por exemplo), o hook nunca
+antecipa bloqueio de portão e só avisa; o `--no-verify` continua bloqueado.
 
 São uma validade por ref enviada, nenhuma varredura de branches e nenhum laço
 de subida de diretório. Um cwd `//` ou UNC sem repositório avisa na hora.

@@ -977,14 +977,16 @@ for C in 'git push' 'git push -u origin feature/ft-02' 'git push origin HEAD:fea
          'git push origin HEAD:refs/heads/feature/ft-02' 'git push origin feature/ft-02:feature/ft-02' \
          'git push origin refs/heads/feature/ft-02' 'git push -o main origin feature/ft-02' \
          'git push -uo main origin feature/ft-02' 'git push origin main' 'git push origin v1' \
-         'git push origin :feature/velha' 'git push --follow-tags origin feature/ft-02'; do
+         'git push origin :feature/velha' 'git push --follow-tags origin feature/ft-02' \
+         'git commit -m "antes do git push"' 'echo "git push origin feature/ft-02"' \
+         'grep -rn "git push origin feature/ft-02" .' 'gh pr create --body "rode git push origin feature/ft-02"' \
+         'find . -maxdepth 0 -exec echo git push \;'; do
   caso_calado "portao valido: $C" "$(bash_json "$C")"
 done
 for C in 'git -C . push origin feature/ft-02' "sh -c 'git push'" 'gh pr create --fill' 'gh -R o/r pr create --fill' \
          'gh pr new --fill' 'glab mr new --fill' 'git push --tags' 'git push --all origin' \
          'GIT_DIR=.git git push origin feature/ft-02' 'cd $DIR_X && git push origin feature/ft-02' \
-         "cd $HIST_T && git push origin feature/ft-02" 'echo push' 'git log --grep push' \
-         'git commit -m "antes do git push"' 'echo "git push origin feature/ft-02"' 'docker push img' \
+         "cd $HIST_T && git push origin feature/ft-02" 'echo push' 'git log --grep push' 'docker push img' \
          '/usr/lib/git-core/git-push origin feature/ft-02' '"$(git --exec-path)"/git-push origin feature/ft-02' \
          "cd -P $HIST_T && git push origin feature/ft-02" "cd -- $HIST_T && git push origin feature/ft-02"; do
   caso "portao valido: $C" mergex/pr-so-com-portao.sh "$(bash_json "$C")" 0
@@ -1003,8 +1005,27 @@ caso "--no-verify fora de repositorio bloqueia"            mergex/pr-so-com-port
 mensagem_cita "--no-verify: a mensagem explica o pre-push pulado e o CI" "$(bash_json 'git push --no-verify origin feature/ft-02')" \
   "--no-verify" "pula" "pre-push" "CI" "/mergex-check"
 caso_calado "--no-verify em git commit nao e push"         "$(bash_json 'git commit --no-verify -m x')"
-caso "citacao de --no-verify nao bloqueia"                 mergex/pr-so-com-portao.sh "$(bash_json 'echo "git push --no-verify"')" 0
 caso_calado "git log --grep=--no-verify nao bloqueia"      "$(bash_json 'git log --grep=--no-verify')"
+# Prefixos unicos que o Git aceita para --no-verify (--no-ver colide com
+# --no-verbose e o proprio Git recusa)
+caso "prefixo --no-verif bloqueia"                         mergex/pr-so-com-portao.sh "$(bash_json 'git push --no-verif origin feature/ft-02')" 2
+caso "prefixo --no-veri bloqueia"                          mergex/pr-so-com-portao.sh "$(bash_json 'git push origin feature/ft-02 --no-veri')" 2
+mensagem_cita "prefixo --no-verif: a mesma mensagem do --no-verify" "$(bash_json 'git push --no-verif origin feature/ft-02')" \
+  "push com --no-verify barrado" "pre-push" "CI"
+caso_aviso "--no-ver (ambiguo para o Git) nao bloqueia: avisa" "$(bash_json 'git push --no-ver origin feature/ft-02')"
+# Formas reais de push com --no-verify: bloqueiam
+for C in 'git push --no-verify' 'git push origin x --no-verify&' '(git push --no-verify)' 'git push --no-verify|cat' \
+         '{ git push --no-verify; }' 'time git push --no-verify' 'command git push --no-verify' 'nice -n 5 git push --no-verify' \
+         'git push "--no-verify"' 'git push --no-""verify' 'bash -c "git push --no-verify"' 'git push origin x --no-verify 2>&1' \
+         'git --no-pager push --no-verify' 'GIT_TRACE=1 git push --no-verify' 'git push -n --no-verify'; do
+  caso "forma real de push com --no-verify bloqueia: $C" mergex/pr-so-com-portao.sh "$(bash_json "$C")" 2
+done
+# Citacao do --no-verify em comando que nao publica: calado, nunca bloqueia
+for C in 'git commit -m "docs: o hook barra git push --no-verify"' 'git log --grep "git push --no-verify"' \
+         'git tag -a v9 -m "nunca git push --no-verify"' 'gh pr create --body "nao use git push --no-verify"' \
+         'echo "git push --no-verify"' 'grep -rn "git push --no-verify" .'; do
+  caso_calado "nao publica, so cita --no-verify: $C" "$(bash_json "$C")"
+done
 
 # Origem explicita: a validade roda sobre o SHA enviado
 fixture_switch_exato fixture-produto -c fixture-produto || exit 1
