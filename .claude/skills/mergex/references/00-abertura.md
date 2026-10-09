@@ -238,7 +238,27 @@ que só voltou para o começo da entrega, não para o começo do mundo.
 relate**, sem reescrever nada: ou o `trabalho_id` está sendo reaproveitado por outro trabalho, ou
 alguém trocou a branch por fora — as duas coisas são decisão humana.
 
-**3. Atualize `.expx/estado.json`**, o arquivo que a barra de status lê:
+**3. Ative o `pre-push` da MergeX** — depois de criar ou retomar o `ENTREGA.md` (casos 1 e 2):
+
+```bash
+bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --instalar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md
+```
+
+O script resolve o diretório de hooks efetivo pelo próprio Git (respeita `core.hooksPath` e a
+worktree vinculada, **nunca altera `core.hooksPath`**), instala o chamador gerenciado quando não há
+`pre-push`, não muda nada quando ele já é o gerenciado, e **nunca sobrescreve, renomeia ou edita**
+um `pre-push` de terceiro. Em todos os casos termina com a prova funcional
+(`references/12-barreira-de-push.md`).
+
+**Código diferente de zero: `mergex E0 BLOQUEADO — pre-push`.** O E0 encerra ali — não siga para o
+item 4 nem devolva o controle como OK — e mostre ao usuário a instrução que o script imprimiu. Com
+hook de terceiro (código `3`), a instrução é a de composição: o `pre-push` existente chama
+`portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída
+dele. A composição é feita à mão pelo responsável do hook; depois dela, o E0 roda de novo e a
+prova decide. Repositório sem versionador (passo 1): não há `pre-push` a ativar; pule este item.
+
+**4. Atualize `.expx/estado.json`**, o arquivo que a barra de status lê:
 
 - `branch`: o nome da branch, **completo e sem corte** — a criada agora, a retomada ou a adotada;
 - `pr_estado`: `null` — no E0 nunca existe pull request, inclusive na retomada de uma branch
@@ -264,6 +284,7 @@ O E0 terminou quando **todas** são verdade:
 - [ ] `git status --porcelain` estava vazio na hora de criar ou trocar a branch (ou o repositório não é versionado, ou a branch foi adotada sem troca).
 - [ ] `ORQUESTRADOR.md` tem a linha da branch.
 - [ ] `docs/entregas/<trabalho_id>/ENTREGA.md` existe com `estado: aberto` e frontmatter válido.
+- [ ] O `pre-push` efetivo está ativo: `ativacao-pre-push.sh --instalar` saiu `0` (chamador gerenciado instalado ou já presente, ou integração externa válida), sem alterar `core.hooksPath` nem hook de terceiro — ou o repositório não é versionado.
 - [ ] `.expx/estado.json` tem `branch` e `pr_estado: null` — **ou** `.expx/` não existe, ou o repositório não é versionado, e nesses casos nada foi gravado. Este item nunca reprova o E0.
 
 Devolva ao chamador uma linha só: `mergex E0 OK — branch <nome> (base <base>, <criada | retomada | adotada>), entrega registrada.` E devolva o controle: quem executa as tasks é a skill de origem.
@@ -284,3 +305,4 @@ Devolva ao chamador uma linha só: `mergex E0 OK — branch <nome> (base <base>,
 | Pasta do trabalho em formato antigo | Trabalha nela onde está; **nunca move**, e registra qual pasta usou |
 | `.expx/` não existe | Segue sem gravar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
 | Gravação do `estado.json` falhou | Segue **em silêncio**, sem rastro (`10-estado.md`, "A lacuna"); o E0 continua OK |
+| `ativacao-pre-push.sh --instalar` saiu diferente de zero | `mergex E0 BLOQUEADO — pre-push`: encerra o E0 e mostra a instrução do script (com hook de terceiro, a de composição); nunca edita o hook nem `core.hooksPath` |

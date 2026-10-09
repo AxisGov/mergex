@@ -8,7 +8,18 @@ A saída é binária: `PRONTO` ou `BLOQUEADO`.
 
 ## Pré-requisitos verificáveis
 
-Antes de qualquer V1–V11, confirme a barreira executável `pre-e2`:
+Antes de qualquer verificação, confirme as duas barreiras executáveis iniciais, nesta ordem.
+
+**1. O `pre-push` da MergeX comprovadamente ativo** — a prova funcional (`references/12-barreira-de-push.md`), que não confia no caminho nem na existência do arquivo:
+
+```bash
+bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --provar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md
+```
+
+Falhou: **E2 não começa e nada é gravado** — nem `portao`, nem `falhas_portao`. Relate a saída do script e mande rodar o E0 (`ativacao-pre-push.sh --instalar`, que mostra a instrução de composição quando há hook de terceiro). Sem essa prova o E2 não emite `PRONTO`.
+
+**2. A barreira `pre-e2`:**
 
 ```bash
 bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
@@ -17,6 +28,8 @@ bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
 ```
 
 Falhou: **E2 não começa**. Rode a ação explícita `persistir-metodo pre-e2` fora do portão e tente de novo. O E2 nunca chama o modo de gravação para consertar o lifecycle silenciosamente.
+
+Só com as duas aprovadas o portão roda V1–V11.
 
 - `docs/entregas/<trabalho_id>/ENTREGA.md` existe (o E0 rodou). Se não existir, rode o E0 primeiro (`references/00-abertura.md`) — a branch pode não ter nascido, e o portão precisa saber o que foi commitado.
 - O `ORQUESTRADOR.md` e o `tasks.md` do trabalho existem. Sem eles não há o que verificar: relate que o trabalho não está planejado e encerre `BLOQUEADO`.
@@ -268,9 +281,25 @@ O portão **não grava `causa`**: ela continua `null` até o E8 fechar o bloquei
 
 ## Critério de saída
 
-**`PRONTO`** quando nenhuma verificação deu `FALHA`. Grave `portao: pronto` e `falhas_portao: []` no `ENTREGA.md`, reescreva `atualizado_em`, e siga para o E3.
+O resultado é gravado no `ENTREGA.md` **só por `registrar-portao.sh`** — o gravador único de `portao`, `portao_sha`, `falhas_portao` e `atualizado_em`. Nunca edite essas chaves à mão.
 
-**`BLOQUEADO`** quando qualquer verificação deu `FALHA`. Grave `portao: bloqueado` e `falhas_portao` com as verificações que falharam no `ENTREGA.md`.
+**`PRONTO`** quando nenhuma verificação deu `FALHA`. Registre:
+
+```bash
+bash .claude/skills/mergex/scripts/registrar-portao.sh \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> --resultado pronto
+```
+
+Ele roda de novo a prova funcional do `pre-push` **antes de qualquer escrita** e só então grava `portao: pronto`, `portao_sha` (o SHA completo do `HEAD` avaliado), `falhas_portao: []` e `atualizado_em`, imprimindo `RESULTADO: PRONTO`. Siga para o E3 só com essa saída. Se ele imprimir `RESULTADO: BLOQUEADO — pre-push sem prova funcional` (código `3`), nada foi gravado e o portão **não** está `PRONTO`: relate e mande rodar o E0.
+
+**`BLOQUEADO`** quando qualquer verificação deu `FALHA`. Registre com as verificações que falharam (a mesma lista do `causa-do-portao.sh --lista`; não exige a prova):
+
+```bash
+bash .claude/skills/mergex/scripts/registrar-portao.sh \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> --resultado bloqueado --falhas v7 v1
+```
 
 **`BLOQUEADO` encerra as etapas de entrega e segue apenas ao E8 para registrar e persistir o bloqueio.** Não classifique o diff (E3), não monte a descrição do PR (E4), não gere o pacote de QA (E5), não faça push (E6), não abra PR (E7): **nenhuma dessas etapas executa.**
 

@@ -15,6 +15,9 @@ CONTRATO_SH="$AQUI/contrato-de-commit.sh"
 SEGREDO_SH="$AQUI/../../../hooks/comum/sem-segredo.sh"
 CATALOGO_SH="$AQUI/catalogo-de-metodo.sh"
 PROVA_SH="$AQUI/prova-de-commit.sh"
+# Só nos checkpoints pre-e6 e e8 com `portao: pronto`: sem ele (ou sem o
+# validador ao lado), a prova falha e o checkpoint é recusado (falha fechada).
+ATIVACAO_SH="$AQUI/ativacao-pre-push.sh"
 
 for dependencia in "$BASE_SH" "$TRAVA_SH" "$CONTRATO_SH" "$SEGREDO_SH" "$CATALOGO_SH" "$PROVA_SH"; do
   [ -r "$dependencia" ] || { printf 'persistir-metodo: dependência indisponível: %s\n' "$dependencia" >&2; exit 1; }
@@ -84,6 +87,7 @@ encerrar() {
   [ -z "$TMP_MSG" ] || rm -f "$TMP_MSG"
   [ -z "$TMP_CATALOGO" ] || rm -f "$TMP_CATALOGO"
   [ -z "$TMP_HIST" ] || rm -rf "$TMP_HIST"
+  [ -z "${TMP_PROVA:-}" ] || rm -f "$TMP_PROVA"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
     liberar "$TOKEN" >/dev/null 2>&1
   fi
@@ -695,6 +699,24 @@ if [ "$MODO" = listar ]; then
   cat "$TMP_LISTA"
   exit 0
 fi
+
+# DM-184: nos checkpoints pre-e6 e e8, um ENTREGA.md com `portao: pronto` (lido
+# como a validade do portão o lê) só é persistido — ou aceito pelo --verificar
+# — com a prova funcional do pre-push efetivo (ativacao-pre-push.sh --provar).
+# Sem essa persistência, o `pronto` nunca chega ao SHA que o pre-push avalia.
+# A prova roda antes de qualquer `git add`: reprovada, nada entra no stage e
+# nenhum commit é criado. Os outros checkpoints, e o portão que não é
+# `pronto`, seguem como antes.
+TMP_PROVA=""
+prova_pre_push() {
+  case "$CHECKPOINT" in pre-e6|e8) ;; *) return 0 ;; esac
+  [ "$(catalogo_fm "$RAIZ/$ENTREGA" portao)" = pronto ] || return 0
+  TMP_PROVA="$(mktemp "${TMPDIR:-/tmp}/mergex-metodo-prova.XXXXXX")" || return 1
+  ( cd "$RAIZ" && bash "$ATIVACAO_SH" --provar --entrega "$ENTREGA" ) > "$TMP_PROVA" 2>&1 && return 0
+  sed 's/^/  /' "$TMP_PROVA" >&2
+  return 1
+}
+prova_pre_push || para "pre-push sem prova funcional: checkpoint $CHECKPOINT recusado com portao: pronto; nada foi preparado nem commitado. Rode o E0 (ativacao-pre-push.sh --instalar) e o E2 de novo" # guarda:E2SEMHOOK
 
 if [ "$MODO" = verificar ]; then
   if [ -s "$TMP_LISTA" ]; then

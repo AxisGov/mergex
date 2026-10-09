@@ -28,6 +28,18 @@
 #   fx_push_real <dir> <args do git push>...  `git push` real com o pre-push
 #                               apontando para portao-push.sh (chamador mínimo
 #                               da fixture); imprime rc=, ref= e stderr=
+#   fx_worktree_vinculada <dir> worktree vinculada (`.git` é arquivo) com
+#                               feature/ft-rec, ao lado de <dir> (o checkout
+#                               principal fica destacado no mesmo commit): FX_WT
+#   fx_hook_terceiro <dir> <variante>  grava um pre-push de terceiro no
+#                               diretório de hooks efetivo de <dir>
+#                               (`git rev-parse --git-path hooks`), executável:
+#     nao_composto  não chama a MergeX e sai 0
+#     composto      repassa a entrada ao portao-push.sh e propaga o código
+#     so_cita       cita o portao-push.sh num comentário e sai 1 sozinho
+#     nao_propaga   chama o portao-push.sh com a entrada e sai 0
+#     libera        chama o portao-push.sh SEM a entrada e propaga (sai 0)
+#     sinal         chama o portao-push.sh com a entrada e se mata (SIGKILL)
 #
 # Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
 # o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
@@ -922,4 +934,85 @@ fx_push_real() {
   git -C "$dir" push "$@" > /dev/null 2> "$err"; rc=$?
   ref="$(git -C "$dir" ls-remote origin "$alvo" 2>/dev/null | awk -v r="$alvo" '$2 == r { print $1 }')"
   printf 'rc=%s\nref=%s\nstderr=%s\n' "$rc" "${ref:--}" "$err"
+}
+
+# ---------------------------------------------------------------------------
+# Ativação do pre-push (Task 15): worktree vinculada e hooks de terceiro
+# ---------------------------------------------------------------------------
+
+# fx_worktree_vinculada <dir> — cria `<dir>-wt`, worktree vinculada de <dir>
+# com feature/ft-rec (o `.git` dela é arquivo; o diretório Git comum é o de
+# <dir>). O checkout principal fica destacado no mesmo commit, sem mudar
+# arquivo nenhum. Exporta FX_WT (caminho absoluto). Falha se `<dir>-wt` existe.
+fx_worktree_vinculada() {
+  local dir="$1" wt
+  [ -n "$dir" ] && [ -e "$dir/.git" ] || return 64
+  wt="$(cd "$dir/.." && pwd)/$(basename "$dir")-wt" || return 1
+  [ ! -e "$wt" ] || return 1
+  git -C "$dir" switch -q --detach || return 1
+  git -C "$dir" worktree add -q "$wt" feature/ft-rec >/dev/null 2>&1 || return 1
+  [ -f "$wt/.git" ] || return 1
+  FX_WT="$wt"
+  export FX_WT
+}
+
+# _fx_hook_corpo <variante> — o corpo do pre-push de terceiro, com __PP__ no
+# lugar do validador de push
+_fx_hook_corpo() {
+  case "$1" in
+    nao_composto) cat <<'EOF'
+cat >/dev/null
+echo 'lint de terceiro: ok' >&2
+exit 0
+EOF
+      ;;
+    composto) cat <<'EOF'
+entrada="$(cat)"
+echo 'lint de terceiro: ok' >&2
+printf '%s\n' "$entrada" | bash __PP__ --pre-push "$@" || exit $?
+exit 0
+EOF
+      ;;
+    so_cita) cat <<'EOF'
+# integra com a MergeX: bash __PP__ --pre-push "$@"
+cat >/dev/null
+echo 'lint de terceiro: barrado por conta própria' >&2
+exit 1
+EOF
+      ;;
+    nao_propaga) cat <<'EOF'
+bash __PP__ --pre-push "$@"
+exit 0
+EOF
+      ;;
+    libera) cat <<'EOF'
+cat >/dev/null
+bash __PP__ --pre-push "$@" </dev/null
+exit $?
+EOF
+      ;;
+    sinal) cat <<'EOF'
+bash __PP__ --pre-push "$@"
+kill -KILL $$
+EOF
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# fx_hook_terceiro <dir> <variante> — grava (sobrescrevendo) o pre-push de
+# terceiro da variante no diretório de hooks efetivo de <dir>, com o bit de
+# execução. O validador é FX_PORTAO_PUSH (padrão: o portao-push.sh da skill).
+fx_hook_terceiro() {
+  local dir="$1" var="$2" hd corpo pp
+  [ -n "$dir" ] && [ -n "$var" ] && [ -e "$dir/.git" ] || return 64
+  corpo="$(_fx_hook_corpo "$var")" || { printf 'fixture: variante de hook desconhecida: %s\n' "$var" >&2; return 64; }
+  hd="$(git -C "$dir" rev-parse --path-format=absolute --git-path hooks)" || return 1
+  mkdir -p "$hd" || return 1
+  pp="$(printf '%q' "${FX_PORTAO_PUSH:-$_FXR_PORTAO_PUSH}")"
+  { printf '#!/usr/bin/env bash\n# pre-push de terceiro (fixture): variante %s\n' "$var"
+    # substituição literal (entre aspas: nem & nem \ do %q são especiais)
+    printf '%s\n' "${corpo//__PP__/"$pp"}"
+  } > "$hd/pre-push" || return 1
+  chmod 755 "$hd/pre-push"
 }

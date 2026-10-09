@@ -1312,4 +1312,66 @@ grep -Fq 'fechamento final do E8' "$estado" \
 grep -Fq 'cópia da árvore falhou' scripts/ci/mutacao-d07-contrato-de-evento.sh \
   || fail 'D-07: mutation harness copia() no longer aborts on a failed tree copy'
 
+# ---------------------------------------------------------------------------
+# DM-184 / Task 15 — o E0 ativa e o E2 prova o pre-push, nos entrypoints em
+# prosa; o enforcement executável é testado em test-r2-barreira-push.sh
+# (grupos ativacao e entrypoints)
+# ---------------------------------------------------------------------------
+barreira_ref='.claude/skills/mergex/references/12-barreira-de-push.md'
+ativacao_sh='.claude/skills/mergex/scripts/ativacao-pre-push.sh'
+registrar_sh='.claude/skills/mergex/scripts/registrar-portao.sh'
+modelo_pp='.claude/skills/mergex/assets/pre-push-gerenciado.sh'
+
+# E0: a ativação e a parada, nas duas cópias do comando e no reference
+for f in "$abrir_cmd" "$abrir_oc"; do
+  grep -Fq 'ativacao-pre-push.sh --instalar' "$f" || fail "mergex-abrir sem ativacao-pre-push.sh --instalar: $f"
+  grep -Fq 'mergex E0 BLOQUEADO — pre-push' "$f" || fail "mergex-abrir sem a parada mergex E0 BLOQUEADO — pre-push: $f"
+done
+grep -Fq 'ativacao-pre-push.sh --instalar' "$abertura" || fail '00-abertura sem ativacao-pre-push.sh --instalar'
+grep -Fq 'mergex E0 BLOQUEADO — pre-push' "$abertura" || fail '00-abertura sem a parada mergex E0 BLOQUEADO — pre-push'
+grep -Fq -- '- [ ] O `pre-push` efetivo' "$abertura" || fail '00-abertura: o checklist do E0 não tem o item do pre-push ativo'
+cmp -s "$abrir_cmd" "$abrir_oc" || fail 'OpenCode mergex-abrir command diverges from Claude Code'
+
+# E2: a prova antes da primeira menção a V1, e o resultado só pelo gravador
+primeira_linha() { { grep -nF -- "$2" "$1" || true; } | sed -n '1s/:.*//p'; }
+for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao"; do
+  p="$(primeira_linha "$f" 'ativacao-pre-push.sh --provar')"
+  v="$(primeira_linha "$f" 'V1')"
+  [ -n "$p" ] || fail "$f sem ativacao-pre-push.sh --provar"
+  [ -n "$v" ] && [ "$p" -lt "$v" ] || fail "$f cita ativacao-pre-push.sh --provar depois da primeira menção a V1"
+  grep -Fq 'registrar-portao.sh' "$f" || fail "$f não grava o resultado do portão por registrar-portao.sh"
+done
+grep -Eq 'Grave `portao: (pronto|bloqueado)`' "$prontidao" \
+  && fail '02-prontidao ainda manda editar portao diretamente (o resultado é gravado só por registrar-portao.sh)'
+grep -Fq 'só por `registrar-portao.sh`' "$prontidao" || fail '02-prontidao não diz que o resultado é gravado só por registrar-portao.sh'
+
+# Fluxo completo: as duas chamadas nas linhas E0 e E2, nas duas cópias
+for f in "$mergex_cmd" "$mergex_oc"; do
+  grep -F '**E0**' "$f" | grep -Fq 'ativacao-pre-push.sh --instalar' || fail "$f: a linha E0 não chama ativacao-pre-push.sh --instalar"
+  grep -F '**E2**' "$f" | grep -Fq 'ativacao-pre-push.sh --provar' || fail "$f: a linha E2 não chama ativacao-pre-push.sh --provar"
+  grep -F '**E2**' "$f" | grep -Fq 'registrar-portao.sh' || fail "$f: a linha E2 não grava o resultado por registrar-portao.sh"
+done
+cmp -s "$mergex_cmd" "$mergex_oc" || fail 'OpenCode mergex command diverges from Claude Code'
+
+# Reference da barreira e executáveis
+for f in "$barreira_ref" "$ativacao_sh" "$registrar_sh" "$modelo_pp"; do
+  [ -f "$f" ] || fail "DM-184: missing $f"
+done
+for s in '## Ativação' '## Composição com hook de terceiro' '## Prova funcional' '## Reversão'; do
+  grep -Fxq "$s" "$barreira_ref" || fail "12-barreira-de-push sem a seção $s"
+done
+# a instrução de composição é a mesma no reference e na mensagem de erro
+composicao='o `pre-push` existente chama `portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída dele'
+grep -Fq -- "$composicao" "$barreira_ref" || fail '12-barreira-de-push sem a instrução de composição'
+grep -Fq -- "$composicao" "$ativacao_sh" || fail 'ativacao-pre-push.sh: a instrução de composição diverge do reference'
+grep -Fxq '# mergex: pre-push gerenciado' "$modelo_pp" || fail 'o modelo do pre-push gerenciado perdeu o marcador'
+# o E0 nunca escreve core.hooksPath; nenhuma opção de força nos executáveis novos
+codigo "$ativacao_sh" | grep -Eq 'config[^|;&]*core\.hooksPath' && fail 'ativacao-pre-push.sh escreve core.hooksPath'
+for f in "$ativacao_sh" "$registrar_sh"; do
+  codigo "$f" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$f tem opção de força"
+  grep -Fq '# guarda:' "$f" || fail "$f sem linha de guarda"
+done
+grep -Fq 'ativacao-pre-push.sh' "$persiste_sh" || fail 'persistir-metodo.sh não prova o pre-push antes de persistir pronto'
+grep -Fq '# guarda:E2SEMHOOK' "$persiste_sh" || fail 'persistir-metodo.sh sem a guarda E2SEMHOOK'
+
 printf 'contract checks passed\n'

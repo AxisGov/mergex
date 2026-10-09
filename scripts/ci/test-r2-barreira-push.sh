@@ -4,8 +4,10 @@
 #
 # O pre-push do Git decide só pelo que o Git entrega (refs e SHAs), pela mesma
 # regra (portao-regras.sh -> validade-do-portao.sh --rev) e pelo mesmo modo
-# (pr-so-com-portao em .expx/hooks.json). Grupos: `prepush` (Task 14); os de
-# ativação (15), CI (16) e modo (17) entram depois, na ordem de definição.
+# (pr-so-com-portao em .expx/hooks.json). Grupos: `prepush` (Task 14),
+# `ativacao` e `entrypoints` (Task 15); os de CI (16) e modo (17) entram
+# depois, na ordem de definição. Caso que depende de um ambiente ausente (Git
+# for Windows sobre \\wsl.localhost) imprime NAO_EXECUTADO e nunca conta como ok.
 #
 # Todo push daqui é REAL, contra o remoto bare local criado no temporário do
 # teste (fx_remoto_bare): nunca rede, nunca o origin do repositório real.
@@ -21,9 +23,12 @@ REGRAS="$S/portao-regras.sh"
 VALIDADE="$S/validade-do-portao.sh"
 RB="$S/reconciliacao-base.sh"
 PERSISTE="$S/persistir-metodo.sh"
+ATV="$S/ativacao-pre-push.sh"
+REGISTRA="$S/registrar-portao.sh"
+CAUSA="$S/causa-do-portao.sh"
 ZERO=0000000000000000000000000000000000000000
 
-OK=0; FALHOU=0
+OK=0; FALHOU=0; NAOEXEC=0
 TMPS=""
 trap 'cd "$REPO" 2>/dev/null; for d in $TMPS; do rm -rf "$d"; done' EXIT
 
@@ -454,6 +459,400 @@ grupo_prepush() {
 }
 
 # ---------------------------------------------------------------------------
+# Ativação no E0 e prova funcional no E2 (Task 15)
+# ---------------------------------------------------------------------------
+
+nao_executado() { NAOEXEC=$((NAOEXEC+1)); printf '  NAO_EXECUTADO: %s\n' "$1"; }
+
+# o diretório de hooks efetivo, pelo próprio Git
+hooks_de() { git -C "$1" rev-parse --path-format=absolute --git-path hooks; }
+
+# assinatura <arquivo> — conteúdo, modo e mtime (com nanossegundos quando há)
+assinatura() {
+  { sha256sum < "$1"; stat -c '%y %a %i' "$1" 2>/dev/null || stat -f '%Fm %p %i' "$1"; } | tr '\n' ' '
+}
+
+# atv <dir> <modo> [entrega] — roda ativacao-pre-push.sh a partir de <dir>;
+# a saída (stdout e stderr) fica em ATV_OUT e o código em ATV_RC
+ATV_OUT=""; ATV_RC=""
+atv() {
+  ATV_OUT="$(cd "$1" && bash "$ATV" "$2" --entrega "${3:-docs/entregas/ft-rec/ENTREGA.md}" 2>&1)"; ATV_RC=$?
+}
+atv_espera() { # <desc> <rc> <dir> <modo> [entrega]
+  atv "$3" "$4" "${5:-}"
+  if [ "$ATV_RC" = "$2" ]; then ok "$1"; else falha "$1 — rc=$ATV_RC (esperava $2): $(printf '%s' "$ATV_OUT" | tr '\n' '|')"; fi
+}
+out_tem() { # <desc> <texto fixo> — na última saída do ativacao
+  case "$ATV_OUT" in *"$2"*) ok "$1" ;; *) falha "$1 — sem '$2' na saída: $(printf '%s' "$ATV_OUT" | tr '\n' '|')" ;; esac
+}
+
+# estado_git <dir> — tudo que a prova não pode mudar: refs locais e do remoto
+# bare, HEAD, índice e árvore de trabalho
+estado_git() {
+  git -C "$1" for-each-ref --format='%(refname) %(objectname)'
+  git -C "$1" rev-parse HEAD
+  printf -- '-- remoto\n'
+  git -C "$FX_REMOTO" for-each-ref --format='%(refname) %(objectname)'
+  printf -- '-- índice\n'
+  git -C "$1" ls-files -s | sha256sum
+  git -C "$1" status --porcelain=v1 --untracked-files=all
+}
+
+# hook_direto <dir> <sinal> — executa o pre-push efetivo como controle, com a
+# entrada vazia e MERGEX_PRE_PUSH_SINAL=<sinal>; imprime o código
+hook_direto() {
+  ( cd "$1" && MERGEX_PRE_PUSH_SINAL="$2" "$(hooks_de "$1")/pre-push" controle file:///dev/null </dev/null >/dev/null 2>&1 ); printf '%s\n' "$?"
+}
+
+COMPOSICAO='portao-push.sh --pre-push "$@"'
+
+# gfw_unc <tmp> — o caso Git for Windows: cenário no WSL, diretório efetivo e
+# prova pelo Git Bash do Windows sobre \\wsl.localhost\... (sem o ambiente:
+# NAO_EXECUTADO, que não conta como ok)
+gfw_unc() {
+  local t="$1" gb="/mnt/c/Program Files/Git/bin/bash.exe" d w a out ef hk desc
+  desc="git for windows: diretório efetivo sobre UNC"
+  command -v wslpath >/dev/null 2>&1 || { nao_executado "$desc — git for windows indisponível (sem wslpath: fora do WSL)"; return; }
+  [ -f "$gb" ] || { nao_executado "$desc — git for windows indisponível ($gb ausente)"; return; }
+  "$gb" -c 'command -v git >/dev/null' >/dev/null 2>&1 \
+    || { nao_executado "$desc — git for windows indisponível (o Git Bash não executa pelo interop do WSL)"; return; }
+  d="$t/gfw/repo"
+  fx_cenario "$d" || { falha "$desc — cenário não montou"; return; }
+  w="$(wslpath -w "$d" | tr '\\' '/')"; a="$(wslpath -w "$ATV" | tr '\\' '/')"
+  case "$w" in //*) ;; *) nao_executado "$desc — o cenário não tem caminho UNC ($w)"; return ;; esac
+  cat > "$t/gfw/roda.sh" <<'EOF'
+# Roda no Git Bash do Windows: <repositório UNC> <ativacao UNC> <modo>...
+cd "$1" || { printf 'cd=falhou\n'; exit 90; }
+# "dubious ownership" do Git for Windows sobre UNC: safe.directory só no
+# ambiente deste processo (escopo de linha de comando), nunca na config global
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$1"
+printf 'uname=%s\n' "$(uname -s)"
+printf 'git=%s\n' "$(git --version)"
+printf 'efetivo=%s\n' "$(git rev-parse --path-format=absolute --git-path hooks)"
+a="$2"; shift 2
+s="$(mktemp)" || exit 91
+for m in "$@"; do
+  bash "$a" "$m" --entrega docs/entregas/ft-rec/ENTREGA.md > "$s" 2>&1; rc=$?
+  sed "s/^/saida$m=/" "$s"; printf 'rc%s=%s\n' "$m" "$rc"
+done
+rm -f "$s"
+EOF
+  out="$("$gb" "$(wslpath -w "$t/gfw/roda.sh")" "$w" "$a" --instalar --provar 2>&1)"
+  printf '%s\n' "$out" > "$t/gfw/saida"
+  ef="$(printf '%s\n' "$out" | sed -n 's/^efetivo=//p')"
+  hk="$d/.git/hooks/pre-push"
+  case "$(printf '%s\n' "$out" | sed -n 's/^uname=//p')" in
+    MINGW*|MSYS*) ok "controle: $desc — roda no Git Bash do Windows ($(printf '%s\n' "$out" | sed -n 's/^git=//p'))" ;;
+    *) falha "$desc — não rodou no Git Bash: $(tr '\n' '|' < "$t/gfw/saida")"; return ;;
+  esac
+  [ "$ef" = "$w/.git/hooks" ] && ok "$desc: o Git for Windows resolve o diretório efetivo pelo caminho UNC ($ef)" \
+    || falha "$desc — efetivo=$ef (esperava $w/.git/hooks)"
+  [ "$(printf '%s\n' "$out" | sed -n 's/^rc--instalar=//p')" = 0 ] && [ -f "$hk" ] && grep -Fxq '# mergex: pre-push gerenciado' "$hk" \
+    && ok "$desc: --instalar pelo Git Bash grava o chamador no diretório comum do WSL" || falha "$desc — instalar: $(tr '\n' '|' < "$t/gfw/saida")"
+  [ "$(printf '%s\n' "$out" | sed -n 's/^rc--provar=//p')" = 0 ] \
+    && ok "$desc: --provar pelo Git Bash aprova" || falha "$desc — provar: $(tr '\n' '|' < "$t/gfw/saida")"
+  [ -z "$(git -C "$d" config --get-all core.hooksPath)" ] && ok "$desc: core.hooksPath intocado" || falha "$desc — core.hooksPath gravado"
+  # controle negativo: sem o hook, a mesma prova pelo Git Bash reprova
+  rm -f "$hk"
+  out="$("$gb" "$(wslpath -w "$t/gfw/roda.sh")" "$w" "$a" --provar 2>&1)"
+  printf '%s\n' "$out" >> "$t/gfw/saida"
+  [ "$(printf '%s\n' "$out" | sed -n 's/^rc--provar=//p')" = 1 ] \
+    && ok "$desc: sem o pre-push, --provar pelo Git Bash reprova" || falha "$desc — provar sem hook: $(printf '%s' "$out" | tr '\n' '|')"
+  [ -z "${MERGEX_GFW_SAIDA:-}" ] || cp "$t/gfw/saida" "$MERGEX_GFW_SAIDA"
+}
+
+grupo_ativacao() {
+  local t d h hk a1 lista1 lista2 antes depois cfg esp abs rc
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  [ -r "$ATV" ] || falha "ativacao-pre-push.sh: No such file ($ATV)"
+  export FX_PORTAO_PUSH="$PP"
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  d="$t/repo"
+  fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_remoto_bare "$d" || { falha "remoto bare não montou"; return; }
+  git -C "$d" push -q origin feature/ft-rec main >/dev/null 2>&1 \
+    && [ -n "$(git -C "$FX_REMOTO" for-each-ref)" ] && ok "controle: o remoto bare tem as refs do cenário" || falha "controle: push inicial ao bare"
+  h="$(hooks_de "$d")"; hk="$h/pre-push"
+  [ "$h" = "$d/.git/hooks" ] && [ ! -e "$hk" ] && [ -z "$(git -C "$d" config --get-all core.hooksPath)" ] \
+    && ok "controle: sem pre-push e sem core.hooksPath" || falha "controle: estado inicial dos hooks ($h)"
+
+  # ---- instalação e idempotência ------------------------------------------------
+  lista1="$(ls -A "$h" | grep -vx pre-push)"
+  atv_espera "instala sem pre-push (E0 sai 0)" 0 "$d" --instalar
+  [ -f "$hk" ] && [ -x "$hk" ] && grep -Fxq '# mergex: pre-push gerenciado' "$hk" \
+    && ok "instala o chamador gerenciado, executável e com o marcador" || falha "chamador gerenciado não instalado em $hk"
+  a1="$(assinatura "$hk")"
+  sleep 1
+  atv_espera "instala sem pre-push e é idempotente (segunda execução sai 0)" 0 "$d" --instalar
+  [ -f "$hk" ] && [ "$(assinatura "$hk")" = "$a1" ] && ok "instala sem pre-push e é idempotente (hash e mtime iguais)" \
+    || falha "segunda instalação mudou o arquivo: $a1 / $(assinatura "$hk")"
+  [ -z "$(git -C "$d" config --get-all core.hooksPath)" ] && ok "instalar não grava core.hooksPath" || falha "core.hooksPath gravado"
+
+  # ---- a prova não toca remoto nem refs --------------------------------------------
+  antes="$(estado_git "$d")"
+  atv_espera "prova com o chamador gerenciado aprova" 0 "$d" --provar
+  depois="$(estado_git "$d")"
+  [ "$antes" = "$depois" ] && ok "prova funcional não toca remoto nem refs (refs, remoto bare, índice e árvore iguais)" \
+    || falha "prova mudou o estado: $(diff <(printf '%s\n' "$antes") <(printf '%s\n' "$depois") | tr '\n' '|')"
+  ( cd "$d/src" && bash "$ATV" --provar --entrega docs/entregas/ft-rec/ENTREGA.md >/dev/null 2>&1 ); rc=$?
+  [ "$rc" = 0 ] && ok "prova a partir de um subdiretório aprova (a entrega é relativa à raiz)" || falha "prova do subdiretório: rc=$rc"
+
+  # ---- reversão e E2 sem prova ---------------------------------------------------------
+  [ -f "$hk" ] || falha "controle: o chamador gerenciado existe antes da reversão"
+  atv_espera "reversão do chamador gerenciado sai 0" 0 "$d" --reverter
+  lista2="$(ls -A "$h" | grep -vx pre-push)"
+  [ ! -e "$hk" ] && [ "$lista1" = "$lista2" ] && ok "reversão remove só o chamador gerenciado" || falha "reversão: hook ainda presente ou outro arquivo mudou"
+  atv_espera "E2 sem prova aprovada não emite PRONTO (--provar sai 1 sem o pre-push)" 1 "$d" --provar
+  atv_espera "reversão sem pre-push sai 0" 0 "$d" --reverter
+
+  # ---- hook de terceiro não composto --------------------------------------------------
+  fx_hook_terceiro "$d" nao_composto || falha "hook de terceiro (nao_composto)"
+  a1="$(assinatura "$hk")"
+  sleep 1
+  atv_espera "hook de terceiro não composto: E0 sai 3" 3 "$d" --instalar
+  [ "$(assinatura "$hk")" = "$a1" ] && ok "hook de terceiro não composto: E0 não toca o arquivo (hash e mtime)" || falha "E0 tocou o hook de terceiro"
+  out_tem "hook de terceiro não composto: a mensagem traz a instrução de composição" "$COMPOSICAO"
+  out_tem "hook de terceiro não composto: parada mergex E0 BLOQUEADO — pre-push" "mergex E0 BLOQUEADO — pre-push"
+  atv_espera "hook de terceiro não composto reprova na prova" 1 "$d" --provar
+  atv_espera "reversão diante de hook de terceiro sai 0" 0 "$d" --reverter
+  [ "$(assinatura "$hk")" = "$a1" ] && ok "reversão preserva hook de terceiro" || falha "reversão tocou o hook de terceiro"
+
+  # ---- hook que só cita a MergeX ----------------------------------------------------------
+  fx_hook_terceiro "$d" so_cita || falha "hook de terceiro (so_cita)"
+  rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
+  grep -Fq "$PP" "$hk" && [ "$rc" = 1 ] && [ ! -s "$t/sinal" ] \
+    && ok "controle: o hook cita o validador, sai 1 sozinho e não dá o sinal" || falha "controle so_cita: rc=$rc"
+  atv_espera "hook que só cita a MergeX reprova" 1 "$d" --provar
+  a1="$(assinatura "$hk")"
+  atv_espera "hook que só cita a MergeX: E0 sai 3" 3 "$d" --instalar
+  [ "$(assinatura "$hk")" = "$a1" ] && ok "hook que só cita a MergeX: E0 não toca o arquivo" || falha "E0 tocou o hook so_cita"
+
+  # ---- hooks compostos que reprovam ----------------------------------------------------------
+  fx_hook_terceiro "$d" nao_propaga || falha "hook de terceiro (nao_propaga)"
+  rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
+  [ "$rc" = 0 ] && grep -Eq '^mergex-pre-push invocado [0-9]+$' "$t/sinal" \
+    && ok "controle: o hook que não propaga chama a MergeX (sinal) e sai 0" || falha "controle nao_propaga: rc=$rc"
+  atv_espera "hook composto que não propaga o código reprova" 1 "$d" --provar
+  fx_hook_terceiro "$d" libera || falha "hook de terceiro (libera)"
+  rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
+  [ "$rc" = 0 ] && grep -Eq '^mergex-pre-push invocado [0-9]+$' "$t/sinal" \
+    && ok "controle: o hook que libera chama a MergeX (sinal) sem a entrada e sai 0" || falha "controle libera: rc=$rc"
+  atv_espera "hook composto que libera a ref inválida reprova" 1 "$d" --provar
+  fx_hook_terceiro "$d" sinal || falha "hook de terceiro (sinal)"
+  rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
+  [ "$rc" -ge 128 ] && grep -Eq '^mergex-pre-push invocado [0-9]+$' "$t/sinal" \
+    && ok "controle: o hook que termina por sinal chama a MergeX e morre (rc $rc)" || falha "controle sinal: rc=$rc"
+  atv_espera "hook que termina por sinal reprova" 1 "$d" --provar
+  a1="$(assinatura "$hk")"
+  atv_espera "hook que termina por sinal: E0 sai 3" 3 "$d" --instalar
+  [ "$(assinatura "$hk")" = "$a1" ] && ok "hook que termina por sinal: E0 não toca o arquivo" || falha "E0 tocou o hook sinal"
+
+  # ---- hook de terceiro composto --------------------------------------------------------------
+  fx_hook_terceiro "$d" composto || falha "hook de terceiro (composto)"
+  a1="$(assinatura "$hk")"
+  sleep 1
+  atv_espera "hook de terceiro composto passa na prova" 0 "$d" --provar
+  atv_espera "hook de terceiro composto: E0 sai 0" 0 "$d" --instalar
+  out_tem "hook de terceiro composto: reconhecido como integração externa válida" "integração externa válida"
+  [ "$(assinatura "$hk")" = "$a1" ] && ok "hook de terceiro composto: E0 não toca o arquivo" || falha "E0 tocou o hook composto"
+  atv_espera "reversão diante de integração externa sai 0" 0 "$d" --reverter
+  [ "$(assinatura "$hk")" = "$a1" ] && ok "reversão preserva a integração externa" || falha "reversão tocou a integração externa"
+  out_tem "reversão informa que a integração externa é removida pelo responsável" "integração externa"
+  rm -f "$hk"
+
+  # ---- core.hooksPath já configurado: relativo e absoluto ---------------------------------------
+  mkdir -p "$d/.githooks-fx"
+  git -C "$d" config core.hooksPath .githooks-fx; cfg="$(git -C "$d" config --get-all core.hooksPath)"
+  [ "$(hooks_de "$d")" = "$d/.githooks-fx" ] && ok "controle: core.hooksPath relativo resolve na raiz" || falha "controle: hooksPath relativo ($(hooks_de "$d"))"
+  atv_espera "core.hooksPath relativo: E0 sai 0" 0 "$d" --instalar
+  [ -f "$d/.githooks-fx/pre-push" ] && [ ! -e "$hk" ] && [ "$(git -C "$d" config --get-all core.hooksPath)" = "$cfg" ] \
+    && ok "core.hooksPath já configurado é respeitado e não muda (relativo)" || falha "hooksPath relativo: instalação fora do efetivo ou config mudou"
+  atv_espera "core.hooksPath relativo: a prova aprova" 0 "$d" --provar
+  ( cd "$d/src" && bash "$ATV" --provar --entrega docs/entregas/ft-rec/ENTREGA.md >/dev/null 2>&1 ); rc=$?
+  [ "$rc" = 0 ] && ok "core.hooksPath relativo: a prova a partir de um subdiretório aprova" || falha "hooksPath relativo do subdiretório: rc=$rc"
+  atv_espera "core.hooksPath relativo: reversão sai 0" 0 "$d" --reverter
+  [ ! -e "$d/.githooks-fx/pre-push" ] && [ "$(git -C "$d" config --get-all core.hooksPath)" = "$cfg" ] \
+    && ok "core.hooksPath relativo: reversão remove o gerenciado e não muda a config" || falha "hooksPath relativo: reversão"
+  rmdir "$d/.githooks-fx"
+  abs="$t/hooks absolutos"
+  git -C "$d" config core.hooksPath "$abs"; cfg="$(git -C "$d" config --get-all core.hooksPath)"
+  atv_espera "core.hooksPath absoluto: E0 sai 0" 0 "$d" --instalar
+  [ -f "$abs/pre-push" ] && [ ! -e "$hk" ] && [ "$(git -C "$d" config --get-all core.hooksPath)" = "$cfg" ] \
+    && ok "core.hooksPath já configurado é respeitado e não muda (absoluto)" || falha "hooksPath absoluto: instalação fora do efetivo ou config mudou"
+  atv_espera "core.hooksPath absoluto: a prova aprova" 0 "$d" --provar
+  atv_espera "core.hooksPath absoluto: reversão sai 0" 0 "$d" --reverter
+  git -C "$d" config --unset core.hooksPath
+
+  # ---- diretório com espaço, acento e apóstrofo ----------------------------------------------------
+  esp="$t/raiz com espaço e ação d'água"
+  fx_cenario "$esp/repo" || falha "cenário com espaço e acento não montou"
+  abs="$esp/hooks d'ação"
+  git -C "$esp/repo" config core.hooksPath "$abs"; cfg="$(git -C "$esp/repo" config --get-all core.hooksPath)"
+  atv_espera "diretório com espaço e acento: E0 sai 0" 0 "$esp/repo" --instalar
+  [ -f "$abs/pre-push" ] && [ "$(git -C "$esp/repo" config --get-all core.hooksPath)" = "$cfg" ] \
+    && ok "diretório com espaço e acento: o chamador vai para o core.hooksPath configurado" || falha "espaço e acento: instalação"
+  atv_espera "diretório com espaço e acento: a prova aprova" 0 "$esp/repo" --provar
+  fx_hook_terceiro "$esp/repo" composto || falha "hook composto com espaço e acento"
+  atv_espera "diretório com espaço e acento: hook de terceiro composto passa na prova" 0 "$esp/repo" --provar
+
+  # ---- ativação em worktree vinculada -----------------------------------------------------------------
+  fx_worktree_vinculada "$d" || { falha "worktree vinculada não montou"; return; }
+  [ "$(hooks_de "$FX_WT")" = "$d/.git/hooks" ] && [ -f "$FX_WT/.git" ] \
+    && ok "controle: na worktree vinculada (.git é arquivo) o diretório efetivo é o comum" || falha "controle worktree: $(hooks_de "$FX_WT")"
+  atv_espera "ativação em worktree vinculada: E0 sai 0" 0 "$FX_WT" --instalar
+  [ -f "$hk" ] && grep -Fxq '# mergex: pre-push gerenciado' "$hk" \
+    && [ ! -e "$(git -C "$FX_WT" rev-parse --absolute-git-dir)/hooks/pre-push" ] \
+    && ok "ativação em worktree vinculada (o diretório efetivo é o comum)" || falha "worktree: chamador fora do diretório comum"
+  atv_espera "ativação em worktree vinculada: a prova aprova" 0 "$FX_WT" --provar
+
+  # ---- Git for Windows sobre \\wsl.localhost ---------------------------------------------------------
+  gfw_unc "$t"
+  cd "$REPO" || return
+}
+
+# registra <resultado> [falha...] — registrar-portao.sh no cwd sobre a entrega
+# ft-rec; a saída fica em REG_OUT e o código em REG_RC
+REG_OUT=""; REG_RC=""
+registra() {
+  local r="$1"; shift
+  if [ "$#" -gt 0 ]; then
+    REG_OUT="$(bash "$REGISTRA" --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec --resultado "$r" --falhas "$@" 2>&1)"
+  else
+    REG_OUT="$(bash "$REGISTRA" --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec --resultado "$r" 2>&1)"
+  fi
+  REG_RC=$?
+}
+
+# persiste <modo> <checkpoint> — persistir-metodo.sh no cwd; saída em PER_OUT
+PER_OUT=""
+persiste() {
+  PER_OUT="$(bash "$PERSISTE" "$1" --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec --checkpoint "$2" 2>&1)"
+}
+
+# fm_e <chave> — a chave de topo do ENTREGA.md do disco
+fm_e() { awk -v c="$1" 'NR>1&&/^---/{exit} index($0,c": ")==1{sub(/^[^:]*: */,"");print;exit}' docs/entregas/ft-rec/ENTREGA.md; }
+
+# edita_e <sed> — reescreve o ENTREGA.md do disco (fora do índice)
+edita_e() {
+  local e=docs/entregas/ft-rec/ENTREGA.md
+  sed "$1" "$e" > "$e.tmp" && cat "$e.tmp" > "$e" && rm -f "$e.tmp"
+}
+
+# sem_pronto <desc> <tmp> — registrar-portao --resultado pronto barrado: rc 3,
+# a saída não tem RESULTADO: PRONTO e tem o bloqueio, e o ENTREGA.md fica byte
+# a byte igual
+sem_pronto() {
+  local e=docs/entregas/ft-rec/ENTREGA.md
+  cp "$e" "$2/antes"
+  registra pronto
+  if [ "$REG_RC" = 3 ] && ! printf '%s\n' "$REG_OUT" | grep -Fq 'RESULTADO: PRONTO' \
+    && printf '%s\n' "$REG_OUT" | grep -Fxq 'RESULTADO: BLOQUEADO — pre-push sem prova funcional' \
+    && cmp -s "$e" "$2/antes"; then ok "$1"
+  else falha "$1 — rc=$REG_RC: $(printf '%s' "$REG_OUT" | tr '\n' '|')"; fi
+}
+
+grupo_entrypoints() {
+  local t d e hk c0 rc hoje
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  [ -r "$REGISTRA" ] || falha "registrar-portao.sh: No such file ($REGISTRA)"
+  [ -r "$ATV" ] || falha "ativacao-pre-push.sh: No such file ($ATV)"
+  export FX_PORTAO_PUSH="$PP"
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  d="$t/repo"
+  fx_cenario "$d" || { falha "cenário não montou"; return; }
+  cd "$d" || return
+  e=docs/entregas/ft-rec/ENTREGA.md; hk="$(hooks_de "$d")/pre-push"; hoje="$(date +%Y-%m-%d)"
+
+  # uma nova tentativa de entrega (o E0 de uma retomada): aberta, portão null
+  edita_e 's/^estado: .*/estado: aberto/; s/^portao: .*/portao: null/; s/^portao_sha: .*/portao_sha: null/; s/^push_feito: .*/push_feito: false/; s/^entregue_em: .*/entregue_em: null/'
+  persiste --persistir pre-e2
+  [ -z "$(git status --porcelain)" ] && [ "$(git show "HEAD:$e" | sed -n 's/^portao: //p')" = null ] && [ ! -e "$hk" ] \
+    && ok "controle: entrega aberta (portao: null) persistida em pre-e2, sem pre-push" || falha "controle pre-e2: $PER_OUT"
+
+  # ---- usos ----------------------------------------------------------------------------------
+  rc_igual "registrar-portao: --falhas com pronto é uso" 64 bash "$REGISTRA" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado pronto --falhas v1
+  rc_igual "registrar-portao: bloqueado sem --falhas é uso" 64 bash "$REGISTRA" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado bloqueado
+  rc_igual "registrar-portao: resultado fora do enum é uso" 64 bash "$REGISTRA" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado talvez
+  rc_igual "registrar-portao: opção de força não existe (uso)" 64 bash "$REGISTRA" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado pronto --sem-prova
+  rc_igual "registrar-portao: falha desconhecida é contrato inválido" 5 bash "$REGISTRA" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado bloqueado --falhas v99
+  rc_igual "registrar-portao: origem divergente do ENTREGA é contrato inválido" 5 bash "$REGISTRA" --entrega "$e" --origem runx --trabalho ft-rec --resultado bloqueado --falhas v1
+  [ -z "$(git status --porcelain)" ] && ok "controle: os usos recusados não gravam nada" || falha "uso recusado gravou: $(git status --porcelain | tr '\n' '|')"
+
+  # ---- E2 sem pre-push funcional ------------------------------------------------------------
+  sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (sem pre-push)" "$t"
+  fx_hook_terceiro "$d" nao_composto || falha "hook nao_composto"
+  sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (hook de terceiro não composto)" "$t"
+  fx_hook_terceiro "$d" so_cita || falha "hook so_cita"
+  sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (hook que só cita a MergeX)" "$t"
+  rm -f "$hk"
+
+  # ---- BLOQUEADO não depende da prova --------------------------------------------------------
+  registra bloqueado v7 v1
+  [ "$REG_RC" = 0 ] && [ "$(fm_e portao)" = bloqueado ] && [ "$(fm_e falhas_portao)" = '[v1, v7]' ] \
+    && printf '%s\n' "$REG_OUT" | grep -Fq 'RESULTADO: BLOQUEADO' \
+    && ok "BLOQUEADO não depende da prova (grava sem pre-push)" || falha "BLOQUEADO sem pre-push: rc=$REG_RC $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  rc_igual "BLOQUEADO gravado passa em causa-do-portao --validar" 0 bash "$CAUSA" --validar "$e"
+  c0="$(git rev-parse HEAD)"
+  persiste --persistir pre-e6; rc=$?
+  [ "$rc" = 0 ] && [ "$(git rev-parse HEAD)" != "$c0" ] && [ -z "$(git status --porcelain)" ] \
+    && ok "pre-e6 sem portao: pronto não exige a prova (como antes)" || falha "pre-e6 bloqueado: rc=$rc $PER_OUT"
+
+  # ---- E2 com chamador gerenciado ------------------------------------------------------------
+  ( bash "$ATV" --instalar --entrega "$e" >/dev/null 2>&1 ) || falha "controle: --instalar do gerenciado"
+  registra pronto
+  [ "$REG_RC" = 0 ] && printf '%s\n' "$REG_OUT" | grep -Fxq 'RESULTADO: PRONTO' && [ "$(fm_e portao)" = pronto ] \
+    && [ "$(fm_e portao_sha)" = "$(git rev-parse HEAD)" ] && [ "$(fm_e falhas_portao)" = '[]' ] && [ "$(fm_e atualizado_em)" = "$hoje" ] \
+    && ok "E2 com chamador gerenciado grava PRONTO (portao_sha = HEAD, falhas [], atualizado_em de hoje)" \
+    || falha "E2 gerenciado: rc=$REG_RC $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  rc_igual "E2 com chamador gerenciado: causa-do-portao --validar aprova" 0 bash "$CAUSA" --validar "$e"
+  diff <(git show "HEAD:$e" | grep -Ev '^(portao|portao_sha|falhas_portao|atualizado_em):') \
+       <(grep -Ev '^(portao|portao_sha|falhas_portao|atualizado_em):' "$e") >/dev/null \
+    && ok "o registro do portão só muda portao, portao_sha, falhas_portao e atualizado_em" || falha "o registro mudou outras chaves"
+  [ -z "$(git diff --cached --name-only)" ] && [ "$(git status --porcelain)" = " M $e" ] \
+    && ok "registrar-portao só grava o ENTREGA.md, fora do índice" || falha "registrar-portao: $(git status --porcelain | tr '\n' '|')"
+  c0="$(git rev-parse HEAD)"
+  persiste --persistir pre-e6; rc=$?
+  [ "$rc" = 0 ] && [ "$(git rev-parse HEAD)" != "$c0" ] && git log -1 --format=%B | grep -Fxq 'Metodo: pre-e6' \
+    && [ -z "$(git status --porcelain)" ] && [ "$(val_motivo HEAD)" = ok ] \
+    && ok "pre-e6 persiste pronto com pre-push funcional (gerenciado; a validade aprova o HEAD)" || falha "pre-e6 gerenciado: rc=$rc $PER_OUT"
+  persiste --verificar pre-e6; rc=$?
+  [ "$rc" = 0 ] && ok "pre-e6 --verificar com pronto e pre-push funcional aprova" || falha "verificar pre-e6: rc=$rc $PER_OUT"
+  ( bash "$ATV" --reverter --entrega "$e" >/dev/null 2>&1 ) && [ ! -e "$hk" ] || falha "controle: reversão do gerenciado"
+  persiste --verificar pre-e6; rc=$?
+  [ "$rc" != 0 ] && printf '%s\n' "$PER_OUT" | grep -Fq 'pre-push sem prova funcional' \
+    && ok "pre-e6 --verificar recusa pronto sem pre-push funcional" || falha "verificar pre-e6 sem hook: rc=$rc $PER_OUT"
+
+  # ---- pre-e6 e e8 recusam persistir pronto sem a prova ---------------------------------------
+  edita_e "s/^portao_sha: .*/portao_sha: $(git rev-parse HEAD)/; s/^atualizado_em: .*/atualizado_em: 2026-10-09/"
+  cp "$e" "$t/antes"; c0="$(git rev-parse HEAD)"
+  for x in pre-e6 e8; do
+    persiste --persistir "$x"; rc=$?
+    [ "$rc" != 0 ] && [ "$(git rev-parse HEAD)" = "$c0" ] && [ -z "$(git diff --cached --name-only)" ] \
+      && cmp -s "$e" "$t/antes" && printf '%s\n' "$PER_OUT" | grep -Fq 'pre-push sem prova funcional' \
+      && ok "$x recusa persistir pronto sem pre-push funcional (sem commit, stage intacto)" || falha "$x sem hook: rc=$rc $PER_OUT"
+  done
+  fx_hook_terceiro "$d" so_cita || falha "hook so_cita"
+  persiste --persistir pre-e6; rc=$?
+  [ "$rc" != 0 ] && [ "$(git rev-parse HEAD)" = "$c0" ] && [ -z "$(git diff --cached --name-only)" ] \
+    && ok "pre-e6 recusa persistir pronto com hook que só cita a MergeX" || falha "pre-e6 so_cita: rc=$rc $PER_OUT"
+
+  # ---- E2 e persistência com hook externo composto --------------------------------------------
+  fx_hook_terceiro "$d" composto || falha "hook composto"
+  registra pronto
+  [ "$REG_RC" = 0 ] && printf '%s\n' "$REG_OUT" | grep -Fxq 'RESULTADO: PRONTO' && [ "$(fm_e portao_sha)" = "$(git rev-parse HEAD)" ] \
+    && ok "E2 com hook externo composto grava PRONTO" || falha "E2 composto: rc=$REG_RC $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  persiste --persistir pre-e6; rc=$?
+  [ "$rc" = 0 ] && [ "$(git rev-parse HEAD)" != "$c0" ] && [ -z "$(git status --porcelain)" ] \
+    && ok "pre-e6 persiste pronto com pre-push funcional (externo composto)" || falha "pre-e6 composto: rc=$rc $PER_OUT"
+  edita_e 's/^estado: .*/estado: entregue/; s/^push_feito: .*/push_feito: true/'
+  c0="$(git rev-parse HEAD)"
+  persiste --persistir e8; rc=$?
+  [ "$rc" = 0 ] && [ "$(git rev-parse HEAD)" != "$c0" ] && git log -1 --format=%B | grep -Fxq 'Metodo: e8' \
+    && ok "e8 persiste pronto com pre-push funcional (externo composto)" || falha "e8 composto: rc=$rc $PER_OUT"
+  cd "$REPO" || return
+}
+
+# ---------------------------------------------------------------------------
 # Despacho
 # ---------------------------------------------------------------------------
 
@@ -481,4 +880,6 @@ done
 
 echo
 echo "$OK ok, $FALHOU falha(s)"
+# NAO_EXECUTADO nunca conta como ok: fica listado à parte
+[ "$NAOEXEC" -eq 0 ] || echo "$NAOEXEC caso(s) NAO_EXECUTADO (não contados como ok)"
 [ "$FALHOU" -eq 0 ]

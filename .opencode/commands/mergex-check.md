@@ -2,13 +2,22 @@
 description: Verifica se o trabalho está realmente pronto para entregar — etapa E2 da mergex, o portão de prontidão, isolada. Roda as onze verificações (tasks concluídas, registro de suíte por task e suíte inteira no fechamento da sprint, dois testes por task, teste de regressão, QA, auditoria, bloqueios, modo legado, arquivos fora do escopo, segredos no diff, commit do E1 por task concluída) e devolve PRONTO ou BLOQUEADO com o que falta. Use antes de entregar, ao perguntar se está pronto para PR, ou para conferir a entrega.
 ---
 
-Acione a skill `mergex` e execute **apenas a etapa E2 (portão de prontidão)**, seguindo `references/02-prontidao.md`.
+Acione a skill `mergex` e execute **apenas a etapa E2 (portão de prontidão)**, seguindo `references/02-prontidao.md` — começando pela prova funcional do `pre-push` (`ativacao-pre-push.sh --provar`) e gravando o resultado só por `registrar-portao.sh`.
 
 Trabalho: $ARGUMENTS
 
 ## O que fazer
 
-Primeiro execute somente a barreira:
+Primeiro prove que o `pre-push` da MergeX está ativo, sem confiar no caminho nem na existência do arquivo:
+
+```bash
+bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --provar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md
+```
+
+Falhou: o E2 não começa e nada é gravado; mande rodar o E0 (`ativacao-pre-push.sh --instalar`).
+
+Depois execute somente a barreira:
 
 ```bash
 bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
@@ -39,5 +48,7 @@ Rode **todas as onze verificações**, mesmo depois de a primeira falhar — o u
 **V11 responde uma pergunta só:** cada task `concluida` tem pelo menos um item em `ENTREGA.commits` com `task` igual ao id dela e `commit` válido? Task não concluída não é alvo dela — isso é da V1. Rode com `scripts/prova-de-commit.sh --verificar <ENTREGA.md> <tasks.md>...`.
 
 Use `assets/TEMPLATE-prontidao.md`. A saída é binária: `PRONTO` ou `BLOQUEADO`, com o que falta e onde corrigir.
+
+Grave o resultado **só** por `registrar-portao.sh` (`--resultado pronto`, ou `--resultado bloqueado --falhas <vN>...`), nunca editando `portao` à mão. Com `pronto`, ele refaz a prova do `pre-push` antes de gravar; se imprimir `RESULTADO: BLOQUEADO — pre-push sem prova funcional`, nada foi gravado e o portão não está `PRONTO`.
 
 O portão barra e explica. **Nunca maquia, nunca passa com ressalva, nunca ajusta o trabalho para caber.** Este comando só verifica: não commite, não suba nada, não abra PR.
