@@ -613,7 +613,7 @@ _pr_decide_push() {
   base="$(_pr_g -C "$raiz" rev-parse -q --verify "refs/remotes/$remoto/HEAD^{commit}" 2>/dev/null)" || base=""
   if [ -n "$base" ]; then
     tem_a=1
-    pr_entregas_do_intervalo "$raiz" "$base" "$sl" >> "$tmp/lista" || { motivo="$PR_SEL_MOTIVO"; erro="$PR_ERRO"; rm -rf "$tmp"; _pr_barra_selecao "$motivo" "$erro"; _pr_nota_base "$remoto" "$base"; return; } # guarda:PPBASE
+    pr_entregas_do_intervalo "$raiz" "$base" "$sl" >> "$tmp/lista" || { motivo="$PR_SEL_MOTIVO"; erro="$PR_ERRO"; rm -rf "$tmp"; _pr_barra_selecao "$motivo" "$erro"; _pr_nota_base "$remoto" "$base"; return 1; } # guarda:PPBASE
   fi
   # (b) a regra legada pelo nome
   PR_ENTREGA=""; PR_FALTA=0; PR_CTRL=0

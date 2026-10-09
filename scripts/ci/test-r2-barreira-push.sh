@@ -543,7 +543,7 @@ grupo_prepush() {
   # barrado (falha fechada, nunca aprovação). O diagnóstico cita a base usada
   # (a ref e o SHA), diz que ela pode estar defasada ou não ser a base de
   # integração, e manda 'git fetch' e 'git remote set-head -a' antes do E2.
-  local t4 d4 m0 m2 yb vr dec4
+  local t4 d4 m0 m2 yb vr dec4 dec5
   t4="$(mktemp -d)"; TMPS="$TMPS $t4"; d4="$t4/repo"
   fx_cenario "$d4" || { falha "cenário DM-185 (base defasada) não montou"; return; }
   fx_remoto_bare "$d4" || { falha "remoto bare (base defasada)"; return; }
@@ -575,6 +575,12 @@ grupo_prepush() {
   git update-ref refs/remotes/origin/main "$m2"
   push_espera "controle: com a base atualizada (fetch + set-head) o mesmo push passa" 0 "$vr" "$d4" origin "$vr:refs/heads/feature/ft-rec"
   err_sem "base atualizada: nenhum diagnóstico da barreira" "mergex pre-push"
+  # seleção da parcela (a) que falha (merge-base não calculável, objetos presentes):
+  # a decisão é barra E o rc é 1 (cabeçalho de pr_decide_ref: rc 1 quando barra)
+  mkdir -p "$t4/rc185-gitstub" && printf '#!/usr/bin/env bash\ncase "$*" in *merge-base*) exit 2 ;; esac\nexec %q "$@"\n' "$(command -v git)" > "$t4/rc185-gitstub/git" \
+    && chmod +x "$t4/rc185-gitstub/git" || falha "git de mentira (merge-base, rc185) não montou"
+  dec5="$( PATH="$t4/rc185-gitstub:$PATH"; . "$REGRAS" || exit 9; arvore_ambiente_git 2>/dev/null; pr_decide_ref "$d4" refs/heads/feature/ft-rec "$vr" refs/heads/feature/ft-rec "$ZERO" origin; printf 'rc=%s\n' "$?" )"
+  case "$dec5" in *decisao=barra*motivo=erro_ambiente*rc=1) ok "seleção da parcela (a) falha com <remoto>: pr_decide_ref imprime barra/erro_ambiente e devolve rc 1" ;; *) falha "seleção da parcela (a) falha: decisão: $(printf '%s' "$dec5" | tr '\n' '|')" ;; esac
   cd "$REPO" || return
 }
 
