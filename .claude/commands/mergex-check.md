@@ -27,6 +27,16 @@ bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
 
 Se houver método pendente, pare. Este comando não chama o modo de gravação; o checkpoint é ação explícita anterior ao E2.
 
+Se a entrega tem reconciliação de base (`reconciliacoes` não vazia no `ENTREGA.md`), exija também a barreira da reconciliação, verificada e persistida:
+
+```bash
+bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
+  --checkpoint reconciliacao-base --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id>
+```
+
+Sem `ok=true`, o portão não emite `PRONTO`; relate os `motivo` (`references/11-reconciliacao-base.md`).
+
 Rode **todas as onze verificações**, mesmo depois de a primeira falhar — o usuário precisa da lista completa do que falta, não do primeiro erro. Verificação que não se aplica é marcada `n/a`, nunca omitida.
 
 | # | Verificação |
@@ -43,12 +53,14 @@ Rode **todas as onze verificações**, mesmo depois de a primeira falhar — o u
 | V10 | Segredo, credencial ou dado real de cliente no diff |
 | V11 | Task concluída sem commit do E1 correspondente em `ENTREGA.commits` |
 
+**V9 é o resultado do script**, sobre a base validada por SHA (nunca o nome da ref) e com os caminhos `coberto` da reconciliação: `scripts/portao-v9.sh --verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <trabalho_id>`. Código `1` é `FALHA` com as linhas `fora_do_plano`; código `3` é `FALHA` registrada como `v9_sem_prova`.
+
 **V10 roda sempre, mesmo quando todo o resto passou.**
 
 **V11 responde uma pergunta só:** cada task `concluida` tem pelo menos um item em `ENTREGA.commits` com `task` igual ao id dela e `commit` válido? Task não concluída não é alvo dela — isso é da V1. Rode com `scripts/prova-de-commit.sh --verificar <ENTREGA.md> <tasks.md>...`.
 
 Use `assets/TEMPLATE-prontidao.md`. A saída é binária: `PRONTO` ou `BLOQUEADO`, com o que falta e onde corrigir.
 
-Grave o resultado **só** por `registrar-portao.sh` (`--resultado pronto`, ou `--resultado bloqueado --falhas <vN>...`), nunca editando `portao` à mão. Com `pronto`, ele refaz a prova do `pre-push` antes de gravar; se imprimir `RESULTADO: BLOQUEADO — pre-push sem prova funcional`, nada foi gravado e o portão não está `PRONTO`.
+Grave o resultado **só** por `registrar-portao.sh` (`--resultado pronto`, ou `--resultado bloqueado --falhas <vN>...`), nunca editando `portao` à mão. Com `pronto`, ele refaz a prova do `pre-push` antes de gravar; se imprimir `RESULTADO: BLOQUEADO — pre-push sem prova funcional`, nada foi gravado e o portão não está `PRONTO`. O `pronto` grava `portao_sha`, o SHA avaliado: qualquer commit de produto, teste, plano ou merge depois dele vence o portão (`validade-do-portao.sh`).
 
 O portão barra e explica. **Nunca maquia, nunca passa com ressalva, nunca ajusta o trabalho para caber.** Este comando só verifica: não commite, não suba nada, não abra PR.

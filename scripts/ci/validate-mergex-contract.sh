@@ -1398,4 +1398,130 @@ ci_ativo="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!s
   || fail 'DM-184: a varredura de arquivos que afirmam CI ativo falhou'
 [ -z "$ci_ativo" ] || fail "DM-184: arquivo afirma que o CI do portão está ativo (esta branch não ativa CI): $(printf '%s' "$ci_ativo" | tr '\n' ' ')" # guarda:CIATIVO
 
+# ---------------------------------------------------------------------------
+# Task 19 — contrato textual da reconciliação de base pós-E8 e do portão por
+# SHA (spec 2026-10-07, seções 4–20 e "Decisões propostas"; DM-178..DM-184)
+# ---------------------------------------------------------------------------
+SKILL_DIR='.claude/skills/mergex'
+REF="$SKILL_DIR/references"
+reconc_ref="$REF/11-reconciliacao-base.md"
+abertura_pr="$REF/07-abertura-pr.md"
+
+# O enum fechado de checkpoints é o mesmo na prosa e nos três executáveis.
+enum_cp='pre-e2 | reconciliacao-base | pre-e6 | e8'
+for f in "$skill" "$commits" "$registro"; do
+  grep -Fq "$enum_cp" "$f" || fail "$f sem o enum de checkpoints novo"
+done
+[ -f "$reconc_ref" ] || fail "missing required file: $reconc_ref"
+for f in persistir-metodo.sh contrato-de-commit.sh catalogo-de-metodo.sh; do
+  grep -Fq 'pre-e2|reconciliacao-base|pre-e6|e8' "$SKILL_DIR/scripts/$f" \
+    || fail "$SKILL_DIR/scripts/$f sem o enum de checkpoints novo"
+done
+grep -Fq "$enum_cp" "$SKILL_DIR/scripts/catalogo-de-metodo.sh" \
+  || fail 'catalogo-de-metodo.sh: o enum documentado diverge da prosa'
+grep -Fq 'Metodo: pre-e2 | pre-e6 | e8`, sem `Task:`' "$skill" \
+  && fail 'SKILL.md ainda dá o enum antigo como a gramática do commit de método'
+grep -Fq '(`pre-e2`, `pre-e6`' "$hooks_readme" \
+  && fail 'hooks README ainda dá o enum antigo de checkpoints'
+grep -Fq "$enum_cp" "$hooks_readme" || fail 'hooks README sem o enum de checkpoints novo'
+
+# E2: ordem reconciliação → V1..V11 (V9 por script) → gravação com portao_sha
+grep -Fq 'portao-v9.sh' "$prontidao" || fail "02-prontidao não manda rodar portao-v9.sh"
+grep -Fq 'portao_sha' "$prontidao" || fail "02-prontidao não grava portao_sha"
+grep -Fq 'validade-do-portao.sh' "$prontidao" || fail '02-prontidao não cita validade-do-portao.sh'
+for f in "$prontidao" .claude/commands/mergex-check.md .opencode/commands/mergex-check.md; do
+  r="$(primeira_linha "$f" '--checkpoint reconciliacao-base')"
+  v="$(primeira_linha "$f" 'V1')"
+  [ -n "$r" ] || fail "$f sem a barreira --verificar --checkpoint reconciliacao-base"
+  [ -n "$v" ] && [ "$r" -lt "$v" ] || fail "$f cita a barreira reconciliacao-base depois da primeira menção a V1"
+  grep -Fq 'portao-v9.sh --verificar' "$f" || fail "$f: a V9 não roda portao-v9.sh --verificar"
+done
+grep -Fq -- '--persistir' "$prontidao" && fail '02-prontidao manda persistir (o E2 só verifica)'
+
+# E6 e E7: validade como pré-requisito; o pre-push decide; o hook é consultivo
+for f in "$push" "$abertura_pr"; do
+  grep -Fq 'validade-do-portao.sh --verificar' "$f" || fail "$f sem a validade do portão como pré-requisito"
+  grep -Fq '12-barreira-de-push.md' "$f" || fail "$f não aponta para 12-barreira-de-push.md"
+  grep -Fq 'consultivo' "$f" || fail "$f não diz que o hook do Claude é consultivo"
+done
+grep -Fq 'o `pre-push` funcional quando o `ENTREGA.md` tem `portao: pronto`' "$push" \
+  || fail '06-push: a barreira pre-e6 não diz que exige o pre-push funcional com portao: pronto'
+
+# E0: base por SHA, nunca reescrita na retomada
+grep -Fq 'base_validada_sha' "$abertura" || fail '00-abertura não grava base_validada_sha'
+grep -Fq 'origem_base: registrada_e0' "$abertura" || fail '00-abertura não grava origem_base: registrada_e0'
+grep -Fq 'nunca acrescenta nem troca `base_validada_sha`' "$abertura" \
+  || fail '00-abertura: a retomada pode acrescentar ou trocar base_validada_sha'
+
+# Schema e template: as chaves novas do kind entrega e o kind novo
+for k in base_validada_sha origem_base reconciliacoes portao_sha; do
+  grep -Fq "\`$k\`" "$schema" || fail "00-schema sem a chave $k"
+  grep -Eq "^$k: " "$template_entrega" || fail "TEMPLATE-ENTREGA sem a chave $k"
+done
+grep -Fq 'kind: reconciliacao_base' "$schema" || fail '00-schema sem o kind reconciliacao_base'
+sem_fm="$(sed -n '/^## Arquivos SEM frontmatter/,/^## /p' "$schema")"
+printf '%s\n' "$sem_fm" | grep -Fq 'RECONCILIACAO-BASE' \
+  && fail '00-schema lista o artefato de reconciliação entre os arquivos sem frontmatter'
+
+# E8: a tabela "Quando o arquivo é escrito" tem a reconciliação; catálogo cumulativo
+quando="$(sed -n '/^## Quando o arquivo é escrito/,/^## /p' "$registro")"
+printf '%s\n' "$quando" | grep -Fq 'reconciliacao-base.sh --registrar' \
+  || fail '08-registro: a tabela "Quando o arquivo é escrito" não tem a reconciliação'
+grep -Fq 'RECONCILIACAO-BASE-NNN.md' "$registro" || fail '08-registro: o catálogo e8 não cita os artefatos de reconciliação'
+
+# Commits: a classe integração
+grep -Fq 'Integra-base:' "$commits" || fail '01-commits sem a classe integração de base'
+
+# 11-reconciliacao-base: as quatro provas, os códigos, os riscos residuais
+for p in '| 1 | `f` nasceu ou mudou na base' '| 2 | A feature não tocou `f`' \
+         '| 3 | `f` não consta das tasks' '| 4 | Existe diferença real entre `B1` e `M`'; do
+  grep -Fq -- "$p" "$reconc_ref" || fail "11-reconciliacao-base sem a prova: $p"
+done
+for c in '| 0 |' '| 1 |' '| 2 |' '| 3 |' '| 4 |' '| 5 |' '| 6 |' '| 64 |'; do
+  sed -n '/^## Códigos de saída/,/^## /p' "$reconc_ref" | grep -Fq -- "$c" \
+    || fail "11-reconciliacao-base: a tabela de códigos de saída não tem $c"
+done
+for r in 'Portão reposicionado por commit de método' 'Entrega legada sem reconciliação' \
+         'B1 lateral' 'Clone raso legítimo falha fechado' 'Isenção por prefixo' \
+         '`core.autocrlf` na barreira' 'Hash do diff com atributos `-diff`/`binary`' \
+         'Escala resolvida pela DM-184'; do
+  sed -n '/^### Riscos residuais conhecidos/,/^## /p' "$reconc_ref" | grep -Fq -- "$r" \
+    || fail "11-reconciliacao-base: falta o risco residual \"$r\""
+done
+grep -Fq 'RECONCILIACAO-BASE-<NNN-1>.md' "$reconc_ref" || fail '11-reconciliacao-base: anterior não é RECONCILIACAO-BASE-<NNN-1>.md'
+grep -Fq 'base integrada e o PR' "$reconc_ref" && fail '11-reconciliacao-base: a prosa do artefato cita PR (o frontmatter não tem PR)'
+grep -Fq '12-barreira-de-push.md' "$reconc_ref" || fail '11-reconciliacao-base não remete os riscos da barreira a 12-barreira-de-push.md'
+grep -Fq 'references/11-reconciliacao-base.md' "$skill" || fail 'SKILL.md não aponta para 11-reconciliacao-base.md'
+
+# Decisões
+for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184; do
+  grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
+done
+
+# Hooks README: validade do portão e a biblioteca da integração
+grep -Fq 'comum/integracao-da-mensagem.sh' "$hooks_readme" || fail 'hooks README não cita comum/integracao-da-mensagem.sh'
+grep -Fq 'validade-do-portao.sh' "$hooks_readme" || fail 'hooks README sem a validade do portão'
+
+# pr-so-com-portao é consultivo: AGENTS.md e SKILL.md o descrevem assim, e a
+# exceção "mesmo em aviso" ganha a ressalva do pre-push (DM-184)
+ressalva='o `pre-push` do Git barra o portão inválido em qualquer modo'
+for f in AGENTS.md "$skill"; do
+  grep -F '`pr-so-com-portao`' "$f" | grep -Fq 'consultivo' || fail "$f não descreve pr-so-com-portao como consultivo"
+  grep -Fq -- "$ressalva" "$f" || fail "$f: a condição que barra mesmo em aviso não tem a ressalva do pre-push"
+done
+grep -Fq 'Regra 6 — sem `PRONTO` no portão, não sobe e não abre PR' "$skill" \
+  && fail 'SKILL.md ainda trata pr-so-com-portao como barreira do push'
+# Nenhum texto versionado trata o hook como barreira autoritativa: uma linha que
+# o cita junto de "autoritativ" só é aceita quando o próprio texto o qualifica
+# como consultivo / aviso antecipado. Spec e plano ficam de fora: são o registro
+# da decisão e citam a regra para proibi-la.
+pr_autoritativo="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' \
+    ':!scripts/ci/mutacao-*' ':!scripts/ci/lib/*' ':!scripts/ci/fixtures/*' ':!docs/superpowers/*' \
+  | xargs -0 sh -c 'grep -nIE -- "pr-so-com-portao" "$@"; [ "$?" -le 1 ]' _ \
+  | grep -iE 'autoritativ' | grep -viE 'consultiv|aviso antecipado' || true)"
+[ -z "$pr_autoritativo" ] || fail "DM-184: texto trata pr-so-com-portao como barreira autoritativa: $(printf '%s' "$pr_autoritativo" | tr '\n' ' ')"
+
+# Nenhum executável da skill aceita opção de bypass (varredura; sem guarda)
+if grep -nE -- '--(force|sem-prova|bypass)' "$SKILL_DIR"/scripts/*.sh; then fail "flag de bypass encontrada"; fi
+
 printf 'contract checks passed\n'

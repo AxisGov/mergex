@@ -55,14 +55,36 @@ O plano também sai desse contexto: branch ativa + `branch:` de exatamente uma
 pasta canônica daquele trabalho. Nenhum plano histórico com task id repetido
 participa, e recência/rastro nunca selecionam ownership.
 
-A mensagem (`-m` ou arquivo de `-F`) declara uma de duas classes mecânicas:
+A mensagem (`-m` ou arquivo de `-F`) declara uma de três classes mecânicas:
 
 - **E1:** exatamente um `Task:` e um `Trabalho:`, sem `Metodo:`;
-- **método:** exatamente um `Trabalho:` e um `Metodo:` (`pre-e2`, `pre-e6`
-  ou `e8`), sem `Task:`.
+- **método:** exatamente um `Trabalho:` e um `Metodo:`, do enum fechado
+  `pre-e2 | reconciliacao-base | pre-e6 | e8`, sem `Task:`;
+- **integração de base:** exatamente um `Trabalho:` e um `Integra-base:` com o
+  SHA completo do segundo pai, sem `Task:` nem `Metodo:` — o merge que integra
+  uma base que avançou depois do E8
+  (`references/11-reconciliacao-base.md`).
 
 `Task:` + `Metodo:`, qualquer chave de controle duplicada e `Metodo:` fora do
-enum param mesmo quando o hook está em aviso. A gramática vem de uma única
+enum param mesmo quando o hook está em aviso.
+
+**O commit de integração da base.** Os dois hooks de commit reconhecem a classe
+pela **mensagem**, nunca pelo estado do Git, por uma biblioteca só:
+`comum/integracao-da-mensagem.sh`, carregada com `.` pelo `commit-por-task` e
+pelo `arquivo-fora-do-plano`. Só vale a mensagem que declara `Integra-base:`
+como trailer isolado e limpo, com `MERGE_HEAD` presente; ela passa por
+`contrato-de-commit.sh --validar-integracao` e o `Integra-base:` tem de ser o
+`MERGE_HEAD`. O que a leitura não isola (aspas soltas, lixo depois dos 40 hex,
+trailers que o Git não acha) é classe "nenhuma" e segue as regras de sempre:
+bloquear só com prova.
+
+- `commit-por-task`: integração válida não é mistura de tasks, e as regras de
+  status e suíte não se aplicam; integração que declara `Integra-base:` e não
+  passa no contrato barra (`exit 2`).
+- `arquivo-fora-do-plano`: numa integração válida, avalia só os caminhos que
+  diferem do segundo pai (`git diff --cached MERGE_HEAD`) — o que a resolução
+  acrescenta, não tudo o que veio da base. O arquivo nascido na base e ajustado
+  pela integração só deixa de ser fora do plano pela reconciliação de base. A gramática vem de uma única
 implementação, `scripts/contrato-de-commit.sh`: commit de método válido não é
 interpretado como E1 e segue para o hook de escopo, sem cobrar status/suíte de
 task. Sem nenhuma das duas declarações, o hook não inventa a classe.
@@ -94,6 +116,17 @@ enviado, e leem o mesmo modo (`pr-so-com-portao` em `.expx/hooks.json`):
 | `pre-push` do Git (`portao-push.sh`, ativado e provado pelo E0 e pelo E2) | Barreira local **autoritativa contra erro normal**. Decide pelas refs e SHAs que o Git entrega, qualquer que seja o comando que disparou o push: `cd … &&`, `bash -c`, `xargs`, função ou alias chegam iguais |
 | Este hook | **Aviso antecipado.** Antecipa o diagnóstico quando consegue provar o resultado; no resto, avisa e deixa o Git seguir até o `pre-push` |
 | CI com proteção de merge (`portao-ci.sh` e o template em `assets/ci/`) | Barreira **contra contorno deliberado**, inclusive `--no-verify`. Esta branch entrega o executável e o template e não ativa CI em produto nenhum |
+
+**A validade do portão.** O portão do E2 vale para um SHA (`portao_sha`, DM-181).
+`scripts/validade-do-portao.sh --verificar --entrega <ENTREGA.md> --rev <sha>` lê
+`portao` e `portao_sha` da revisão avaliada, nunca do disco, e só mantém o
+`pronto` se todo commit em `portao_sha..<sha>` é commit de método `pre-e6` ou
+`e8`, de um pai, tocando só o catálogo daquele checkpoint. Commit de produto, de
+teste, de plano ou merge invalida (`commit_de_produto`, `commit_merge`,
+`metodo_fora_do_catalogo`); clone raso ou objeto ausente é
+`historia_incompleta`, e ambiente que impede a avaliação é `erro_ambiente` —
+os dois barram sempre. É a regra que as três camadas consomem; nenhuma tem regra
+própria.
 
 O hook não é fronteira de segurança. Ler o texto do shell nunca cobre tudo
 (alias, função, config de push, plumbing), e o que ele não consegue determinar

@@ -95,7 +95,7 @@ Nenhuma branch foi criada nem trocada. Crie a base, ou chame o E0 sem base
 explícita para usar a convenção do repositório.
 ```
 
-Registre qual das quatro respondeu. A base efetiva vai para `branch_base` no `ENTREGA.md`, e é ela que o E2 (V9, V10), o E3 e o E4 usam no `git diff <branch-base>...HEAD`.
+Registre qual das quatro respondeu. A base efetiva vai para `branch_base` no `ENTREGA.md`, e é ela que o E2 (V10), o E3 e o E4 usam no `git diff <branch-base>...HEAD`. A V9 não usa o nome: usa a base validada **por SHA**, `base_validada_sha`, que o passo 5 grava (`references/11-reconciliacao-base.md`). Um nome de ref que avançou ou ficou parado muda o resultado de um diff; um SHA, não.
 
 Se a branch atual **não** for a base determinada e já for uma branch de trabalho de outra coisa, use a base determinada como ponto de partida — nunca ramifique um trabalho de dentro de outro sem que isso esteja declarado.
 
@@ -207,7 +207,11 @@ replanejamento (portão bloqueado → replaneja → F3/F4/F5 → F6 de novo → 
 - `versionado: true` (ou `false`, se o passo 1 assim determinou)
 - `commits: []` — a lista cresce no E1, e o primeiro item dela recebe `seq: 1`. **Não existe `seq` de topo**: o próximo número sai da própria lista (`00-schema.md`, "A ordem de registro")
 - `portao: null`, `falhas_portao: []`, `causa: null`, `push_feito: false`, `pr_url: null`, `pr_estado: null`
+- `base_validada_sha` com o SHA completo (40 hex) de `git merge-base HEAD <branch_base>`, e `origem_base: registrada_e0` — a base em que o trabalho é validado, fixada por SHA, nunca por nome de ref
+- `reconciliacoes: []` e `portao_sha: null` — a lista só cresce pelo `reconciliacao-base.sh --registrar`, e `portao_sha` só é gravado pelo E2 (`registrar-portao.sh`)
 - `criado_em` e `atualizado_em` com a data de hoje
+
+Repositório sem versionador (passo 1): `base_validada_sha` e `origem_base` ficam `null`, como `branch` e `branch_base`.
 
 Na prosa, a linha da branch diz como ela chegou até aqui — `aberta pela mergex`, `retomada` ou `adotada da skill de origem` — e de onde saiu a base (chamador, `CONVENCOES.md`, `origin/HEAD` ou principal atual). É o que permite, depois, entender um diff que não bate com `main`.
 
@@ -227,6 +231,9 @@ Atualize **somente o necessário** para abrir uma nova tentativa de entrega:
 | `desvios` | preservado enquanto continuar verdadeiro |
 | `pr_url`, `pr_estado` | **preservados como estão.** O E0 não verifica e não afirma que aquele PR ainda vale; quem confirma é o E7, que já trata "PR já existe" como retomada. **Nunca abra um segundo PR e nunca recrie a branch** |
 | `branch`, `branch_base` | coerentes com a branch adotada e com a base efetiva do passo 3 |
+| `portao_sha` | volta para `null`, junto com `portao` |
+| `base_validada_sha`, `origem_base` | **preservados como estão.** O E0 de retomada **nunca acrescenta nem troca `base_validada_sha`** num `ENTREGA.md` existente: a base validada só muda pelo `reconciliacao-base.sh --registrar`, e uma entrega legada sem a chave só a ganha, uma única vez, na primeira reconciliação (`origem_base: inferida_legado`, `references/11-reconciliacao-base.md`) |
+| `reconciliacoes` | preservado — a cadeia de reconciliações é histórico da entrega |
 | `atualizado_em` | a data de hoje |
 | prosa | acrescente que **esta é uma retomada** — e, quando for o caso, que a tentativa anterior parou no portão |
 
@@ -284,6 +291,7 @@ O E0 terminou quando **todas** são verdade:
 - [ ] `git status --porcelain` estava vazio na hora de criar ou trocar a branch (ou o repositório não é versionado, ou a branch foi adotada sem troca).
 - [ ] `ORQUESTRADOR.md` tem a linha da branch.
 - [ ] `docs/entregas/<trabalho_id>/ENTREGA.md` existe com `estado: aberto` e frontmatter válido.
+- [ ] Numa entrega nova, `base_validada_sha` é um SHA de 40 hex com `origem_base: registrada_e0`; numa retomada, os dois estão exatamente como estavam.
 - [ ] O `pre-push` efetivo está ativo: `ativacao-pre-push.sh --instalar` saiu `0` (chamador gerenciado instalado ou já presente, ou integração externa válida), sem alterar `core.hooksPath` nem hook de terceiro — ou o repositório não é versionado.
 - [ ] `.expx/estado.json` tem `branch` e `pr_estado: null` — **ou** `.expx/` não existe, ou o repositório não é versionado, e nesses casos nada foi gravado. Este item nunca reprova o E0.
 
