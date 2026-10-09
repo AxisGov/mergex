@@ -1412,7 +1412,7 @@ MSG_INT_M="git commit -m \"merge(mergex): integra a base
 Trabalho: ft-02
 Integra-base: $(git rev-parse -q --verify MERGE_HEAD)\""
 caso "integração por -m válida passa" mergex/commit-por-task.sh "$(bash_json "$MSG_INT_M")" 0
-caso "integração por -m sem trailers barra" mergex/commit-por-task.sh "$(bash_json 'git commit -m "integra a base"')" 2
+caso "-m sem Integra-base segue as regras de sempre (bloqueio: mistura)" mergex/commit-por-task.sh "$(bash_json 'git commit -m "integra a base"')" 2
 caso "fora-do-plano não acusa o que veio da base" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-integracao.txt')" 0
 # Sem isto o caso acima nao distingue "avalia o diff contra MERGE_HEAD" de
 # "nao avalia nada": produto que a base NAO trouxe e o plano NAO declara
@@ -1422,6 +1422,49 @@ printf 'produto nao planejado
 git add src/fora-do-plano.ts
 caso "integração: produto fora do plano e fora da base continua acusado" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-integracao.txt')" 2
 git rm -q --cached src/fora-do-plano.ts; rm -f src/fora-do-plano.ts
+
+echo "merge de integração: a classe vem da mensagem, não do estado do Git"
+SHA_MH="$(git rev-parse -q --verify MERGE_HEAD)"
+# (b) mensagem valida lida pelas formas que o recorte do comando suja
+MSG_HEREDOC="git commit -m \"\$(cat <<'EOF'
+merge(mergex): integra a base
+
+Trabalho: ft-02
+Integra-base: $SHA_MH
+EOF
+)\""
+caso "integração válida via heredoc" mergex/commit-por-task.sh "$(bash_json "$MSG_HEREDOC")" 0
+MSG_DOIS_M="git commit -m \"merge(mergex): integra a base\" -m \"Trabalho: ft-02
+Integra-base: $SHA_MH\""
+caso "integração válida via -m a -m b" mergex/commit-por-task.sh "$(bash_json "$MSG_DOIS_M")" 0
+caso "integração válida via heredoc (fora-do-plano)" mergex/arquivo-fora-do-plano.sh "$(bash_json "$MSG_HEREDOC")" 0
+# (c) Integra-base tem de ser o MERGE_HEAD
+ZEROS="0000000000000000000000000000000000000000"
+printf 'merge(mergex): integra a base\n\nTrabalho: ft-02\nIntegra-base: %s\n' "$ZEROS" > msg-zeros.txt
+printf 'merge(mergex): integra a base\n\nTrabalho: ft-02\nIntegra-base: %s\n' "$(git rev-parse HEAD)" > msg-outro-sha.txt
+caso "Integra-base com 40 zeros barra" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-zeros.txt')" 2
+caso "Integra-base de outro SHA barra" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-outro-sha.txt')" 2
+# integração inválida não reduz o escopo do fora-do-plano
+caso "Integra-base errado nao reduz o escopo" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-zeros.txt')" 2
+# (d) arquivo que veio da base, alterado na resolucao e fora do plano
+printf 'resolucao mexe no que veio da base\n' >> src/da-base.ts
+git add src/da-base.ts
+caso "base alterada na resolução e fora do plano é acusada" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-integracao.txt')" 2
+git checkout -q MERGE_HEAD -- src/da-base.ts
+# merge comum (mensagem sem Integra-base): escopo de sempre
+caso "fora-do-plano: merge sem Integra-base avalia tudo" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m "Merge branch main"')" 2
+# (e) mensagem ilegivel: regras de sempre (aqui, mistura de tasks em bloqueio)
+caso "git commit sem -m segue as regras de sempre" mergex/commit-por-task.sh "$(bash_json 'git commit')" 2
+caso "git commit --no-edit segue as regras de sempre" mergex/commit-por-task.sh "$(bash_json 'git commit --no-edit')" 2
+# (a) modo aviso: merge conflitado fora da integracao nunca bloqueia
+printf 'Merge branch main\n' > msg-plana.txt
+echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"aviso"}}}' > .expx/hooks.json
+caso "aviso: -m Merge branch main nao bloqueia" mergex/commit-por-task.sh "$(bash_json 'git commit -m "Merge branch main"')" 0
+caso "aviso: -m x nao bloqueia" mergex/commit-por-task.sh "$(bash_json 'git commit -m "x"')" 0
+caso "aviso: -F sem trailers nao bloqueia" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-plana.txt')" 0
+caso "aviso: integração com Task: ainda barra (Integra-base declarado)" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-integracao-com-task.txt')" 2
+echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"bloqueio"},"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
+rm -f msg-zeros.txt msg-outro-sha.txt msg-plana.txt
 git merge --abort >/dev/null 2>&1 || exit 1
 rm -f msg-integracao.txt msg-integracao-com-task.txt .expx/hooks.json
 cd "$RAIZ_T" || exit 1

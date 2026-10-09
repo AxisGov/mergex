@@ -129,42 +129,60 @@ fi
 # --------------------------------------------------------------------------
 # Merge de integração da base — a terceira classe de commit
 # --------------------------------------------------------------------------
-# Com MERGE_HEAD, o commit é o merge que integra a base ao trabalho: trailers
-# Trabalho + Integra-base, sem Task e sem Metodo (contrato-de-commit.sh
-# --validar-integracao). O que ele traz da base não é de uma task: as regras de
-# mistura de tasks, de status e de suíte não se aplicam, e a mensagem que
-# declara Task ou Metodo é classe híbrida, que o contrato recusa.
-# Mensagem que o hook não consegue ler (editor, arquivo ilegível) segue as
-# regras de sempre, sem modo mais frouxo.
-if git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && [ -n "$MSG_LIDA" ]; then
-  if [ ! -r "$CONTRATO_COMMIT" ]; then
-    printf '%s
-' "mergex/commit-por-task — instalação MergeX incompleta
-
-Componente ausente: $CONTRATO_COMMIT
-O merge de integração da base não pode ter a mensagem validada." >&2
-    exit 2
+# A classe é ativada pela MENSAGEM, não pelo estado do Git: com MERGE_HEAD, só
+# a mensagem lida que declara `Integra-base:` passa por
+# contrato-de-commit.sh --validar-integracao (Trabalho + Integra-base igual a
+# MERGE_HEAD, sem Task nem Metodo). Inválida: exit 2. Válida: as regras de
+# mistura de tasks, status e suíte não se aplicam. Qualquer outra mensagem —
+# sem Integra-base, ilegível, com trailers que a leitura não isola — segue as
+# regras de sempre: bloquear só com prova.
+integracao_da_mensagem() { # <mensagem-lida> <trabalho-da-branch> <contrato>
+  # Define INT_CLASSE (nenhuma | valida | invalida) e INT_SAIDA. Só uma mensagem
+  # que declara `Integra-base:` como trailer isolado é da classe integração;
+  # qualquer outra é "nenhuma" e segue as regras de sempre.
+  INT_CLASSE=nenhuma; INT_SAIDA=""
+  local txt tr integra trab tmp mh rc
+  # Formas de -m que o recorte do comando deixa sujas: `-m a -m b` (parágrafos)
+  # e `-m "$(cat <<'EOF' ... EOF)"` (invólucro do heredoc).
+  txt="${1//\" -m \"/$'\n\n'}"
+  txt="$(printf '%s\n' "$txt" | awk 'NR==1 && /^\$\(cat[[:space:]]*<</ { h=1; next } h && /^[A-Z_]+[[:space:]]*$/ { exit } { print }')"
+  tr="$(printf '%s\n' "$txt" | git interpret-trailers --parse 2>/dev/null)"
+  printf '%s\n' "$tr" | grep -Eq '^Integra-base:' || return 0
+  integra="$(printf '%s\n' "$tr" | sed -n 's/^Integra-base:[[:space:]]*//p' | head -1)"
+  trab="$2"
+  [ -n "$trab" ] || trab="$(printf '%s\n' "$tr" | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
+  if [ ! -r "$3" ]; then
+    INT_CLASSE=invalida; INT_SAIDA="instalação MergeX incompleta: $3"; return 0
   fi
-  TRAB_INT="$TRABALHO"
-  [ -n "$TRAB_INT" ] || TRAB_INT="$(printf '%s
-' "$MSG_LIDA" | git interpret-trailers --parse 2>/dev/null     | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
-  TMP_INT="$(mktemp)" || exit 2
-  printf '%s
-' "$MSG_LIDA" > "$TMP_INT" || { rm -f "$TMP_INT"; exit 2; }
-  SAIDA_INT="$(bash "$CONTRATO_COMMIT" --validar-integracao     --trabalho "${TRAB_INT:-?}" --arquivo "$TMP_INT" 2>&1)"
-  RC_INT=$?
-  rm -f "$TMP_INT"
-  if [ "$RC_INT" != 0 ]; then
-    printf '%s
+  tmp="$(mktemp)" || { INT_CLASSE=invalida; INT_SAIDA="sem arquivo temporário"; return 0; }
+  printf '%s\n' "$txt" > "$tmp"
+  INT_SAIDA="$(bash "$3" --validar-integracao --trabalho "${trab:-?}" --arquivo "$tmp" 2>&1)"; rc=$?
+  rm -f "$tmp"
+  if [ "$rc" != 0 ]; then INT_CLASSE=invalida; return 0; fi
+  mh="$(git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD 2>/dev/null)"
+  if [ "$integra" != "$mh" ]; then
+    INT_CLASSE=invalida
+    INT_SAIDA="Integra-base diverge de MERGE_HEAD: mensagem=$integra MERGE_HEAD=$mh"
+    return 0
+  fi
+  INT_CLASSE=valida
+}
+
+if git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && [ -n "$MSG_LIDA" ]; then
+  integracao_da_mensagem "$MSG_LIDA" "$TRABALHO" "$CONTRATO_COMMIT"
+  case "$INT_CLASSE" in
+    invalida)
+      printf '%s
 ' "mergex/commit-por-task — merge de integração com mensagem inválida
 
-$SAIDA_INT
+$INT_SAIDA
 
-O merge em andamento é a integração da base: exige exatamente Trabalho +
-Integra-base (SHA completo de MERGE_HEAD) e nunca aceita Task nem Metodo." >&2
-    exit 2
-  fi
-  expx_permite "$RAIZ" "$HOOK" "merge de integracao da base"
+O merge em andamento declara Integra-base, então é a integração da base: exige
+exatamente Trabalho + Integra-base (SHA completo de MERGE_HEAD) e nunca aceita
+Task nem Metodo." >&2
+      exit 2 ;;
+    valida) expx_permite "$RAIZ" "$HOOK" "merge de integracao da base" ;;
+  esac
 fi
 
 # As três chaves de controle formam duas classes mutuamente exclusivas. Esta

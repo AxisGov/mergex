@@ -30,11 +30,64 @@ RAIZ="$(expx_raiz "${CWD:-$PWD}")"
 MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
 [ "$MODO" = "desligado" ] && exit 0
 
-# Merge de integração da base (MERGE_HEAD): só vale o que a integração muda em
-# relação à base — o resultado preparado contra MERGE_HEAD. O que veio da base
-# inteira não é desvio deste trabalho; o que a resolução acrescenta, é.
+# Merge de integração da base: só vale o que a integração muda em relação à
+# base — o resultado preparado contra MERGE_HEAD. O que veio da base inteira não
+# é desvio deste trabalho; o que a resolução acrescenta, é. Isso vale só quando
+# a MENSAGEM do commit é uma integração válida (Integra-base = MERGE_HEAD); um
+# merge qualquer, ou mensagem ilegível, é avaliado como sempre.
+CONTRATO_COMMIT="$DIR/../../skills/mergex/scripts/contrato-de-commit.sh"
+integracao_da_mensagem() { # <mensagem-lida> <trabalho-da-branch> <contrato>
+  # Define INT_CLASSE (nenhuma | valida | invalida) e INT_SAIDA. Só uma mensagem
+  # que declara `Integra-base:` como trailer isolado é da classe integração;
+  # qualquer outra é "nenhuma" e segue as regras de sempre.
+  INT_CLASSE=nenhuma; INT_SAIDA=""
+  local txt tr integra trab tmp mh rc
+  # Formas de -m que o recorte do comando deixa sujas: `-m a -m b` (parágrafos)
+  # e `-m "$(cat <<'EOF' ... EOF)"` (invólucro do heredoc).
+  txt="${1//\" -m \"/$'\n\n'}"
+  txt="$(printf '%s\n' "$txt" | awk 'NR==1 && /^\$\(cat[[:space:]]*<</ { h=1; next } h && /^[A-Z_]+[[:space:]]*$/ { exit } { print }')"
+  tr="$(printf '%s\n' "$txt" | git interpret-trailers --parse 2>/dev/null)"
+  printf '%s\n' "$tr" | grep -Eq '^Integra-base:' || return 0
+  integra="$(printf '%s\n' "$tr" | sed -n 's/^Integra-base:[[:space:]]*//p' | head -1)"
+  trab="$2"
+  [ -n "$trab" ] || trab="$(printf '%s\n' "$tr" | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
+  if [ ! -r "$3" ]; then
+    return 0
+  fi
+  tmp="$(mktemp)" || { INT_CLASSE=invalida; INT_SAIDA="sem arquivo temporário"; return 0; }
+  printf '%s\n' "$txt" > "$tmp"
+  INT_SAIDA="$(bash "$3" --validar-integracao --trabalho "${trab:-?}" --arquivo "$tmp" 2>&1)"; rc=$?
+  rm -f "$tmp"
+  if [ "$rc" != 0 ]; then INT_CLASSE=invalida; return 0; fi
+  mh="$(git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD 2>/dev/null)"
+  if [ "$integra" != "$mh" ]; then
+    INT_CLASSE=invalida
+    INT_SAIDA="Integra-base diverge de MERGE_HEAD: mensagem=$integra MERGE_HEAD=$mh"
+    return 0
+  fi
+  INT_CLASSE=valida
+}
+
+MSG_LIDA=""
 if git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
-  PREP="$(git -C "$RAIZ" diff --cached --name-only MERGE_HEAD 2>/dev/null)"
+  ARQ_MSG="$(printf '%s' "$CMD" | sed -n 's/.*[[:space:]]-F[[:space:]]*\([^[:space:]]*\).*/\1/p; s/.*--file=\([^[:space:]]*\).*/\1/p' | head -1)"
+  if [ -n "$ARQ_MSG" ]; then
+    ARQ_MSG="$(printf '%s' "$ARQ_MSG" | sed "s/^['\"]//; s/['\"]$//")"
+    case "$ARQ_MSG" in /*) : ;; *) ARQ_MSG="$RAIZ/$ARQ_MSG" ;; esac
+    [ -r "$ARQ_MSG" ] && MSG_LIDA="$(cat "$ARQ_MSG" 2>/dev/null)"
+  else
+    case "$CMD" in
+      *' -m "'*) MSG_LIDA="${CMD#*' -m "'}"; MSG_LIDA="${MSG_LIDA%\"*}" ;;
+    esac
+  fi
+fi
+PREP=""
+if [ -n "$MSG_LIDA" ]; then
+  TRAB_MSG="$(expx_trabalho_atual_por_branch "$RAIZ")" || TRAB_MSG=""
+  integracao_da_mensagem "$MSG_LIDA" "$TRAB_MSG" "$CONTRATO_COMMIT"
+  [ "$INT_CLASSE" = valida ] \
+    && PREP="$(git -C "$RAIZ" diff --cached --name-only MERGE_HEAD 2>/dev/null)"
+  [ "$INT_CLASSE" = valida ] || PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
 else
   PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
 fi
