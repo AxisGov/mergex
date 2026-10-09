@@ -28,6 +28,13 @@
 #   fx_push_real <dir> <args do git push>...  `git push` real com o pre-push
 #                               apontando para portao-push.sh (chamador mínimo
 #                               da fixture); imprime rc=, ref= e stderr=
+#   fx_push_efetivo <dir> <args do git push>...  o mesmo push real e a mesma
+#                               saída, sem chamador mínimo nem core.hooksPath:
+#                               decide o pre-push do diretório efetivo (o do E0)
+#   fx_fluxo_completo <dir>     o fluxo da spec, seção 16, só pelos executáveis
+#                               da skill (E0 ao e8); falha na primeira etapa
+#                               com FX_ERRO; saídas em FX_FLUXO_DIR
+#   fx_commit_produto_apos_portao <dir>  commit de produto comum na branch
 #   fx_worktree_vinculada <dir> worktree vinculada (`.git` é arquivo) com
 #                               feature/ft-rec, ao lado de <dir> (o checkout
 #                               principal fica destacado no mesmo commit): FX_WT
@@ -936,10 +943,25 @@ _fx_pre_push_minimo() {
 #   stderr=<arquivo com o stderr do push, no diretório Git comum de <dir>>
 # FX_PUSH_REF padrão: refs/heads/feature/ft-rec. rc 1 se o chamador não instala.
 fx_push_real() {
-  local dir="$1" rc ref err alvo="${FX_PUSH_REF:-refs/heads/feature/ft-rec}"
+  local dir="$1"
   [ -n "$dir" ] && [ "$#" -ge 2 ] || return 64
-  shift
   _fx_pre_push_minimo "$dir" "${FX_PORTAO_PUSH:-$_FXR_PORTAO_PUSH}" || return 1
+  _fx_push "$@"
+}
+
+# fx_push_efetivo <dir> <args do git push>... — o mesmo push REAL e a mesma
+# saída de fx_push_real, SEM instalar o chamador mínimo nem tocar
+# core.hooksPath: quem decide é o pre-push do diretório efetivo do Git (`git
+# rev-parse --git-path hooks`), o que o E0 instalou.
+fx_push_efetivo() {
+  [ -n "${1:-}" ] && [ "$#" -ge 2 ] || return 64
+  _fx_push "$@"
+}
+
+# _fx_push <dir> <args do git push>... — o núcleo dos dois: push e saída
+_fx_push() {
+  local dir="$1" rc ref err alvo="${FX_PUSH_REF:-refs/heads/feature/ft-rec}"
+  shift
   err="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/fx-push-stderr" || return 1
   git -C "$dir" push "$@" > /dev/null 2> "$err"; rc=$?
   ref="$(git -C "$dir" ls-remote origin "$alvo" 2>/dev/null | awk -v r="$alvo" '$2 == r { print $1 }')"
@@ -1069,4 +1091,137 @@ fx_hook_terceiro() {
     printf '%s\n' "${corpo//__PP__/"$pp"}"
   } > "$hd/pre-push" || return 1
   chmod 755 "$hd/pre-push"
+}
+
+# ---------------------------------------------------------------------------
+# Fluxo ponta a ponta depois da reconciliação (Task 20, spec seção 16)
+# ---------------------------------------------------------------------------
+
+# Os executáveis da própria skill, chamados pelo fluxo.
+_FXR_SKILL="$(cd "$_FXR_LIB/../../.." && pwd)/.claude/skills/mergex/scripts"
+
+# _fx_etapa <rótulo> <dir> <comando>... — roda o comando em <dir> (num
+# subshell), grava stdout, stderr e código em FX_FLUXO_DIR/<rótulo>.{out,err,rc}.
+# Código diferente de 0 preenche FX_ERRO com a etapa e a saída, e devolve 1.
+_fx_etapa() {
+  local rot="$1" dir="$2" rc; shift 2
+  ( cd "$dir" && "$@" ) > "$FX_FLUXO_DIR/$rot.out" 2> "$FX_FLUXO_DIR/$rot.err"; rc=$?
+  printf '%s\n' "$rc" > "$FX_FLUXO_DIR/$rot.rc"
+  [ "$rc" = 0 ] && return 0
+  FX_ERRO="etapa $rot (rc=$rc): $(cat "$FX_FLUXO_DIR/$rot.out" "$FX_FLUXO_DIR/$rot.err" | tr '\n' '|')"
+  return 1
+}
+
+# _fx_e3 — o E3 sobre o delta desde o último ATENCAO.md, no cwd: a lista de
+# reconciliados vem das linhas `coberto` de `reconciliacao-base.sh
+# --verificar`, a classificação vem de `classificar-atencao.sh --reconciliados`
+# (O10), e o ATENCAO.md é regravado inteiro na forma de
+# assets/TEMPLATE-atencao.md a partir da saída do classificador. Sem o agente
+# revisor-diff, nenhum caminho leva evidência O1–O9, L1–L3 ou D1–D3: os
+# reconciliados saem por O10, os artefatos de método pelo catálogo (L4/D4) e o
+# resto pelo padrão do classificador.
+_fx_e3() {
+  local e=docs/entregas/ft-rec/ENTREGA.md a=docs/entregas/ft-rec/ATENCAO.md ult
+  local rec="$FX_FLUXO_DIR/e3-reconciliados.tsv" ent="$FX_FLUXO_DIR/e3-entrada.txt" cls="$FX_FLUXO_DIR/e3-classificacao.tsv"
+  local caminho faixa just st tam n=0 x=0 y=0 z=0 olho="" leit="" disp="" linha
+  bash "$_FXR_SKILL/reconciliacao-base.sh" --verificar --entrega "$e" --origem sprintx --trabalho ft-rec > "$FX_FLUXO_DIR/e3-verificar.out" || return 1
+  awk -F'\t' '$1 == "coberto" { print $2 "\t" $3 }' "$FX_FLUXO_DIR/e3-verificar.out" > "$rec" || return 1
+  [ -s "$rec" ] || { printf 'e3: nenhum caminho coberto\n' >&2; return 1; }
+  ult="$(git log -1 --format=%H -- "$a")" && [ -n "$ult" ] || { printf 'e3: sem ATENCAO.md anterior\n' >&2; return 1; }
+  git -c core.quotepath=false diff --name-only --no-renames "$ult" HEAD > "$ent" || return 1
+  bash "$_FXR_SKILL/classificar-atencao.sh" --base main --reconciliados "$rec" < "$ent" > "$cls" || return 1
+  while IFS="$(printf '\t')" read -r caminho faixa just; do
+    [ -n "$caminho" ] || continue
+    st="$(git -c core.quotepath=false diff --name-status --no-renames "$ult" HEAD -- ":(literal)$caminho" | cut -f1)"
+    tam="$(git -c core.quotepath=false diff --numstat --no-renames "$ult" HEAD -- ":(literal)$caminho" | awk -F'\t' '{ printf "+%s/-%s", $1, $2 }')"
+    linha="| \`$caminho\` | ${st:--} | ${tam:--} | $just |"
+    n=$((n + 1))
+    case "$faixa" in
+      'OLHO OBRIGATÓRIO') x=$((x + 1)); olho="$olho$linha
+" ;;
+      'LEITURA RÁPIDA') y=$((y + 1)); leit="$leit$linha
+" ;;
+      'DISPENSÁVEL') z=$((z + 1)); disp="$disp$linha
+" ;;
+      *) printf 'e3: faixa desconhecida para %s: %s\n' "$caminho" "$faixa" >&2; return 1 ;;
+    esac
+  done < "$cls"
+  [ "$n" -gt 0 ] || { printf 'e3: classificação vazia\n' >&2; return 1; }
+  { printf '# Onde gastar atenção — ft-rec\n\n'
+    printf 'Branch: `feature/ft-rec` → `main`\nData: %s\n\n' "$(date +%Y-%m-%d)"
+    printf '**%s arquivos — %s olho obrigatório, %s leitura rápida, %s dispensável**\n\n' "$n" "$x" "$y" "$z"
+    printf 'A classificação é derivada de evidência registrada, nunca de sensação.\nTamanho de diff não é critério.\n\n'
+    printf '## OLHO OBRIGATÓRIO — ler linha a linha\n\n| Arquivo | Mudança | Tamanho | Por quê |\n|---|---|---|---|\n%s\n' "$olho"
+    printf '## LEITURA RÁPIDA — conferir intenção, não implementação\n\n| Arquivo | Mudança | Tamanho | Por quê |\n|---|---|---|---|\n%s\n' "$leit"
+    printf '## DISPENSÁVEL — a máquina já provou\n\n| Arquivo | Mudança | Tamanho | Por quê |\n|---|---|---|---|\n%s\n' "$disp"
+    printf '## Fontes consultadas\n\n- reconciliacao-base.sh --verificar — os caminhos cobertos (O10)\n- classificar-atencao.sh --reconciliados — a ordem dos critérios e o catálogo de método\n\n'
+    printf '## Fontes ausentes\n\n- evidência O1–O9, L1–L3 e D1–D3 do revisor-diff — não avaliada nesta fixture\n'
+  } > "$a"
+}
+
+# _fx_e7 — o E7 retoma o PR existente (nunca um segundo PR): regrava o PR.md
+# com a nota da retomada, no cwd. Fica para o checkpoint e8.
+_fx_e7() {
+  printf '\n## Retomada depois da reconciliação de base\n\nO PR existente é retomado com RECONCILIACAO-BASE-001.md; nenhum PR novo é aberto.\n' \
+    >> docs/entregas/ft-rec/PR.md
+}
+
+# fx_fluxo_completo <dir> — o fluxo da spec, seção 16, sobre o cenário em
+# <dir> (o checkout principal ou uma worktree vinculada em feature/ft-rec),
+# só pelos executáveis da skill, nesta ordem:
+#   01-instalar            ativacao-pre-push.sh --instalar (E0)
+#   02-registrar           reconciliacao-base.sh --registrar -- FX_NOVO1 FX_NOVO2
+#   03-reconciliacao-base  persistir-metodo.sh --persistir --checkpoint reconciliacao-base
+#   04-barreira            reconciliacao-base.sh --verificar --checkpoint reconciliacao-base
+#   05-v9, 05-provar       portao-v9.sh --verificar; ativacao-pre-push.sh --provar
+#   06-registrar-portao    registrar-portao.sh --resultado pronto (portao e portao_sha)
+#   07-e3, 07-pre-e6       ATENCAO.md pelo classificador (O10); checkpoint pre-e6
+#   08-validade            validade-do-portao.sh --verificar
+#   09-e7, 09-e8           PR.md retomado; checkpoint e8
+#   10-validade            validade-do-portao.sh --verificar
+# Nunca edita o ENTREGA.md: o registro, o registrar-portao e os checkpoints são
+# os únicos escritores. Para na primeira etapa com código diferente de 0, com
+# FX_ERRO = a etapa e a saída. Cada etapa deixa <rótulo>.out/.err/.rc em
+# FX_FLUXO_DIR (<diretório Git comum>/fx-fluxo, no temporário do teste).
+# Exporta FX_FLUXO_DIR, FX_FLUXO_RECONC (o commit reconciliacao-base),
+# FX_FLUXO_PORTAO (o portao_sha gravado), FX_FLUXO_PRE_E6 e FX_FLUXO_E8.
+fx_fluxo_completo() {
+  local dir="${1:-}" e=docs/entregas/ft-rec/ENTREGA.md
+  FX_ERRO=""
+  [ -n "$dir" ] && [ -e "$dir/.git" ] || { FX_ERRO="uso: fx_fluxo_completo <dir>"; return 64; }
+  FX_FLUXO_DIR="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/fx-fluxo" \
+    || { FX_ERRO="diretório Git comum ilegível"; return 1; }
+  rm -rf "$FX_FLUXO_DIR" && mkdir -p "$FX_FLUXO_DIR" || { FX_ERRO="não criou $FX_FLUXO_DIR"; return 1; }
+  FX_FLUXO_RECONC=""; FX_FLUXO_PORTAO=""; FX_FLUXO_PRE_E6=""; FX_FLUXO_E8=""
+  export FX_FLUXO_DIR FX_FLUXO_RECONC FX_FLUXO_PORTAO FX_FLUXO_PRE_E6 FX_FLUXO_E8
+  set -- --entrega "$e" --origem sprintx --trabalho ft-rec
+  _fx_etapa 01-instalar "$dir" bash "$_FXR_SKILL/ativacao-pre-push.sh" --instalar --entrega "$e" || return 1
+  _fx_etapa 02-registrar "$dir" bash "$_FXR_SKILL/reconciliacao-base.sh" --registrar "$@" -- "$FX_NOVO1" "$FX_NOVO2" || return 1
+  _fx_etapa 03-reconciliacao-base "$dir" bash "$_FXR_SKILL/persistir-metodo.sh" --persistir "$@" --checkpoint reconciliacao-base || return 1
+  FX_FLUXO_RECONC="$(git -C "$dir" rev-parse HEAD)"
+  _fx_etapa 04-barreira "$dir" bash "$_FXR_SKILL/reconciliacao-base.sh" --verificar --checkpoint reconciliacao-base "$@" || return 1
+  _fx_etapa 05-v9 "$dir" bash "$_FXR_SKILL/portao-v9.sh" --verificar "$@" || return 1
+  _fx_etapa 05-provar "$dir" bash "$_FXR_SKILL/ativacao-pre-push.sh" --provar --entrega "$e" || return 1
+  _fx_etapa 06-registrar-portao "$dir" bash "$_FXR_SKILL/registrar-portao.sh" "$@" --resultado pronto || return 1
+  FX_FLUXO_PORTAO="$(sed -n 's/^portao_sha=//p' "$FX_FLUXO_DIR/06-registrar-portao.out")"
+  _fx_etapa 07-e3 "$dir" _fx_e3 || return 1
+  _fx_etapa 07-pre-e6 "$dir" bash "$_FXR_SKILL/persistir-metodo.sh" --persistir "$@" --checkpoint pre-e6 || return 1
+  FX_FLUXO_PRE_E6="$(git -C "$dir" rev-parse HEAD)"
+  _fx_etapa 08-validade "$dir" bash "$_FXR_SKILL/validade-do-portao.sh" --verificar --entrega "$e" || return 1
+  _fx_etapa 09-e7 "$dir" _fx_e7 || return 1
+  _fx_etapa 09-e8 "$dir" bash "$_FXR_SKILL/persistir-metodo.sh" --persistir "$@" --checkpoint e8 || return 1
+  FX_FLUXO_E8="$(git -C "$dir" rev-parse HEAD)"
+  _fx_etapa 10-validade "$dir" bash "$_FXR_SKILL/validade-do-portao.sh" --verificar --entrega "$e" || return 1
+  return 0
+}
+
+# fx_commit_produto_apos_portao <dir> — um commit de produto comum (sem
+# Metodo:) na branch do trabalho: acrescenta uma linha a src/painel.ts.
+fx_commit_produto_apos_portao() {
+  local dir="${1:-}"
+  [ -n "$dir" ] && [ -e "$dir/.git" ] || return 64
+  ( cd "$dir" || exit 1
+    printf 'export const depoisDoPortao = 1;\n' >> src/painel.ts || exit 1
+    git add -- src/painel.ts || exit 1
+    git commit -q -m "feat(ft-rec): ajuste do painel depois do portao" )
 }
