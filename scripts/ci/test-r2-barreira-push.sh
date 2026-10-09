@@ -943,6 +943,226 @@ grupo_entrypoints() {
 }
 
 # ---------------------------------------------------------------------------
+# CI (Task 16): o mesmo portão sobre o SHA da cabeça do PR
+# ---------------------------------------------------------------------------
+
+CI="$S/portao-ci.sh"
+TEMPLATE_CI="$REPO/.claude/skills/mergex/assets/ci/mergex-portao.yml"
+BARREIRA_REF="$REPO/.claude/skills/mergex/references/12-barreira-de-push.md"
+VALIDADOR_CONTRATO="$REPO/scripts/ci/validate-mergex-contract.sh"
+
+# ci_roda <dir> <sha> <branch> [script] — portao-ci.sh a partir de <dir>; stdout
+# em CI_OUT, stderr em CI_ERR, código em CI_RC
+CI_OUT=""; CI_ERR=""; CI_RC=""
+ci_roda() {
+  local e; e="$(mktemp)"; TMPS="$TMPS $e"
+  CI_OUT="$(cd "$1" && bash "${4:-$CI}" --verificar --sha "$2" --branch "$3" 2>"$e")"; CI_RC=$?
+  CI_ERR="$(cat "$e")"; rm -f "$e"
+}
+ci_rc() { # <desc> <rc> <dir> <sha> <branch> [script]
+  ci_roda "$3" "$4" "$5" "${6:-}"
+  if [ "$CI_RC" = "$2" ]; then ok "$1"; else falha "$1 — rc=$CI_RC (esperava $2): $(printf '%s' "$CI_OUT $CI_ERR" | tr '\n' '|')"; fi
+}
+ci_err_tem() { case "$CI_ERR" in *"$2"*) ok "$1" ;; *) falha "$1 — sem '$2' no stderr: $(printf '%s' "$CI_ERR" | tr '\n' '|')" ;; esac; }
+ci_err_sem() { case "$CI_ERR" in *"$2"*) falha "$1 — '$2' no stderr: $(printf '%s' "$CI_ERR" | tr '\n' '|')" ;; *) ok "$1" ;; esac; }
+
+# remoto_novo <dir> <nome> — um bare vazio e novo como origin: o SHA remoto da
+# ref é nulo, como no CI
+remoto_novo() {
+  local r; r="$(cd "$1/.." && pwd)/$2.git"
+  git init -q --bare "$r" && git -C "$1" remote set-url origin "$r" && FX_REMOTO="$r"
+}
+
+# equivale <desc> <barra|passa> <dir> <sha> [script do pre-push] [script do ci] —
+# a MESMA entrada no pre-push (push real, remoto novo) e no CI: decisões iguais
+EQ_N=0
+equivale() {
+  local desc="$1" esp="$2" dir="$3" sha="$4" pp="${5:-$PP}" ci="${6:-$CI}" prc crc out
+  EQ_N=$((EQ_N + 1))
+  remoto_novo "$dir" "eq$EQ_N" || { falha "$desc — remoto novo"; return; }
+  out="$(FX_PORTAO_PUSH="$pp" fx_push_real "$dir" origin "$sha:refs/heads/feature/ft-rec")"
+  prc="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
+  PUSH_ERR="$(printf '%s\n' "$out" | sed -n 's/^stderr=//p')"
+  ci_roda "$dir" "$sha" feature/ft-rec "$ci"; crc="$CI_RC"
+  case "$esp" in
+    barra) [ "$prc" = 1 ] && [ "$crc" = 1 ] && ok "$desc: pre-push e CI barram" \
+      || falha "$desc — pre-push rc=$prc, ci rc=$crc (ambos 1): $(printf '%s' "$CI_ERR" | tr '\n' '|')" ;;
+    *) [ "$prc" = 0 ] && [ "$crc" = 0 ] && ok "$desc: pre-push e CI liberam" \
+      || falha "$desc — pre-push rc=$prc, ci rc=$crc (ambos 0): $(printf '%s' "$CI_ERR" | tr '\n' '|')" ;;
+  esac
+}
+
+grupo_ci() {
+  local t d v1 p1 vv x pn n1 c a o e frase
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  [ -r "$CI" ] || falha "portao-ci.sh: No such file ($CI)"
+  export FX_PORTAO_PUSH="$PP"
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  d="$t/repo"
+  fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_remoto_bare "$d" || { falha "remoto bare não montou"; return; }
+  modo "$d" aviso
+  cd "$d" || return
+  git switch -q --detach || { falha "HEAD não destacou"; return; }
+
+  # ---- ci reprova o SHA que o pre-push barraria; aprova o que ele libera --------
+  fx_portao_em "$d" HEAD; v1="$(git rev-parse HEAD)"
+  equivale "ci aprova o SHA que o pre-push libera (pronto válido)" passa "$d" "$v1"
+  ci_err_sem "ci aprova o válido: nenhum diagnóstico" "mergex ci"
+  case "$CI_OUT" in *decisao=passa*motivo=portao_valido*) ok "ci imprime decisao=passa e motivo=portao_valido" ;; *) falha "saída do ci válido: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+  produto "$d" vencido1; p1="$(git rev-parse HEAD)"
+  [ "$(val_motivo HEAD)" = commit_de_produto ] && ok "controle: HEAD vencido por produto" || falha "controle: HEAD não venceu"
+  equivale "ci reprova o SHA que o pre-push barraria (pronto vencido)" barra "$d" "$p1"
+  ci_err_tem "ci vencido: diagnóstico cita commit_de_produto" "commit_de_produto"
+  case "$CI_OUT" in *decisao=barra*) ok "ci imprime decisao=barra" ;; *) falha "saída do ci vencido: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+
+  # ausente: pronto legado sem portao_sha, e ENTREGA.md ausente do SHA enviado
+  # (a ponta local da branch ainda a declara)
+  fx_portao_em "$d" HEAD; vv="$(git rev-parse HEAD)"
+  fx_portao_sem_sha "$d"; x="$(git rev-parse HEAD)"
+  [ "$(val_motivo HEAD)" = portao_sha_ausente ] && ok "controle: pronto sem portao_sha" || falha "controle: legado"
+  equivale "ci reprova o SHA que o pre-push barraria (portão ausente: pronto sem portao_sha)" barra "$d" "$x"
+  ci_err_tem "ci sem portao_sha: instrução de rodar o E2" "rode o E2"
+  pn="$( GIT_INDEX_FILE="$t/idx-sem" git read-tree "$vv" \
+    && GIT_INDEX_FILE="$t/idx-sem" git update-index --force-remove docs/entregas/ft-rec/ENTREGA.md \
+    && git commit-tree "$(GIT_INDEX_FILE="$t/idx-sem" git write-tree)" -p "$vv" -m "docs: sem entrega"; rm -f "$t/idx-sem" )"
+  git cat-file -e "$pn:docs/entregas/ft-rec/ENTREGA.md" 2>/dev/null && falha "controle: o ENTREGA.md continua no SHA sem entrega" || ok "controle: SHA sem ENTREGA.md"
+  equivale "ci reprova o SHA que o pre-push barraria (ENTREGA.md ausente do SHA enviado)" barra "$d" "$pn"
+
+  # historia_incompleta: clone raso, com a mesma entrada no pre-push e no CI
+  git push -q origin "$vv:refs/heads/feature/ft-rec" >/dev/null 2>&1 || falha "push do portão válido ao remoto"
+  cd "$t" || return
+  git clone -q --depth 1 -b feature/ft-rec "file://$FX_REMOTO" "$t/raso" 2>/dev/null || falha "clone --depth 1"
+  git -C "$t/raso" config user.email teste@expx.local; git -C "$t/raso" config user.name "Teste Expx"
+  git -C "$t/raso" config commit.gpgsign false
+  [ "$(git -C "$t/raso" rev-parse --is-shallow-repository)" = true ] && ok "controle: clone --depth 1 é raso" || falha "controle: clone não é raso"
+  fx_commit_metodo "$t/raso" pre-e6 docs/entregas/ft-rec/PR.md || falha "commit no clone raso"
+  modo "$t/raso" aviso
+  equivale "ci reprova o SHA que o pre-push barraria (historia_incompleta, clone raso)" barra "$t/raso" "$(git -C "$t/raso" rev-parse HEAD)"
+  ci_err_tem "ci clone raso: diagnóstico historia_incompleta" "historia_incompleta"
+  ci_err_tem "ci clone raso: diagnóstico indica git fetch --unshallow" "git fetch --unshallow"
+  printf '%s\n' "$CI_ERR" > "$t/err-ci-historia"
+  cd "$d" || return
+
+  # erro_ambiente: o validador ausente (cópia dos scripts sem ele)
+  mkdir -p "$t/sem-validade"; cp "$S"/*.sh "$t/sem-validade/"; rm -f "$t/sem-validade/validade-do-portao.sh"
+  equivale "ci reprova o SHA que o pre-push barraria (erro_ambiente, validador ausente)" barra "$d" "$vv" \
+    "$t/sem-validade/portao-push.sh" "$t/sem-validade/portao-ci.sh"
+  ci_err_tem "ci validador ausente: diagnóstico erro_ambiente" "erro_ambiente"
+  ci_err_tem "ci validador ausente: diagnóstico de ambiente" "erro de ambiente"
+  printf '%s\n' "$CI_ERR" > "$t/err-ci-ambiente"
+  ! grep -Fq "erro de ambiente" "$t/err-ci-historia" && ! grep -Fq "unshallow" "$t/err-ci-ambiente" \
+    && ok "ci: historia_incompleta e erro_ambiente com diagnósticos distintos" || falha "ci: diagnósticos não distintos"
+  mkdir -p "$t/sem-regras"; cp "$CI" "$t/sem-regras/"
+  ci_rc "ci sem portao-regras.sh ao lado: erro_ambiente barra" 1 "$d" "$vv" feature/ft-rec "$t/sem-regras/portao-ci.sh"
+  ci_err_tem "ci sem as regras: diagnóstico erro_ambiente" "erro_ambiente"
+
+  # ---- ci usa o SHA do PR, não o HEAD local ----------------------------------------
+  git switch -q --detach "$vv"
+  [ "$(git rev-parse HEAD)" = "$vv" ] && [ "$(val_motivo HEAD)" = ok ] && ok "controle: HEAD local válido" || falha "controle: HEAD válido"
+  ci_rc "ci usa o SHA do PR (HEAD local válido, SHA vencido): barra" 1 "$d" "$p1" feature/ft-rec
+  ci_err_tem "ci: o diagnóstico é o do SHA vencido" "commit_de_produto"
+  git switch -q --detach "$p1"
+  [ "$(val_motivo HEAD)" = commit_de_produto ] && ok "controle: HEAD local vencido" || falha "controle: HEAD vencido"
+  ci_rc "ci usa o SHA do PR (HEAD local vencido, SHA válido): passa" 0 "$d" "$vv" feature/ft-rec
+  git switch -q --detach "$vv"
+
+  # ---- null no CI segue o modo de .expx/hooks.json ---------------------------------
+  entrega_commit "$d" 's/^portao: .*/portao: null/' pre-e6; n1="$(git rev-parse HEAD)"
+  [ "$(val_motivo HEAD)" = portao_nao_pronto ] && ok "controle: portao null" || falha "controle: portao null"
+  modo "$d" bloqueio
+  equivale "null no CI segue o modo: bloqueio barra como o pre-push" barra "$d" "$n1"
+  ci_err_tem "null em bloqueio: diagnóstico do portão não autorizado" "portao: null"
+  modo "$d" aviso
+  equivale "null no CI segue o modo: aviso libera como o pre-push" passa "$d" "$n1"
+  ci_roda "$d" "$n1" feature/ft-rec
+  ci_err_tem "null em aviso: diagnóstico em stderr" "portao: null"
+  case "$CI_OUT" in *decisao=avisa*motivo=portao_null*) ok "ci imprime decisao=avisa e motivo=portao_null" ;; *) falha "saída do ci null/aviso: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+  modo "$d" desligado
+  equivale "null no CI segue o modo: desligado libera como o pre-push" passa "$d" "$n1"
+  ci_err_sem "null em desligado: sem diagnóstico" "mergex ci"
+  modo "$d" -
+  equivale "null no CI sem .expx/hooks.json: aviso (o padrão) libera" passa "$d" "$n1"
+  printf '{"hooks":{"pr-so-com-portao":{"modo":"bloquear"}}}\n' > "$d/.expx/hooks.json"
+  equivale "null no CI com modo inválido: falha fechada, barra" barra "$d" "$n1"
+  modo "$d" desligado
+  # o modo nunca afrouxa pronto vencido
+  ci_rc "o modo desligado não afrouxa o pronto vencido" 1 "$d" "$p1" feature/ft-rec
+
+  # ---- ref que não é a branch do trabalho: não aplicável ---------------------------
+  ci_rc "branch que nenhuma entrega declara não é aplicável: passa" 0 "$d" "$p1" feature/outra
+  case "$CI_OUT" in *motivo=ref_nao_aplicavel*) ok "ci imprime motivo=ref_nao_aplicavel" ;; *) falha "saída: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+
+  # ---- uso --------------------------------------------------------------------------
+  cd "$d" || return
+  rc_igual "ci sem argumentos: uso" 64 bash "$CI"
+  rc_igual "ci sem --branch: uso" 64 bash "$CI" --verificar --sha "$v1"
+  rc_igual "ci com --branch vazio: uso" 64 bash "$CI" --verificar --sha "$v1" --branch ""
+  rc_igual "ci com SHA abreviado: uso" 64 bash "$CI" --verificar --sha "$(printf '%s' "$v1" | cut -c1-12)" --branch feature/ft-rec
+  rc_igual "ci com nome de ref no lugar do SHA: uso" 64 bash "$CI" --verificar --sha HEAD --branch feature/ft-rec
+  rc_igual "ci com SHA em maiúsculas: uso" 64 bash "$CI" --verificar --sha AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA --branch feature/ft-rec
+  rc_igual "ci sem --verificar: uso" 64 bash "$CI" --sha "$v1" --branch feature/ft-rec
+  rc_igual "ci com opção desconhecida: uso" 64 bash "$CI" --verificar --sha "$v1" --branch feature/ft-rec --force
+  rc_igual "ci não tem opção de força: --force no lugar do SHA" 64 bash "$CI" --verificar --force "$v1" --branch feature/ft-rec
+
+  # ---- template ----------------------------------------------------------------------
+  [ -f "$TEMPLATE_CI" ] || falha "template ausente: $TEMPLATE_CI"
+  grep -Eq '^[[:space:]]*fetch-depth: 0[[:space:]]*$' "$TEMPLATE_CI" \
+    && ok "template fixa fetch-depth 0" || falha "template sem fetch-depth: 0"
+  grep -Fq 'ref: ${{ github.event.pull_request.head.sha }}' "$TEMPLATE_CI" \
+    && ok "template faz checkout do SHA da cabeça do PR" || falha "template sem checkout de pull_request.head.sha"
+  grep -Fq 'PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}' "$TEMPLATE_CI" \
+    && ok "template passa o SHA da cabeça do PR ao portao-ci.sh" || falha "template sem o SHA do PR no step"
+  grep -Fq 'PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}' "$TEMPLATE_CI" \
+    && ok "template passa a branch de origem do PR" || falha "template sem a branch do PR"
+  c="$(grep -F 'portao-ci.sh' "$TEMPLATE_CI" | grep -v '^[[:space:]]*#')"
+  case "$c" in *'portao-ci.sh --verificar --sha "$PR_HEAD_SHA" --branch "$PR_HEAD_REF"'*) ok "template chama portao-ci.sh --verificar com o SHA e a branch do PR" ;; *) falha "template sem a chamada de portao-ci.sh: $c" ;; esac
+  case "$c" in *'${{'*) falha "template interpola expressão no shell (injeção): $c" ;; *) ok "template não interpola o evento no texto do shell" ;; esac
+  grep -Eq '^[[:space:]]*pull_request:[[:space:]]*$' "$TEMPLATE_CI" && ok "template roda em pull_request" || falha "template sem on: pull_request"
+  sed -n '1p' "$TEMPLATE_CI" | grep -Fq 'TEMPLATE' && grep -Fq 'NÃO o' "$TEMPLATE_CI" \
+    && ok "template declara no topo que é template e que esta branch não o ativa" || falha "template sem a declaração de template"
+
+  # ---- nenhum workflow ativo ------------------------------------------------------------
+  [ -z "$(git -C "$REPO" ls-files .github/workflows)" ] && ok "nenhum workflow ativo nesta branch (git ls-files .github/workflows vazio)" \
+    || falha "há arquivo versionado em .github/workflows"
+  [ -z "$(git -C "$REPO" ls-files | grep -E '(^|/)\.github/workflows/')" ] \
+    && ok "nenhum caminho versionado sob .github/workflows em qualquer nível" || falha "caminho sob .github/workflows"
+
+  # ---- documentação não afirma CI ativo ---------------------------------------------------
+  frase='CI do portão ativo'
+  grep -Fq 'Esta branch não ativa CI em nenhum produto' "$BARREIRA_REF" \
+    && ok "o reference diz que esta branch não ativa CI em produto" || falha "o reference não diz que a branch não ativa CI"
+  grep -Fxq '## CI' "$BARREIRA_REF" && ok "o reference tem a seção CI" || falha "o reference sem a seção '## CI'"
+  ( cd "$REPO" && bash "$VALIDADOR_CONTRATO" ) >/dev/null 2>&1 && ok "o validador do contrato aprova o repositório (nenhum arquivo afirma CI ativo)" \
+    || falha "o validador do contrato reprova o repositório"
+  grep -Fq '# guarda:CIATIVO' "$VALIDADOR_CONTRATO" && ok "o validador tem a linha de guarda CIATIVO" || falha "validador sem # guarda:CIATIVO"
+  # cópia com a frase-alvo no reference: o validador reprova (e sem ela, aprova)
+  c="$t/copia"; mkdir -p "$c"
+  git -C "$REPO" ls-files -co --exclude-standard -z | ( cd "$REPO" && tar --null -T - -cf - ) | ( cd "$c" && tar -xf - ) \
+    && ( cd "$c" && git init -q && git config user.email teste@expx.local && git config user.name "Teste Expx" && git add -A ) >/dev/null 2>&1 \
+    || { falha "cópia do repositório não montou"; return; }
+  ( cd "$c" && bash scripts/ci/validate-mergex-contract.sh ) >/dev/null 2>&1 \
+    && ok "controle: a cópia sem a frase-alvo é aprovada pelo validador" || falha "controle: a cópia limpa reprova"
+  cp "$c/.claude/skills/mergex/references/12-barreira-de-push.md" "$t/ref.bak"
+  printf '\n%s em todo produto.\n' "$frase" >> "$c/.claude/skills/mergex/references/12-barreira-de-push.md"
+  ( cd "$c" && git add -A && bash scripts/ci/validate-mergex-contract.sh ) >"$t/saida-val" 2>&1; a=$?
+  [ "$a" != 0 ] && grep -Fq 'CI' "$t/saida-val" \
+    && ok "a frase-alvo num arquivo versionado faz o validador reprovar" || falha "validador aprovou a frase-alvo (rc=$a): $(tr '\n' '|' < "$t/saida-val")"
+  cp "$t/ref.bak" "$c/.claude/skills/mergex/references/12-barreira-de-push.md"
+  printf '\n%s\n' 'CI DO PORTAO ATIVO' >> "$c/docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md"
+  ( cd "$c" && git add -A && bash scripts/ci/validate-mergex-contract.sh ) >"$t/saida-val" 2>&1; a=$?
+  [ "$a" != 0 ] && ok "a frase-alvo em maiúsculas e sem acento, em outro arquivo versionado, também reprova" || falha "validador aprovou a variante (rc=$a)"
+
+  # ---- PR #192 ----------------------------------------------------------------------------------
+  grep -Fq 'PR #192' "$BARREIRA_REF" && grep -Fq 'rascunho' "$BARREIRA_REF" \
+    && grep -Fq 'instalação da MergeX nova com o `pre-push` ativo' "$BARREIRA_REF" \
+    && grep -Fq 'check de CI correspondente com a proteção de merge' "$BARREIRA_REF" \
+    && grep -Fq 'os gates' "$BARREIRA_REF" \
+    && ok "PR #192 fica em rascunho até instalação, CI e gates (os três itens no reference)" || falha "reference sem a condição do PR #192 com os três itens"
+  cd "$REPO" || return
+}
+
+# ---------------------------------------------------------------------------
 # Despacho
 # ---------------------------------------------------------------------------
 

@@ -135,3 +135,48 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --reverter \
 
 Reverter a MergeX (voltar o pin) não desfaz uma composição feita à mão: quem compôs um hook próprio
 desfaz a composição por conta própria, e o PR de reversão explica o passo.
+
+## CI
+
+O CI é a barreira **contra contorno deliberado** (`git push --no-verify` ignora o `pre-push`) e a
+defesa adicional ao `pre-push`, nunca o substituto dele. Ele repete a decisão do `pre-push` sobre o
+SHA real da cabeça do PR, pelo mesmo executável de regra:
+
+```bash
+bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha <sha40> --branch <nome>
+```
+
+- **Mesma regra, mesmo modo.** `portao-ci.sh` não tem regra própria: decide como a ref
+  `refs/heads/<nome>` empurrada com o SHA `<sha>` e SHA remoto nulo, chamando a mesma função do
+  `pre-push` (`pr_decide_ref`, em `portao-regras.sh`). Imprime `decisao=`, `motivo=` e `entrega=`.
+  Portão `pronto` vencido, ausente, inconsistente ou ilegível, `historia_incompleta` e
+  `erro_ambiente` reprovam em qualquer modo; `portao: null` segue o modo de `pr-so-com-portao` em
+  `.expx/hooks.json`, igual ao `pre-push`.
+- **O SHA do PR, não o `HEAD` local.** A decisão é sobre o `--sha` recebido; o commit em que o
+  checkout está não entra.
+- **Códigos:** `0` passa ou avisa; `1` barra (o diagnóstico vai a stderr, com textos distintos para
+  `historia_incompleta`, que manda completar a história, e para `erro_ambiente`); `64` uso. Não existe
+  opção de força.
+- **História completa.** O clone do CI precisa de `fetch-depth: 0`; clone raso é
+  `historia_incompleta` e reprova.
+- **Template.** `assets/ci/mergex-portao.yml` roda em `pull_request`, faz o checkout do SHA da
+  cabeça do PR com `fetch-depth: 0` e chama `portao-ci.sh` com esse SHA e a branch de origem do PR.
+  Os valores do evento entram pelo `env:` do step, nunca interpolados no texto do shell.
+
+### Handoff: esta branch não ativa o CI
+
+Esta branch não ativa CI em nenhum produto: ela entrega o executável, o template e os testes, e nenhum
+arquivo vive em `.github/workflows/`. Ativar é handoff posterior e separado, feito no repositório do
+produto: copiar o template para `.github/workflows/` e configurar a proteção de merge da branch
+principal exigindo o check `mergex-portao`. Sem a proteção de merge exigindo o check, ele não barra
+nada. O empacotamento do `pre-push` e do template pelo ExpxDev é outro handoff.
+
+### Condição do PR #192
+
+O PR #192 fica em rascunho até o QA aprovar e até estarem comprovados no produto os três itens:
+
+1. a instalação da MergeX nova com o `pre-push` ativo;
+2. o check de CI correspondente com a proteção de merge;
+3. os gates.
+
+Enquanto isso não estiver comprovado, nenhum texto deste repositório afirma proteção em vigor.

@@ -1374,4 +1374,28 @@ done
 grep -Fq 'ativacao-pre-push.sh' "$persiste_sh" || fail 'persistir-metodo.sh não prova o pre-push antes de persistir pronto'
 grep -Fq '# guarda:E2SEMHOOK' "$persiste_sh" || fail 'persistir-metodo.sh sem a guarda E2SEMHOOK'
 
+# ---------------------------------------------------------------------------
+# DM-184 / Task 16 — o contrato e o template de CI; esta branch não ativa CI
+# ---------------------------------------------------------------------------
+ci_sh='.claude/skills/mergex/scripts/portao-ci.sh'
+ci_tpl='.claude/skills/mergex/assets/ci/mergex-portao.yml'
+for f in "$ci_sh" "$ci_tpl"; do
+  [ -f "$f" ] || fail "DM-184: missing $f"
+done
+grep -Fxq '## CI' "$barreira_ref" || fail '12-barreira-de-push sem a seção ## CI'
+codigo "$ci_sh" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$ci_sh tem opção de força"
+grep -Fq 'pr_decide_ref' "$ci_sh" || fail "$ci_sh não decide pela regra compartilhada (pr_decide_ref)"
+grep -Fq 'fetch-depth: 0' "$ci_tpl" || fail "$ci_tpl sem fetch-depth: 0"
+grep -Fq 'portao-ci.sh --verificar' "$ci_tpl" || fail "$ci_tpl não chama portao-ci.sh --verificar"
+# Nenhum arquivo versionado afirma que o CI do portão está ativo: esta branch só
+# entrega o executável e o template (spec, seção 13, item 8). A frase-alvo é
+# "CI do portão ativo" (sem distinguir maiúsculas nem o acento de "portão"). Ficam
+# de fora só os arquivos que precisam citá-la para testá-la: este validador, as
+# suítes test-*, os mutantes mutacao-* e a fixture em scripts/ci/lib.
+# O grep sai 1 sem achado e 2 em erro: só o erro derruba a varredura.
+ci_ativo="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' ':!scripts/ci/mutacao-*' ':!scripts/ci/lib/*' \
+  | xargs -0 sh -c 'grep -IlEi -- "ci do port.{0,2}o ativo" "$@"; [ "$?" -le 1 ]' _)" \
+  || fail 'DM-184: a varredura de arquivos que afirmam CI ativo falhou'
+[ -z "$ci_ativo" ] || fail "DM-184: arquivo afirma que o CI do portão está ativo (esta branch não ativa CI): $(printf '%s' "$ci_ativo" | tr '\n' ' ')" # guarda:CIATIVO
+
 printf 'contract checks passed\n'

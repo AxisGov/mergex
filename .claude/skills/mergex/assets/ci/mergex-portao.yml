@@ -1,0 +1,39 @@
+# TEMPLATE de workflow do portão da MergeX. Não é um workflow ativo.
+#
+# Esta branch entrega o template e o executável (scripts/portao-ci.sh) e NÃO o
+# ativa em lugar nenhum: nenhum arquivo daqui existe em .github/workflows/.
+# Ativar no produto é handoff posterior e separado: copiar este arquivo para
+# .github/workflows/ do repositório do produto e configurar a proteção de merge
+# da branch principal exigindo o check "mergex-portao". Sem a proteção de merge
+# exigindo o check, ele não barra nada.
+#
+# O check repete a decisão do `pre-push` sobre o SHA da cabeça do PR (a mesma
+# regra e o mesmo modo de `portao: null`) e é a barreira contra contorno
+# deliberado, como `git push --no-verify`. Não substitui o `pre-push`.
+name: mergex-portao
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mergex-portao:
+    name: mergex-portao
+    runs-on: ubuntu-latest
+    steps:
+      # história completa: clone raso é historia_incompleta e reprova
+      - name: Checkout da cabeça do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      # os valores do evento entram pelo ambiente do step, nunca interpolados
+      # no texto do shell (head.ref é controlado por quem abre o PR)
+      - name: Verificar o portão
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha "$PR_HEAD_SHA" --branch "$PR_HEAD_REF"
