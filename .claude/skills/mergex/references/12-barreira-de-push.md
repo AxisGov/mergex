@@ -84,13 +84,25 @@ A mesma prova serve ao E0 e ao E2, e não confia no caminho nem na existência d
    remoto não mudam; só ficam objetos soltos, que nenhuma ref alcança.
 2. Executa o `pre-push` efetivo como o Git o executaria: na raiz da árvore de trabalho, com os
    argumentos `prova-mergex file:///dev/null`, uma linha de protocolo para
-   `refs/heads/<branch da entrega>` e `MERGEX_PRE_PUSH_SINAL` apontando para um temporário (o
-   validador de push acrescenta ali `mergex-pre-push invocado <pid>`, sem mudar a decisão).
-3. **Aprova só se** o hook sair com código diferente de zero **e** o sinal registrar a execução do
-   `portao-push.sh`. Reprovam: `pre-push` ausente ou não executável, término por sinal (código 128 ou
-   mais), código zero (liberou a ref inválida ou não propagou o código), ausência do sinal (o
-   validador não rodou) e estouro do orçamento de tempo (120 s pelo `timeout` do GNU coreutils,
-   quando ele existe).
+   `refs/heads/<branch da entrega>` com o SHA desse commit solto, e `MERGEX_PRE_PUSH_SINAL`
+   apontando para um temporário. O validador de push escreve ali, **depois de decidir** cada ref
+   recebida na entrada padrão, a linha `mergex-pre-push <SHA avaliado> <passa|avisa|barra>`, sem
+   mudar a decisão.
+3. **Aprova só se** o hook sair com código diferente de zero **e** o sinal tiver a linha
+   `mergex-pre-push <SHA do commit solto desta prova> barra`. Reprovam: `pre-push` ausente ou não
+   executável, término por sinal (código 128 ou mais), código zero (liberou a ref inválida ou não
+   propagou o código), a falta dessa linha (o validador não rodou, rodou sem receber a entrada, ou a
+   linha foi escrita por outro com SHA alheio) e o estouro do orçamento de tempo.
+4. **Orçamento de tempo:** 120 s. Vale um `timeout` que comprove, pelo comportamento, matar um
+   processo dentro do prazo (GNU, uutils ou outro); sem ele, um vigia em Bash. O hook roda em grupo
+   de processos próprio, morto inteiro no estouro e ao fim da prova: nenhum processo fica órfão.
+   Estouro reprova.
+
+**Limite da prova.** Ela pega erro normal: hook que não chama a MergeX, que só a cita, que a chama
+sem a entrada, que não propaga o código, que forja o sinal antigo ou uma linha com outro SHA. Um hook
+escrito **de propósito** para forjar a linha certa (lendo o SHA da entrada padrão) é contorno
+deliberado, que nenhuma prova local alcança: a barreira contra ele é o CI com proteção de merge,
+quando o produto o ativar (spec, seção 13, item 8).
 
 No E2 a prova é barreira inicial, ao lado da `pre-e2`: reprovada, o E2 não começa e nada é
 gravado. O resultado do portão é gravado só por `scripts/registrar-portao.sh`, que roda a mesma

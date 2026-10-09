@@ -40,6 +40,11 @@
 #     nao_propaga   chama o portao-push.sh com a entrada e sai 0
 #     libera        chama o portao-push.sh SEM a entrada e propaga (sai 0)
 #     sinal         chama o portao-push.sh com a entrada e se mata (SIGKILL)
+#     ecoa_sinal    não chama a MergeX: forja linhas de sinal (a antiga e uma
+#                   com SHA arbitrário) e sai 1
+#     sem_entrada   chama o portao-push.sh com </dev/null e sai 1 sozinho
+#     lento         chama o portao-push.sh com a entrada e dorme (`sleep
+#                   3077`) antes de sair 1: para o orçamento de tempo
 #
 # Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
 # o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
@@ -994,6 +999,26 @@ EOF
     sinal) cat <<'EOF'
 bash __PP__ --pre-push "$@"
 kill -KILL $$
+EOF
+      ;;
+    ecoa_sinal) cat <<'EOF'
+# forja o sinal sem executar a MergeX: a linha antiga e uma com SHA arbitrário
+cat >/dev/null
+printf 'mergex-pre-push invocado 1\n' >> "${MERGEX_PRE_PUSH_SINAL:-/dev/null}"
+printf 'mergex-pre-push 0123456789abcdef0123456789abcdef01234567 barra\n' >> "${MERGEX_PRE_PUSH_SINAL:-/dev/null}"
+exit 1
+EOF
+      ;;
+    sem_entrada) cat <<'EOF'
+cat >/dev/null
+bash __PP__ --pre-push "$@" </dev/null
+exit 1
+EOF
+      ;;
+    lento) cat <<'EOF'
+bash __PP__ --pre-push "$@"
+sleep 3077
+exit 1
 EOF
       ;;
     *) return 1 ;;

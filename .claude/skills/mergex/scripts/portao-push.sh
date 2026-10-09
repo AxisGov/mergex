@@ -20,9 +20,14 @@
 # historia_incompleta (completar a história) e de erro_ambiente (falha do
 # ambiente, inclusive o validador ausente) são textos distintos.
 #
-# MERGEX_PRE_PUSH_SINAL=<arquivo> no ambiente: só acrescenta a linha
-# `mergex-pre-push invocado <pid>` ao arquivo (o sinal da prova funcional do
-# E0/E2), sem mudar a decisão.
+# MERGEX_PRE_PUSH_SINAL=<arquivo> no ambiente: o sinal da prova funcional do
+# E0/E2 (ativacao-pre-push.sh --provar). Depois de decidir cada ref do
+# protocolo, acrescenta ao arquivo uma linha
+# `mergex-pre-push <SHA local avaliado> <passa|avisa|barra>`, sem mudar a
+# decisão. Nada é escrito antes da decisão, nem para linha fora do protocolo:
+# um hook que chama o validador sem repassar a entrada não deixa sinal, e a
+# prova exige a linha `barra` do SHA do commit solto dela. Um hook escrito de
+# propósito para forjar essa linha é contorno deliberado (a barreira é o CI).
 #
 # Códigos: 0 libera; 1 barra; 64 uso. Custo: uma validade por ref aplicável,
 # nenhuma varredura de branches. Nenhuma opção de força.
@@ -42,10 +47,6 @@ uso() {
 [ "$#" -eq 3 ] || uso 'esperava --pre-push <remoto> <url>'
 [ "$1" = --pre-push ] || uso "opção desconhecida: $1"
 REMOTO="$2"
-
-if [ -n "${MERGEX_PRE_PUSH_SINAL:-}" ]; then
-  printf 'mergex-pre-push invocado %s\n' "$$" >> "$MERGEX_PRE_PUSH_SINAL" 2>/dev/null || true
-fi
 
 diag() { printf 'mergex pre-push: %s\n' "$1" >&2; }
 AMBIENTE='erro de ambiente (erro_ambiente): a validade do portão não pôde ser avaliada'
@@ -95,6 +96,11 @@ while IFS=' ' read -r ref_local sha_local ref_remota sha_remoto resto <&3; do
     *) diag "$ref_remota: ${PR_DIAG:-$AMBIENTE: decisão indeterminada}" ;;
   esac
   [ "$decisao" = passa ] || [ "$decisao" = avisa ] || BARRA=1 # guarda:PPMULTI
+  # o sinal da prova funcional: só depois da decisão, amarrado ao SHA avaliado
+  if [ -n "${MERGEX_PRE_PUSH_SINAL:-}" ]; then
+    case "$decisao" in passa|avisa) ;; *) decisao=barra ;; esac
+    printf 'mergex-pre-push %s %s\n' "$sha_local" "$decisao" >> "$MERGEX_PRE_PUSH_SINAL" 2>/dev/null || true
+  fi
 done 3< "$TMP_DIR/entrada"
 
 [ "$BARRA" = 0 ] || diag "push barrado: uma ref inválida barra o push inteiro"

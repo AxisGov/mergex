@@ -34,13 +34,19 @@
 #   `prova-mergex file:///dev/null`, uma linha de protocolo para
 #   `refs/heads/<branch da entrega>` com o SHA remoto nulo), com
 #   MERGEX_PRE_PUSH_SINAL num temporário. Aprova só se o hook sair com código
-#   diferente de zero E o sinal registrar a execução do portao-push.sh.
-#   Reprovam: pre-push ausente ou não executável, término por sinal (código
-#   128 ou mais), estouro do orçamento de tempo, código zero (liberou a ref
-#   inválida, ou não propagou o código) e ausência do sinal (o validador não
-#   rodou). Orçamento: PRAZO segundos pelo `timeout` do GNU coreutils quando
-#   ele existe (código 124 é estouro e reprova); sem ele, a prova roda sem
-#   orçamento. Os objetos do commit solto ficam soltos no repositório
+#   diferente de zero E o sinal tiver a linha `mergex-pre-push <SHA do commit
+#   solto desta prova> barra`, que o portao-push.sh só escreve depois de
+#   decidir aquela ref. Reprovam: pre-push ausente ou não executável, término
+#   por sinal (código 128 ou mais), estouro do orçamento de tempo, código zero
+#   (liberou a ref inválida, ou não propagou o código) e a falta daquela linha
+#   (o validador não rodou, não recebeu a entrada, ou a linha é forjada com
+#   outro SHA). Um hook escrito de propósito para forjar a linha lendo o SHA
+#   da entrada é contorno deliberado, fora do alcance de qualquer prova local:
+#   a barreira contra ele é o CI. Orçamento: PRAZO segundos, por um `timeout`
+#   que comprove matar um processo no prazo (detecção pelo comportamento) ou,
+#   sem ele, por um vigia em Bash; o hook roda em grupo de processos próprio,
+#   morto inteiro no estouro e ao fim (nenhum órfão); estouro reprova. Os
+#   objetos do commit solto ficam soltos no repositório
 #   (inalcançáveis, nenhuma ref aponta para eles); o índice e a árvore de
 #   trabalho não mudam.
 #
@@ -148,12 +154,44 @@ carrega_editor() {
   declare -F _entrega_fecha >/dev/null && declare -F _entrega_troca >/dev/null && declare -F entrega_define >/dev/null
 }
 
-# orcamento — LIMITE com o timeout do GNU coreutils, ou vazio
+# orcamento — LIMITE com um `timeout` que comprovadamente mata um processo
+# dentro do prazo (pelo comportamento: `timeout 1 sleep 5` tem de sair 124 em
+# menos de 5 s; vale GNU, uutils ou outro); senão vazio, e executa_hook usa o
+# vigia em Bash.
 LIMITE=""
 orcamento() {
-  if timeout --version 2>/dev/null | sed -n 1p | grep -Fq 'GNU coreutils'; then
-    LIMITE="timeout -k 5 $PRAZO"
+  local ini fim rc
+  LIMITE=""
+  command -v timeout >/dev/null 2>&1 || return 0
+  ini="$(date +%s)"; timeout 1 sleep 5 >/dev/null 2>&1; rc=$?; fim="$(date +%s)"
+  [ "$rc" = 124 ] && [ $((fim - ini)) -lt 5 ] && LIMITE="timeout -k 5 $PRAZO"
+  return 0
+}
+
+# executa_hook — roda o pre-push efetivo como o Git (na raiz, argumentos da
+# prova, a linha de protocolo na entrada) em grupo de processos próprio
+# (`set -m`), com o orçamento: o `timeout` comprovado, ou um vigia em Bash
+# que, estourado o PRAZO, marca `estouro` e mata o grupo (TERM e, 5 s depois,
+# KILL). No fim, o que sobrar do grupo do hook é morto: nenhum processo órfão.
+# Imprime nada; devolve o código do hook.
+executa_hook() {
+  local pid vigia="" rc
+  rm -f "$TMP_DIR/estouro"
+  set -m
+  # shellcheck disable=SC2086
+  ( cd "$RAIZ" && export MERGEX_PRE_PUSH_SINAL="$TMP_DIR/sinal" && exec $LIMITE "$HOOK" prova-mergex file:///dev/null \
+      < "$TMP_DIR/linha" > "$TMP_DIR/saida" 2>&1 ) &
+  pid=$!
+  if [ -z "$LIMITE" ]; then
+    ( sleep "$PRAZO"; : > "$TMP_DIR/estouro"; kill -TERM -- "-$pid" 2>/dev/null
+      sleep 5; kill -KILL -- "-$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    vigia=$!
   fi
+  wait "$pid"; rc=$?
+  if [ -n "$vigia" ]; then kill -KILL -- "-$vigia" 2>/dev/null; wait "$vigia" 2>/dev/null; fi
+  kill -KILL -- "-$pid" 2>/dev/null
+  set +m
+  return "$rc"
 }
 
 # para_git <caminho> — o temporário como o git o lê: no Git Bash do Windows,
@@ -200,14 +238,16 @@ provar() {
   printf 'refs/heads/%s %s refs/heads/%s %s\n' "$b" "$c" "$b" "$nulo" > "$TMP_DIR/linha"
   : > "$TMP_DIR/sinal"
   orcamento
-  # shellcheck disable=SC2086
-  ( cd "$RAIZ" && MERGEX_PRE_PUSH_SINAL="$TMP_DIR/sinal" $LIMITE "$HOOK" prova-mergex file:///dev/null \
-      < "$TMP_DIR/linha" > "$TMP_DIR/saida" 2>&1 ); rc=$?
+  executa_hook 2>/dev/null; rc=$?
   PROVA_RC="$rc"
-  [ "$rc" -lt 128 ] || { PROVA_ERRO="o pre-push terminou por sinal (código $rc)"; return 1; }
+  [ ! -e "$TMP_DIR/estouro" ] || { PROVA_ERRO="o pre-push estourou o orçamento de ${PRAZO}s"; return 1; }
   [ -z "$LIMITE" ] || [ "$rc" != 124 ] || { PROVA_ERRO="o pre-push estourou o orçamento de ${PRAZO}s"; return 1; }
+  [ "$rc" -lt 128 ] || { PROVA_ERRO="o pre-push terminou por sinal (código $rc)"; return 1; }
   [ "$rc" != 0 ] || { PROVA_ERRO='o pre-push saiu com código 0: liberou a ref sabidamente inválida da prova, ou não propagou o código do validador'; return 1; }
-  grep -Eq '^mergex-pre-push invocado [0-9]+$' "$TMP_DIR/sinal" || { PROVA_ERRO="o pre-push saiu com código $rc sem executar o validador da MergeX (nenhum sinal do portao-push.sh)"; return 1; } # guarda:ATVTXT
+  # o validador decidiu `barra` para o SHA do commit solto DESTA prova (a linha
+  # vem do portao-push.sh depois da decisão); linha antiga, SHA alheio ou
+  # decisão diferente não contam
+  grep -Fxq "mergex-pre-push $c barra" "$TMP_DIR/sinal" || { PROVA_ERRO="o pre-push saiu com código $rc sem que o validador da MergeX barrasse a ref da prova ($c): nenhuma decisão dele no sinal"; return 1; } # guarda:ATVTXT
   return 0
 }
 

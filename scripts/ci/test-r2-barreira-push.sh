@@ -391,8 +391,8 @@ grupo_prepush() {
   printf 'refs/heads/feature/ft-rec %s refs/heads/feature/ft-rec %s\n' "$p2" "$v9" > "$t/linha"
   bash "$PP" --pre-push origin "$FX_REMOTO" < "$t/linha" >/dev/null 2>&1; rc=$?
   MERGEX_PRE_PUSH_SINAL="$t/sinal" bash "$PP" --pre-push origin "$FX_REMOTO" < "$t/linha" >/dev/null 2>&1
-  [ "$?" = "$rc" ] && [ "$rc" = 1 ] && grep -Eq '^mergex-pre-push invocado [0-9]+$' "$t/sinal" \
-    && ok "MERGEX_PRE_PUSH_SINAL só acrescenta o sinal, sem mudar a decisão" || falha "sinal: rc=$rc $(cat "$t/sinal" 2>/dev/null)"
+  [ "$?" = "$rc" ] && [ "$rc" = 1 ] && [ "$(cat "$t/sinal")" = "mergex-pre-push $p2 barra" ] \
+    && ok "MERGEX_PRE_PUSH_SINAL só acrescenta o sinal (SHA avaliado e decisão), sem mudar a decisão" || falha "sinal: rc=$rc $(cat "$t/sinal" 2>/dev/null)"
   printf 'refs/heads/feature/ft-rec %s refs/heads/feature/ft-rec\n' "$v9" > "$t/linha"
   rc_igual "linha do protocolo malformada barra" 1 bash "$PP" --pre-push origin "$FX_REMOTO" < "$t/linha"
   : > "$t/linha"
@@ -498,11 +498,16 @@ estado_git() {
   git -C "$1" status --porcelain=v1 --untracked-files=all
 }
 
-# hook_direto <dir> <sinal> — executa o pre-push efetivo como controle, com a
-# entrada vazia e MERGEX_PRE_PUSH_SINAL=<sinal>; imprime o código
+# hook_direto <dir> <sinal> — executa o pre-push efetivo como controle, com
+# MERGEX_PRE_PUSH_SINAL=<sinal> e uma linha de protocolo para o HEAD do
+# cenário (portão vencido: a MergeX barra); imprime o código
 hook_direto() {
-  ( cd "$1" && MERGEX_PRE_PUSH_SINAL="$2" "$(hooks_de "$1")/pre-push" controle file:///dev/null </dev/null >/dev/null 2>&1 ); printf '%s\n' "$?"
+  local h; h="$(git -C "$1" rev-parse HEAD)"
+  printf 'refs/heads/feature/ft-rec %s refs/heads/feature/ft-rec %s\n' "$h" "$ZERO" > "$2.entrada"
+  ( cd "$1" && MERGEX_PRE_PUSH_SINAL="$2" "$(hooks_de "$1")/pre-push" controle file:///dev/null < "$2.entrada" >/dev/null 2>&1 ); printf '%s\n' "$?"
 }
+# barrou_no_sinal <dir> <sinal> — a MergeX decidiu `barra` para o HEAD
+barrou_no_sinal() { grep -Fxq "mergex-pre-push $(git -C "$1" rev-parse HEAD) barra" "$2"; }
 
 COMPOSICAO='portao-push.sh --pre-push "$@"'
 
@@ -523,9 +528,13 @@ gfw_unc() {
   cat > "$t/gfw/roda.sh" <<'EOF'
 # Roda no Git Bash do Windows: <repositório UNC> <ativacao UNC> <modo>...
 cd "$1" || { printf 'cd=falhou\n'; exit 90; }
-# "dubious ownership" do Git for Windows sobre UNC: safe.directory só no
-# ambiente deste processo (escopo de linha de comando), nunca na config global
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$1"
+# "dubious ownership" do Git for Windows sobre UNC: safe.directory só neste
+# processo, num arquivo de config global TEMPORÁRIO (GIT_CONFIG_GLOBAL) — a
+# config global do usuário não é lida nem escrita. Não basta GIT_CONFIG_COUNT:
+# arvore_ambiente_git (portao-push, validade) o redefine para o ambiente fixo.
+g="$(mktemp)" || exit 92
+printf '[safe]\n\tdirectory = %%(prefix)/%s\n' "$1" > "$g"
+export GIT_CONFIG_GLOBAL="$(cygpath -m "$g")"
 printf 'uname=%s\n' "$(uname -s)"
 printf 'git=%s\n' "$(git --version)"
 printf 'efetivo=%s\n' "$(git rev-parse --path-format=absolute --git-path hooks)"
@@ -535,7 +544,7 @@ for m in "$@"; do
   bash "$a" "$m" --entrega docs/entregas/ft-rec/ENTREGA.md > "$s" 2>&1; rc=$?
   sed "s/^/saida$m=/" "$s"; printf 'rc%s=%s\n' "$m" "$rc"
 done
-rm -f "$s"
+rm -f "$s" "$g"
 EOF
   out="$("$gb" "$(wslpath -w "$t/gfw/roda.sh")" "$w" "$a" --instalar --provar 2>&1)"
   printf '%s\n' "$out" > "$t/gfw/saida"
@@ -559,6 +568,27 @@ EOF
   [ "$(printf '%s\n' "$out" | sed -n 's/^rc--provar=//p')" = 1 ] \
     && ok "$desc: sem o pre-push, --provar pelo Git Bash reprova" || falha "$desc — provar sem hook: $(printf '%s' "$out" | tr '\n' '|')"
   [ -z "${MERGEX_GFW_SAIDA:-}" ] || cp "$t/gfw/saida" "$MERGEX_GFW_SAIDA"
+}
+
+# orcamento_caso <tmp> <dir> <rótulo> — o hook `lento` chama a MergeX e dorme;
+# com PRAZO=3 numa cópia dos scripts, a prova reprova por estouro, rápido, e
+# não deixa o `sleep 3077` do hook órfão
+orcamento_caso() {
+  local t="$1" d="$2" r="$3" c="$1/prazo" ini fim rc out n
+  rm -rf "$c"; mkdir -p "$c" && cp -R "$S" "$c/scripts" || { falha "cópia dos scripts ($r)"; return; }
+  sed 's/^PRAZO=120$/PRAZO=3/' "$S/ativacao-pre-push.sh" > "$c/scripts/ativacao-pre-push.sh"
+  grep -Fxq 'PRAZO=3' "$c/scripts/ativacao-pre-push.sh" && ok "controle ($r): a cópia tem PRAZO=3" || { falha "controle ($r): PRAZO não reduzido"; return; }
+  fx_hook_terceiro "$d" lento || { falha "hook lento"; return; }
+  ini="$(date +%s)"
+  out="$(cd "$d" && bash "$c/scripts/ativacao-pre-push.sh" --provar --entrega docs/entregas/ft-rec/ENTREGA.md 2>&1)"; rc=$?
+  fim="$(date +%s)"
+  [ "$rc" = 1 ] && printf '%s\n' "$out" | grep -Fq 'orçamento' && [ $((fim - ini)) -lt 30 ] \
+    && ok "estouro do prazo reprova ($r; $((fim - ini))s)" || falha "estouro ($r): rc=$rc $((fim - ini))s $(printf '%s' "$out" | tr '\n' '|')"
+  n=0; while [ "$n" -lt 10 ] && pgrep -f '^sleep 3077$' >/dev/null 2>&1; do sleep 1; n=$((n + 1)); done
+  if pgrep -f '^sleep 3077$' >/dev/null 2>&1; then
+    falha "estouro ($r): processo órfão do hook ($(pgrep -af '^sleep 3077$' | tr '\n' '|'))"; pkill -f '^sleep 3077$'
+  else ok "estouro do prazo ($r): nenhum processo órfão do hook"; fi
+  rm -rf "$c"
 }
 
 grupo_ativacao() {
@@ -630,22 +660,47 @@ grupo_ativacao() {
   # ---- hooks compostos que reprovam ----------------------------------------------------------
   fx_hook_terceiro "$d" nao_propaga || falha "hook de terceiro (nao_propaga)"
   rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
-  [ "$rc" = 0 ] && grep -Eq '^mergex-pre-push invocado [0-9]+$' "$t/sinal" \
-    && ok "controle: o hook que não propaga chama a MergeX (sinal) e sai 0" || falha "controle nao_propaga: rc=$rc"
+  [ "$rc" = 0 ] && barrou_no_sinal "$d" "$t/sinal" \
+    && ok "controle: o hook que não propaga chama a MergeX (ela barra) e sai 0" || falha "controle nao_propaga: rc=$rc"
   atv_espera "hook composto que não propaga o código reprova" 1 "$d" --provar
   fx_hook_terceiro "$d" libera || falha "hook de terceiro (libera)"
   rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
-  [ "$rc" = 0 ] && grep -Eq '^mergex-pre-push invocado [0-9]+$' "$t/sinal" \
-    && ok "controle: o hook que libera chama a MergeX (sinal) sem a entrada e sai 0" || falha "controle libera: rc=$rc"
+  [ "$rc" = 0 ] && [ ! -s "$t/sinal" ] \
+    && ok "controle: o hook que libera chama a MergeX sem a entrada (nenhuma ref decidida) e sai 0" || falha "controle libera: rc=$rc"
   atv_espera "hook composto que libera a ref inválida reprova" 1 "$d" --provar
   fx_hook_terceiro "$d" sinal || falha "hook de terceiro (sinal)"
   rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
-  [ "$rc" -ge 128 ] && grep -Eq '^mergex-pre-push invocado [0-9]+$' "$t/sinal" \
-    && ok "controle: o hook que termina por sinal chama a MergeX e morre (rc $rc)" || falha "controle sinal: rc=$rc"
+  [ "$rc" -ge 128 ] && barrou_no_sinal "$d" "$t/sinal" \
+    && ok "controle: o hook que termina por sinal chama a MergeX (ela barra) e morre (rc $rc)" || falha "controle sinal: rc=$rc"
   atv_espera "hook que termina por sinal reprova" 1 "$d" --provar
   a1="$(assinatura "$hk")"
   atv_espera "hook que termina por sinal: E0 sai 3" 3 "$d" --instalar
   [ "$(assinatura "$hk")" = "$a1" ] && ok "hook que termina por sinal: E0 não toca o arquivo" || falha "E0 tocou o hook sinal"
+
+  # ---- sinal forjado e validador sem a entrada (correção 1) ----------------------------------
+  fx_hook_terceiro "$d" ecoa_sinal || falha "hook de terceiro (ecoa_sinal)"
+  rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
+  [ "$rc" = 1 ] && ! grep -Fq "$PP" "$hk" && grep -Fxq 'mergex-pre-push invocado 1' "$t/sinal" \
+    && grep -Eq '^mergex-pre-push [0-9a-f]{40} barra$' "$t/sinal" \
+    && ok "controle: o hook que forja o sinal (sem citar o validador) escreve a linha antiga e uma barra com SHA arbitrário, e sai 1" \
+    || falha "controle ecoa_sinal: rc=$rc"
+  atv_espera "hook que forja o sinal (sem executar a MergeX) reprova" 1 "$d" --provar
+  a1="$(assinatura "$hk")"
+  atv_espera "hook que forja o sinal: E0 sai 3" 3 "$d" --instalar
+  [ "$(assinatura "$hk")" = "$a1" ] && ok "hook que forja o sinal: E0 não toca o arquivo" || falha "E0 tocou o hook ecoa_sinal"
+  fx_hook_terceiro "$d" sem_entrada || falha "hook de terceiro (sem_entrada)"
+  rm -f "$t/sinal"; rc="$(hook_direto "$d" "$t/sinal")"
+  [ "$rc" = 1 ] && [ ! -s "$t/sinal" ] \
+    && ok "controle: o hook que chama a MergeX sem a entrada sai 1 sozinho, sem decisão" || falha "controle sem_entrada: rc=$rc"
+  atv_espera "hook que chama a MergeX sem a entrada e sai 1 reprova" 1 "$d" --provar
+  atv_espera "hook que chama a MergeX sem a entrada: E0 sai 3" 3 "$d" --instalar
+
+  # ---- orçamento de tempo (correção 1): cópia dos scripts com o prazo reduzido ------------
+  orcamento_caso "$t" "$d" "timeout disponível"
+  mkdir -p "$t/sem-timeout"
+  printf '#!/bin/sh\n# timeout que não mata nada: a detecção pelo comportamento o recusa\nexit 0\n' > "$t/sem-timeout/timeout"
+  chmod 755 "$t/sem-timeout/timeout"
+  PATH="$t/sem-timeout:$PATH" orcamento_caso "$t" "$d" "vigia em Bash, sem timeout que funcione"
 
   # ---- hook de terceiro composto --------------------------------------------------------------
   fx_hook_terceiro "$d" composto || falha "hook de terceiro (composto)"
@@ -784,6 +839,10 @@ grupo_entrypoints() {
   sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (hook de terceiro não composto)" "$t"
   fx_hook_terceiro "$d" so_cita || falha "hook so_cita"
   sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (hook que só cita a MergeX)" "$t"
+  fx_hook_terceiro "$d" ecoa_sinal || falha "hook ecoa_sinal"
+  sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (hook que forja o sinal)" "$t"
+  fx_hook_terceiro "$d" sem_entrada || falha "hook sem_entrada"
+  sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (hook que chama a MergeX sem a entrada)" "$t"
   rm -f "$hk"
 
   # ---- BLOQUEADO não depende da prova --------------------------------------------------------
