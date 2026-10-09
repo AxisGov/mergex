@@ -175,6 +175,9 @@ _PR_AWK_BRANCH='
 # arquivo os ENTREGA.md da árvore de <rev> que declaram `branch: <branch>`.
 # Custo constante em processos: um ls-tree e um cat-file --batch por árvore,
 # qualquer que seja o número de entregas. Objeto ausente: PR_FALTA=1.
+# Escreve arquivos auxiliares ao lado da saída (<saída>.lista, .cand, .batch,
+# .idx) e não os apaga: quem chama põe a saída num diretório temporário só seu
+# e o remove inteiro (_pr_entrega, portao-ci.sh).
 _pr_entregas_em() {
   local raiz="$1" rev="$2" b="$3" saida="$4"
   _pr_g -C "$raiz" ls-tree -r -z "$rev" -- docs/entregas > "$saida.lista" 2>/dev/null \

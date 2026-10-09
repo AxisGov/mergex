@@ -93,10 +93,14 @@ RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || { diag "$AMBIENTE: fora de um repositório Git com árvore de trabalho; PR reprovado"; exit 1; }
 
 REF="refs/heads/$BRANCH"
-TMP="$(mktemp "${TMPDIR:-/tmp}/mergex-portao-ci.XXXXXX")" \
-  || { diag "$AMBIENTE: não foi possível criar arquivo temporário; PR reprovado"; exit 1; }
-trap 'rm -f "$TMP" "$TMP.revs" "$TMP.um"' EXIT
+# um diretório temporário único, removido inteiro na saída: a decisão, a história
+# do PR e os arquivos auxiliares que _pr_entregas_em escreve ao lado de $TMP.um
+# (.lista, .cand, .batch, .idx) ficam todos nele; nada vaza para /tmp
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-portao-ci.XXXXXX")" \
+  || { diag "$AMBIENTE: não foi possível criar diretório temporário; PR reprovado"; exit 1; }
+trap 'rm -rf "$TMP_DIR"' EXIT
 trap 'exit 1' HUP INT TERM
+TMP="$TMP_DIR/decisao"
 
 # final — imprime a decisão de $TMP, o diagnóstico e sai com o código
 final() {

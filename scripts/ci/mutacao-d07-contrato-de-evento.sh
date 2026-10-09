@@ -48,6 +48,12 @@ copia() {
       return 1
     fi
   done
+  # O validador do contrato varre os arquivos versionados com `git ls-files`
+  # (DM-184): a cópia ganha um Git próprio com a árvore inteira no índice.
+  if ! ( cd "$d" && git init -q && git add -A ) >/dev/null 2>&1; then
+    printf 'FALHA cópia da árvore falhou: git init/add em %s\n' "$d" >&2
+    return 1
+  fi
   printf '%s\n' "$d"
 }
 

@@ -81,6 +81,17 @@ modo() {
   else printf '{\n  "expx_hooks": 1,\n  "hooks": {\n    "pr-so-com-portao": { "modo": "%s" }\n  }\n}\n' "$2" > "$1/.expx/hooks.json"; fi
 }
 
+# sem_residuo <desc> <dir> <cmd...> — roda <cmd> a partir de <dir> com TMPDIR
+# num diretório vazio só dele: depois, o diretório continua vazio (o consumidor
+# da barreira apaga tudo que cria em /tmp, decida o que decidir)
+sem_residuo() {
+  local desc="$1" dir="$2" v; shift 2
+  v="$(mktemp -d)"; TMPS="$TMPS $v"
+  ( cd "$dir" && TMPDIR="$v" "$@" ) >/dev/null 2>&1
+  if [ -z "$(ls -A "$v")" ]; then ok "$desc"
+  else falha "$desc — resíduo em TMPDIR: $(ls -A "$v" | tr '\n' ' ')"; fi
+}
+
 # produto <dir> <nome> — commit de produto (sem Metodo:)
 produto() {
   ( cd "$1" && printf 'export const %s = 1;\n' "$2" > "src/$2.ts" && git add "src/$2.ts" && git commit -q -m "feat: $2" )
@@ -420,7 +431,7 @@ grupo_prepush() {
   cd "$REPO" || return
 
   # ---- reconciliação e ordem ---------------------------------------------------------------
-  local t2 d2 b e ar
+  local t2 d2 b e ar vr
   t2="$(mktemp -d)"; TMPS="$TMPS $t2"; d2="$t2/repo"
   fx_cenario "$d2" || { falha "cenário de reconciliação não montou"; return; }
   fx_remoto_bare "$d2" || { falha "remoto bare (reconciliação)"; return; }
@@ -456,6 +467,15 @@ grupo_prepush() {
   "${b[@]}" >/dev/null 2>&1; rc=$?
   [ "$rc" != 0 ] && ok "controle: a barreira da reconciliação reprova o disco adulterado (rc $rc)" || falha "controle: barreira aprovou o disco adulterado"
   push_espera "ordem: o pre-push não reexecuta a reconciliação" 0 "$v2" "$d2" origin feature/ft-rec
+
+  # ---- sem resíduo em /tmp: o pre-push apaga tudo que cria --------------------------------
+  fx_commit_metodo "$d2" pre-e6 docs/entregas/ft-rec/PR.md; vr="$(git rev-parse HEAD)"
+  [ "$(val_motivo HEAD)" = ok ] && ok "controle: commit de método pre-e6 mantém o portão válido" || falha "controle: $(val_motivo HEAD)"
+  sem_residuo "sem resíduo em /tmp: pre-push de push liberado" "$d2" fx_push_real "$d2" origin feature/ft-rec
+  [ "$(git ls-remote origin refs/heads/feature/ft-rec | cut -f1)" = "$vr" ] && ok "controle: o push liberado chegou ao remoto" || falha "controle: o push liberado não chegou"
+  produto "$d2" residuo1
+  sem_residuo "sem resíduo em /tmp: pre-push de push barrado (pronto vencido)" "$d2" fx_push_real "$d2" origin feature/ft-rec
+  [ "$(git ls-remote origin refs/heads/feature/ft-rec | cut -f1)" = "$vr" ] && ok "controle: o push barrado não chegou ao remoto" || falha "controle: o push barrado chegou"
   cd "$REPO" || return
 }
 
@@ -1043,6 +1063,10 @@ grupo_ci() {
   ci_err_tem "SHA que remove o ENTREGA.md: diagnóstico do portão não pronto" "portao_nao_pronto"
   CI_BASE="$mainsha" EQ_CIDIR="$co" equivale "ci reprova o SHA vencido (clone sem refs/heads)" barra "$d" "$p1"
   CI_BASE="$mainsha" EQ_CIDIR="$co" equivale "ci aprova o SHA válido (clone sem refs/heads)" passa "$d" "$vv"
+  # sem resíduo em /tmp: o CI apaga tudo que cria, também quando a história do
+  # PR decide a aplicabilidade (clone sem refs/heads, SHA sem ENTREGA.md)
+  sem_residuo "sem resíduo em /tmp: ci com o SHA que declara a branch" "$d" bash "$CI" --verificar --sha "$vv" --branch feature/ft-rec --base "$mainsha"
+  sem_residuo "sem resíduo em /tmp: ci pela história do PR (clone sem refs/heads, SHA sem ENTREGA.md)" "$co" bash "$CI" --verificar --sha "$pn" --branch feature/ft-rec --base "$mainsha"
   CI_BASE="$mainsha" ci_rc "ci: --sha ausente no clone barra (entrega_indeterminada)" 1 "$co" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa feature/ft-rec
   ci_err_tem "ci: --sha ausente no clone: diagnóstico" "entrega_indeterminada"
   CI_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ci_rc "ci: --base que não é objeto no clone: historia_incompleta barra" 1 "$co" "$pn" feature/ft-rec
