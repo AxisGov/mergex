@@ -128,6 +128,15 @@
 # Custo: uma validade por entrega selecionada; nenhuma varredura de branches;
 # um número constante de processos Git por árvore lida e por seleção.
 #
+# Versão do Git: a parcela (c) do pre-push lê o trailer com
+# `git log -1 --format='%(trailers:key=Trabalho,valueonly,unfold)'`: `unfold`
+# existe desde o Git 2.15 e `key=`/`valueonly` desde o 2.22 (RelNotes 2.22.0:
+# "pick trailers selectively by keyword, show only values"). Num Git anterior o
+# placeholder sai literal, reprova na gramática do id e a parcela (c) não
+# seleciona nada — ela só acrescenta, e as parcelas (a) e (b) continuam. O
+# restante (`--path-format=absolute`, Git >= 2.31) é o que os demais scripts da
+# skill já exigem.
+#
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
 PR_AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -401,19 +410,29 @@ pr_entregas_do_intervalo() {
   return 0
 }
 
+# _pr_id_valido <id> — rc 0 se <id> pode nomear um trabalho: a gramática de
+# validade-do-portao.sh (não vazio, só [A-Za-z0-9._-], não começa por `.`,
+# nenhum nome reservado)
+_pr_id_valido() {
+  case "$1" in
+    ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto) return 1 ;;
+  esac
+  return 0
+}
+
 # _pr_trailer_trabalho <raiz> <sha> — imprime docs/entregas/<id>/ENTREGA.md
 # para cada trailer `Trabalho: <id>` da mensagem do commit <sha> (um
-# processo Git). Um <id> que não pode nomear uma entrega (vazio, com
-# caractere fora de [A-Za-z0-9._-], começando por `.`, ou um nome reservado
-# que validade-do-portao.sh recusa) é ignorado: não nomeia entrega nenhuma.
+# processo Git: `%(trailers:key=Trabalho,valueonly,unfold)`, Git >= 2.22; num
+# Git sem as opções o placeholder sai literal, não passa na gramática e a
+# parcela não seleciona nada — ela só acrescenta, (a) e (b) continuam). Um
+# <id> fora da gramática (_pr_id_valido) é ignorado: não nomeia entrega
+# nenhuma.
 _pr_trailer_trabalho() {
   local id
   _pr_g -C "$1" log -1 --format='%(trailers:key=Trabalho,valueonly,unfold)' "$2" 2>/dev/null \
     | while IFS= read -r id; do
         id="$(printf '%s' "$id" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        case "$id" in
-          ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto) continue ;;
-        esac
+        _pr_id_valido "$id" || continue
         printf 'docs/entregas/%s/ENTREGA.md\n' "$id"
       done
 }
@@ -483,8 +502,14 @@ _pr_diag_invalido() {
 }
 
 pr_decide_entrega() {
-  local raiz="$1" sha="$2" ent="$3" out rc okv mot pri avisos nulo d
+  local raiz="$1" sha="$2" ent="$3" out rc okv mot pri avisos nulo d id
   PR_ERRO=""; PR_DIAG=""
+  # o <id> do caminho tem de poder nomear um trabalho; fora da gramática (espaço,
+  # acento, nome reservado) a entrega é indeterminada — motivo próprio, nunca
+  # erro de ambiente, e a validade nem roda
+  id="${ent#docs/entregas/}"; id="${id%/ENTREGA.md}"
+  _pr_id_valido "$id" \
+    || { _pr_sai barra entrega_indeterminada "$ent" "$(_pr_diag_invalido entrega_indeterminada): o id '$id' em $ent está fora da gramática de trabalho ([A-Za-z0-9._-], sem começar por '.', sem nome reservado); renomeie o diretório da entrega"; return; }
   [ -r "$PR_VALIDADE" ] \
     || { _pr_sai barra erro_ambiente "$ent" "$(_pr_diag_invalido erro_ambiente): validador ausente: $PR_VALIDADE"; return; }
   set -- --verificar --entrega "$ent"

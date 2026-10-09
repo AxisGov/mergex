@@ -53,7 +53,8 @@
 #   ou a falta da linha (o validador não rodou, não recebeu a entrada, ou a
 #   linha é forjada com outro SHA). Um hook escrito de propósito para forjar a linha lendo o SHA
 #   da entrada é contorno deliberado, fora do alcance de qualquer prova local:
-#   a barreira contra ele é o CI. Orçamento: PRAZO segundos, por um `timeout`
+#   a barreira contra ele é o CI, nos limites da spec, seção 15.1 (itens 1 e
+#   12). Orçamento: PRAZO segundos, por um `timeout`
 #   que comprove matar um processo no prazo (detecção pelo comportamento) ou,
 #   sem ele, por um vigia em Bash; o hook roda em grupo de processos próprio,
 #   morto inteiro no estouro e ao fim (nenhum órfão); estouro reprova (com o

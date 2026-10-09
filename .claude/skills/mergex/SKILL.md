@@ -166,8 +166,9 @@ barra mesmo em aviso. O `pr-so-com-portao`, que é consultivo, também sai 2 em 
 nos dois casos provados: o `--no-verify` reconhecido e o push simples que a regra
 do portão prova inválido; no resto, só avisa. Fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo (DM-184):
 ele é a barreira local autoritativa contra erro normal, e o CI com proteção de
-merge, quando o produto o ativar, é a barreira contra contorno deliberado
-(`references/12-barreira-de-push.md`).
+merge, quando o produto o ativar, é a barreira contra o `--no-verify` e contra o
+contorno pelo nome da branch, nos limites da spec, seção 15.1 (itens 1 e 12)
+(DM-185; `references/12-barreira-de-push.md`).
 
 O modo de cada um vive em `.expx/hooks.json`. Detalhe operacional, os três
 cuidados de desenho e os testes: `.claude/hooks/README.md`.

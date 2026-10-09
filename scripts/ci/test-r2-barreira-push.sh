@@ -709,16 +709,18 @@ grupo_ativacao() {
     || falha "prova mudou o estado: $(diff <(printf '%s\n' "$antes") <(printf '%s\n' "$depois") | tr '\n' '|')"
   ( cd "$d/src" && bash "$ATV" --provar --entrega docs/entregas/ft-rec/ENTREGA.md >/dev/null 2>&1 ); rc=$?
   [ "$rc" = 0 ] && ok "prova a partir de um subdiretório aprova (a entrega é relativa à raiz)" || falha "prova do subdiretório: rc=$rc"
-  # DM-185: com a seleção pelo conteúdo no pre-push, a prova continua com os
-  # dois lados — (a) barra a ref inválida, (b) o controle positivo passa (a sua
-  # árvore é vazia: nenhuma parcela da seleção o alcança) — mesmo com
-  # refs/remotes/origin/HEAD presente no repositório
+  # DM-185: a prova executa o hook com o remoto `prova-mergex`, e nenhum
+  # refs/remotes/prova-mergex/HEAD existe: a parcela (a) da seleção NÃO entra
+  # na prova. Este caso afirma só isso: um refs/remotes/origin/HEAD presente no
+  # repositório não interfere, e os dois lados continuam — (b) pelo nome barra
+  # a ref inválida; o controle positivo (árvore vazia) passa.
   git -C "$d" fetch -q origin >/dev/null 2>&1 && git -C "$d" remote set-head origin main >/dev/null 2>&1 \
     && git -C "$d" rev-parse -q --verify 'refs/remotes/origin/HEAD^{commit}' >/dev/null \
-    && ok "controle: refs/remotes/origin/HEAD presente" || falha "controle: origin/HEAD não montou"
-  atv_espera "prova funcional com origin/HEAD presente continua com os dois lados (aprova)" 0 "$d" --provar
-  out_tem "prova com origin/HEAD: barrou a ref inválida" "barrou a ref inválida da prova"
-  out_tem "prova com origin/HEAD: liberou o controle positivo" "liberou o controle positivo"
+    && ! git -C "$d" rev-parse -q --verify 'refs/remotes/prova-mergex/HEAD' >/dev/null 2>&1 \
+    && ok "controle: refs/remotes/origin/HEAD presente e refs/remotes/prova-mergex/HEAD ausente" || falha "controle: origin/HEAD não montou"
+  atv_espera "origin/HEAD presente não interfere na prova (ela usa o remoto prova-mergex, sem parcela (a)): aprova pelos dois lados" 0 "$d" --provar
+  out_tem "prova com origin/HEAD presente: barrou a ref inválida (pelo nome)" "barrou a ref inválida da prova"
+  out_tem "prova com origin/HEAD presente: liberou o controle positivo (árvore vazia)" "liberou o controle positivo"
   git -C "$d" remote set-head origin -d >/dev/null 2>&1
 
   # ---- reversão e E2 sem prova ---------------------------------------------------------
@@ -1240,6 +1242,15 @@ ci_selecao_conteudo() {
 rc=0 motivo=" ] && ok "seleção P/C/M: pr_entregas_do_intervalo seleciona ft-rec" || falha "seleção P/C/M: $(selecao "$ci" "$vv" "$M" | tr '\n' '|')"
   ci_val "criss-cross barra com base_ambigua (validade não executada)" 1 barra base_ambigua 0 "$ci" "$B2" feature/ft-rec "$A2"
   ci_err_tem "criss-cross: diagnóstico base_ambigua" "base_ambigua"
+  ci_out_tem "criss-cross: a saída traz quantidade_entregas=0 (falha de seleção)" "quantidade_entregas=0"
+  # id de entrega fora da gramática: barra com motivo próprio, nunca erro de ambiente
+  git -C "$dm" switch -q --detach "$vv" && entrega_em "$dm" "ação x" feature/acao && git -C "$dm" commit -q -m "docs: entrega com id invalido"; IDX="$(git -C "$dm" rev-parse HEAD)"
+  git -C "$dm" update-ref "refs/tmp/dm-$IDX" "$IDX"; git -C "$ci" fetch -q "$dm" "refs/tmp/dm-$IDX:refs/tmp/dm-$IDX" 2>/dev/null
+  git -C "$ci" cat-file -e "$IDX:docs/entregas/ação x/ENTREGA.md" 2>/dev/null && ok "controle: commit com docs/entregas/ação x/ENTREGA.md" || falha "controle: id inválido não montou"
+  ci_val "id de entrega fora da gramática barra com entrega_indeterminada (sem validade)" 1 barra entrega_indeterminada 0 "$ci" "$IDX" feature/acao "$vv"
+  ci_err_tem "id fora da gramática: o diagnóstico cita o id inválido" "ação x"
+  ci_err_sem "id fora da gramática: não é erro de ambiente" "erro de ambiente"
+  ci_out_tem "id fora da gramática: entrega indexada" "entrega[1]=docs/entregas/ação x/ENTREGA.md"
   ci_val "merge que altera o ENTREGA contra os dois pais barra" 1 barra commit_merge 1 "$ci" "$MM" feature/ft-rec "$vv"
   ci_val "merge que apaga um ENTREGA da base barra" 1 barra portao_nao_pronto 1 "$ci" "$MD" feature/ft-rec "$vv"
   ci_val "cria e apaga no PR barra" 1 barra portao_nao_pronto 1 "$ci" "$CA" feature/nova "$mainsha"
@@ -1260,6 +1271,7 @@ rc=0 motivo=" ] && ok "seleção P/C/M: pr_entregas_do_intervalo seleciona ft-re
   o="$(git -C "$t/raso" commit-tree "$(git -C "$t/raso" mktree </dev/null)" -m orfa)"; head="$(git -C "$t/raso" rev-parse HEAD)"
   ci_val "órfã em clone raso é historia_incompleta" 1 barra historia_incompleta 0 "$t/raso" "$head" feature/ft-rec "$o"
   ci_err_tem "órfã em clone raso: diagnóstico indica git fetch --unshallow" "git fetch --unshallow"
+  ci_out_tem "órfã em clone raso: a saída traz quantidade_entregas=0" "quantidade_entregas=0"
   case "$(selecao "$t/raso" "$o" "$head")" in "rc=1 motivo=historia_incompleta") ok "seleção sem merge-base em clone raso: historia_incompleta" ;; *) falha "seleção raso: $(selecao "$t/raso" "$o" "$head" | tr '\n' '|')" ;; esac
 
   # ---- saída indexada --------------------------------------------------------------
@@ -1359,8 +1371,10 @@ grupo_ci() {
   CI_BASE="$mainsha" ci_rc "ci: --sha ausente no clone barra (historia_incompleta)" 1 "$co" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa feature/ft-rec
   ci_err_tem "ci: --sha ausente no clone: diagnóstico historia_incompleta" "historia_incompleta"
   case "$CI_OUT" in *motivo=historia_incompleta*) ok "ci: --sha ausente: motivo historia_incompleta" ;; *) falha "ci --sha ausente: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+  case "$CI_OUT" in *quantidade_entregas=0*) ok "ci: --sha ausente: a saída traz quantidade_entregas=0" ;; *) falha "ci --sha ausente sem quantidade_entregas: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
   CI_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ci_rc "ci: --base que não é objeto no clone: historia_incompleta barra" 1 "$co" "$pn" feature/ft-rec
   ci_err_tem "ci: --base ausente: diagnóstico historia_incompleta" "historia_incompleta"
+  case "$CI_OUT" in *quantidade_entregas=0*) ok "ci: --base ausente: a saída traz quantidade_entregas=0" ;; *) falha "ci --base ausente sem quantidade_entregas: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
   orf="$(git -C "$co" commit-tree "$(git -C "$co" hash-object -t tree -w /dev/null)" -m orfao)"
   # sem merge-base (clone completo): a história do PR é a do SHA inteiro, sem fechar à toa
   CI_BASE="$orf" ci_rc "ci: --base sem merge-base, SHA que apaga um ENTREGA.md da própria história: barra (história inteira)" 1 "$co" "$pn" feature/ft-rec
@@ -1395,6 +1409,7 @@ grupo_ci() {
   equivale "ci reprova o SHA que o pre-push barraria (historia_incompleta, clone raso)" barra "$t/raso" "$(git -C "$t/raso" rev-parse HEAD)"
   ci_err_tem "ci clone raso: diagnóstico historia_incompleta" "historia_incompleta"
   ci_err_tem "ci clone raso: diagnóstico indica git fetch --unshallow" "git fetch --unshallow"
+  case "$CI_OUT" in *quantidade_entregas=0*) ok "ci clone raso: a saída traz quantidade_entregas=0" ;; *) falha "ci clone raso sem quantidade_entregas: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
   printf '%s\n' "$CI_ERR" > "$t/err-ci-historia"
   cd "$d" || return
 

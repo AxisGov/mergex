@@ -29,8 +29,9 @@ MergeX e nunca altera task (DM-178).
 5. **Falha fechada.** Toda prova que não pode ser calculada reprova. Não existe flag, variável de
    ambiente nem modo de hook **da MergeX** que pule a reconciliação, a V9 executável ou a validade
    do portão. Isso não torna incontornável um mecanismo exclusivamente local: o Git permite ignorar
-   o `pre-push` deliberadamente (`git push --no-verify`). A barreira contra contorno deliberado é o
-   CI com proteção de merge, quando o produto o ativar; a local é contra erro normal (DM-184,
+   o `pre-push` deliberadamente (`git push --no-verify`). A barreira contra esse contorno, e contra
+   o contorno pelo nome da branch, é o CI com proteção de merge, quando o produto o ativar, dentro
+   dos limites da spec, seção 15.1 (itens 1 e 12); a local é contra erro normal (DM-184, DM-185,
    `references/12-barreira-de-push.md`).
 
 ## Modelo Git

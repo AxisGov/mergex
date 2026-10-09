@@ -37,7 +37,8 @@
 # decisão. Nada é escrito antes da decisão, nem para linha fora do protocolo:
 # um hook que chama o validador sem repassar a entrada não deixa sinal, e a
 # prova exige a linha `barra` do SHA do commit solto dela. Um hook escrito de
-# propósito para forjar essa linha é contorno deliberado (a barreira é o CI).
+# propósito para forjar essa linha é contorno deliberado (a barreira é o CI,
+# nos limites da spec, seção 15.1, itens 1 e 12).
 #
 # Códigos: 0 libera; 1 barra; 64 uso. Custo: uma seleção com processos Git
 # constantes e uma validade por entrega selecionada, por ref enviada; nenhuma

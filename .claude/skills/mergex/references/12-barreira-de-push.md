@@ -115,7 +115,8 @@ A mesma prova serve ao E0 e ao E2, e não confia no caminho nem na existência d
 sem a entrada, que não propaga o código, que forja o sinal antigo ou uma linha com outro SHA. Um hook
 escrito **de propósito** para forjar a linha certa (lendo o SHA da entrada padrão) é contorno
 deliberado, que nenhuma prova local alcança: a barreira contra ele é o CI com proteção de merge,
-quando o produto o ativar (spec, seção 13, item 8).
+quando o produto o ativar (spec, seção 13, item 8), nos limites da seção "Limites do CI" (spec,
+seção 15.1, itens 1 e 12).
 
 No E2 a prova é barreira inicial, ao lado da `pre-e2`: reprovada, o E2 não começa e nada é
 gravado. O resultado do portão é gravado só por `scripts/registrar-portao.sh`, que roda a mesma
@@ -183,7 +184,14 @@ Para cada ref `refs/heads/<b>` do push (exclusão e tag passam, como antes), as 
   a parcela não existe — nunca se adivinha `main` ou `master`;
 - (b) a regra legada pelo nome: o `ENTREGA.md` que declara `branch: <b>` na árvore do SHA enviado,
   na do SHA remoto anterior ou na ponta local de `refs/heads/<b>`;
-- (c) o trailer `Trabalho: <id>` do commit enviado, que seleciona `docs/entregas/<id>/ENTREGA.md`.
+- (c) o trailer `Trabalho: <id>` do commit enviado (só o da ponta da ref), que seleciona
+  `docs/entregas/<id>/ENTREGA.md`. **Limite:** a parcela só acrescenta, e a entrega que ela nomeia
+  é validada na árvore enviada. Se a árvore não a tem — por exemplo, o cherry-pick de um commit E1
+  (com `Trabalho:`) para uma branch sem a entrega — o push **barra** com `portao_nao_pronto`; não
+  há flag, por desenho. Um `<id>` fora da gramática de trabalho (vazio, caractere fora de
+  `[A-Za-z0-9._-]`, começando por `.`, nome reservado) não nomeia entrega nenhuma e é ignorado.
+  A parcela depende de `git log --format='%(trailers:key=…,valueonly,unfold)'` (ver "Versão do
+  Git"); num Git sem suporte ela não seleciona nada e as parcelas (a) e (b) continuam.
 
 A ref é aplicável quando a união não é vazia; cada entrega é decidida sobre o **SHA enviado** e a
 decisão da ref é a agregada. Sem a parcela (a) e com (b) e (c) vazias, se a árvore enviada tem algum
@@ -199,6 +207,14 @@ rode ativacao-pre-push.sh --reverter`, em vez do erro cru do bash.
 
 O hook do Claude `pr-so-com-portao` continua resolvendo o `ENTREGA.md` pelo nome da branch: ele é
 só aviso antecipado e nunca barra o que o `pre-push` deixaria passar.
+
+### Versão do Git
+
+A parcela (c) lê o trailer com `git log -1 --format='%(trailers:key=Trabalho,valueonly,unfold)'`:
+`unfold` existe desde o Git 2.15 e `key=`/`valueonly` desde o **2.22** (RelNotes 2.22.0). Num Git
+anterior o placeholder sai literal, não passa na gramática do id e a parcela (c) não seleciona nada;
+como ela só acrescenta, as parcelas (a) e (b) continuam valendo. O resto da barreira já exige
+Git ≥ 2.31 (`--path-format=absolute`), como os demais scripts da skill.
 
 ## CI
 
@@ -255,9 +271,10 @@ deliberado (spec, seção 15.1, itens 1 e 9 a 12):
   O CI não é barreira contra todo contorno deliberado: não barra quem reescreve a própria verificação.
   No produto, exija `CODEOWNERS` com revisão obrigatória para `.expx/**`, `.claude/**` e
   `.github/**`.
-- **PR sem `ENTREGA.md`.** Código enviado num PR que não carrega nenhum `ENTREGA.md` (cherry-pick
-  sem a entrega, trailers apagados) não está sob o portão: a seleção é vazia e o CI passa com
-  `ref_nao_aplicavel`.
+- **PR sem `ENTREGA.md`.** Código enviado num PR que não cria, altera nem apaga nenhum
+  `ENTREGA.md` (por exemplo, um cherry-pick dos commits de produto sem a entrega) não está sob o
+  portão: a seleção é vazia e o CI passa com `ref_nao_aplicavel`. O CI não lê trailer de commit —
+  só o `pre-push` lê o `Trabalho:` do commit enviado (parcela (c)).
 - **Várias entregas ativas no mesmo PR.** Um PR empilhado sobre a base principal que traz uma
   entrega ainda não integrada além da sua seleciona as duas; a anterior fica vencida pelos commits
   da seguinte e o PR barra. Encadeie os PRs pela base ou entregue a anterior antes. Remover, ou

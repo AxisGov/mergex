@@ -9,7 +9,9 @@
 #     decide pelas refs e SHAs que o Git entrega, qualquer que seja o texto do
 #     comando;
 #   - este hook: só aviso antecipado. Não é fronteira de segurança;
-#   - o CI com proteção de merge: a barreira contra contorno deliberado.
+#   - o CI com proteção de merge: a barreira contra o `--no-verify` e contra o
+#     contorno pelo nome da branch (DM-185), nos limites da spec, seção 15.1
+#     (itens 1 e 12).
 #
 # O que este hook faz, num comando que publica (`git ... push`, `send-pack`,
 # `subtree push`, inclusive dentro de `bash -c`, `xargs` ou função):

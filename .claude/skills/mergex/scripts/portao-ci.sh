@@ -112,6 +112,10 @@ TMP="$TMP_DIR/saida"
 # final — imprime a saída de $TMP, o diagnóstico e sai com o código do resumo
 final() {
   local decisao
+  # o resumo sempre traz quantidade_entregas=: nos caminhos de falha da seleção
+  # (clone raso, base ausente, base_ambigua, caminho_com_controle,
+  # historia_incompleta) nenhuma entrega chegou a ser decidida: 0
+  grep -q '^quantidade_entregas=' "$TMP" || printf 'quantidade_entregas=0\n' >> "$TMP"
   cat "$TMP"
   decisao="$(sed -n 's/^decisao=//p' "$TMP")"
   case "$decisao" in
