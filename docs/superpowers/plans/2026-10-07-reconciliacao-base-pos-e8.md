@@ -6,7 +6,7 @@
 
 **Architecture:** Um executável novo (`reconciliacao-base.sh`) registra e verifica a reconciliação, apoiado numa biblioteca de artefato (`reconciliacao-artefato.sh`) que emite, lê, valida e assina `RECONCILIACAO-BASE-NNN.md`. A V9 passa a ser o executável `portao-v9.sh`, que compõe a união das tasks (exposta por `ownership-da-task.sh --uniao`) com os caminhos que a verificação da reconciliação declara cobertos. A validade do portão é o executável `validade-do-portao.sh --rev`. A barreira de push segue a DM-184 e tem três consumidores do mesmo validador, através da biblioteca de decisão por ref `portao-regras.sh`:
 - o `pre-push` do Git (`portao-push.sh`), ativado pelo E0 e provado funcionalmente pelo E2 (`ativacao-pre-push.sh`): barreira local contra erro normal. O resultado do E2 só é gravado por `registrar-portao.sh`, que roda a prova antes de gravar `pronto`, e os checkpoints `pre-e6` e `e8` recusam persistir `pronto` sem a prova;
-- o executável de CI (`portao-ci.sh`), com template de workflow: barreira contra contorno deliberado, não ativada em produto nesta branch;
+- o executável de CI (`portao-ci.sh`), com template de workflow: barreira contra contorno deliberado, nos limites da DM-185 (contra o `--no-verify` e o contorno pelo nome da branch, não contra todo contorno deliberado; spec, seção 15.1, itens 1 e 12), não ativada em produto nesta branch;
 - o hook do Claude `pr-so-com-portao`, só consultivo.
 
 O checkpoint `reconciliacao-base` entra no enum fechado de `contrato-de-commit.sh`, `catalogo-de-metodo.sh` e `persistir-metodo.sh`.
