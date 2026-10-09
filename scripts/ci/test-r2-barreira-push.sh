@@ -358,6 +358,23 @@ grupo_prepush() {
   [ "$n" -le 1 ] && [ "$n" -ge 1 ] && ok "custo independe das branches entregues (1 chamada da validade com 50 branches)" \
     || falha "custo: $n chamadas da validade para uma ref"
 
+  # ---- caminho com caractere de controle sob docs/entregas: barra ---------------
+  # commits montados por plumbing sobre v8, cada um com uma entrega num diretório
+  # com TAB ou LF no nome, declarando branch: feature/ctrl (a única que a declara)
+  local nome cc
+  for x in tab lf; do
+    case "$x" in tab) nome="$(printf 'tab\tx')" ;; lf) nome="$(printf 'lf\nx')" ;; esac
+    cc="$( b="$(printf -- '---\nkind: entrega\ntrabalho_id: ctrl\nbranch: feature/ctrl\n---\n' | git hash-object -w --stdin)" \
+      && GIT_INDEX_FILE="$t/idx-ctrl" git read-tree "$v8" \
+      && GIT_INDEX_FILE="$t/idx-ctrl" git update-index --add --cacheinfo "100644,$b,docs/entregas/$nome/ENTREGA.md" \
+      && git commit-tree "$(GIT_INDEX_FILE="$t/idx-ctrl" git write-tree)" -p "$v8" -m "docs: entrega com $x no caminho"; rm -f "$t/idx-ctrl" )"
+    [ -n "$cc" ] && git cat-file -e "$cc:docs/entregas/$nome/ENTREGA.md" 2>/dev/null \
+      && ok "controle: entrega com $x no caminho do diretório" || falha "controle: commit com $x não montou"
+    FX_PUSH_REF=refs/heads/feature/ctrl push_espera "caminho com $x sob docs/entregas barra o push" 1 - "$d" origin "$cc:refs/heads/feature/ctrl"
+    err_tem "caminho com $x: diagnóstico de caractere de controle" "caractere de controle"
+  done
+  FX_PUSH_REF=refs/heads/feature/ctrl push_espera "controle: a mesma ref sem o caminho com controle (não aplicável) passa" 0 "$v8" "$d" origin "$v8:refs/heads/feature/ctrl"
+
   # ---- custo: centenas de ENTREGA.md na árvore, processos Git constantes ------------
   entregas_custo "$t"
 

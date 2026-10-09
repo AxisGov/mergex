@@ -29,7 +29,9 @@
 #       do SHA enviado, do SHA remoto anterior (quando o objeto existe aqui) e
 #       da ponta local de refs/heads/<b>. Nada (rc 0) quando a ref não é
 #       aplicável: outro namespace, nenhuma dessas árvores declara a branch.
-#       rc 1: SHA enviado sem objeto, árvore ou blob que não se lê (com
+#       rc 1: caminho sob docs/entregas com caractere de controle (TAB, LF,
+#       CR...) numa das árvores (PR_CTRL=1; pr_decide_ref barra com
+#       caminho_com_controle), SHA enviado sem objeto, árvore ou blob que não se lê (com
 #       PR_FALTA=1 quando é objeto Git ausente), ou mais de um ENTREGA.md
 #       diferente declarando a branch (ambíguo; inclusive reúso de nome de
 #       branch por uma entrega antiga). `branch:` é lido como catalogo_fm lê,
@@ -80,6 +82,7 @@ PR_DIAG=""
 PR_MODO=""
 PR_ENTREGA=""
 PR_FALTA=0
+PR_CTRL=0
 
 if [ ! -r "$PR_AQUI/catalogo-de-metodo.sh" ] || [ ! -r "$PR_AQUI/reconciliacao-arvore.sh" ]; then
   PR_ERRO="dependência indisponível ao lado de $PR_AQUI/portao-regras.sh"
@@ -176,6 +179,14 @@ _pr_entregas_em() {
   local raiz="$1" rev="$2" b="$3" saida="$4"
   _pr_g -C "$raiz" ls-tree -r -z "$rev" -- docs/entregas > "$saida.lista" 2>/dev/null \
     || { _pr_falta_objeto "$raiz" "$rev" && PR_FALTA=1; PR_ERRO="árvore de $rev não se lê"; return 1; }
+  # caminho sob docs/entregas com caractere de controle (TAB, LF, CR...): falha
+  # fechada, sem ler mais nada (o filtro abaixo o ignoraria e a ref passaria).
+  # Só builtins: o custo continua constante em processos.
+  local cab p
+  while IFS= read -r -d '' cab; do
+    p="${cab#*	}"
+    case "$p" in *[[:cntrl:]]*) PR_CTRL=1; PR_ERRO="caminho com caractere de controle sob docs/entregas em $rev"; return 1 ;; esac # guarda:PPCTRL
+  done < "$saida.lista"
   # candidatos: `<sha> <caminho>` dos docs/entregas/<id>/ENTREGA.md regulares
   tr '\0' '\n' < "$saida.lista" | LC_ALL=C awk -F'\t' '
     NF == 2 && $2 ~ "^docs/entregas/[^/[:cntrl:]]+/ENTREGA[.]md$" && $1 ~ "^100(644|755) blob [0-9a-f]+$" {
@@ -195,7 +206,7 @@ _pr_entregas_em() {
 # _pr_entrega <raiz> <ref_remota> <sha_local> <sha_remoto> — PR_ENTREGA
 _pr_entrega() {
   local raiz="$1" rr="$2" sl="$3" sr="$4" b tmp rev ponta n rc=0 vistos=""
-  PR_ERRO=""; PR_ENTREGA=""; PR_FALTA=0
+  PR_ERRO=""; PR_ENTREGA=""; PR_FALTA=0; PR_CTRL=0
   case "$rr" in refs/heads/?*) b="${rr#refs/heads/}" ;; *) return 0 ;; esac
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/mergex-portao-regras.XXXXXX")" || { PR_ERRO="não foi possível criar diretório temporário"; return 1; }
   : > "$tmp/achados"
@@ -286,6 +297,7 @@ pr_decide_ref() {
   _pr_nulo "$sl" && { _pr_sai passa exclusao - ""; return; }
   case "$rr" in refs/tags/*) _pr_sai passa tag - ""; return ;; esac
   if ! _pr_entrega "$raiz" "$rr" "$sl" "$sr"; then
+    [ "$PR_CTRL" != 1 ] || { _pr_sai barra caminho_com_controle - "caminho com caractere de controle (TAB, quebra de linha, CR) sob docs/entregas (caminho_com_controle): renomeie o diretório da entrega; o push fica barrado [$PR_ERRO]"; return; }
     # objeto ausente nas entregas da ref: história incompleta, não ambiente
     [ "$PR_FALTA" != 1 ] || { _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [$PR_ERRO]"; return; } # guarda:VALOBJ
     _pr_sai barra entrega_indeterminada - "$(_pr_diag_invalido entrega_indeterminada): $PR_ERRO"; return
