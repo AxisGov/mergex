@@ -2,45 +2,54 @@
 # portao-ci — a verificação do portão no CI, sobre o SHA da cabeça do PR.
 #
 # Contrato: docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md,
-# seção 13, item 8 (DM-184). Repete, no CI, a decisão do `pre-push`: não tem
-# regra própria. Decide como se a ref refs/heads/<branch> fosse empurrada com o
-# SHA local <sha> e o SHA remoto nulo, chamando pr_decide_ref (portao-regras.sh):
-# a mesma validade (validade-do-portao.sh --rev) e o mesmo modo de `portao: null`
-# (pr-so-com-portao em .expx/hooks.json). É a barreira contra contorno
-# deliberado (`--no-verify`) quando o produto a ativa com proteção de merge;
-# esta branch entrega o executável e o template, nunca ativa CI.
+# seção 13, itens 5 e 8 (DM-184, DM-185). Seleciona as entregas governadas pelo
+# portão SÓ PELO CONTEÚDO do PR (pr_entregas_do_intervalo, em portao-regras.sh:
+# o diff de árvores entre o merge-base de --base e --sha e os commits não-merge
+# do intervalo que tocam docs/entregas/<id>/ENTREGA.md) e decide cada uma com a
+# mesma validade do pre-push (validade-do-portao.sh --rev <sha>) e o mesmo modo
+# de `portao: null` (pr-so-com-portao em .expx/hooks.json), agregando: qualquer
+# barra vence, depois avisa, depois passa. O nome da branch nunca seleciona
+# nem isenta: `--branch` é só conferência — quando não é o `branch:` de nenhuma
+# entrega selecionada, a saída traz `aviso=branch_divergente` e a decisão não
+# muda. Esta branch entrega o executável e o template, nunca ativa CI.
 #
 # Uso (a partir da raiz do checkout, com a história completa):
 #   portao-ci.sh --verificar --sha <sha40|sha64> --branch <nome> --base <sha40|sha64>
 #
-# Aplicabilidade. No clone de um CI (actions/checkout com ref: <sha>) não existe
-# refs/heads/* local nem SHA remoto anterior. O análogo da "árvore do SHA remoto
-# anterior" é a história do PR: se o SHA enviado não declara a branch, o CI
-# consulta os ENTREGA.md do merge-base(--base, --sha) e dos commits do PR que
-# tocam docs/entregas, e usa o mais recente que declara `branch: <nome>` como
-# SHA remoto anterior de pr_decide_ref. Assim um commit que apaga o ENTREGA.md é
-# barrado, como no pre-push. Custo: um número constante de processos Git mais os
-# poucos por commit do PR que toca docs/entregas; nunca proporcional às
-# entregas do repositório. --base que não é objeto no clone, ou sem
-# merge-base com --sha, é historia_incompleta (falha fechada).
+# Seleção. <base> é pull_request.base.sha e <sha> é pull_request.head.sha. Um
+# merge-base único; mais de um barra (base_ambigua). Sem merge-base: num clone
+# completo a base é a árvore vazia (a história do SHA inteira entra); num clone
+# raso, historia_incompleta. Clone raso, --base ou --sha que não é objeto no
+# clone: historia_incompleta (falha fechada). Entrega selecionada que não existe
+# no <sha> (removida, renomeada, criada e apagada) barra (portao_nao_pronto).
+# Custo: um número constante de processos Git na seleção, mais uma validade por
+# entrega selecionada (normalmente uma); nunca proporcional às entregas do
+# repositório.
 #
-# Saída: decisao=<passa|avisa|barra>, motivo= e entrega= em stdout. O
-# diagnóstico (avisa e barra) vai a stderr; historia_incompleta (completar a
-# história, clone raso) e erro_ambiente (falha do ambiente, inclusive o
-# validador ausente) têm textos distintos.
+# Saída (stdout): por entrega selecionada, entrega[<i>]=, decisao[<i>]= e
+# motivo[<i>]= (<i> a partir de 1); cada aviso numa linha aviso=<...>; e, uma
+# única vez no fim, o resumo decisao=<passa|avisa|barra>, motivo= (o da
+# primeira entrega que barra, senão o da que decide), entrega= (`-` com
+# nenhuma ou mais de uma) e quantidade_entregas=<n>. Seleção vazia: passa,
+# ref_nao_aplicavel. O código de saída segue só o resumo. O diagnóstico (avisa
+# e barra) vai a stderr; historia_incompleta (completar a história, clone raso)
+# e erro_ambiente (falha do ambiente, inclusive o validador ausente) têm textos
+# distintos. Com mais de uma entrega selecionada, o diagnóstico lista todas e
+# diz que, se alguma veio da base, o evento tem base defasada: gerar novo
+# evento (push na branch do PR) com a base atual.
 #
 # Códigos: 0 passa ou avisa; 1 barra; 64 uso. Nenhuma opção de força.
 #
-# RISCOS RESIDUAIS (documentados, não resolvidos aqui):
-# - Aplicabilidade pelo `branch:` do ENTREGA.md, como nos três consumidores da
-#   barreira (spec 13.7). Um PR de branch com outro nome (o ENTREGA declara
-#   feature/ft-rec e o PR vem de feature/ft-rec-2) não é aplicável: um SHA
-#   vencido passa no CI e no pre-push. Mudar a regra é decisão de desenho
-#   pendente.
-# - Com `on: pull_request`, o autor do PR controla a cabeça do PR: o próprio
-#   portao-ci.sh e o workflow, e o .expx/hooks.json (o modo de `portao: null`).
-#   O check confia neles. Proteja .expx/**, .claude/** e .github/** com
-#   CODEOWNERS e revisão obrigatória no produto.
+# LIMITES (spec, seção 15.1, itens 1 e 9 a 12 — documentados, não resolvidos):
+# - A DM-185 fecha o contorno pelo nome da branch; o CI não é barreira contra todo contorno deliberado.
+#   Com `on: pull_request`, o autor do PR controla a
+#   cabeça do PR: o próprio portao-ci.sh, o workflow e o .expx/hooks.json (o
+#   modo de `portao: null`). O check confia neles. Proteja .expx/**, .claude/**
+#   e .github/** com CODEOWNERS e revisão obrigatória no produto.
+# - Código enviado num PR que não carrega nenhum ENTREGA.md (cherry-pick sem a
+#   entrega) não está sob o portão: a seleção é vazia e o CI passa.
+# - Várias entregas ativas no mesmo PR barram (a anterior fica vencida); base
+#   do evento defasada barra (falso bloqueio, nunca aprovação).
 #
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
@@ -77,7 +86,6 @@ case "$BRANCH" in refs/*) uso '--branch é o nome da branch, sem o prefixo refs/
 
 diag() { printf 'mergex ci: %s\n' "$1" >&2; }
 AMBIENTE='erro de ambiente (erro_ambiente): a validade do portão não pôde ser avaliada'
-NULO=0000000000000000000000000000000000000000
 
 # shellcheck source=portao-regras.sh
 if [ ! -r "$AQUI/portao-regras.sh" ] || ! . "$AQUI/portao-regras.sh"; then
@@ -93,16 +101,15 @@ RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || { diag "$AMBIENTE: fora de um repositório Git com árvore de trabalho; PR reprovado"; exit 1; }
 
 REF="refs/heads/$BRANCH"
-# um diretório temporário único, removido inteiro na saída: a decisão, a história
-# do PR e os arquivos auxiliares que _pr_entregas_em escreve ao lado de $TMP.um
-# (.lista, .cand, .batch, .idx) ficam todos nele; nada vaza para /tmp
+# um diretório temporário único, removido inteiro na saída: a seleção, as
+# decisões e os avisos ficam todos nele; nada vaza para /tmp
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-portao-ci.XXXXXX")" \
   || { diag "$AMBIENTE: não foi possível criar diretório temporário; PR reprovado"; exit 1; }
 trap 'rm -rf "$TMP_DIR"' EXIT
 trap 'exit 1' HUP INT TERM
-TMP="$TMP_DIR/decisao"
+TMP="$TMP_DIR/saida"
 
-# final — imprime a decisão de $TMP, o diagnóstico e sai com o código
+# final — imprime a saída de $TMP, o diagnóstico e sai com o código do resumo
 final() {
   local decisao
   cat "$TMP"
@@ -114,48 +121,46 @@ final() {
   esac
 }
 
-# a base precisa existir no clone: sem ela a história do PR não se lê
+# clone raso: a história cortada esconde commits e versões do ENTREGA.md
+if _pr_raso "$RAIZ"; then
+  _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [clone raso: o CI precisa de fetch-depth: 0]" > "$TMP"
+  final
+fi
+# a base precisa existir no clone: sem ela o intervalo do PR não se lê
 if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
   _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [a base $BASE do PR não é objeto neste clone]" > "$TMP"
   final
 fi
 
-: > "$TMP"
-pr_decide_ref "$RAIZ" "$REF" "$SHA" "$REF" "$NULO" > "$TMP" # guarda:CISHA
+# a seleção pelo conteúdo do PR: o nome da branch não entra
+SEL_RC=0
+: > "$TMP_DIR/selecao"
+pr_entregas_do_intervalo "$RAIZ" "$BASE" "$SHA" > "$TMP_DIR/selecao" || SEL_RC=1 # guarda:CINOME
+if [ "$SEL_RC" = 1 ]; then
+  _pr_barra_selecao "${PR_SEL_MOTIVO:-erro_ambiente}" "$PR_ERRO" > "$TMP"
+  final
+fi
+set --
+while IFS= read -r e; do [ -n "$e" ] && set -- "$@" "$e"; done < "$TMP_DIR/selecao"
 
-# SHA sem ENTREGA.md que declare a branch: a história do PR decide a aplicabilidade
-if [ "$(sed -n 's/^motivo=//p' "$TMP")" = ref_nao_aplicavel ]; then
-  MB="$(git merge-base "$BASE" "$SHA" 2>/dev/null)"
-  # --full-history: sem simplificação, um merge cuja árvore descarta o docs/entregas
-  # do PR continua listando os commits que o tocaram
-  if [ -n "$MB" ]; then
-    { git rev-list --full-history "$MB..$SHA" -- docs/entregas 2>/dev/null; printf '%s\n' "$MB"; } > "$TMP.revs" # guarda:CIFULL
-  elif [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ]; then
-    # branch órfã (sem ancestral comum com a base) num clone completo: a história
-    # do PR é a do SHA inteiro
-    git rev-list --full-history "$SHA" -- docs/entregas > "$TMP.revs" 2>/dev/null
-  else
-    _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [sem merge-base entre a base $BASE e $SHA num clone raso ou ilegível]" > "$TMP"
-    final
-  fi
-  ANTERIOR=""
-  PR_FALTA=0; PR_CTRL=0
-  while read -r rev; do
-    [ -n "$rev" ] || continue
-    : > "$TMP.um"
-    if ! _pr_entregas_em "$RAIZ" "$rev" "$BRANCH" "$TMP.um"; then
-      if [ "$PR_FALTA" = 1 ]; then
-        _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [$PR_ERRO]" > "$TMP"
-      else
-        _pr_sai barra entrega_indeterminada - "$(_pr_diag_invalido entrega_indeterminada): $PR_ERRO" > "$TMP"
-      fi
-      final
-    fi
-    if [ -s "$TMP.um" ]; then ANTERIOR="$rev"; break; fi
-  done < "$TMP.revs"
-  if [ -n "$ANTERIOR" ]; then
-    : > "$TMP"
-    pr_decide_ref "$RAIZ" "$REF" "$SHA" "$REF" "$ANTERIOR" > "$TMP" # guarda:CIHIST
+# cada entrega selecionada decidida sobre o SHA da cabeça do PR, com a agregação
+: > "$TMP_DIR/decisao"
+pr_decide_entregas "$RAIZ" "$SHA" "$@" > "$TMP_DIR/decisao" # guarda:CISHA
+
+# --branch é só conferência: não é o branch: de nenhuma entrega selecionada
+: > "$TMP_DIR/avisos"
+if [ "$#" -gt 0 ]; then
+  DECLARA=0
+  for e in "$@"; do
+    if git cat-file blob "$SHA:$e" > "$TMP_DIR/blob" 2>/dev/null && [ "$(catalogo_fm "$TMP_DIR/blob" branch)" = "$BRANCH" ]; then DECLARA=1; fi
+  done
+  [ "$DECLARA" = 1 ] || printf 'aviso=branch_divergente\n' >> "$TMP_DIR/avisos" # guarda:BRDIV
+  [ "$DECLARA" = 1 ] || diag "$REF: o nome da branch do PR ($BRANCH) não é o branch: de nenhuma entrega selecionada (branch_divergente): a seleção é pelo conteúdo e a decisão não muda; atualize branch: no ENTREGA.md num commit de método pre-e6 se a renomeação for legítima"
+  if [ "$#" -gt 1 ]; then
+    diag "$REF: $# entregas selecionadas pelo conteúdo do PR ($(printf '%s, ' "$@" | sed 's/, $//')); se alguma veio da base, o evento do PR tem base defasada: gere novo evento (push na branch do PR) com a base atual"
   fi
 fi
+
+# a saída: as linhas por entrega, os avisos e o resumo único no fim
+{ grep -E '^[a-z_]+\[[0-9]+\]=' "$TMP_DIR/decisao"; cat "$TMP_DIR/avisos"; grep -Ev '^[a-z_]+\[[0-9]+\]=' "$TMP_DIR/decisao"; } > "$TMP"
 final

@@ -38,9 +38,12 @@
 #   (a) a ref aplicável com o commit solto vencido: exige código diferente de
 #       zero E a linha `mergex-pre-push <SHA desse commit> barra`, que o
 #       portao-push.sh só escreve depois de decidir aquela ref;
-#   (b) controle positivo: outro commit solto (a árvore de HEAD) numa ref NÃO
-#       aplicável (`refs/heads/mergex-prova-livre-<pid>[-n]`, conferida como
-#       inexistente localmente): exige código 0 E a linha
+#   (b) controle positivo: outro commit solto, com a ÁRVORE VAZIA (`git
+#       mktree </dev/null`, no formato de hash do repositório: nenhum
+#       ENTREGA.md, para que nenhuma parcela da seleção do pre-push o alcance
+#       — DM-185), numa ref NÃO aplicável
+#       (`refs/heads/mergex-prova-livre-<pid>[-n]`, conferida como inexistente
+#       localmente): exige código 0 E a linha
 #       `mergex-pre-push <SHA desse commit> passa`. Pega o hook que ignora o
 #       código do validador e decide por regra própria, e o ambiente em que o
 #       validador barra tudo por erro.
@@ -233,7 +236,7 @@ para_git() {
 PROVA_ERRO=""
 PROVA_RC=""
 provar() {
-  local head b c c2 livre n arvore blob_e blob_p nulo produto rc tg
+  local head b c c2 livre n arvore vazia blob_e blob_p nulo produto rc tg
   PROVA_ERRO=""; PROVA_RC=""; PROVA_SAIDA=""
   [ -f "$HOOK" ] && [ -x "$HOOK" ] || { PROVA_ERRO="nenhum pre-push executável no diretório efetivo $HOOKS"; return 1; }
   [ -f "$RAIZ/$ENTREGA" ] && [ ! -L "$RAIZ/$ENTREGA" ] || { PROVA_ERRO="$ENTREGA não é arquivo regular"; return 1; }
@@ -278,14 +281,16 @@ provar() {
   [ "$rc" != 0 ] || { PROVA_ERRO='o pre-push saiu com código 0: liberou a ref sabidamente inválida da prova, ou não propagou o código do validador'; return 1; }
   grep -Fxq "mergex-pre-push $c barra" "$TMP_DIR/sinal-a" || { PROVA_ERRO="o pre-push saiu com código $rc sem que o validador da MergeX barrasse a ref da prova ($c): nenhuma decisão dele no sinal"; return 1; } # guarda:ATVTXT
 
-  # (b) controle positivo: outro commit solto (a árvore de HEAD, sem nenhum
-  # ENTREGA.md que declare a branch usada) numa ref NÃO aplicável — um nome que
-  # não existe localmente. O validador decide `passa` e o hook tem de sair 0:
-  # prova que o código do hook é o do validador (não uma regra própria) e que
-  # o validador de fato avalia neste ambiente (não barra tudo por erro)
+  # (b) controle positivo: outro commit solto, com a árvore VAZIA (nenhum
+  # ENTREGA.md: nem o nome, nem o conteúdo, nem o trailer selecionam nada —
+  # DM-185), numa ref NÃO aplicável — um nome que não existe localmente. O
+  # validador decide `passa` e o hook tem de sair 0: prova que o código do
+  # hook é o do validador (não uma regra própria) e que o validador de fato
+  # avalia neste ambiente (não barra tudo por erro)
   n=0; livre="mergex-prova-livre-$$"
   while git -C "$RAIZ" show-ref -q --verify "refs/heads/$livre"; do n=$((n + 1)); livre="mergex-prova-livre-$$-$n"; done
-  c2="$(GIT_AUTHOR_NAME='MergeX prova' GIT_AUTHOR_EMAIL='prova@mergex.invalid'       GIT_COMMITTER_NAME='MergeX prova' GIT_COMMITTER_EMAIL='prova@mergex.invalid'       git -C "$RAIZ" commit-tree --no-gpg-sign "$head^{tree}" -p "$head" -m 'chore: controle positivo da prova do pre-push da mergex' 2>/dev/null)"     || { PROVA_ERRO='não foi possível montar o commit solto do controle positivo'; return 1; }
+  vazia="$(git -C "$RAIZ" mktree </dev/null 2>/dev/null)" || { PROVA_ERRO='não foi possível gravar a árvore vazia do controle positivo'; return 1; }
+  c2="$(GIT_AUTHOR_NAME='MergeX prova' GIT_AUTHOR_EMAIL='prova@mergex.invalid'       GIT_COMMITTER_NAME='MergeX prova' GIT_COMMITTER_EMAIL='prova@mergex.invalid'       git -C "$RAIZ" commit-tree --no-gpg-sign "$vazia" -p "$head" -m 'chore: controle positivo da prova do pre-push da mergex' 2>/dev/null)"     || { PROVA_ERRO='não foi possível montar o commit solto do controle positivo'; return 1; }
   printf 'refs/heads/%s %s refs/heads/%s %s
 ' "$livre" "$c2" "$livre" "$nulo" > "$TMP_DIR/linha-b"
   executa_hook b 2>/dev/null; rc=$?

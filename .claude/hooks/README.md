@@ -120,7 +120,7 @@ enviado, e leem o mesmo modo (`pr-so-com-portao` em `.expx/hooks.json`):
 |---|---|
 | `pre-push` do Git (`portao-push.sh`, ativado e provado pelo E0 e pelo E2) | Barreira local **autoritativa contra erro normal**. Decide pelas refs e SHAs que o Git entrega, qualquer que seja o comando que disparou o push: `cd … &&`, `bash -c`, `xargs`, função ou alias chegam iguais |
 | Este hook | **Aviso antecipado.** Antecipa o diagnóstico quando consegue provar o resultado; no resto, avisa e deixa o Git seguir até o `pre-push` |
-| CI com proteção de merge (`portao-ci.sh` e o template em `assets/ci/`) | Barreira **contra contorno deliberado**, inclusive `--no-verify`. Esta branch entrega o executável e o template e não ativa CI em produto nenhum |
+| CI com proteção de merge (`portao-ci.sh` e o template em `assets/ci/`) | Barreira contra `--no-verify` e contra o contorno pelo nome da branch: seleciona as entregas **só pelo conteúdo do PR** (DM-185), nunca pelo nome, nos limites da spec (seção 15.1). Esta branch entrega o executável e o template e não ativa CI em produto nenhum |
 
 **A validade do portão.** O portão do E2 vale para um SHA (`portao_sha`, DM-181).
 `scripts/validade-do-portao.sh --verificar --entrega <ENTREGA.md> --rev <sha>` lê

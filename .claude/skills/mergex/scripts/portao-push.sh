@@ -2,19 +2,29 @@
 # portao-push — o validador de push da MergeX, chamado pelo `pre-push` do Git.
 #
 # Contrato: docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md,
-# seção 13, item 7 (DM-184). É a barreira local autoritativa contra erro
-# normal: decide só com o que o Git entrega na entrada padrão, nunca com texto
-# de comando de shell (um push por `cd`, `bash -c` ou link simbólico chega aqui
-# igual).
+# seção 13, item 7 (DM-184, DM-185). É a barreira local autoritativa contra
+# erro normal: decide só com o que o Git entrega na entrada padrão, nunca com
+# texto de comando de shell (um push por `cd`, `bash -c` ou link simbólico
+# chega aqui igual).
 #
 # Uso (pelo pre-push, que repassa a entrada padrão e propaga o código):
 #   portao-push.sh --pre-push <remoto> <url>
 #
 # Entrada padrão: o protocolo do pre-push, uma linha por ref:
 #   <ref local> SP <SHA local> SP <ref remota> SP <SHA remoto>
-# Cada ref é decidida por pr_decide_ref (portao-regras.sh) sobre o SHA local
-# DAQUELA linha, nunca sobre o HEAD do checkout. Qualquer ref que barra barra
-# o push inteiro, mesmo depois de uma válida. Linha fora do protocolo barra.
+# Cada ref é decidida por pr_decide_ref (portao-regras.sh, com <remoto>) sobre
+# o SHA local DAQUELA linha, nunca sobre o HEAD do checkout. As entregas de uma
+# ref refs/heads/<b> são a UNIÃO de três parcelas, que só acrescentam e nunca
+# isentam (DM-185): (a) a seleção pelo conteúdo contra refs/remotes/<remoto>/HEAD,
+# quando resolve para commit (push para URL não tem; nunca se adivinha main ou
+# master); (b) a regra legada pelo nome (o ENTREGA.md que declara branch: <b>
+# na árvore enviada, na remota anterior ou na ponta local); (c) o trailer
+# Trabalho: <id> do commit enviado. Cada entrega é validada sobre o SHA
+# enviado e a decisão da ref é a agregada (qualquer barra vence, depois avisa,
+# depois passa). Sem a parcela (a) e com (b) e (c) vazias, uma árvore enviada
+# com ENTREGA.md canônico só avisa (cobertura_indeterminada): a aplicabilidade
+# não está provada, e o push segue. Qualquer ref que barra barra o push
+# inteiro, mesmo depois de uma válida. Linha fora do protocolo barra.
 #
 # Diagnóstico em stderr, uma linha por ref que avisa ou barra; os de
 # historia_incompleta (completar a história) e de erro_ambiente (falha do
@@ -29,8 +39,9 @@
 # prova exige a linha `barra` do SHA do commit solto dela. Um hook escrito de
 # propósito para forjar essa linha é contorno deliberado (a barreira é o CI).
 #
-# Códigos: 0 libera; 1 barra; 64 uso. Custo: uma validade por ref aplicável,
-# nenhuma varredura de branches. Nenhuma opção de força.
+# Códigos: 0 libera; 1 barra; 64 uso. Custo: uma seleção com processos Git
+# constantes e uma validade por entrega selecionada, por ref enviada; nenhuma
+# varredura de branches. Nenhuma opção de força.
 #
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
@@ -88,7 +99,7 @@ while IFS=' ' read -r ref_local sha_local ref_remota sha_remoto resto <&3; do
     BARRA=1; continue
   fi
   : > "$TMP_DIR/decisao"
-  pr_decide_ref "$RAIZ" "$ref_local" "$sha_local" "$ref_remota" "$sha_remoto" > "$TMP_DIR/decisao" # guarda:PPSHA
+  pr_decide_ref "$RAIZ" "$ref_local" "$sha_local" "$ref_remota" "$sha_remoto" "$REMOTO" > "$TMP_DIR/decisao" # guarda:PPSHA
   decisao="$(sed -n 's/^decisao=//p' "$TMP_DIR/decisao")"
   case "$decisao" in
     passa) ;;

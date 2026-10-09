@@ -378,9 +378,11 @@ estão documentados no cabeçalho do executável afetado:
    branches entregues do repositório a cada comando, e com dezenas delas estourava o prazo. O
    `pre-push` avalia só as refs do push: o custo deixou de depender das branches existentes.
 
-Os riscos residuais da própria barreira de push — o PR de branch com outro nome, o autor do PR que
-controla o modo e os scripts do CI, e o hook consultivo diante de caminho UNC — estão em
-`references/12-barreira-de-push.md` e em `.claude/hooks/README.md`.
+Os riscos residuais da própria barreira de push — o autor do PR que controla o modo e os scripts do
+CI, o PR sem `ENTREGA.md`, várias entregas no mesmo PR, a base do evento defasada e o hook
+consultivo diante de caminho UNC — estão em `references/12-barreira-de-push.md` e em
+`.claude/hooks/README.md`. O contorno pelo nome da branch foi fechado pela DM-185: a entrega é
+selecionada pelo conteúdo do que é enviado.
 
 ## Reversão
 

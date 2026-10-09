@@ -108,9 +108,9 @@ Metodo: $3"
     else git commit -q -m "docs: entrega"; fi )
 }
 
-# _arvore_entregas <repo> <n> — commit (na branch atual) com n ENTREGA.md
-# simples (docs/entregas/e<i>/ENTREGA.md, branch: feature/e<i>) e as variantes
-# de leitura de `branch:` que catalogo_fm aceita ou recusa:
+# _arvore_entregas <repo> <n> [pai] — commit (sem pai, ou sobre <pai>) com n
+# ENTREGA.md simples (docs/entregas/e<i>/ENTREGA.md, branch: feature/e<i>) e as
+# variantes de leitura de `branch:` que catalogo_fm aceita ou recusa:
 #   alvo     `branch: "feature/alvo"` com CRLF (casa)
 #   esp      `branch: feature/esp` com espaços no fim, e `---  ` (casa)
 #   base     só `branch_base: feature/alvo` (não casa)
@@ -119,7 +119,7 @@ Metodo: $3"
 #   segunda  segunda chave `branch:` (só a primeira vale; não casa)
 # Imprime o SHA do commit.
 _arvore_entregas() {
-  local r="$1" n="$2" i b
+  local r="$1" n="$2" pai="${3:-}" i b
   ( cd "$r" || exit 1
     rm -f .git/fx-idx
     _e() { printf '%s' "$2" | git hash-object -w --stdin > .git/fx-blob \
@@ -137,7 +137,8 @@ _arvore_entregas() {
     _e segunda "$(printf -- '---\nbranch: feature/outra\nbranch: feature/alvo\n---\n')" || exit 1
     b="$(GIT_INDEX_FILE=.git/fx-idx git write-tree)" || exit 1
     rm -f .git/fx-idx .git/fx-blob
-    git commit-tree "$b" -m "entregas: $n" )
+    if [ -n "$pai" ]; then git commit-tree "$b" -p "$pai" -m "entregas: $n"
+    else git commit-tree "$b" -m "entregas: $n"; fi )
 }
 
 # entregas_custo <tmp> — pr_entrega_da_ref com 2 e com 300 ENTREGA.md na
@@ -477,6 +478,64 @@ grupo_prepush() {
   sem_residuo "sem resíduo em /tmp: pre-push de push barrado (pronto vencido)" "$d2" fx_push_real "$d2" origin feature/ft-rec
   [ "$(git ls-remote origin refs/heads/feature/ft-rec | cut -f1)" = "$vr" ] && ok "controle: o push barrado não chegou ao remoto" || falha "controle: o push barrado chegou"
   cd "$REPO" || return
+
+  # ---- DM-185: a união das três parcelas no pre-push (spec 13.7) -------------------------
+  # (a) o conteúdo contra refs/remotes/<remoto>/HEAD, (b) a regra legada pelo
+  # nome, (c) o trailer Trabalho: do commit enviado; nenhuma isenta. Sem (a) e
+  # com (b) e (c) vazias, ENTREGA.md na árvore só avisa (cobertura_indeterminada).
+  local t3 d3 vA pB mT pR
+  t3="$(mktemp -d)"; TMPS="$TMPS $t3"; d3="$t3/repo"
+  fx_cenario "$d3" || { falha "cenário DM-185 não montou"; return; }
+  fx_remoto_bare "$d3" || { falha "remoto bare (DM-185)"; return; }
+  modo "$d3" aviso
+  cd "$d3" || return
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1 && git remote set-head origin main >/dev/null 2>&1 \
+    && [ "$(git rev-parse -q --verify 'refs/remotes/origin/HEAD^{commit}')" = "$(git rev-parse main)" ] \
+    && ok "controle: refs/remotes/origin/HEAD resolve para a main" || falha "controle: origin/HEAD não montou"
+  fx_portao_em "$d3" HEAD; vA="$(git rev-parse HEAD)"
+  produto "$d3" dm185; pB="$(git rev-parse HEAD)"
+  [ "$(val_motivo "$pB")" = commit_de_produto ] && [ "$(val_motivo "$vA")" = ok ] \
+    && [ -z "$(git log -1 --format='%(trailers:key=Trabalho,valueonly)' "$pB" | tr -d '[:space:]')" ] \
+    && ok "controle: pB vencido e sem trailer Trabalho:, vA válido" || falha "controle DM-185: pB/vA"
+  FX_PUSH_REF=refs/heads/feature/ft-rec-renomeada push_espera "ref renomeada com origin/HEAD barra pelo conteúdo" 1 - "$d3" origin "$pB:refs/heads/feature/ft-rec-renomeada"
+  err_tem "ref renomeada: diagnóstico commit_de_produto" "commit_de_produto"
+  FX_PUSH_REF=refs/heads/feature/ft-rec-renomeada push_espera "controle: ref renomeada com o SHA válido passa pelo conteúdo" 0 "$vA" "$d3" origin "$vA:refs/heads/feature/ft-rec-renomeada"
+  err_sem "ref renomeada válida: nenhum diagnóstico" "mergex pre-push"
+
+  # chamador gerenciado (instalado por uma cópia da skill) sem o validador: a
+  # mensagem da MergeX, não o erro cru do bash
+  mkdir -p "$t3/skill" && cp -R "$S" "$t3/skill/scripts" && cp -R "$S/../assets" "$t3/skill/assets" || falha "cópia da skill (M3)"
+  git config --unset core.hooksPath
+  ( cd "$d3" && bash "$t3/skill/scripts/ativacao-pre-push.sh" --instalar --entrega docs/entregas/ft-rec/ENTREGA.md ) >/dev/null 2>&1; rc=$?
+  [ "$rc" = 0 ] && grep -Fq "$t3/skill/scripts/portao-push.sh" "$d3/.git/hooks/pre-push" \
+    && ok "controle: chamador gerenciado instalado apontando para a cópia da skill" || falha "controle M3: instalar rc=$rc"
+  rm -rf "$t3/skill"
+  out="$(fx_push_efetivo "$d3" origin "$vA:refs/heads/feature/ft-rec")"
+  PUSH_ERR="$(printf '%s\n' "$out" | sed -n 's/^stderr=//p')"
+  [ "$(printf '%s\n' "$out" | sed -n 's/^rc=//p')" = 1 ] && [ "$(printf '%s\n' "$out" | sed -n 's/^ref=//p')" = - ] \
+    && ok "chamador gerenciado sem o validador barra com a mensagem da MergeX" || falha "chamador sem validador: $(printf '%s' "$out" | tr '\n' '|')"
+  err_tem "chamador sem validador: a mensagem nomeia o validador ausente" "mergex pre-push: validador ausente neste checkout"
+  err_tem "chamador sem validador: instrução de reinstalar ou reverter" "reinstale a skill ou rode ativacao-pre-push.sh --reverter"
+  err_sem "chamador sem validador: sem o erro cru do bash" "No such file"
+  rm -f "$d3/.git/hooks/pre-push"
+
+  git remote set-head origin -d >/dev/null 2>&1
+  git rev-parse -q --verify refs/remotes/origin/HEAD >/dev/null 2>&1 && falha "controle: origin/HEAD ainda existe" || ok "controle: sem refs/remotes/origin/HEAD"
+  FX_PUSH_REF=refs/heads/zz-sem-base push_espera "sem base, sem nome e sem trailer, com ENTREGA na árvore, avisa cobertura_indeterminada (passa)" 0 "$pB" "$d3" "$FX_REMOTO" "$pB:refs/heads/zz-sem-base"
+  err_tem "cobertura indeterminada: diagnóstico" "cobertura_indeterminada"
+  FX_PUSH_REF=refs/heads/zz-vazia push_espera "sem base e sem ENTREGA na árvore passa" 0 "$FX_B0" "$d3" "$FX_REMOTO" "$FX_B0:refs/heads/zz-vazia"
+  err_sem "sem ENTREGA na árvore: nenhum diagnóstico" "mergex pre-push"
+  fx_commit_metodo "$d3" pre-e6 docs/entregas/ft-rec/PR.md; mT="$(git rev-parse HEAD)"
+  [ "$(git log -1 --format='%(trailers:key=Trabalho,valueonly)' "$mT" | tr -d '[:space:]')" = ft-rec ] && [ "$(val_motivo "$mT")" = commit_de_produto ] \
+    && ok "controle: mT tem o trailer Trabalho: ft-rec e está vencido" || falha "controle: mT"
+  FX_PUSH_REF=refs/heads/zz-trailer push_espera "push por URL com nome divergente barra pelo trailer Trabalho do commit enviado" 1 - "$d3" "$FX_REMOTO" "$mT:refs/heads/zz-trailer"
+  err_tem "trailer Trabalho: diagnóstico commit_de_produto" "commit_de_produto"
+  push_espera "controle: o SHA válido na branch do trabalho passa" 0 "$vA" "$d3" origin "$vA:refs/heads/feature/ft-rec"
+  git rm -q docs/entregas/ft-rec/ENTREGA.md && git commit -q -m "docs: remove a entrega"; pR="$(git rev-parse HEAD)"
+  [ -z "$(git log -1 --format='%(trailers:key=Trabalho,valueonly)' "$pR" | tr -d '[:space:]')" ] && ok "controle: o commit que apaga o ENTREGA não tem trailer" || falha "controle: pR com trailer"
+  push_espera "push que apaga o ENTREGA da branch de mesmo nome barra pelo nome sem base" 1 "$vA" "$d3" origin "$pR:refs/heads/feature/ft-rec"
+  err_tem "apaga o ENTREGA: diagnóstico portao_nao_pronto" "portao_nao_pronto"
+  cd "$REPO" || return
 }
 
 # ---------------------------------------------------------------------------
@@ -650,6 +709,17 @@ grupo_ativacao() {
     || falha "prova mudou o estado: $(diff <(printf '%s\n' "$antes") <(printf '%s\n' "$depois") | tr '\n' '|')"
   ( cd "$d/src" && bash "$ATV" --provar --entrega docs/entregas/ft-rec/ENTREGA.md >/dev/null 2>&1 ); rc=$?
   [ "$rc" = 0 ] && ok "prova a partir de um subdiretório aprova (a entrega é relativa à raiz)" || falha "prova do subdiretório: rc=$rc"
+  # DM-185: com a seleção pelo conteúdo no pre-push, a prova continua com os
+  # dois lados — (a) barra a ref inválida, (b) o controle positivo passa (a sua
+  # árvore é vazia: nenhuma parcela da seleção o alcança) — mesmo com
+  # refs/remotes/origin/HEAD presente no repositório
+  git -C "$d" fetch -q origin >/dev/null 2>&1 && git -C "$d" remote set-head origin main >/dev/null 2>&1 \
+    && git -C "$d" rev-parse -q --verify 'refs/remotes/origin/HEAD^{commit}' >/dev/null \
+    && ok "controle: refs/remotes/origin/HEAD presente" || falha "controle: origin/HEAD não montou"
+  atv_espera "prova funcional com origin/HEAD presente continua com os dois lados (aprova)" 0 "$d" --provar
+  out_tem "prova com origin/HEAD: barrou a ref inválida" "barrou a ref inválida da prova"
+  out_tem "prova com origin/HEAD: liberou o controle positivo" "liberou o controle positivo"
+  git -C "$d" remote set-head origin -d >/dev/null 2>&1
 
   # ---- reversão e E2 sem prova ---------------------------------------------------------
   [ -f "$hk" ] || falha "controle: o chamador gerenciado existe antes da reversão"
@@ -1015,6 +1085,223 @@ equivale() {
   esac
 }
 
+# ---------------------------------------------------------------------------
+# DM-185: seleção da entrega pelo conteúdo do PR (spec 13.5 e 13.8)
+# ---------------------------------------------------------------------------
+
+# ci_val <desc> <rc> <decisao> <motivo|-> <n validade> <dir> <sha> <branch> <base>
+# — portao-ci.sh pela cópia instrumentada da skill (CI_INSTR), cuja
+# validade-do-portao.sh registra cada execução em CI_LOG antes de delegar à
+# real: exige o rc, o resumo decisao= e motivo= (`-` não confere) e o número de
+# execuções da validade
+CI_INSTR=""; CI_LOG=""
+ci_val() {
+  local desc="$1" rce="$2" dece="$3" mote="$4" ne="$5" dir="$6" sha="$7" br="$8" base="$9" dec mot n
+  : > "$CI_LOG"
+  CI_BASE="$base" ci_roda "$dir" "$sha" "$br" "$CI_INSTR/portao-ci.sh"
+  dec="$(printf '%s\n' "$CI_OUT" | sed -n 's/^decisao=//p')"; mot="$(printf '%s\n' "$CI_OUT" | sed -n 's/^motivo=//p')"
+  n="$(grep -c . "$CI_LOG")"
+  if [ "$CI_RC" = "$rce" ] && [ "$dec" = "$dece" ] && { [ "$mote" = - ] || [ "$mot" = "$mote" ]; } && [ "$n" = "$ne" ]; then ok "$desc"
+  else falha "$desc — rc=$CI_RC decisao=$dec motivo=$mot validade=${n}x (esperava rc=$rce $dece/$mote ${ne}x): $(printf '%s' "$CI_OUT $CI_ERR" | tr '\n' '|')"; fi
+}
+ci_out_tem() { case "$CI_OUT" in *"$2"*) ok "$1" ;; *) falha "$1 — sem '$2' na saída: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac; }
+ci_out_sem() { case "$CI_OUT" in *"$2"*) falha "$1 — '$2' na saída: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; *) ok "$1" ;; esac; }
+
+# entrega_em <dir> <id> <branch> [sed extra] [rev] — docs/entregas/<id>/ENTREGA.md
+# derivado do ENTREGA.md de ft-rec de <rev> (padrão HEAD), no índice (sem commit)
+entrega_em() {
+  ( cd "$1" || exit 1
+    mkdir -p "docs/entregas/$2"
+    git show "${5:-HEAD}:docs/entregas/ft-rec/ENTREGA.md" \
+      | sed -e "s/^trabalho_id: .*/trabalho_id: $2/" -e "s#^branch: .*#branch: $3#" -e "${4:-s/^trabalho_id: /&/}" \
+      > "docs/entregas/$2/ENTREGA.md" && git add "docs/entregas/$2/ENTREGA.md" )
+}
+
+# selecao <dir> <base> <sha> — pr_entregas_do_intervalo direto, uma linha por
+# entrega e, no fim, `rc=<rc> motivo=<PR_SEL_MOTIVO>`
+selecao() {
+  ( . "$REGRAS" || exit 9; arvore_ambiente_git
+    pr_entregas_do_intervalo "$1" "$2" "$3"; rc=$?
+    printf 'rc=%s motivo=%s\n' "$rc" "${PR_SEL_MOTIVO:-}" )
+}
+
+ci_selecao_conteudo() {
+  local t="$1" dm ci vv p1 x sp dois dup agg fk mainsha C M A1 B1 A2 B2 F G MM MD CA RN B1n MI P2 orfS orfE o head out n2 n300 c2 c300 real
+  dm="$t/dm"
+  fx_cenario "$dm" || { falha "cenário DM-185 (ci) não montou"; return; }
+  cd "$dm" || return
+  git switch -q --detach || { falha "HEAD não destacou (DM-185)"; return; }
+  modo "$dm" aviso
+  mainsha="$(git rev-parse main)"
+  fx_portao_em "$dm" HEAD; vv="$(git rev-parse HEAD)"
+  produto "$dm" dm185; p1="$(git rev-parse HEAD)"
+  git switch -q --detach "$vv"; fx_portao_sem_sha "$dm"; x="$(git rev-parse HEAD)"
+  git switch -q --detach "$mainsha"; produto "$dm" so-produto; sp="$(git rev-parse HEAD)"
+  git switch -q --detach "$p1"; entrega_em "$dm" ft-outro feature/outro && git commit -q -m "docs: segunda entrega"; dois="$(git rev-parse HEAD)"
+  git switch -q --detach "$p1"; entrega_em "$dm" ft-dup feature/ft-rec && git commit -q -m "docs: entrega duplicada"; dup="$(git rev-parse HEAD)"
+  git switch -q --detach "$p1"; entrega_em "$dm" aa-null feature/aa-null 's/^portao: .*/portao: null/' && git commit -q -m "docs: entrega ainda nao autorizada"; agg="$(git rev-parse HEAD)"
+  [ "$(val_motivo "$vv")" = ok ] && [ "$(val_motivo "$p1")" = commit_de_produto ] && [ "$(val_motivo "$x")" = portao_sha_ausente ] \
+    && [ "$(git show "$vv:docs/entregas/ft-rec/ENTREGA.md" | sed -n 's/^branch: //p')" = feature/ft-rec ] \
+    && [ -z "$(git ls-tree "$mainsha" -- docs/entregas)" ] \
+    && ok "controle DM-185: vv válido, p1 vencido, x sem portao_sha; o ENTREGA declara feature/ft-rec; a main não tem entregas" || falha "controle DM-185: fixture"
+  # bordas (spec 21, caso 22)
+  git switch -q --detach "$vv"
+  git switch -q -c dm-lado && entrega_commit "$dm" 's/^portao: .*/portao: null/' && produto "$dm" dm-lado; C="$(git rev-parse HEAD)"
+  git switch -q --detach "$vv" && git merge -q --no-ff --no-commit dm-lado >/dev/null 2>&1; git checkout -q "$vv" -- docs/entregas/ft-rec/ENTREGA.md && git commit -q -m "merge: restaura o ENTREGA de vv"; M="$(git rev-parse HEAD)"
+  [ "$(git rev-parse "$M^1")" = "$vv" ] && [ "$(git rev-parse "$M^2")" = "$C" ] && [ "$(git rev-parse "$M:docs/entregas/ft-rec/ENTREGA.md")" = "$(git rev-parse "$vv:docs/entregas/ft-rec/ENTREGA.md")" ] \
+    && [ -z "$(git log --no-merges --format= --name-only "$vv..$M" -- docs/entregas | sed '/^$/d')" ] \
+    && ok "controle: M restaura o ENTREGA de vv (sem --full-history, o log não vê C)" || falha "controle: grafo P/C/M"
+  git switch -q -c dm-cc-a "$vv" && produto "$dm" cc-a; A1="$(git rev-parse HEAD)"
+  git switch -q -c dm-cc-b "$vv" && produto "$dm" cc-b; B1="$(git rev-parse HEAD)"
+  git switch -q dm-cc-a && git merge -q --no-ff --no-edit dm-cc-b >/dev/null 2>&1; A2="$(git rev-parse HEAD)"
+  git switch -q dm-cc-b && git merge -q --no-ff --no-edit "$A1" >/dev/null 2>&1; B2="$(git rev-parse HEAD)"
+  [ "$(git merge-base --all "$A2" "$B2" | wc -l | tr -d ' ')" = 2 ] && ok "controle: criss-cross com dois merge-bases" || falha "controle: criss-cross"
+  git switch -q -c dm-mm-f "$vv" && produto "$dm" mm-f; F="$(git rev-parse HEAD)"
+  git switch -q -c dm-mm-g "$vv" && printf 'q\n' > q.txt && git add q.txt && git commit -q -m "feat: q"; G="$(git rev-parse HEAD)"
+  git switch -q dm-mm-f && git merge -q --no-ff --no-commit dm-mm-g >/dev/null 2>&1; entrega_commit "$dm" 's/^atualizado_em: .*/atualizado_em: 2026-10-09/'; MM="$(git rev-parse HEAD)"
+  [ "$(git rev-parse "$MM^2")" = "$G" ] && [ "$(git diff-tree -r --name-only --no-commit-id "$vv" "$MM" -- docs/entregas)" = docs/entregas/ft-rec/ENTREGA.md ] \
+    && [ -z "$(git log --full-history --no-merges --format= --name-only "$vv..$MM" -- docs/entregas | sed '/^$/d')" ] \
+    && ok "controle: MM altera o ENTREGA contra os dois pais (só o diff de árvores vê)" || falha "controle: merge maligno"
+  git switch -q --detach "$vv" && git merge -q --no-ff --no-commit dm-mm-g >/dev/null 2>&1; git rm -q -r docs/entregas/ft-rec && git commit -q -m "merge: apaga a entrega"; MD="$(git rev-parse HEAD)"
+  if [ "$(git rev-parse "$MD^2")" = "$G" ] && ! git cat-file -e "$MD:docs/entregas/ft-rec/ENTREGA.md" 2>/dev/null; then ok "controle: MD é merge sem o ENTREGA da base"; else falha "controle: MD"; fi
+  git switch -q --detach "$mainsha" && entrega_em "$dm" nova feature/nova '' "$vv" && git commit -q -m "docs: cria a entrega nova" \
+    && git rm -q -r docs/entregas/nova && git commit -q -m "docs: apaga a entrega nova" && produto "$dm" cria-apaga; CA="$(git rev-parse HEAD)"
+  [ -z "$(git diff-tree -r --name-only --no-commit-id "$mainsha" "$CA" -- docs/entregas)" ] && [ "$(git rev-parse "$CA~3")" = "$mainsha" ] \
+    && ok "controle: cria-e-apaga a partir da main (diff de árvores vazio)" || falha "controle: cria-e-apaga"
+  git switch -q --detach "$vv" && git mv docs/entregas/ft-rec docs/entregas/ft-ren && git commit -q -m "docs: renomeia o diretório da entrega"; RN="$(git rev-parse HEAD)"
+  git switch -q --detach "$mainsha" && entrega_em "$dm" outro feature/outro '' "$vv" && git commit -q -m "docs: entrega alheia na base"; B1n="$(git rev-parse HEAD)"
+  git switch -q --detach "$vv" && git merge -q --no-ff --no-edit "$B1n" >/dev/null 2>&1; MI="$(git rev-parse HEAD)"; produto "$dm" p2; P2="$(git rev-parse HEAD)"
+  [ "$(git rev-parse "$MI^2")" = "$B1n" ] && [ "$(git merge-base "$B1n" "$P2")" = "$B1n" ] && [ "$(git merge-base "$mainsha" "$P2")" = "$mainsha" ] \
+    && ok "controle: a feature integrou a base com a entrega alheia; a base antiga recua o merge-base" || falha "controle: integração da base"
+  orfS="$( b="$(printf 'z\n' | git hash-object -w --stdin)" && GIT_INDEX_FILE="$t/idx-orf" git update-index --add --cacheinfo "100644,$b,z" \
+    && git commit-tree "$(GIT_INDEX_FILE="$t/idx-orf" git write-tree)" -m "orfa sem entrega"; rm -f "$t/idx-orf" )"
+  orfE="$( b="$(printf 'z\n' | git hash-object -w --stdin)" && GIT_INDEX_FILE="$t/idx-orf" git update-index --add --cacheinfo "100644,$b,z" \
+    && GIT_INDEX_FILE="$t/idx-orf" git update-index --add --cacheinfo "100644,$(git rev-parse "$vv:docs/entregas/ft-rec/ENTREGA.md"),docs/entregas/ft-rec/ENTREGA.md" \
+    && git commit-tree "$(GIT_INDEX_FILE="$t/idx-orf" git write-tree)" -m "orfa com entrega"; rm -f "$t/idx-orf" )"
+  git merge-base "$mainsha" "$orfE" >/dev/null 2>&1 && falha "controle: a órfã tem merge-base com a main" || ok "controle: órfãs sem merge-base com a main"
+  for c in "$C" "$M" "$A2" "$B2" "$MM" "$MD" "$CA" "$RN" "$B1n" "$P2" "$orfS" "$orfE" "$dois" "$dup" "$agg" "$x" "$sp"; do
+    git update-ref "refs/tmp/dm-$c" "$c"
+  done
+  git switch -q --detach "$vv"
+  # fork (outro repositório): PR de patch-1 com produto depois do portão
+  git clone -q "$dm" "$t/fork" 2>/dev/null || falha "clone do fork"
+  git -C "$t/fork" config user.email teste@expx.local; git -C "$t/fork" config user.name "Teste Expx"; git -C "$t/fork" config commit.gpgsign false
+  git -C "$t/fork" switch -q -c patch-1 "$vv" && produto "$t/fork" fork; fk="$(git -C "$t/fork" rev-parse HEAD)"
+  # o clone do CI: objetos, HEAD destacado e nenhuma refs/heads (actions/checkout)
+  ci="$t/dm-ci"; cp -a "$dm" "$ci" || { falha "cópia do clone do CI (DM-185)"; return; }
+  git -C "$ci" fetch -q "$t/fork" "patch-1:refs/pull/1/head" 2>/dev/null || falha "fetch do fork no clone do CI"
+  for h in $(git -C "$ci" for-each-ref --format='%(refname)' refs/heads); do git -C "$ci" update-ref -d "$h"; done
+  git -C "$ci" update-ref --no-deref HEAD "$vv"
+  [ -z "$(git -C "$ci" for-each-ref refs/heads)" ] && git -C "$ci" cat-file -e "$fk^{commit}" 2>/dev/null \
+    && ok "controle: o clone do CI não tem refs/heads e tem o commit do fork" || falha "controle: clone do CI (DM-185)"
+  # a cópia instrumentada da skill: cada execução da validade fica registrada
+  CI_INSTR="$t/dm-instr"; CI_LOG="$t/dm-instr.log"
+  mkdir -p "$CI_INSTR" && cp "$S"/*.sh "$CI_INSTR/" && mv "$CI_INSTR/validade-do-portao.sh" "$CI_INSTR/validade-real.sh" || falha "cópia instrumentada"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexec bash "$(dirname "${BASH_SOURCE[0]}")/validade-real.sh" "$@"\n' "$CI_LOG" > "$CI_INSTR/validade-do-portao.sh"
+  : > "$CI_LOG"
+  CI_BASE="$mainsha" ci_roda "$ci" "$vv" feature/ft-rec "$CI_INSTR/portao-ci.sh"
+  [ "$(grep -c . "$CI_LOG")" = 1 ] && grep -Fq -- "--rev $vv" "$CI_LOG" \
+    && ok "controle: a cópia instrumentada registra a validade (1 execução, --rev do SHA do PR)" || falha "controle: instrumentação ($(tr '\n' '|' < "$CI_LOG"))"
+
+  # ---- os dez cenários da auditoria de segurança final (2026-10-09) ---------------
+  ci_val "dm185 1: nome esperado, portão válido passa" 0 passa portao_valido 1 "$ci" "$vv" feature/ft-rec "$mainsha"
+  ci_out_sem "dm185 1: nome esperado: sem aviso de branch divergente" "aviso=branch_divergente"
+  ci_val "dm185 1b: nome esperado, portão vencido barra" 1 barra commit_de_produto 1 "$ci" "$p1" feature/ft-rec "$mainsha"
+  ci_val "dm185 2: mesmo SHA válido com outro nome passa pelo conteúdo (validade executada)" 0 passa portao_valido 1 "$ci" "$vv" feature/ft-rec-2 "$mainsha"
+  ci_out_tem "dm185 2: aviso=branch_divergente" "aviso=branch_divergente"
+  ci_err_tem "dm185 2: o diagnóstico explica a divergência do nome" "branch_divergente"
+  ci_val "dm185 3: outro nome com portão vencido barra" 1 barra commit_de_produto 1 "$ci" "$p1" feature/ft-rec-2 "$mainsha"
+  ci_val "dm185 4: outro nome com portão ausente (pronto sem portao_sha) barra" 1 barra portao_sha_ausente 1 "$ci" "$x" feature/ft-rec-2 "$mainsha"
+  ci_val "dm185 4b: nome esperado com portão ausente barra" 1 barra portao_sha_ausente 1 "$ci" "$x" feature/ft-rec "$mainsha"
+  ci_val "dm185 5: branch renomeada legitimamente, portão válido, passa pelo conteúdo" 0 passa portao_valido 1 "$ci" "$vv" feature/ft-rec-renomeada "$mainsha"
+  ci_out_tem "dm185 5: renomeada: aviso=branch_divergente" "aviso=branch_divergente"
+  ci_val "dm185 5b: branch renomeada com portão vencido barra" 1 barra commit_de_produto 1 "$ci" "$p1" feature/ft-rec-renomeada "$mainsha"
+  ci_val "dm185 6: fork patch-1 com produto depois do portão barra" 1 barra commit_de_produto 1 "$ci" "$fk" patch-1 "$mainsha"
+  ci_val "dm185 6b: fork com o nome do trabalho barra" 1 barra commit_de_produto 1 "$ci" "$fk" feature/ft-rec "$mainsha"
+  ci_val "dm185 7: PR sem ENTREGA.md alterado, nome do trabalho: não aplicável" 0 passa ref_nao_aplicavel 0 "$ci" "$sp" feature/ft-rec "$mainsha"
+  ci_out_tem "dm185 7: quantidade_entregas=0" "quantidade_entregas=0"
+  ci_out_sem "dm185 7: sem aviso de branch divergente (nada selecionado)" "aviso="
+  ci_val "dm185 7b: PR sem ENTREGA.md alterado, outro nome: não aplicável" 0 passa ref_nao_aplicavel 0 "$ci" "$sp" feature/x "$mainsha"
+  ci_val "dm185 8: um ENTREGA.md alterado, nome esperado, vencido barra" 1 barra commit_de_produto 1 "$ci" "$p1" feature/ft-rec "$mainsha"
+  ci_val "dm185 8b: um ENTREGA.md alterado, nome qualquer, vencido barra" 1 barra commit_de_produto 1 "$ci" "$p1" qualquer "$mainsha"
+  ci_val "dm185 9a: duas entregas, o nome de uma: barra (as duas validadas)" 1 barra - 2 "$ci" "$dois" feature/ft-rec "$mainsha"
+  ci_out_tem "dm185 9a: quantidade_entregas=2" "quantidade_entregas=2"
+  ci_out_tem "dm185 9a: entrega=- no resumo" "entrega=-"
+  ci_val "dm185 9b: duas entregas, o nome da outra: barra (o nome não escolhe)" 1 barra - 2 "$ci" "$dois" feature/outro "$mainsha"
+  ci_val "dm185 9c: duas entregas, o nome de nenhuma: barra" 1 barra - 2 "$ci" "$dois" feature/terceira "$mainsha"
+  ci_out_tem "dm185 9c: aviso=branch_divergente" "aviso=branch_divergente"
+  ci_val "dm185 9d: duas entregas declarando a mesma branch: barra (as duas validadas)" 1 barra - 2 "$ci" "$dup" feature/ft-rec "$mainsha"
+  ci_val "dm185 10: --branch forjado (cabeça real feature/ft-rec, vencida) barra" 1 barra commit_de_produto 1 "$ci" "$p1" nada-a-ver "$mainsha"
+  ci_val "dm185 10b: --branch forjado com o nome de outra entrega barra" 1 barra commit_de_produto 1 "$ci" "$p1" feature/outro "$mainsha"
+
+  # ---- bordas da seleção -------------------------------------------------------------
+  ci_val "merge que restaura o ENTREGA de um pai barra (só --full-history vê C)" 1 barra commit_merge 1 "$ci" "$M" feature/ft-rec "$vv"
+  [ "$(selecao "$ci" "$vv" "$M")" = "docs/entregas/ft-rec/ENTREGA.md
+rc=0 motivo=" ] && ok "seleção P/C/M: pr_entregas_do_intervalo seleciona ft-rec" || falha "seleção P/C/M: $(selecao "$ci" "$vv" "$M" | tr '\n' '|')"
+  ci_val "criss-cross barra com base_ambigua (validade não executada)" 1 barra base_ambigua 0 "$ci" "$B2" feature/ft-rec "$A2"
+  ci_err_tem "criss-cross: diagnóstico base_ambigua" "base_ambigua"
+  ci_val "merge que altera o ENTREGA contra os dois pais barra" 1 barra commit_merge 1 "$ci" "$MM" feature/ft-rec "$vv"
+  ci_val "merge que apaga um ENTREGA da base barra" 1 barra portao_nao_pronto 1 "$ci" "$MD" feature/ft-rec "$vv"
+  ci_val "cria e apaga no PR barra" 1 barra portao_nao_pronto 1 "$ci" "$CA" feature/nova "$mainsha"
+  ci_out_tem "cria e apaga: a entrega nova foi selecionada" "entrega[1]=docs/entregas/nova/ENTREGA.md"
+  ci_val "renomear o diretório da entrega barra" 1 barra portao_nao_pronto 2 "$ci" "$RN" feature/ft-rec "$vv"
+  ci_out_tem "renomear: o caminho antigo é selecionado" "entrega[1]=docs/entregas/ft-rec/ENTREGA.md"
+  ci_out_tem "renomear: o caminho novo é selecionado" "entrega[2]=docs/entregas/ft-ren/ENTREGA.md"
+  ci_val "integração da base não seleciona entregas alheias" 1 barra commit_merge 1 "$ci" "$P2" feature/ft-rec "$B1n"
+  ci_out_tem "integração da base: só ft-rec" "quantidade_entregas=1"
+  ci_out_sem "integração da base: a entrega alheia não entra" "docs/entregas/outro"
+  ci_val "base defasada barra com o diagnóstico de base defasada" 1 barra - 2 "$ci" "$P2" feature/ft-rec "$mainsha"
+  ci_err_tem "base defasada: diagnóstico" "base defasada"
+  ci_err_tem "base defasada: manda gerar novo evento com a base atual" "base atual"
+  ci_out_tem "base defasada: a entrega alheia entrou pela base" "docs/entregas/outro/ENTREGA.md"
+  ci_val "órfã completa sem entrega passa" 0 passa ref_nao_aplicavel 0 "$ci" "$orfS" feature/orfa "$mainsha"
+  ci_val "órfã completa com entrega vencida barra" 1 barra portao_sha_nao_ancestral 1 "$ci" "$orfE" feature/orfa "$mainsha"
+  [ "$(git -C "$t/raso" rev-parse --is-shallow-repository 2>/dev/null)" = true ] || { falha "controle: o clone raso do grupo não existe"; }
+  o="$(git -C "$t/raso" commit-tree "$(git -C "$t/raso" mktree </dev/null)" -m orfa)"; head="$(git -C "$t/raso" rev-parse HEAD)"
+  ci_val "órfã em clone raso é historia_incompleta" 1 barra historia_incompleta 0 "$t/raso" "$head" feature/ft-rec "$o"
+  ci_err_tem "órfã em clone raso: diagnóstico indica git fetch --unshallow" "git fetch --unshallow"
+  case "$(selecao "$t/raso" "$o" "$head")" in "rc=1 motivo=historia_incompleta") ok "seleção sem merge-base em clone raso: historia_incompleta" ;; *) falha "seleção raso: $(selecao "$t/raso" "$o" "$head" | tr '\n' '|')" ;; esac
+
+  # ---- saída indexada --------------------------------------------------------------
+  ci_val "saída indexada com uma entrega" 0 passa portao_valido 1 "$ci" "$vv" feature/ft-rec "$mainsha"
+  [ "$CI_OUT" = "entrega[1]=docs/entregas/ft-rec/ENTREGA.md
+decisao[1]=passa
+motivo[1]=portao_valido
+decisao=passa
+motivo=portao_valido
+entrega=docs/entregas/ft-rec/ENTREGA.md
+quantidade_entregas=1" ] && ok "saída indexada com uma entrega: as sete linhas, na ordem" || falha "saída indexada (uma): $(printf '%s' "$CI_OUT" | tr '\n' '|')"
+  ci_val "saída indexada com duas entregas e resumo único" 1 barra - 2 "$ci" "$dois" feature/ft-rec "$mainsha"
+  [ "$(printf '%s\n' "$CI_OUT" | grep -c '^decisao=')" = 1 ] && [ "$(printf '%s\n' "$CI_OUT" | grep -c '^quantidade_entregas=')" = 1 ] \
+    && [ "$(printf '%s\n' "$CI_OUT" | tail -n 4 | tr '\n' '|')" = "decisao=barra|motivo=$(printf '%s\n' "$CI_OUT" | sed -n 's/^motivo\[1\]=//p')|entrega=-|quantidade_entregas=2|" ] \
+    && ok "saída indexada com duas entregas: resumo único no fim, motivo da primeira que barra" || falha "saída indexada (duas): $(printf '%s' "$CI_OUT" | tr '\n' '|')"
+  ci_out_tem "saída indexada (duas): entrega[1] em ordem" "entrega[1]=docs/entregas/ft-outro/ENTREGA.md"
+  ci_out_tem "saída indexada (duas): entrega[2] em ordem" "entrega[2]=docs/entregas/ft-rec/ENTREGA.md"
+  ci_out_tem "saída indexada (duas): decisao[2]" "decisao[2]=barra"
+  ci_val "duas entregas, a primeira avisa e a segunda barra: agregação barra" 1 barra commit_de_produto 2 "$ci" "$agg" feature/ft-rec "$mainsha"
+  ci_out_tem "agregação: decisao[1]=avisa (portao: null em aviso)" "decisao[1]=avisa"
+  ci_out_tem "agregação: decisao[2]=barra" "decisao[2]=barra"
+
+  # ---- custo constante: centenas de entregas tocadas, processos Git constantes ------
+  real="$(command -v git)"
+  mkdir -p "$t/dm-gitstub"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexec %q "$@"\n' "$t/dm-git-chamadas" "$real" > "$t/dm-gitstub/git"
+  chmod +x "$t/dm-gitstub/git"
+  c2="$(_arvore_entregas "$dm" 2 "$mainsha")" && c300="$(_arvore_entregas "$dm" 300 "$mainsha")" || falha "árvores de entregas (DM-185)"
+  _conta_sel() { # <sha> — imprime "<n entregas>|<rc>|<chamadas git>"
+    : > "$t/dm-git-chamadas"
+    ( PATH="$t/dm-gitstub:$PATH"; . "$REGRAS" || exit 9; arvore_ambiente_git
+      o="$(pr_entregas_do_intervalo "$dm" "$mainsha" "$1")"; rc=$?
+      printf '%s|%s|' "$(printf '%s\n' "$o" | grep -c .)" "$rc" )
+    wc -l < "$t/dm-git-chamadas" | tr -d ' '
+  }
+  n2="$(_conta_sel "$c2")"; n300="$(_conta_sel "$c300")"
+  [ "${n2%|*}" = "8|0" ] && [ "${n300%|*}" = "306|0" ] && [ "${n2##*|}" = "${n300##*|}" ] && [ "${n300##*|}" -le 8 ] \
+    && ok "custo constante com centenas de entregas (${n300##*|} processos Git com 8 ou 306 ENTREGA.md selecionados)" \
+    || falha "custo da seleção: 2 → [$n2], 300 → [$n300] (entregas|rc|processos)"
+  cd "$REPO" || return
+}
+
 grupo_ci() {
   local t d v1 p1 vv x pn n1 c a o e frase mainsha co orf ordem pais mg
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
@@ -1067,8 +1354,11 @@ grupo_ci() {
   # PR decide a aplicabilidade (clone sem refs/heads, SHA sem ENTREGA.md)
   sem_residuo "sem resíduo em /tmp: ci com o SHA que declara a branch" "$d" bash "$CI" --verificar --sha "$vv" --branch feature/ft-rec --base "$mainsha"
   sem_residuo "sem resíduo em /tmp: ci pela história do PR (clone sem refs/heads, SHA sem ENTREGA.md)" "$co" bash "$CI" --verificar --sha "$pn" --branch feature/ft-rec --base "$mainsha"
-  CI_BASE="$mainsha" ci_rc "ci: --sha ausente no clone barra (entrega_indeterminada)" 1 "$co" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa feature/ft-rec
-  ci_err_tem "ci: --sha ausente no clone: diagnóstico" "entrega_indeterminada"
+  # DM-185: o SHA da cabeça que não é objeto no clone é história incompleta
+  # (o actions/checkout não o trouxe), nunca entrega indeterminada
+  CI_BASE="$mainsha" ci_rc "ci: --sha ausente no clone barra (historia_incompleta)" 1 "$co" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa feature/ft-rec
+  ci_err_tem "ci: --sha ausente no clone: diagnóstico historia_incompleta" "historia_incompleta"
+  case "$CI_OUT" in *motivo=historia_incompleta*) ok "ci: --sha ausente: motivo historia_incompleta" ;; *) falha "ci --sha ausente: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
   CI_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ci_rc "ci: --base que não é objeto no clone: historia_incompleta barra" 1 "$co" "$pn" feature/ft-rec
   ci_err_tem "ci: --base ausente: diagnóstico historia_incompleta" "historia_incompleta"
   orf="$(git -C "$co" commit-tree "$(git -C "$co" hash-object -t tree -w /dev/null)" -m orfao)"
@@ -1153,9 +1443,12 @@ grupo_ci() {
   # o modo nunca afrouxa pronto vencido
   ci_rc "o modo desligado não afrouxa o pronto vencido" 1 "$d" "$p1" feature/ft-rec
 
-  # ---- ref que não é a branch do trabalho: não aplicável ---------------------------
-  ci_rc "residual: PR de branch com outro nome não é aplicável (SHA vencido passa; risco documentado)" 0 "$d" "$p1" feature/ft-rec-2
-  case "$CI_OUT" in *motivo=ref_nao_aplicavel*) ok "ci imprime motivo=ref_nao_aplicavel" ;; *) falha "saída: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+  # ---- DM-185: o nome da branch nunca seleciona nem isenta ----------------------------
+  # (substitui o caso "residual: PR de branch com outro nome não é aplicável")
+  ci_rc "DM-185: PR de branch com outro nome é selecionado pelo conteúdo (SHA vencido barra)" 1 "$d" "$p1" feature/ft-rec-2
+  case "$CI_OUT" in *motivo=commit_de_produto*) ok "ci com outro nome: motivo commit_de_produto (a validade rodou)" ;; *) falha "saída: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+  case "$CI_OUT" in *aviso=branch_divergente*) ok "ci com outro nome: aviso=branch_divergente na saída" ;; *) falha "sem aviso=branch_divergente: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+  ci_selecao_conteudo "$t"
 
   # ---- uso --------------------------------------------------------------------------
   cd "$d" || return
@@ -1203,13 +1496,22 @@ grupo_ci() {
   frase='CI do portão ativo'
   grep -Fq 'Esta branch não ativa CI em nenhum produto' "$BARREIRA_REF" \
     && ok "o reference diz que esta branch não ativa CI em produto" || falha "o reference não diz que a branch não ativa CI"
-  grep -Fq 'ft-rec-2' "$BARREIRA_REF" && grep -Fq 'Riscos residuais do CI' "$BARREIRA_REF" \
-    && ok "o reference documenta o risco residual do PR de branch com outro nome" || falha "reference sem o risco residual de I2"
+  # DM-185: a prosa diz exatamente o limite — fecha o contorno pelo nome; o CI
+  # não é barreira contra todo contorno deliberado (spec 15.1, itens 1 e 12)
+  grep -Fq 'pr_entregas_do_intervalo' "$BARREIRA_REF" && grep -Fq 'aviso=branch_divergente' "$BARREIRA_REF" \
+    && grep -Fq 'nunca seleciona nem isenta' "$BARREIRA_REF" && grep -Fq 'Limites do CI' "$BARREIRA_REF" \
+    && ok "o reference documenta a seleção pelo conteúdo (DM-185) e o nome só como conferência" || falha "reference sem a seleção pelo conteúdo da DM-185"
+  grep -Fq 'PR de branch com outro nome não é aplicável' "$BARREIRA_REF" \
+    && falha "o reference ainda apresenta a aplicabilidade pelo nome como regra" || ok "o reference não apresenta mais a aplicabilidade pelo nome"
   grep -Fq 'CODEOWNERS' "$BARREIRA_REF" && grep -Fq '.expx/**' "$BARREIRA_REF" && grep -Fq '.github/**' "$BARREIRA_REF" \
-    && grep -Fq 'autor do PR controla a cabeça do PR' "$BARREIRA_REF" \
-    && ok "o reference documenta que o autor do PR controla o modo e os scripts, e recomenda CODEOWNERS" || falha "reference sem o limite de I3"
-  grep -Fq 'ft-rec-2' "$CI" && grep -Fq 'CODEOWNERS' "$CI" \
-    && ok "o cabeçalho de portao-ci.sh documenta os riscos residuais" || falha "portao-ci.sh sem os riscos residuais"
+    && grep -Fq 'autor do PR controla a cabeça do PR' "$BARREIRA_REF" && grep -Fq 'não é barreira contra todo contorno deliberado' "$BARREIRA_REF" \
+    && ok "o reference documenta os limites da DM-185 (autor do PR, CODEOWNERS; o CI não barra todo contorno deliberado)" || falha "reference sem os limites da DM-185"
+  grep -Fq 'branch_divergente' "$CI" && grep -Fq 'CODEOWNERS' "$CI" && grep -Fq 'não é barreira contra todo contorno deliberado' "$CI" \
+    && ! grep -Fq 'não é aplicável: um SHA' "$CI" \
+    && ok "o cabeçalho de portao-ci.sh documenta a seleção pelo conteúdo e os limites" || falha "portao-ci.sh sem a seleção pelo conteúdo ou com a regra antiga"
+  grep -Fq 'DM-185' "$TEMPLATE_CI" && grep -Fq 'conteúdo' "$TEMPLATE_CI" && grep -Fq 'não é barreira contra todo contorno deliberado' "$TEMPLATE_CI" \
+    && ! grep -Fq 'outro nome não é aplicável' "$TEMPLATE_CI" \
+    && ok "o template descreve a seleção pelo conteúdo e os limites da DM-185" || falha "template sem os limites da DM-185"
   grep -Fxq '## CI' "$BARREIRA_REF" && ok "o reference tem a seção CI" || falha "o reference sem a seção '## CI'"
   ( cd "$REPO" && bash "$VALIDADOR_CONTRATO" ) >/dev/null 2>&1 && ok "o validador do contrato aprova o repositório (nenhum arquivo afirma CI ativo)" \
     || falha "o validador do contrato reprova o repositório"
@@ -1342,7 +1644,44 @@ grupo_modo() {
     modo "$d" "$m"
     modo_igual "portao: bloqueado barra em $m" barra "$d" "$b1"
   done
+
+  # ---- DM-185: portao: null com a seleção pelo conteúdo, no pre-push e no CI ----------
+  # A ref tem outro nome (refs/heads/feature/ft-rec-conteudo): o pre-push a
+  # seleciona pelo conteúdo contra refs/remotes/origin/HEAD e pelo trailer; o
+  # CI, pelo conteúdo do PR. O hook do Claude continua pelo nome (consultivo) e
+  # fica fora desta comparação.
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1 && git remote set-head origin main >/dev/null 2>&1 \
+    && git rev-parse -q --verify 'refs/remotes/origin/HEAD^{commit}' >/dev/null \
+    && ok "controle: refs/remotes/origin/HEAD presente (modo)" || falha "controle: origin/HEAD (modo)"
+  modo "$d" bloqueio
+  modo_conteudo "null nos três modos com a seleção pelo conteúdo (bloqueio)" barra "$d" "$n1"
+  modo "$d" aviso
+  modo_conteudo "null nos três modos com a seleção pelo conteúdo (aviso)" avisa "$d" "$n1"
+  modo "$d" desligado
+  modo_conteudo "null nos três modos com a seleção pelo conteúdo (desligado)" passa "$d" "$n1"
+  modo_conteudo "pronto vencido com a seleção pelo conteúdo barra até em desligado" barra "$d" "$p1"
   cd "$REPO" || return
+}
+
+# modo_conteudo <desc> <passa|avisa|barra> <dir> <sha> — a ref
+# refs/heads/feature/ft-rec-conteudo (nome que nenhum ENTREGA.md declara) com o
+# SHA <sha>: o pre-push (push real, bare novo, origin/HEAD presente) e o CI
+# (--branch feature/ft-rec-conteudo, base main) dão a mesma decisão esperada
+modo_conteudo() {
+  local desc="$1" esp="$2" dir="$3" sha="$4" p c out rc err
+  MD_N=$((MD_N + 1))
+  remoto_novo "$dir" "modo$MD_N" || { falha "$desc — remoto novo"; return; }
+  out="$(fx_push_real "$dir" origin "$sha:refs/heads/feature/ft-rec-conteudo")"
+  rc="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"; err="$(printf '%s\n' "$out" | sed -n 's/^stderr=//p')"
+  case "$rc" in
+    1) p=barra ;;
+    0) if grep -Fq 'mergex pre-push' "$err" 2>/dev/null; then p=avisa; else p=passa; fi ;;
+    *) p="rc$rc" ;;
+  esac
+  ci_roda "$dir" "$sha" feature/ft-rec-conteudo
+  c="$(printf '%s\n' "$CI_OUT" | sed -n 's/^decisao=//p')"
+  if [ "$p" = "$esp" ] && [ "$c" = "$esp" ]; then ok "$desc: pre-push e CI dão $esp"
+  else falha "$desc — esperava $esp: pre-push=$p, ci=$c ($(printf '%s' "$CI_OUT $CI_ERR" | tr '\n' '|'))"; fi
 }
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,15 @@
 # BARREIRA DE PUSH — ATIVAÇÃO E PROVA DO `pre-push`
 
 Contrato: `docs/superpowers/specs/2026-10-07-reconciliacao-base-pos-e8-design.md`, seção 13,
-itens 5 a 7 (DM-184).
+itens 5 a 8 (DM-184, DM-185).
 
 O `pre-push` do Git é a barreira **local autoritativa contra erro normal**: ele decide cada push
 pelo que o Git entrega (refs e SHAs), chamando o validador de push da skill
 (`scripts/portao-push.sh --pre-push`), que aplica a mesma validade do portão
-(`validade-do-portao.sh --rev`) ao SHA enviado. Este reference cobre como o E0 o ativa, como o E2
-prova que ele está ativo, como compô-lo com um hook que já existe e como revertê-lo.
+(`validade-do-portao.sh --rev`) ao SHA enviado. A entrega governada pelo portão é identificada pelo
+**conteúdo** do que é enviado, nunca pelo nome da branch (DM-185; seção "Seleção da entrega").
+Este reference cobre como o E0 o ativa, como o E2 prova que ele está ativo, como compô-lo com um
+hook que já existe, como revertê-lo, como as entregas são selecionadas e o que o CI confere.
 
 O executável é um só: `scripts/ativacao-pre-push.sh <--instalar|--provar|--reverter> --entrega
 docs/entregas/<trabalho_id>/ENTREGA.md`. Códigos: `0` ok; `1` prova reprovada; `3` pré-requisito
@@ -91,10 +93,11 @@ A mesma prova serve ao E0 e ao E2, e não confia no caminho nem na existência d
 3. **A prova tem dois lados**, cada um uma execução do hook, e **aprova só com os dois**:
    - **(a) ref aplicável vencida:** o hook sai com código diferente de zero **e** o sinal tem a
      linha `mergex-pre-push <SHA do commit solto desta prova> barra`;
-   - **(b) controle positivo:** um segundo commit solto (a árvore de `HEAD`, sem nenhum
-     `ENTREGA.md` que declare a branch usada) numa ref **não aplicável**
-     (`refs/heads/mergex-prova-livre-<pid>`, conferida como inexistente localmente): o hook sai com
-     código **0** **e** o sinal tem `mergex-pre-push <SHA desse commit> passa`.
+   - **(b) controle positivo:** um segundo commit solto, com a **árvore vazia** (`git mktree
+     </dev/null`: nenhum `ENTREGA.md`, para que nenhuma parcela da seleção o alcance), numa ref
+     **não aplicável** (`refs/heads/mergex-prova-livre-<pid>`, conferida como inexistente
+     localmente): o hook sai com código **0** **e** o sinal tem
+     `mergex-pre-push <SHA desse commit> passa`.
 
    O lado (b) pega o que o (a) não distingue: o hook que chama a MergeX mas decide o código por
    regra própria (no push real, ele liberaria um portão vencido) e o ambiente em que o validador
@@ -136,55 +139,132 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --reverter \
 Reverter a MergeX (voltar o pin) não desfaz uma composição feita à mão: quem compôs um hook próprio
 desfaz a composição por conta própria, e o PR de reversão explica o passo.
 
+## Seleção da entrega
+
+A entrega que o portão governa é identificada pelo **conteúdo** do que é enviado (DM-185). Antes
+dela, a aplicabilidade era uma igualdade entre o nome da ref e o `branch:` do `ENTREGA.md`: bastava
+um nome diferente (PR de `feature/ft-rec-2` para um trabalho de `feature/ft-rec`, fork `patch-1`,
+renomeação, `--branch` forjado) para um portão vencido ou ausente passar com código 0, sem a
+validade rodar. A auditoria de segurança final (2026-10-09) provou o contorno nos dez cenários; a
+suíte `scripts/ci/test-r2-barreira-push.sh ci` os mantém como regressão.
+
+**Seleção pelo conteúdo** — `pr_entregas_do_intervalo <raiz> <base> <sha>`, em
+`scripts/portao-regras.sh` (spec, seção 13, item 5). `MB` é o merge-base de `<base>` e `<sha>`
+(`git merge-base --all`; mais de um barra com `base_ambigua`). A seleção é a união de:
+
+- (a) os `docs/entregas/<id>/ENTREGA.md` com qualquer status (A, M, D, T) em
+  `git diff-tree -r --no-renames -z MB <sha>`: o que o PR cria, altera, apaga ou troca de tipo,
+  inclusive o que um merge faz contra os dois pais;
+- (b) os `docs/entregas/<id>/ENTREGA.md` tocados por algum commit não-merge de
+  `git log --full-history --no-merges --no-renames -z MB..<sha>`: o que foi criado e apagado, tocado
+  e restaurado (um merge que devolve a versão de um pai não esconde o commit que a alterou), ou
+  renomeado (o caminho antigo continua listado).
+
+Só o caminho canônico conta; a leitura é NUL-safe; caminho com caractere de controle sob
+`docs/entregas/` barra (`caminho_com_controle`). Merges ficam fora de (b) para que o merge de
+integração da base (`references/11-reconciliacao-base.md`) não selecione entregas de outros
+trabalhos. Sem merge-base: em clone completo a base é a árvore vazia (toda a história de `<sha>`
+entra); em clone raso, `historia_incompleta`. O custo é constante em processos Git. **O nome da
+branch nunca seleciona nem isenta.**
+
+**Decisão por entrega.** Cada entrega selecionada é validada com `validade-do-portao.sh --rev <sha>`
+(`pr_decide_entrega`) e a lista é agregada (`pr_decide_entregas`): qualquer `barra` vence, depois
+`avisa`, depois `passa`; o motivo do resumo é o da primeira entrega que barra. Entrega selecionada
+que não existe no `<sha>` (removida, renomeada, criada e apagada) barra com `portao_nao_pronto`.
+Seleção vazia: `passa`, `ref_nao_aplicavel`.
+
+### Seleção no `pre-push`
+
+Para cada ref `refs/heads/<b>` do push (exclusão e tag passam, como antes), as entregas são a
+**união** de três parcelas, que só acrescentam e nunca isentam (spec, seção 13, item 7):
+
+- (a) a seleção pelo conteúdo com `<base>` = `refs/remotes/<remoto>/HEAD`, quando ela resolve para
+  um commit (`<remoto>` é o primeiro argumento do `pre-push`; um push para URL não tem). Sem ela,
+  a parcela não existe — nunca se adivinha `main` ou `master`;
+- (b) a regra legada pelo nome: o `ENTREGA.md` que declara `branch: <b>` na árvore do SHA enviado,
+  na do SHA remoto anterior ou na ponta local de `refs/heads/<b>`;
+- (c) o trailer `Trabalho: <id>` do commit enviado, que seleciona `docs/entregas/<id>/ENTREGA.md`.
+
+A ref é aplicável quando a união não é vazia; cada entrega é decidida sobre o **SHA enviado** e a
+decisão da ref é a agregada. Sem a parcela (a) e com (b) e (c) vazias, se a árvore enviada tem algum
+`ENTREGA.md` canônico, a ref **avisa** com `cobertura_indeterminada` e o push segue: a
+aplicabilidade não está provada, e o diagnóstico sugere `git remote set-head <remoto> --auto`. Sem
+`ENTREGA.md` na árvore, passa. Qualquer ref que barra barra o push inteiro.
+
+**Chamador gerenciado sem o validador.** O `pre-push` instalado pelo E0 confere que
+`portao-push.sh` existe no checkout antes de chamá-lo. Sem ele (branch anterior à instalação da
+skill, skill removida), barra com a mensagem
+`mergex pre-push: validador ausente neste checkout (<caminho>): push barrado; reinstale a skill ou
+rode ativacao-pre-push.sh --reverter`, em vez do erro cru do bash.
+
+O hook do Claude `pr-so-com-portao` continua resolvendo o `ENTREGA.md` pelo nome da branch: ele é
+só aviso antecipado e nunca barra o que o `pre-push` deixaria passar.
+
 ## CI
 
-O CI é a defesa adicional ao `pre-push` e a barreira prevista **contra contorno deliberado**
-(`git push --no-verify` ignora o `pre-push`), nunca o substituto dele. Ele repete a decisão do
-`pre-push` sobre o SHA real da cabeça do PR, pelo mesmo executável de regra:
+O CI é a defesa adicional ao `pre-push`, nunca o substituto dele. Com a proteção de merge do
+repositório exigindo o check, ele é a barreira contra `git push --no-verify` (que ignora o
+`pre-push`) e contra o contorno pelo nome da branch, nos limites da seção "Limites do CI". Ele
+seleciona as entregas **só pelo conteúdo do PR** e aplica a cada uma a mesma validade, sobre o SHA
+real da cabeça do PR:
 
 ```bash
 bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha <sha40> --branch <nome> --base <sha40>
 ```
 
-- **Mesma regra, mesmo modo.** `portao-ci.sh` não tem regra própria: decide como a ref
-  `refs/heads/<nome>` empurrada com o SHA `<sha>`, chamando a mesma função do `pre-push`
-  (`pr_decide_ref`, em `portao-regras.sh`). Imprime `decisao=`, `motivo=` e `entrega=`. Numa ref
-  aplicável, portão `pronto` vencido, ausente, inconsistente ou ilegível, `historia_incompleta` e
-  `erro_ambiente` reprovam em qualquer modo; `portao: null` segue o modo de `pr-so-com-portao` em
-  `.expx/hooks.json`, igual ao `pre-push`.
+- **Seleção pelo conteúdo do PR.** `<base>` é `pull_request.base.sha` e `<sha>` é
+  `pull_request.head.sha`: `pr_entregas_do_intervalo` com os dois (seção "Seleção da entrega").
+  Nenhum `refs/heads/*` local nem SHA remoto anterior é consultado, e o nome da branch não entra na
+  seleção. Fork, renomeação e PR de qualquer nome são decididos pelo que trazem.
+- **Mesma validade, mesmo modo.** Cada entrega selecionada passa por `validade-do-portao.sh --rev
+  <sha>` (`pr_decide_entregas`, em `portao-regras.sh`): portão `pronto` vencido, ausente,
+  inconsistente ou ilegível, `historia_incompleta` e `erro_ambiente` reprovam em qualquer modo;
+  `portao: null` segue o modo de `pr-so-com-portao` em `.expx/hooks.json`, igual ao `pre-push`.
+  Qualquer entrega que barra reprova o PR.
+- **`--branch` é só conferência.** O nome da branch de origem do PR continua obrigatório (e precisa
+  ser um nome de branch válido), mas não seleciona nem isenta: quando não é o `branch:` de nenhuma
+  entrega selecionada, a saída traz `aviso=branch_divergente` e a decisão não muda. Fork e
+  renomeação legítimos passam quando o portão é válido; renomeação definitiva pede atualizar
+  `branch:` no `ENTREGA.md` num commit de método `pre-e6`, que mantém a validade.
 - **O SHA do PR, não o `HEAD` local.** A decisão é sobre o `--sha` recebido; o commit em que o
   checkout está não entra.
-- **Aplicabilidade pela história do PR (`--base`).** O clone de um CI não tem `refs/heads/*` locais
-  nem SHA remoto anterior. Se o SHA não declara a branch, o CI consulta os `ENTREGA.md` do
-  merge-base entre `--base` e `--sha` e dos commits do PR que tocam `docs/entregas`, lidos com a
-  história completa (`--full-history`, sem simplificar: um merge cuja árvore descarta o
-  `docs/entregas` do PR não esconde os commits que o tocaram); o mais recente que declara
-  `branch: <nome>` faz o papel do SHA remoto anterior. Assim um commit que apaga o `ENTREGA.md`
-  reprova, como no `pre-push`. `--base` que não é objeto no clone é `historia_incompleta`. Sem
-  merge-base com `--sha` (branch órfã), num clone completo, a história do PR é a do `--sha` inteiro:
-  a ref só é aplicável se algum commit dela declara a branch, e um PR legítimo sem `ENTREGA.md` não
-  é barrado à toa. Sem merge-base num clone raso, a leitura não é confiável e fecha como
-  `historia_incompleta`.
+- **Saída.** Por entrega selecionada, `entrega[<i>]=`, `decisao[<i>]=` e `motivo[<i>]=` (`<i>` a
+  partir de 1); cada aviso numa linha `aviso=<branch_divergente|...>`; e, uma única vez no fim, o
+  resumo `decisao=`, `motivo=` (o da primeira entrega que barra, senão o da que decide), `entrega=`
+  (`-` com nenhuma ou mais de uma) e `quantidade_entregas=<n>`. O código de saída segue só o resumo.
+- **Mais de uma entrega.** O diagnóstico lista todas e diz que, se alguma veio da base, o evento do
+  PR tem base defasada (`pull_request.base.sha` mais antigo que a base que a cabeça já integrou):
+  gerar novo evento (push na branch do PR) com a base atual. É falso bloqueio, nunca aprovação.
+- **História completa.** O clone do CI precisa de `fetch-depth: 0`; clone raso, `--base` ou `--sha`
+  que não é objeto no clone, e objeto que falta no meio são `historia_incompleta` e reprovam. Sem
+  merge-base num clone completo (branch órfã), a história do `--sha` inteira entra.
 - **Códigos:** `0` passa ou avisa; `1` barra (o diagnóstico vai a stderr, com textos distintos para
   `historia_incompleta`, que manda completar a história, e para `erro_ambiente`); `64` uso (inclui
   `--branch` que não é nome de branch ou com prefixo `refs/`). Não existe opção de força.
-- **História completa.** O clone do CI precisa de `fetch-depth: 0`; clone raso é
-  `historia_incompleta` e reprova.
 - **Template.** `assets/ci/mergex-portao.yml` roda em `pull_request`, faz o checkout do SHA da
   cabeça do PR com `fetch-depth: 0` e chama `portao-ci.sh` com esse SHA, a branch de origem e o SHA
   da base do PR. Os valores do evento entram pelo `env:` do step, nunca interpolados no texto do shell.
 
-### Riscos residuais do CI
+### Limites do CI
 
-- **PR de branch com outro nome não é aplicável.** A aplicabilidade é pelo `branch:` do `ENTREGA.md`,
-  igual nos três consumidores da barreira (spec, seção 13, item 7). Se o `ENTREGA.md` declara
-  `feature/ft-rec` e o PR vem de `feature/ft-rec-2`, um SHA vencido passa no CI e no `pre-push`.
-  Mudar a regra é decisão de desenho pendente.
+A DM-185 fecha o contorno pelo nome da branch; ela **não** torna o CI barreira contra todo contorno
+deliberado (spec, seção 15.1, itens 1 e 9 a 12):
+
 - **O autor do PR controla a cabeça do PR.** Com `on: pull_request`, o `.expx/hooks.json` (o modo de
   `portao: null`), o `portao-ci.sh` e o próprio workflow vêm da árvore dele, e o check confia neles.
-  Por isso o CI é barreira contra o contorno comum (`--no-verify`), não contra quem reescreve a
-  própria verificação. No produto, exija `CODEOWNERS` com revisão obrigatória para `.expx/**`,
-  `.claude/**` e `.github/**`.
+  O CI não é barreira contra todo contorno deliberado: não barra quem reescreve a própria verificação.
+  No produto, exija `CODEOWNERS` com revisão obrigatória para `.expx/**`, `.claude/**` e
+  `.github/**`.
+- **PR sem `ENTREGA.md`.** Código enviado num PR que não carrega nenhum `ENTREGA.md` (cherry-pick
+  sem a entrega, trailers apagados) não está sob o portão: a seleção é vazia e o CI passa com
+  `ref_nao_aplicavel`.
+- **Várias entregas ativas no mesmo PR.** Um PR empilhado sobre a base principal que traz uma
+  entrega ainda não integrada além da sua seleciona as duas; a anterior fica vencida pelos commits
+  da seguinte e o PR barra. Encadeie os PRs pela base ou entregue a anterior antes. Remover, ou
+  tocar e restaurar, um `ENTREGA.md` existente também barra, sem exceção por `estado: entregue`.
+- **Base do evento defasada.** Barra com o diagnóstico de base defasada (acima); nunca aprova.
+- **Portão reposicionado por commit de método** (seção 15.1, item 1) continua indistinguível do
+  fluxo legítimo: a validade prova que nada mudou depois de `portao_sha`, não que um E2 rodou nele.
 
 ### Handoff: esta branch não ativa o CI
 

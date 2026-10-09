@@ -1384,7 +1384,12 @@ for f in "$ci_sh" "$ci_tpl"; do
 done
 grep -Fxq '## CI' "$barreira_ref" || fail '12-barreira-de-push sem a seção ## CI'
 codigo "$ci_sh" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$ci_sh tem opção de força"
-grep -Fq 'pr_decide_ref' "$ci_sh" || fail "$ci_sh não decide pela regra compartilhada (pr_decide_ref)"
+# DM-185: o CI seleciona pelo conteúdo (pr_entregas_do_intervalo) e decide
+# cada entrega pela regra compartilhada (pr_decide_entregas); nada nele filtra
+# a seleção pelo nome da branch
+grep -Fq 'pr_entregas_do_intervalo' "$ci_sh" || fail "$ci_sh não seleciona pelo conteúdo (pr_entregas_do_intervalo)"
+grep -Fq 'pr_decide_entregas' "$ci_sh" || fail "$ci_sh não decide pela regra compartilhada (pr_decide_entregas)"
+grep -Fq 'aviso=branch_divergente' "$ci_sh" || fail "$ci_sh não trata --branch como conferência (aviso=branch_divergente)"
 grep -Fq 'fetch-depth: 0' "$ci_tpl" || fail "$ci_tpl sem fetch-depth: 0"
 grep -Fq 'portao-ci.sh --verificar' "$ci_tpl" || fail "$ci_tpl não chama portao-ci.sh --verificar"
 # Nenhum arquivo versionado afirma que o CI do portão está ativo: esta branch só
