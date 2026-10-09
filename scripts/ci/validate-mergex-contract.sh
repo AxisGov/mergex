@@ -1499,9 +1499,17 @@ grep -Fq '12-barreira-de-push.md' "$reconc_ref" || fail '11-reconciliacao-base n
 grep -Fq 'references/11-reconciliacao-base.md' "$skill" || fail 'SKILL.md não aponta para 11-reconciliacao-base.md'
 
 # Decisões
-for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184; do
+for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184 DM-185; do
   grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
 done
+# DM-185: a linha registra a seleção pelo conteúdo, o que ela substitui na
+# DM-184 e os limites (15.1); a DM-184 fica como registro histórico
+dm185="$(grep -F '| DM-185 |' "$SKILL_DIR/DECISOES-DA-SKILL.md")"
+for s in 'pelo **conteúdo**' 'pr_entregas_do_intervalo' 'aviso=branch_divergente' 'cobertura_indeterminada' 'substitui na DM-184' '15.1'; do
+  printf '%s\n' "$dm185" | grep -Fq -- "$s" || fail "DM-185 em DECISOES-DA-SKILL.md sem: $s"
+done
+grep -q '^| DM-184 |' "$SKILL_DIR/DECISOES-DA-SKILL.md" && grep -F '| DM-184 |' "$SKILL_DIR/DECISOES-DA-SKILL.md" | grep -Fq 'Barreira contra contorno deliberado' \
+  || fail 'DM-184 em DECISOES-DA-SKILL.md foi reescrita (é registro histórico; a DM-185 diz o que substitui)'
 
 # Hooks README: validade do portão e a biblioteca da integração
 grep -Fq 'comum/integracao-da-mensagem.sh' "$hooks_readme" || fail 'hooks README não cita comum/integracao-da-mensagem.sh'
