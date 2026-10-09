@@ -99,6 +99,7 @@ CONTRATO_COMMIT="$DIR/../../skills/mergex/scripts/contrato-de-commit.sh"
 # escolher a primeira task do plano, ou a do arquivo mais recente, inventaria
 # o dono. Duas declarações diferentes, ou nenhuma, é "não determinada".
 MSG="$CMD"
+MSG_LIDA=""   # a mensagem do commit só como o hook a leu (arquivo ou -m), sem o comando
 ARQ_MSG="$(printf '%s' "$CMD" | sed -n 's/.*[[:space:]]-F[[:space:]]*\([^[:space:]]*\).*/\1/p; s/.*--file=\([^[:space:]]*\).*/\1/p' | head -1)"
 if [ -n "$ARQ_MSG" ]; then
   ARQ_MSG="$(printf '%s' "$ARQ_MSG" | sed "s/^['\"]//; s/['\"]$//")"
@@ -106,8 +107,11 @@ if [ -n "$ARQ_MSG" ]; then
     /*) : ;;
     *) ARQ_MSG="$RAIZ/$ARQ_MSG" ;;
   esac
-  [ -r "$ARQ_MSG" ] && MSG="$MSG
-$(cat "$ARQ_MSG" 2>/dev/null)"
+  if [ -r "$ARQ_MSG" ]; then
+    MSG_LIDA="$(cat "$ARQ_MSG" 2>/dev/null)"
+    MSG="$MSG
+$MSG_LIDA"
+  fi
 else
   # O evento do harness traz a linha de comando, não argv. Para `-m "..."`,
   # retire somente o invólucro externo usado pelo chamador; o corpo, inclusive
@@ -117,8 +121,50 @@ else
     *"$MARCADOR_M"*)
       MSG="${CMD#*"$MARCADOR_M"}"
       MSG="${MSG%\"*}"
+      MSG_LIDA="$MSG"
       ;;
   esac
+fi
+
+# --------------------------------------------------------------------------
+# Merge de integração da base — a terceira classe de commit
+# --------------------------------------------------------------------------
+# Com MERGE_HEAD, o commit é o merge que integra a base ao trabalho: trailers
+# Trabalho + Integra-base, sem Task e sem Metodo (contrato-de-commit.sh
+# --validar-integracao). O que ele traz da base não é de uma task: as regras de
+# mistura de tasks, de status e de suíte não se aplicam, e a mensagem que
+# declara Task ou Metodo é classe híbrida, que o contrato recusa.
+# Mensagem que o hook não consegue ler (editor, arquivo ilegível) segue as
+# regras de sempre, sem modo mais frouxo.
+if git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && [ -n "$MSG_LIDA" ]; then
+  if [ ! -r "$CONTRATO_COMMIT" ]; then
+    printf '%s
+' "mergex/commit-por-task — instalação MergeX incompleta
+
+Componente ausente: $CONTRATO_COMMIT
+O merge de integração da base não pode ter a mensagem validada." >&2
+    exit 2
+  fi
+  TRAB_INT="$TRABALHO"
+  [ -n "$TRAB_INT" ] || TRAB_INT="$(printf '%s
+' "$MSG_LIDA" | git interpret-trailers --parse 2>/dev/null     | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
+  TMP_INT="$(mktemp)" || exit 2
+  printf '%s
+' "$MSG_LIDA" > "$TMP_INT" || { rm -f "$TMP_INT"; exit 2; }
+  SAIDA_INT="$(bash "$CONTRATO_COMMIT" --validar-integracao     --trabalho "${TRAB_INT:-?}" --arquivo "$TMP_INT" 2>&1)"
+  RC_INT=$?
+  rm -f "$TMP_INT"
+  if [ "$RC_INT" != 0 ]; then
+    printf '%s
+' "mergex/commit-por-task — merge de integração com mensagem inválida
+
+$SAIDA_INT
+
+O merge em andamento é a integração da base: exige exatamente Trabalho +
+Integra-base (SHA completo de MERGE_HEAD) e nunca aceita Task nem Metodo." >&2
+    exit 2
+  fi
+  expx_permite "$RAIZ" "$HOOK" "merge de integracao da base"
 fi
 
 # As três chaves de controle formam duas classes mutuamente exclusivas. Esta

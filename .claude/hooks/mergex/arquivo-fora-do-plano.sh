@@ -30,7 +30,14 @@ RAIZ="$(expx_raiz "${CWD:-$PWD}")"
 MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
 [ "$MODO" = "desligado" ] && exit 0
 
-PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
+# Merge de integração da base (MERGE_HEAD): só vale o que a integração muda em
+# relação à base — o resultado preparado contra MERGE_HEAD. O que veio da base
+# inteira não é desvio deste trabalho; o que a resolução acrescenta, é.
+if git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+  PREP="$(git -C "$RAIZ" diff --cached --name-only MERGE_HEAD 2>/dev/null)"
+else
+  PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
+fi
 [ -n "$PREP" ] || exit 0
 
 TASKS_ARQS="$(find "$RAIZ/docs" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"

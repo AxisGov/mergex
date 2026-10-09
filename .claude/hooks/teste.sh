@@ -42,7 +42,8 @@ WTM_T="${HIST_T}--main"     # worktree da main do repositorio historico
 WTB_T="${HIST_T}--base"     # worktree sem docs/entregas no HEAD
 WTX_T="${HIST_T}--outra"    # worktree com o HEAD noutra branch
 SEMX_T="$(mktemp -d)"       # repositorio sem MergeX
-trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T" "$HIST_T" "$WTH_T" "$WTM_T" "$WTB_T" "$WTX_T" "$SEMX_T"' EXIT
+INT_T="$(mktemp -d)"        # repositorio do merge de integracao da base
+trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T" "$HIST_T" "$WTH_T" "$WTM_T" "$WTB_T" "$WTX_T" "$SEMX_T" "$INT_T"' EXIT
 HOOK_CWD="$RAIZ_T"
 
 cd "$RAIZ_T" || exit 1
@@ -496,6 +497,42 @@ entrega() { # entrega <trabalho_id> <branch>
   mkdir -p "docs/entregas/$1"
   printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: %s\nentregue_por: mergex\nbranch: %s\nbranch_base: main\n---\n\n# Entrega\n' \
     "$1" "$2" > "docs/entregas/$1/ENTREGA.md"
+}
+
+# merge_em_andamento_com_ajuste <branch> — no cwd (repositorio da fixture de
+# integracao): a main ganha um arquivo novo (src/da-base.ts) e muda um arquivo
+# de cada task; na <branch> roda `git merge --no-ff --no-commit main`, a
+# resolucao combina os dois lados e acrescenta um ajuste ao arquivo da task.
+# Deixa MERGE_HEAD e a resolucao no indice, e grava as duas mensagens:
+# msg-integracao.txt (Trabalho + Integra-base = SHA de MERGE_HEAD) e
+# msg-integracao-com-task.txt (os mesmos trailers + Task).
+merge_em_andamento_com_ajuste() {
+  local b="$1" t="${1##*/}" sha
+  fixture_switch_exato main main || return 1
+  printf 'base muda a tarefa
+' >> src/tarefa.ts
+  printf 'base muda a outra
+' >> src/outra.ts
+  printf 'novo da base
+' > src/da-base.ts
+  git add src/tarefa.ts src/outra.ts src/da-base.ts && git commit -qm "a base avanca" || return 1
+  fixture_switch_exato "$b" "$b" || return 1
+  git merge -q --no-ff --no-commit main >/dev/null 2>&1 || return 1
+  printf 'ajuste da resolucao
+' >> src/tarefa.ts
+  git add src/tarefa.ts || return 1
+  sha="$(git rev-parse -q --verify MERGE_HEAD)" || return 1
+  printf 'merge(mergex): integra a base
+
+Trabalho: %s
+Integra-base: %s
+' "$t" "$sha" > msg-integracao.txt
+  printf 'merge(mergex): integra a base
+
+Task: T-01.01
+Trabalho: %s
+Integra-base: %s
+' "$t" "$sha" > msg-integracao-com-task.txt
 }
 
 # Validade do portão: o push só segue com `portao: pronto` se o portão VALE
@@ -1316,6 +1353,79 @@ caso "tasks.md corrompido barra ownership" mergex/commit-por-task.sh "$(bash_jso
 caso "tasks.md corrompido (escopo)" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 0
 rm -f docs/sprintx/features/exportacao-csv/sprint-01/tasks.md
 caso "tasks.md ausente barra ownership" mergex/commit-por-task.sh "$(bash_json "$MSG_PLANO_INVALIDO")" 2
+
+echo
+echo "merge de integração da base (MERGE_HEAD)"
+# Repositorio proprio: a main ganha commits aqui e nao pode mexer nas fixtures
+# dos blocos anteriores. Duas tasks no plano: a T-01.02 nao esta concluida, de
+# modo que, sem o reconhecimento da integracao, o que a base traz de
+# src/outra.ts viraria mistura de tasks e task nao concluida.
+cd "$INT_T" || exit 1
+HOOK_CWD="$INT_T"
+git init -q -b main . 2>/dev/null || exit 1
+git config user.email teste@expx.local
+git config user.name Teste
+mkdir -p docs/sprintx/features/ft-02/sprint-01 src
+printf 'l1
+l2
+l3
+l4
+l5
+' > src/tarefa.ts
+printf 'o1
+' > src/outra.ts
+cat > docs/sprintx/features/ft-02/sprint-01/tasks.md <<'YAML'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: plano
+trabalho_id: ft-02
+tasks:
+  - id: T-01.01
+    status: concluida
+    arquivos:
+      cria: [src/tarefa.ts]
+      altera: []
+    suite: verde
+  - id: T-01.02
+    status: em_andamento
+    arquivos:
+      cria: [src/outra.ts]
+      altera: []
+    suite: vermelha
+---
+YAML
+entrega ft-02 feature/ft-02
+git add -A >/dev/null 2>&1 && git commit -qm "base da integracao" || exit 1
+fixture_switch_exato feature/ft-02 -c feature/ft-02 || exit 1
+printf 'trabalho muda a tarefa
+' | cat - src/tarefa.ts > src/tarefa.novo && mv src/tarefa.novo src/tarefa.ts
+git add src/tarefa.ts && git commit -qm "feat: a tarefa" || exit 1
+mkdir -p .expx
+echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"bloqueio"},"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
+
+merge_em_andamento_com_ajuste feature/ft-02 || exit 1
+caso "integração não é mistura de tasks" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-integracao.txt')" 0
+caso "integração com Task: barra" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-integracao-com-task.txt')" 2
+MSG_INT_M="git commit -m \"merge(mergex): integra a base
+
+Trabalho: ft-02
+Integra-base: $(git rev-parse -q --verify MERGE_HEAD)\""
+caso "integração por -m válida passa" mergex/commit-por-task.sh "$(bash_json "$MSG_INT_M")" 0
+caso "integração por -m sem trailers barra" mergex/commit-por-task.sh "$(bash_json 'git commit -m "integra a base"')" 2
+caso "fora-do-plano não acusa o que veio da base" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-integracao.txt')" 0
+# Sem isto o caso acima nao distingue "avalia o diff contra MERGE_HEAD" de
+# "nao avalia nada": produto que a base NAO trouxe e o plano NAO declara
+# continua desvio, mesmo dentro da integracao.
+printf 'produto nao planejado
+' > src/fora-do-plano.ts
+git add src/fora-do-plano.ts
+caso "integração: produto fora do plano e fora da base continua acusado" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-integracao.txt')" 2
+git rm -q --cached src/fora-do-plano.ts; rm -f src/fora-do-plano.ts
+git merge --abort >/dev/null 2>&1 || exit 1
+rm -f msg-integracao.txt msg-integracao-com-task.txt .expx/hooks.json
+cd "$RAIZ_T" || exit 1
+HOOK_CWD="$RAIZ_T"
 
 echo
 echo "registro dos hooks — tempo do pr-so-com-portao"
