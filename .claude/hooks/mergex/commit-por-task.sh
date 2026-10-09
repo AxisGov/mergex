@@ -23,6 +23,8 @@ PADRAO="aviso"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../comum/base.sh
 . "$DIR/../comum/base.sh"
+# shellcheck source=../comum/integracao-da-mensagem.sh
+. "$DIR/../comum/integracao-da-mensagem.sh"
 
 # Falha aberta: sem `set -e`, um comando que retorna não-zero não derruba o
 # script — ele segue e, no limite, chega ao fim e sai 0. É esse o comportamento
@@ -121,7 +123,7 @@ else
     *"$MARCADOR_M"*)
       MSG="${CMD#*"$MARCADOR_M"}"
       MSG="${MSG%\"*}"
-      MSG_LIDA="$MSG"
+      MSG_LIDA="$(integracao_le_m "$CMD")"
       ;;
   esac
 fi
@@ -136,38 +138,6 @@ fi
 # mistura de tasks, status e suíte não se aplicam. Qualquer outra mensagem —
 # sem Integra-base, ilegível, com trailers que a leitura não isola — segue as
 # regras de sempre: bloquear só com prova.
-integracao_da_mensagem() { # <mensagem-lida> <trabalho-da-branch> <contrato>
-  # Define INT_CLASSE (nenhuma | valida | invalida) e INT_SAIDA. Só uma mensagem
-  # que declara `Integra-base:` como trailer isolado é da classe integração;
-  # qualquer outra é "nenhuma" e segue as regras de sempre.
-  INT_CLASSE=nenhuma; INT_SAIDA=""
-  local txt tr integra trab tmp mh rc
-  # Formas de -m que o recorte do comando deixa sujas: `-m a -m b` (parágrafos)
-  # e `-m "$(cat <<'EOF' ... EOF)"` (invólucro do heredoc).
-  txt="${1//\" -m \"/$'\n\n'}"
-  txt="$(printf '%s\n' "$txt" | awk 'NR==1 && /^\$\(cat[[:space:]]*<</ { h=1; next } h && /^[A-Z_]+[[:space:]]*$/ { exit } { print }')"
-  tr="$(printf '%s\n' "$txt" | git interpret-trailers --parse 2>/dev/null)"
-  printf '%s\n' "$tr" | grep -Eq '^Integra-base:' || return 0
-  integra="$(printf '%s\n' "$tr" | sed -n 's/^Integra-base:[[:space:]]*//p' | head -1)"
-  trab="$2"
-  [ -n "$trab" ] || trab="$(printf '%s\n' "$tr" | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
-  if [ ! -r "$3" ]; then
-    INT_CLASSE=invalida; INT_SAIDA="instalação MergeX incompleta: $3"; return 0
-  fi
-  tmp="$(mktemp)" || { INT_CLASSE=invalida; INT_SAIDA="sem arquivo temporário"; return 0; }
-  printf '%s\n' "$txt" > "$tmp"
-  INT_SAIDA="$(bash "$3" --validar-integracao --trabalho "${trab:-?}" --arquivo "$tmp" 2>&1)"; rc=$?
-  rm -f "$tmp"
-  if [ "$rc" != 0 ]; then INT_CLASSE=invalida; return 0; fi
-  mh="$(git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD 2>/dev/null)"
-  if [ "$integra" != "$mh" ]; then
-    INT_CLASSE=invalida
-    INT_SAIDA="Integra-base diverge de MERGE_HEAD: mensagem=$integra MERGE_HEAD=$mh"
-    return 0
-  fi
-  INT_CLASSE=valida
-}
-
 if git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && [ -n "$MSG_LIDA" ]; then
   integracao_da_mensagem "$MSG_LIDA" "$TRABALHO" "$CONTRATO_COMMIT"
   case "$INT_CLASSE" in

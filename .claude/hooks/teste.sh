@@ -1438,6 +1438,16 @@ MSG_DOIS_M="git commit -m \"merge(mergex): integra a base\" -m \"Trabalho: ft-02
 Integra-base: $SHA_MH\""
 caso "integração válida via -m a -m b" mergex/commit-por-task.sh "$(bash_json "$MSG_DOIS_M")" 0
 caso "integração válida via heredoc (fora-do-plano)" mergex/arquivo-fora-do-plano.sh "$(bash_json "$MSG_HEREDOC")" 0
+# comando com aspas DEPOIS da mensagem: o recorte fecha na aspa certa
+MSG_ECO="git commit -m \"merge(mergex): integra a base
+
+Trabalho: ft-02
+Integra-base: $SHA_MH\" && echo \"ok\""
+MSG_LOG="git commit -m \"merge(mergex): integra a base\" -m \"Trabalho: ft-02
+Integra-base: $SHA_MH\" && git log --format=\"%h\""
+caso "integração válida + && echo \"ok\"" mergex/commit-por-task.sh "$(bash_json "$MSG_ECO")" 0
+caso "integração válida (-m -m) + && git log --format=\"%h\"" mergex/commit-por-task.sh "$(bash_json "$MSG_LOG")" 0
+caso "integração válida + && echo (fora-do-plano)" mergex/arquivo-fora-do-plano.sh "$(bash_json "$MSG_ECO")" 0
 # (c) Integra-base tem de ser o MERGE_HEAD
 ZEROS="0000000000000000000000000000000000000000"
 printf 'merge(mergex): integra a base\n\nTrabalho: ft-02\nIntegra-base: %s\n' "$ZEROS" > msg-zeros.txt
@@ -1463,6 +1473,14 @@ caso "aviso: -m Merge branch main nao bloqueia" mergex/commit-por-task.sh "$(bas
 caso "aviso: -m x nao bloqueia" mergex/commit-por-task.sh "$(bash_json 'git commit -m "x"')" 0
 caso "aviso: -F sem trailers nao bloqueia" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-plana.txt')" 0
 caso "aviso: integração com Task: ainda barra (Integra-base declarado)" mergex/commit-por-task.sh "$(bash_json 'git commit -F msg-integracao-com-task.txt')" 2
+caso "aviso: integração válida + && echo \"ok\" não bloqueia" mergex/commit-por-task.sh "$(bash_json "$MSG_ECO")" 0
+caso "aviso: integração válida (-m -m) + && git log não bloqueia" mergex/commit-por-task.sh "$(bash_json "$MSG_LOG")" 0
+# trailers que a leitura nao isola (lixo depois dos 40 hex): regras de sempre
+MSG_LIXO="git commit -m \"merge(mergex): integra a base
+
+Trabalho: ft-02
+Integra-base: ${SHA_MH}XYZ\""
+caso "aviso: Integra-base com lixo apos os 40 hex nao bloqueia" mergex/commit-por-task.sh "$(bash_json "$MSG_LIXO")" 0
 echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"bloqueio"},"arquivo-fora-do-plano":{"modo":"bloqueio"}}}' > .expx/hooks.json
 rm -f msg-zeros.txt msg-outro-sha.txt msg-plana.txt
 git merge --abort >/dev/null 2>&1 || exit 1
