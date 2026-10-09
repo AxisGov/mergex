@@ -1307,9 +1307,111 @@ Expected: só caminhos sob `.claude/`, `.opencode/`, `scripts/ci/`, `docs/superp
 
 Uma suíte vermelha no Step 1 é regressão de uma task anterior: corrigir na task dona, com teste que a reproduza, e commitar só os arquivos tocados com a mensagem `fix(mergex): corrige regressao da suite ampla`. Sem regressão, esta task não gera commit.
 
+### Task 23: Seleção da entrega pelo conteúdo (DM-185)
+
+Spec: seção 13, itens 5, 7 e 8; seção 15; seção 15.1, itens 9–12; seção 21, caso 22; DM-185. Corrige o item bloqueante da auditoria de segurança final (contorno do CI e do `pre-push` pelo nome da branch) e o minor M3 da revisão final.
+
+**Files:**
+- Modify: `.claude/skills/mergex/scripts/portao-regras.sh`
+- Modify: `.claude/skills/mergex/scripts/portao-ci.sh`
+- Modify: `.claude/skills/mergex/scripts/portao-push.sh`
+- Modify: `.claude/skills/mergex/assets/pre-push-gerenciado.sh`
+- Modify: `.claude/skills/mergex/assets/ci/mergex-portao.yml` (só o comentário de limites; os argumentos da chamada continuam os mesmos)
+- Modify: `.claude/skills/mergex/references/12-barreira-de-push.md` (seleção, CI, `pre-push`, limites da seção 15.1, itens 9–12)
+- Modify: `.claude/skills/mergex/references/11-reconciliacao-base.md` e `.claude/hooks/README.md` só onde citam a regra de aplicabilidade pelo nome
+- Modify: `scripts/ci/test-r2-barreira-push.sh` (grupos `ci`, `prepush`, `modo`, `ativacao`)
+- Modify: `scripts/ci/validate-mergex-contract.sh` só se uma verificação existente depender do texto alterado
+
+**Interfaces:**
+- Consumes: `validade-do-portao.sh --rev` (Task 13/14), `pr_modo_null` e `pr_decide_ref` (Task 14), `portao-ci.sh` (Task 16), a prova funcional de `ativacao-pre-push.sh` (Task 15), o hook `pr-so-com-portao` (Task 17, inalterado: continua pelo nome).
+- Produces, em `portao-regras.sh`:
+  - `pr_entregas_do_intervalo <raiz> <base> <sha>`: imprime, um por linha, ordenados e sem repetição, os `docs/entregas/<id>/ENTREGA.md` selecionados pela spec, seção 13, item 5: `git merge-base --all` (mais de um → rc 1, motivo `base_ambigua`, `# guarda:CIMBALL` na linha que exige um único merge-base); parcela (a) `git diff-tree -r --no-renames -z MB <sha>` com qualquer status (`# guarda:CIDIFF` na linha que a acrescenta; `# guarda:CIDEL` na linha que define os status aceitos, que inclui `D`); parcela (b) `git log --full-history --no-merges --no-renames -z MB..<sha>` (`# guarda:CIHIST` na linha que a acrescenta; `# guarda:CIFULL2` na linha que passa `--full-history`); só o caminho canônico; caminho com controle → rc 1, `caminho_com_controle`; sem merge-base: árvore vazia (`git hash-object -t tree /dev/null`) em clone completo, `historia_incompleta` em clone raso; objeto ausente → `historia_incompleta`. Número constante de processos Git.
+  - uma função que decide UMA entrega para um SHA (a cauda atual de `pr_decide_ref`, extraída sem mudar a decisão; `pr_decide_ref` passa a chamá-la; as marcas `PPSHA` e `PPMODO` continuam nas linhas equivalentes) e uma que decide uma lista de entregas, imprimindo `entrega[<i>]=`, `decisao[<i>]=`, `motivo[<i>]=` por entrega e o resumo `decisao=`, `motivo=`, `entrega=` (`-` com mais de uma) e `quantidade_entregas=` uma única vez no fim, com a agregação `barra` > `avisa` > `passa` (`# guarda:CIAGREG` na linha que agrega). Lista vazia: resumo `passa`, `ref_nao_aplicavel`.
+- Produces, em `portao-ci.sh`: mesma interface de linha de comando (`--verificar --sha --branch --base`, códigos 0/1/64); a seleção é só `pr_entregas_do_intervalo` com `--base` e `--sha` (`# guarda:CINOME` na linha que a chama; o fallback pela história com filtro de nome, e suas marcas `CIFULL`/`CIHIST` antigas, deixam de existir); saída indexada da spec, seção 13, item 8; `aviso=branch_divergente` quando `--branch` não é o `branch:` de nenhuma entrega selecionada, sem mudar a decisão (`# guarda:BRDIV` na linha que emite o aviso); diagnóstico de base defasada quando há mais de uma entrega. As marcas `CISHA`, `CIBARRA` e `CIBRANCH` continuam nas linhas equivalentes.
+- Produces, em `portao-push.sh` (por ref `refs/heads/*`; exclusão e tag como hoje): união das parcelas da spec, seção 13, item 7 — (a) `pr_entregas_do_intervalo` com `refs/remotes/<remoto>/HEAD` quando resolve para commit (`# guarda:PPBASE`), (b) a regra legada pelo nome (`_pr_entrega`, `# guarda:PPLEG`), (c) o trailer `Trabalho:` do SHA enviado, lido com `git interpret-trailers --parse` ou equivalente do commit (`# guarda:PPTRL`); decisão da lista com a agregação; `avisa` com `cobertura_indeterminada` quando não há (a) e (b)/(c) são vazias e a árvore enviada tem `ENTREGA.md` canônico (`# guarda:PPCOB`). As marcas `PPSHA` e `PPMULTI` continuam. O sinal `mergex-pre-push <sha> <decisao>` usa a decisão agregada da ref.
+- Produces, em `pre-push-gerenciado.sh`: `[ -r "$MERGEX_PORTAO_PUSH" ]` antes do `exec`; sem o validador, mensagem `mergex pre-push: validador ausente neste checkout (<caminho>): push barrado; reinstale a skill ou rode ativacao-pre-push.sh --reverter` em stderr e código 1 (`# guarda:M3CHAM`). O marcador da segunda linha não muda.
+
+- [ ] **Step 1: Escrever os testes (RED)**
+
+No grupo `ci`, os dez cenários da auditoria de segurança final como regressão (uma fixture com `ENTREGA.md` de `branch: feature/ft-rec`, um SHA válido, um com produto depois do portão, um com `pronto` sem `portao_sha`, um com duas entregas, um com duas entregas declarando a mesma branch, um fork, um só de produto, clone sem `refs/heads` como o `actions/checkout`), cada um conferindo a decisão, o código e se a validade foi executada:
+- passam: nome esperado com portão válido; mesmo SHA válido com outro nome; branch renomeada válida (estes dois com `aviso=branch_divergente`); PR sem `ENTREGA.md` alterado com o nome do trabalho e com outro nome (`ref_nao_aplicavel`);
+- barram: nome esperado vencido e ausente; outro nome vencido; outro nome ausente; renomeada vencida; fork `patch-1` vencido; nome qualquer vencido; duas entregas com o nome de uma, de outra e de nenhuma; duas entregas declarando a mesma branch; `--branch` forjado e forjado com o nome de outra entrega.
+
+Mais, no grupo `ci`: `merge que restaura o ENTREGA de um pai barra` (grafo P/C/M da DM-185); `criss-cross barra com base_ambigua`; `merge que altera o ENTREGA contra os dois pais barra`; `merge que apaga um ENTREGA da base barra`; `cria e apaga no PR barra`; `renomear o diretório da entrega barra`; `integração da base não seleciona entregas alheias`; `base defasada barra com o diagnóstico de base defasada`; `órfã completa sem entrega passa`; `órfã completa com entrega vencida barra`; `órfã em clone raso é historia_incompleta`; `saída indexada com uma entrega`; `saída indexada com duas entregas e resumo único`; `custo constante com centenas de entregas` (contagem de processos Git, como na Task 14).
+
+No grupo `prepush`: `ref renomeada com origin/HEAD barra pelo conteúdo`; `push que apaga o ENTREGA da branch de mesmo nome barra pelo nome sem base`; `push por URL com nome divergente barra pelo trailer Trabalho do commit enviado`; `sem base, sem nome e sem trailer, com ENTREGA na árvore, avisa cobertura_indeterminada`; `sem base e sem ENTREGA na árvore passa`; `chamador gerenciado sem o validador barra com a mensagem da MergeX`. No grupo `modo`: `portao: null` nos três modos com a seleção pelo conteúdo, mesmo resultado no CI e no `pre-push`. No grupo `ativacao`: a prova funcional do E0/E2 continua com os dois lados (barra a ref inválida; passa o controle) depois da mudança. Os casos existentes dos grupos que assumiam a aplicabilidade pelo nome no CI (o caso `residual: PR de branch com outro nome não é aplicável`) passam a afirmar o comportamento novo; nenhum caso é apagado sem um substituto que afirme o comportamento novo.
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `bash scripts/ci/test-r2-barreira-push.sh ci prepush modo ativacao`
+Expected: FAIL nos cenários de contorno (rc 0 onde se espera 1, validade não executada), na saída indexada e no chamador sem validador (`No such file`).
+
+- [ ] **Step 3: Implementar**
+
+As interfaces acima, em Bash 3.2. O hook `pr-so-com-portao` não muda. A prosa do reference, do template e dos cabeçalhos diz exatamente o limite da DM-185: fecha o contorno pelo nome; o CI não é barreira contra todo contorno deliberado (seção 15.1, itens 1 e 12).
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `bash scripts/ci/test-r2-barreira-push.sh && bash .claude/hooks/teste.sh && bash scripts/ci/test-r1-reconciliacao-base.sh fluxo && bash scripts/ci/validate-mergex-contract.sh`
+Expected: todos `ok`, rc 0; nenhum `NAO_EXECUTADO` contado como ok.
+
+- [ ] **Step 5: Revisão independente**
+
+Revisor novo, com o diff, a DM-185 e a auditoria de segurança final. Foco: nenhum caminho em que o nome selecione ou isente no CI; falso negativo de seleção (merges, renomeação, criss-cross, órfã); a prova funcional do E0/E2 intacta; o texto não promete mais do que a DM-185.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .claude/skills/mergex/scripts/portao-regras.sh .claude/skills/mergex/scripts/portao-ci.sh .claude/skills/mergex/scripts/portao-push.sh .claude/skills/mergex/assets/pre-push-gerenciado.sh .claude/skills/mergex/assets/ci/mergex-portao.yml .claude/skills/mergex/references/12-barreira-de-push.md scripts/ci/test-r2-barreira-push.sh
+git commit -m "fix(mergex): seleciona a entrega do portao pelo conteudo"
+```
+(acrescentar ao `git add` os demais arquivos da lista que a task de fato alterou)
+
+### Task 24: Mutantes da DM-185
+
+**Files:**
+- Modify: `scripts/ci/mutacao-r1-reconciliacao-base.sh`
+
+**Interfaces:**
+- Consumes: as marcas `# guarda:<ID>` da Task 23.
+- Produces: a matriz da Task 21 com 13 mutantes novos (25 → 38), no mesmo padrão; nenhum dos 25 existentes é removido ou enfraquecido; resultado individual de cada um.
+
+| # | ID | Mutação | Suíte que tem de reprovar |
+|---|---|---|---|
+| 26 | `CINOME` | o CI seleciona pela regra do nome (`--branch`) em vez de `pr_entregas_do_intervalo` (exceção de troca, documentada) | `r2 ci` |
+| 27 | `CIDIFF` | sem a parcela do diff de árvores | `r2 ci` (merge que altera o ENTREGA contra os dois pais) |
+| 28 | `CIHIST` | sem a parcela dos commits não-merge | `r2 ci` (cria e apaga) |
+| 29 | `CIFULL2` | parcela dos commits sem `--full-history` (exceção literal: só a opção sai) | `r2 ci` (merge que restaura) |
+| 30 | `CIMBALL` | aceita o primeiro de vários merge-bases (exceção literal) | `r2 ci` (criss-cross) |
+| 31 | `CIDEL` | a parcela do diff de árvores ignora o status `D` (exceção literal) | `r2 ci` (merge que apaga) |
+| 32 | `CIAGREG` | a agregação devolve a decisão da primeira entrega | `r2 ci` (duas entregas) |
+| 33 | `BRDIV` | `branch_divergente` barra em vez de avisar (exceção de troca) | `r2 ci` (outro nome, portão válido) |
+| 34 | `PPBASE` | `pre-push` sem a parcela do conteúdo | `r2 prepush` |
+| 35 | `PPLEG` | `pre-push` sem a parcela legada pelo nome | `r2 prepush` |
+| 36 | `PPTRL` | `pre-push` sem a parcela do trailer | `r2 prepush` |
+| 37 | `PPCOB` | `pre-push` sem o aviso `cobertura_indeterminada` | `r2 prepush` |
+| 38 | `M3CHAM` | chamador gerenciado sem conferir o validador | `r2 prepush` |
+
+- [ ] **Step 1: Rodar o controle**
+
+Run: `bash scripts/ci/mutacao-r1-reconciliacao-base.sh controle`
+Expected: `controle verde`.
+
+- [ ] **Step 2: Rodar a matriz**
+
+Run: `bash scripts/ci/mutacao-r1-reconciliacao-base.sh`
+Expected: `38 mortos, 0 vivos`, rc 0. Um mutante vivo é teste faltando na Task 23: acrescentar o caso lá (no mesmo commit desta task, como na Task 21) e reexecutar. Um mutante equivalente (nenhum caso alcançável o distingue) é provado no relatório e decidido pelo controlador; a matriz não encolhe sem decisão registrada.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add scripts/ci/mutacao-r1-reconciliacao-base.sh
+git commit -m "test(mergex): mutantes da selecao do portao pelo conteudo"
+```
+
 ### Revisão final da branch
 
-Depois da Task 22, um revisor novo, no modelo mais capaz, avalia a branch inteira contra a spec, este plano e os contratos. Além da conformidade geral, o relatório classifica cada um dos oito riscos residuais da spec (seção 15.1) numa destas categorias, citando o teste ou o trecho de código que sustenta a classificação:
+Depois da Task 24, um revisor novo, no modelo mais capaz, avalia a branch inteira contra a spec, este plano e os contratos. Além da conformidade geral, o relatório classifica cada um dos doze riscos residuais da spec (seção 15.1) numa destas categorias, citando o teste ou o trecho de código que sustenta a classificação:
 - **eliminado:** o desenho atual o remove;
 - **testado e aceito:** existe teste que fixa o comportamento aceito;
 - **documentado sem mitigação técnica nesta rodada:** só cabeçalho ou reference.
@@ -1326,6 +1428,10 @@ Classificação esperada, que o revisor confirma ou contesta com evidência:
 | 6 | `core.autocrlf` na barreira | documentado sem mitigação técnica |
 | 7 | Hash do diff com atributos `-diff`/`binary` | documentado sem mitigação técnica |
 | 8 | Escala por branches entregues | eliminado (`custo independe das branches entregues`, `hook não varre branches`) |
+| 9 | PR sem `ENTREGA.md` | testado e aceito (`PR sem ENTREGA.md alterado … ref_nao_aplicavel`, Task 23) |
+| 10 | Várias entregas ativas; remoção ou toque-e-restaura | testado e aceito (casos de duas entregas e de remoção, Task 23) |
+| 11 | Base do evento defasada | testado e aceito (`base defasada barra com o diagnóstico de base defasada`, Task 23) |
+| 12 | Limite do CI frente ao autor do PR | documentado sem mitigação técnica |
 
 Também lista os casos `NAO_EXECUTADO` e confirma que nenhum foi contado como aprovado.
 
