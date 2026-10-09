@@ -138,39 +138,57 @@ desfaz a composição por conta própria, e o PR de reversão explica o passo.
 
 ## CI
 
-O CI é a barreira **contra contorno deliberado** (`git push --no-verify` ignora o `pre-push`) e a
-defesa adicional ao `pre-push`, nunca o substituto dele. Ele repete a decisão do `pre-push` sobre o
-SHA real da cabeça do PR, pelo mesmo executável de regra:
+O CI é a defesa adicional ao `pre-push` e a barreira prevista **contra contorno deliberado**
+(`git push --no-verify` ignora o `pre-push`), nunca o substituto dele. Ele repete a decisão do
+`pre-push` sobre o SHA real da cabeça do PR, pelo mesmo executável de regra:
 
 ```bash
-bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha <sha40> --branch <nome>
+bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha <sha40> --branch <nome> --base <sha40>
 ```
 
 - **Mesma regra, mesmo modo.** `portao-ci.sh` não tem regra própria: decide como a ref
-  `refs/heads/<nome>` empurrada com o SHA `<sha>` e SHA remoto nulo, chamando a mesma função do
-  `pre-push` (`pr_decide_ref`, em `portao-regras.sh`). Imprime `decisao=`, `motivo=` e `entrega=`.
-  Portão `pronto` vencido, ausente, inconsistente ou ilegível, `historia_incompleta` e
+  `refs/heads/<nome>` empurrada com o SHA `<sha>`, chamando a mesma função do `pre-push`
+  (`pr_decide_ref`, em `portao-regras.sh`). Imprime `decisao=`, `motivo=` e `entrega=`. Numa ref
+  aplicável, portão `pronto` vencido, ausente, inconsistente ou ilegível, `historia_incompleta` e
   `erro_ambiente` reprovam em qualquer modo; `portao: null` segue o modo de `pr-so-com-portao` em
   `.expx/hooks.json`, igual ao `pre-push`.
 - **O SHA do PR, não o `HEAD` local.** A decisão é sobre o `--sha` recebido; o commit em que o
   checkout está não entra.
+- **Aplicabilidade pela história do PR (`--base`).** O clone de um CI não tem `refs/heads/*` locais
+  nem SHA remoto anterior. Se o SHA não declara a branch, o CI consulta os `ENTREGA.md` do
+  merge-base entre `--base` e `--sha` e dos commits do PR que tocam `docs/entregas`; o mais recente que
+  declara `branch: <nome>` faz o papel do SHA remoto anterior. Assim um commit que apaga o `ENTREGA.md`
+  reprova, como no `pre-push`. `--base` que não é objeto no clone, ou sem merge-base com `--sha`, é
+  `historia_incompleta`.
 - **Códigos:** `0` passa ou avisa; `1` barra (o diagnóstico vai a stderr, com textos distintos para
-  `historia_incompleta`, que manda completar a história, e para `erro_ambiente`); `64` uso. Não existe
-  opção de força.
+  `historia_incompleta`, que manda completar a história, e para `erro_ambiente`); `64` uso (inclui
+  `--branch` que não é nome de branch ou com prefixo `refs/`). Não existe opção de força.
 - **História completa.** O clone do CI precisa de `fetch-depth: 0`; clone raso é
   `historia_incompleta` e reprova.
 - **Template.** `assets/ci/mergex-portao.yml` roda em `pull_request`, faz o checkout do SHA da
-  cabeça do PR com `fetch-depth: 0` e chama `portao-ci.sh` com esse SHA e a branch de origem do PR.
-  Os valores do evento entram pelo `env:` do step, nunca interpolados no texto do shell.
+  cabeça do PR com `fetch-depth: 0` e chama `portao-ci.sh` com esse SHA, a branch de origem e o SHA
+  da base do PR. Os valores do evento entram pelo `env:` do step, nunca interpolados no texto do shell.
+
+### Riscos residuais do CI
+
+- **PR de branch com outro nome não é aplicável.** A aplicabilidade é pelo `branch:` do `ENTREGA.md`,
+  igual nos três consumidores da barreira (spec, seção 13, item 7). Se o `ENTREGA.md` declara
+  `feature/ft-rec` e o PR vem de `feature/ft-rec-2`, um SHA vencido passa no CI e no `pre-push`.
+  Mudar a regra é decisão de desenho pendente.
+- **O autor do PR controla a cabeça do PR.** Com `on: pull_request`, o `.expx/hooks.json` (o modo de
+  `portao: null`), o `portao-ci.sh` e o próprio workflow vêm da árvore dele, e o check confia neles.
+  Por isso o CI é barreira contra o contorno comum (`--no-verify`), não contra quem reescreve a
+  própria verificação. No produto, exija `CODEOWNERS` com revisão obrigatória para `.expx/**`,
+  `.claude/**` e `.github/**`.
 
 ### Handoff: esta branch não ativa o CI
 
 Esta branch não ativa CI em nenhum produto: ela entrega o executável, o template e os testes, e nenhum
 arquivo vive em `.github/workflows/`. Ativar é handoff posterior e separado, feito no repositório do
-produto: copiar o template para `.github/workflows/` e configurar a proteção de merge da branch
-principal exigindo o check `mergex-portao`. Sem a proteção de merge exigindo o check, ele não barra
+produto: copiar o template para `.github/workflows/`, configurar a proteção de merge da branch
+principal exigindo o check `mergex-portao` e exigir `CODEOWNERS` com revisão obrigatória para
+`.expx/**`, `.claude/**` e `.github/**`. Sem a proteção de merge exigindo o check, ele não barra
 nada. O empacotamento do `pre-push` e do template pelo ExpxDev é outro handoff.
-
 ### Condição do PR #192
 
 O PR #192 fica em rascunho até o QA aprovar e até estarem comprovados no produto os três itens:

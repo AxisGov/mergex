@@ -955,8 +955,10 @@ VALIDADOR_CONTRATO="$REPO/scripts/ci/validate-mergex-contract.sh"
 # em CI_OUT, stderr em CI_ERR, código em CI_RC
 CI_OUT=""; CI_ERR=""; CI_RC=""
 ci_roda() {
-  local e; e="$(mktemp)"; TMPS="$TMPS $e"
-  CI_OUT="$(cd "$1" && bash "${4:-$CI}" --verificar --sha "$2" --branch "$3" 2>"$e")"; CI_RC=$?
+  local e b; e="$(mktemp)"; TMPS="$TMPS $e"
+  # a base do PR: CI_BASE, senão a main do repositório, senão o próprio SHA
+  b="${CI_BASE:-$(git -C "$1" rev-parse -q --verify "main^{commit}" 2>/dev/null || printf "%s" "$2")}"
+  CI_OUT="$(cd "$1" && bash "${4:-$CI}" --verificar --sha "$2" --branch "$3" --base "$b" 2>"$e")"; CI_RC=$?
   CI_ERR="$(cat "$e")"; rm -f "$e"
 }
 ci_rc() { # <desc> <rc> <dir> <sha> <branch> [script]
@@ -983,7 +985,7 @@ equivale() {
   out="$(FX_PORTAO_PUSH="$pp" fx_push_real "$dir" origin "$sha:refs/heads/feature/ft-rec")"
   prc="$(printf '%s\n' "$out" | sed -n 's/^rc=//p')"
   PUSH_ERR="$(printf '%s\n' "$out" | sed -n 's/^stderr=//p')"
-  ci_roda "$dir" "$sha" feature/ft-rec "$ci"; crc="$CI_RC"
+  ci_roda "${EQ_CIDIR:-$dir}" "$sha" feature/ft-rec "$ci"; crc="$CI_RC"
   case "$esp" in
     barra) [ "$prc" = 1 ] && [ "$crc" = 1 ] && ok "$desc: pre-push e CI barram" \
       || falha "$desc — pre-push rc=$prc, ci rc=$crc (ambos 1): $(printf '%s' "$CI_ERR" | tr '\n' '|')" ;;
@@ -993,7 +995,7 @@ equivale() {
 }
 
 grupo_ci() {
-  local t d v1 p1 vv x pn n1 c a o e frase
+  local t d v1 p1 vv x pn n1 c a o e frase mainsha co orf
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   [ -r "$CI" ] || falha "portao-ci.sh: No such file ($CI)"
   export FX_PORTAO_PUSH="$PP"
@@ -1028,6 +1030,26 @@ grupo_ci() {
     && git commit-tree "$(GIT_INDEX_FILE="$t/idx-sem" git write-tree)" -p "$vv" -m "docs: sem entrega"; rm -f "$t/idx-sem" )"
   git cat-file -e "$pn:docs/entregas/ft-rec/ENTREGA.md" 2>/dev/null && falha "controle: o ENTREGA.md continua no SHA sem entrega" || ok "controle: SHA sem ENTREGA.md"
   equivale "ci reprova o SHA que o pre-push barraria (ENTREGA.md ausente do SHA enviado)" barra "$d" "$pn"
+
+  # clone no formato do actions/checkout: objetos, HEAD destacado e nenhuma refs/heads
+  mainsha="$(git rev-parse main)"
+  co="$t/checkout"; cp -a "$d" "$co" || { falha "cópia do checkout"; return; }
+  git -C "$co" rev-parse -q --verify "$vv^{commit}" >/dev/null && git -C "$co" update-ref --no-deref HEAD "$vv" \
+    && for h in $(git -C "$co" for-each-ref --format="%(refname)" refs/heads); do git -C "$co" update-ref -d "$h"; done
+  [ -z "$(git -C "$co" for-each-ref refs/heads)" ] && [ "$(git -C "$co" rev-parse --abbrev-ref HEAD)" = HEAD ] \
+    && ok "controle: o clone do checkout não tem refs/heads e o HEAD é destacado" || falha "controle: o clone do checkout tem refs/heads"
+  CI_BASE="$mainsha" EQ_CIDIR="$co" equivale "ci reprova o SHA que remove o ENTREGA.md (clone sem refs/heads, como o actions/checkout)" barra "$d" "$pn"
+  ci_err_tem "SHA que remove o ENTREGA.md: diagnóstico do portão não pronto" "portao_nao_pronto"
+  CI_BASE="$mainsha" EQ_CIDIR="$co" equivale "ci reprova o SHA vencido (clone sem refs/heads)" barra "$d" "$p1"
+  CI_BASE="$mainsha" EQ_CIDIR="$co" equivale "ci aprova o SHA válido (clone sem refs/heads)" passa "$d" "$vv"
+  CI_BASE="$mainsha" ci_rc "ci: --sha ausente no clone barra (entrega_indeterminada)" 1 "$co" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa feature/ft-rec
+  ci_err_tem "ci: --sha ausente no clone: diagnóstico" "entrega_indeterminada"
+  CI_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ci_rc "ci: --base que não é objeto no clone: historia_incompleta barra" 1 "$co" "$pn" feature/ft-rec
+  ci_err_tem "ci: --base ausente: diagnóstico historia_incompleta" "historia_incompleta"
+  orf="$(git -C "$co" commit-tree "$(git -C "$co" hash-object -t tree -w /dev/null)" -m orfao)"
+  CI_BASE="$orf" ci_rc "ci: --base sem merge-base com o SHA: historia_incompleta barra" 1 "$co" "$pn" feature/ft-rec
+  ci_err_tem "ci: sem merge-base: diagnóstico historia_incompleta" "historia_incompleta"
+  CI_BASE="$pn" ci_rc "ci: base igual ao SHA sem ENTREGA.md declarando: não aplicável (controle da regra de aplicabilidade)" 0 "$co" "$pn" feature/ft-rec
 
   # historia_incompleta: clone raso, com a mesma entrada no pre-push e no CI
   git push -q origin "$vv:refs/heads/feature/ft-rec" >/dev/null 2>&1 || falha "push do portão válido ao remoto"
@@ -1090,20 +1112,25 @@ grupo_ci() {
   ci_rc "o modo desligado não afrouxa o pronto vencido" 1 "$d" "$p1" feature/ft-rec
 
   # ---- ref que não é a branch do trabalho: não aplicável ---------------------------
-  ci_rc "branch que nenhuma entrega declara não é aplicável: passa" 0 "$d" "$p1" feature/outra
+  ci_rc "residual: PR de branch com outro nome não é aplicável (SHA vencido passa; risco documentado)" 0 "$d" "$p1" feature/ft-rec-2
   case "$CI_OUT" in *motivo=ref_nao_aplicavel*) ok "ci imprime motivo=ref_nao_aplicavel" ;; *) falha "saída: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
 
   # ---- uso --------------------------------------------------------------------------
   cd "$d" || return
   rc_igual "ci sem argumentos: uso" 64 bash "$CI"
-  rc_igual "ci sem --branch: uso" 64 bash "$CI" --verificar --sha "$v1"
-  rc_igual "ci com --branch vazio: uso" 64 bash "$CI" --verificar --sha "$v1" --branch ""
-  rc_igual "ci com SHA abreviado: uso" 64 bash "$CI" --verificar --sha "$(printf '%s' "$v1" | cut -c1-12)" --branch feature/ft-rec
-  rc_igual "ci com nome de ref no lugar do SHA: uso" 64 bash "$CI" --verificar --sha HEAD --branch feature/ft-rec
-  rc_igual "ci com SHA em maiúsculas: uso" 64 bash "$CI" --verificar --sha AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA --branch feature/ft-rec
-  rc_igual "ci sem --verificar: uso" 64 bash "$CI" --sha "$v1" --branch feature/ft-rec
-  rc_igual "ci com opção desconhecida: uso" 64 bash "$CI" --verificar --sha "$v1" --branch feature/ft-rec --force
-  rc_igual "ci não tem opção de força: --force no lugar do SHA" 64 bash "$CI" --verificar --force "$v1" --branch feature/ft-rec
+  rc_igual "ci sem --branch: uso" 64 bash "$CI" --verificar --sha "$v1" --base "$v1"
+  rc_igual "ci sem --base: uso" 64 bash "$CI" --verificar --sha "$v1" --branch feature/ft-rec
+  rc_igual "ci com --base abreviado: uso" 64 bash "$CI" --verificar --sha "$v1" --branch feature/ft-rec --base "$(printf '%s' "$v1" | cut -c1-12)"
+  rc_igual "ci com --branch refs/heads/...: uso" 64 bash "$CI" --verificar --sha "$v1" --branch refs/heads/feature/ft-rec --base "$v1"
+  rc_igual "ci com --branch inválido (a..b): uso" 64 bash "$CI" --verificar --sha "$v1" --branch a..b --base "$v1"
+  rc_igual "ci com --branch começando por hífen: uso" 64 bash "$CI" --verificar --sha "$v1" --branch --x --base "$v1"
+  rc_igual "ci com --branch vazio: uso" 64 bash "$CI" --verificar --sha "$v1" --base "$v1" --branch ""
+  rc_igual "ci com SHA abreviado: uso" 64 bash "$CI" --verificar --sha "$(printf '%s' "$v1" | cut -c1-12)" --branch feature/ft-rec --base "$v1"
+  rc_igual "ci com nome de ref no lugar do SHA: uso" 64 bash "$CI" --verificar --sha HEAD --branch feature/ft-rec --base "$v1"
+  rc_igual "ci com SHA em maiúsculas: uso" 64 bash "$CI" --verificar --sha AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA --branch feature/ft-rec --base "$v1"
+  rc_igual "ci sem --verificar: uso" 64 bash "$CI" --sha "$v1" --branch feature/ft-rec --base "$v1"
+  rc_igual "ci com opção desconhecida: uso" 64 bash "$CI" --verificar --sha "$v1" --branch feature/ft-rec --base "$v1" --force
+  rc_igual "ci não tem opção de força: --force no lugar do SHA" 64 bash "$CI" --verificar --force "$v1" --branch feature/ft-rec --base "$v1"
 
   # ---- template ----------------------------------------------------------------------
   [ -f "$TEMPLATE_CI" ] || falha "template ausente: $TEMPLATE_CI"
@@ -1116,8 +1143,10 @@ grupo_ci() {
   grep -Fq 'PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}' "$TEMPLATE_CI" \
     && ok "template passa a branch de origem do PR" || falha "template sem a branch do PR"
   c="$(grep -F 'portao-ci.sh' "$TEMPLATE_CI" | grep -v '^[[:space:]]*#')"
-  case "$c" in *'portao-ci.sh --verificar --sha "$PR_HEAD_SHA" --branch "$PR_HEAD_REF"'*) ok "template chama portao-ci.sh --verificar com o SHA e a branch do PR" ;; *) falha "template sem a chamada de portao-ci.sh: $c" ;; esac
+  case "$c" in *'portao-ci.sh --verificar --sha "$PR_HEAD_SHA" --branch "$PR_HEAD_REF" --base "$PR_BASE_SHA"'*) ok "template chama portao-ci.sh --verificar com o SHA e a branch do PR" ;; *) falha "template sem a chamada de portao-ci.sh: $c" ;; esac
   case "$c" in *'${{'*) falha "template interpola expressão no shell (injeção): $c" ;; *) ok "template não interpola o evento no texto do shell" ;; esac
+  grep -Fq 'PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}' "$TEMPLATE_CI" \
+    && ok "template passa o SHA da base do PR" || falha "template sem a base do PR"
   grep -Eq '^[[:space:]]*pull_request:[[:space:]]*$' "$TEMPLATE_CI" && ok "template roda em pull_request" || falha "template sem on: pull_request"
   sed -n '1p' "$TEMPLATE_CI" | grep -Fq 'TEMPLATE' && grep -Fq 'NÃO o' "$TEMPLATE_CI" \
     && ok "template declara no topo que é template e que esta branch não o ativa" || falha "template sem a declaração de template"
@@ -1132,6 +1161,13 @@ grupo_ci() {
   frase='CI do portão ativo'
   grep -Fq 'Esta branch não ativa CI em nenhum produto' "$BARREIRA_REF" \
     && ok "o reference diz que esta branch não ativa CI em produto" || falha "o reference não diz que a branch não ativa CI"
+  grep -Fq 'ft-rec-2' "$BARREIRA_REF" && grep -Fq 'Riscos residuais do CI' "$BARREIRA_REF" \
+    && ok "o reference documenta o risco residual do PR de branch com outro nome" || falha "reference sem o risco residual de I2"
+  grep -Fq 'CODEOWNERS' "$BARREIRA_REF" && grep -Fq '.expx/**' "$BARREIRA_REF" && grep -Fq '.github/**' "$BARREIRA_REF" \
+    && grep -Fq 'autor do PR controla a cabeça do PR' "$BARREIRA_REF" \
+    && ok "o reference documenta que o autor do PR controla o modo e os scripts, e recomenda CODEOWNERS" || falha "reference sem o limite de I3"
+  grep -Fq 'ft-rec-2' "$CI" && grep -Fq 'CODEOWNERS' "$CI" \
+    && ok "o cabeçalho de portao-ci.sh documenta os riscos residuais" || falha "portao-ci.sh sem os riscos residuais"
   grep -Fxq '## CI' "$BARREIRA_REF" && ok "o reference tem a seção CI" || falha "o reference sem a seção '## CI'"
   ( cd "$REPO" && bash "$VALIDADOR_CONTRATO" ) >/dev/null 2>&1 && ok "o validador do contrato aprova o repositório (nenhum arquivo afirma CI ativo)" \
     || falha "o validador do contrato reprova o repositório"

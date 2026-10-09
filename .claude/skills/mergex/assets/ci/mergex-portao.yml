@@ -10,6 +10,12 @@
 # O check repete a decisão do `pre-push` sobre o SHA da cabeça do PR (a mesma
 # regra e o mesmo modo de `portao: null`) e é a barreira contra contorno
 # deliberado, como `git push --no-verify`. Não substitui o `pre-push`.
+#
+# Limites: com `on: pull_request` o autor do PR controla a cabeça do PR, inclusive
+# `.expx/hooks.json` (o modo de `portao: null`) e os próprios scripts; o check
+# confia neles. No produto, exija CODEOWNERS e revisão obrigatória para `.expx/**`,
+# `.claude/**` e `.github/**`. A aplicabilidade é pelo `branch:` do ENTREGA.md:
+# um PR de branch com outro nome não é aplicável (risco residual).
 name: mergex-portao
 
 on:
@@ -29,6 +35,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       # os valores do evento entram pelo ambiente do step, nunca interpolados
       # no texto do shell (head.ref é controlado por quem abre o PR)
@@ -36,4 +43,5 @@ jobs:
         env:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha "$PR_HEAD_SHA" --branch "$PR_HEAD_REF"
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash .claude/skills/mergex/scripts/portao-ci.sh --verificar --sha "$PR_HEAD_SHA" --branch "$PR_HEAD_REF" --base "$PR_BASE_SHA"
