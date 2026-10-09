@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Controle e 25 mutantes da reconciliação de base pós-E8 (R1) e da barreira de
-# push da DM-184 (R2). Os 17 primeiros são a lista da spec (seção 21); os 8
-# seguintes completam a barreira de push.
+# Controle e 38 mutantes da reconciliação de base pós-E8 (R1), da barreira de
+# push da DM-184 (R2) e da seleção da entrega pelo conteúdo (DM-185). Os 17
+# primeiros são a lista da spec (seção 21); os 8 seguintes completam a barreira
+# de push; os 13 últimos (26-38) são os da seleção pelo conteúdo.
 #
 # Cada mutante altera só uma CÓPIA temporária do repositório (git ls-files ->
 # tar -> git init + commit), nunca o repositório real. A regra geral é a do
@@ -45,6 +46,20 @@
 #     12-barreira-de-push.md;
 #   - E2SEMHOOK: as linhas de registrar-portao.sh e de persistir-metodo.sh são
 #     neutralizadas juntas.
+# Exceções da DM-185 (seleção da entrega pelo conteúdo; `troca_marca`: a linha
+# marcada vira o corpo abaixo, sempre terminada em `# mutante <ID>`):
+#   - CINOME (troca): o CI seleciona pela regra do nome, `pr_entrega_da_ref
+#     "$RAIZ" "$REF" "$SHA" "$SHA"` (a regra legada pelo --branch), em vez de
+#     `pr_entregas_do_intervalo`;
+#   - BRDIV (troca): a divergência entre --branch e o branch: da entrega barra
+#     (`_pr_sai barra branch_divergente`) em vez de só avisar;
+#   - CIFULL2 (literal): só a opção sai, `set -- "$@"` no lugar de
+#     `set -- "$@" --full-history`;
+#   - CIMBALL (literal): vários merge-bases passam a aceitar o primeiro
+#     (`n=1`) em vez de `base_ambigua`;
+#   - CIDEL (literal): o `case` dos status aceitos perde o `D` (`A|M|T`).
+# CIDIFF, CIHIST, CIAGREG, PPBASE, PPLEG, PPTRL, PPCOB e M3CHAM seguem a troca
+# geral por `:`.
 #
 # Morto: alguma suíte alvo sai com rc != 0 POR FALHA DE CASO (linha `  FALHA`
 # e resumo `<n> ok, <m> falha(s)` com m > 0; no validador do contrato,
@@ -59,7 +74,7 @@
 # na matriz).
 #
 # Uso: bash scripts/ci/mutacao-r1-reconciliacao-base.sh [controle | <ID>]
-#   sem argumento: controle + os 25 mutantes; `controle`: só o controle;
+#   sem argumento: controle + os 38 mutantes; `controle`: só o controle;
 #   <ID>: controle das suítes daquele ID + o mutante.
 # rc 0 só com controle verde e todos os mutantes executados mortos.
 
@@ -93,7 +108,20 @@ MATRIZ='1|P1|r1:provas|prova 1 desligada
 22|ATVHP|r2:ativacao|E0 grava core.hooksPath
 23|HKNV|hooks|hook do Claude aceita --no-verify
 24|CIATIVO|contrato r2:ci|contrato aceita texto que afirma CI ativo
-25|E2SEMHOOK|r2:entrypoints|E2 ignora a prova funcional e emite/persiste PRONTO'
+25|E2SEMHOOK|r2:entrypoints|E2 ignora a prova funcional e emite/persiste PRONTO
+26|CINOME|r2:ci|o CI seleciona pela regra do nome em vez de pr_entregas_do_intervalo
+27|CIDIFF|r2:ci|seleção sem a parcela do diff de árvores
+28|CIHIST|r2:ci|seleção sem a parcela dos commits não-merge
+29|CIFULL2|r2:ci|parcela dos commits sem --full-history
+30|CIMBALL|r2:ci|seleção aceita o primeiro de vários merge-bases
+31|CIDEL|r2:ci|parcela do diff de árvores ignora o status D
+32|CIAGREG|r2:ci|agregação devolve a decisão da primeira entrega
+33|BRDIV|r2:ci|branch_divergente barra em vez de avisar
+34|PPBASE|r2:prepush|pre-push sem a parcela do conteúdo
+35|PPLEG|r2:prepush|pre-push sem a parcela legada pelo nome
+36|PPTRL|r2:prepush|pre-push sem a parcela do trailer
+37|PPCOB|r2:prepush|pre-push sem o aviso cobertura_indeterminada
+38|M3CHAM|r2:prepush|chamador gerenciado sem conferir o validador'
 
 RAIZ_TMP="$(mktemp -d "${TMPDIR:-/tmp}/mutacao-r1.XXXXXX")" || { echo 'sem diretório temporário' >&2; exit 1; }
 limpa() { rm -rf "$RAIZ_TMP"; }
@@ -185,6 +213,22 @@ insere_depois() {
   cat "$arq.mut" > "$arq" && rm -f "$arq.mut"
 }
 
+# troca_marca <dir> <ID> <arquivo> <corpo> — exceção de troca/literal: neutraliza
+# (a linha vira `: # mutante <ID>`) e o `:` é substituído pelo <corpo> exato,
+# na mesma linha, com a indentação preservada e terminando em `# mutante <ID>`
+troca_marca() {
+  local d="$1" id="$2" arq="$d/$3"
+  neutraliza "$d" "$id" || return 1
+  [ "$(grep -c -- "# mutante $id[[:space:]]*\$" "$arq")" = 1 ] \
+    || { echo "$id: a linha marcada não está em $3" >&2; return 1; }
+  ID="$id" CORPO="$4" awk '
+    BEGIN { m = "# mutante " ENVIRON["ID"] }
+    $0 ~ (m "[ \t]*$") { match($0, /^[ \t]*/); print substr($0, 1, RLENGTH) ENVIRON["CORPO"] " " m; next }
+    { print }' "$arq" > "$arq.mut" || return 1
+  cat "$arq.mut" > "$arq" && rm -f "$arq.mut" || return 1
+  echo "$id: linha trocada por \`$4\` em $3"
+}
+
 aplica() { # <dir> <ID>
   local d="$1" id="$2" rb ref atv
   atv="$d/.claude/skills/mergex/scripts/ativacao-pre-push.sh"
@@ -229,6 +273,26 @@ aplica() { # <dir> <ID>
       neutraliza "$d" E2SEMHOOK || return 1
       [ "$(marcadas "$d" '# mutante E2SEMHOOK' | grep -Ec 'registrar-portao\.sh|persistir-metodo\.sh')" = 2 ] \
         || { echo 'E2SEMHOOK: os dois entrypoints não foram neutralizados juntos' >&2; return 1; }
+      ;;
+    CINOME)
+      troca_marca "$d" CINOME .claude/skills/mergex/scripts/portao-ci.sh \
+        'pr_entrega_da_ref "$RAIZ" "$REF" "$SHA" "$SHA" > "$TMP_DIR/selecao" || SEL_RC=1' || return 1
+      ;;
+    BRDIV)
+      troca_marca "$d" BRDIV .claude/skills/mergex/scripts/portao-ci.sh \
+        '[ "$DECLARA" = 1 ] || { _pr_sai barra branch_divergente - "branch_divergente: o nome da branch não é o branch: da entrega" > "$TMP"; final; }' || return 1
+      ;;
+    CIMBALL)
+      troca_marca "$d" CIMBALL .claude/skills/mergex/scripts/portao-regras.sh \
+        '[ "$n" -le 1 ] || n=1' || return 1
+      ;;
+    CIDEL)
+      troca_marca "$d" CIDEL .claude/skills/mergex/scripts/portao-regras.sh \
+        'case "$st" in A|M|T) aceito=1 ;; esac' || return 1
+      ;;
+    CIFULL2)
+      troca_marca "$d" CIFULL2 .claude/skills/mergex/scripts/portao-regras.sh \
+        'set -- "$@"' || return 1
       ;;
     *) neutraliza "$d" "$id" || return 1 ;;
   esac
