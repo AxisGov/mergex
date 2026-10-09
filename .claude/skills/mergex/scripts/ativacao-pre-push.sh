@@ -33,19 +33,29 @@
 #   Executa o pre-push efetivo como o Git o executaria (na raiz, argumentos
 #   `prova-mergex file:///dev/null`, uma linha de protocolo para
 #   `refs/heads/<branch da entrega>` com o SHA remoto nulo), com
-#   MERGEX_PRE_PUSH_SINAL num temporário. Aprova só se o hook sair com código
-#   diferente de zero E o sinal tiver a linha `mergex-pre-push <SHA do commit
-#   solto desta prova> barra`, que o portao-push.sh só escreve depois de
-#   decidir aquela ref. Reprovam: pre-push ausente ou não executável, término
-#   por sinal (código 128 ou mais), estouro do orçamento de tempo, código zero
-#   (liberou a ref inválida, ou não propagou o código) e a falta daquela linha
-#   (o validador não rodou, não recebeu a entrada, ou a linha é forjada com
-#   outro SHA). Um hook escrito de propósito para forjar a linha lendo o SHA
+#   MERGEX_PRE_PUSH_SINAL num temporário. A prova tem DOIS lados, cada um uma
+#   execução do hook:
+#   (a) a ref aplicável com o commit solto vencido: exige código diferente de
+#       zero E a linha `mergex-pre-push <SHA desse commit> barra`, que o
+#       portao-push.sh só escreve depois de decidir aquela ref;
+#   (b) controle positivo: outro commit solto (a árvore de HEAD) numa ref NÃO
+#       aplicável (`refs/heads/mergex-prova-livre-<pid>[-n]`, conferida como
+#       inexistente localmente): exige código 0 E a linha
+#       `mergex-pre-push <SHA desse commit> passa`. Pega o hook que ignora o
+#       código do validador e decide por regra própria, e o ambiente em que o
+#       validador barra tudo por erro.
+#   Reprovam: pre-push ausente ou não executável, término por sinal (código
+#   128 ou mais), estouro do orçamento de tempo, e qualquer resultado
+#   diferente do exigido em (a) ou (b) — código zero em (a), não zero em (b),
+#   ou a falta da linha (o validador não rodou, não recebeu a entrada, ou a
+#   linha é forjada com outro SHA). Um hook escrito de propósito para forjar a linha lendo o SHA
 #   da entrada é contorno deliberado, fora do alcance de qualquer prova local:
 #   a barreira contra ele é o CI. Orçamento: PRAZO segundos, por um `timeout`
 #   que comprove matar um processo no prazo (detecção pelo comportamento) ou,
 #   sem ele, por um vigia em Bash; o hook roda em grupo de processos próprio,
-#   morto inteiro no estouro e ao fim (nenhum órfão); estouro reprova. Os
+#   morto inteiro no estouro e ao fim (nenhum órfão); estouro reprova (com o
+#   `timeout`: código 124, ou 137 depois do prazo inteiro, quando o hook
+#   ignorou o TERM e levou o KILL). Os
 #   objetos do commit solto ficam soltos no repositório
 #   (inalcançáveis, nenhuma ref aponta para eles); o índice e a árvore de
 #   trabalho não mudam.
@@ -168,22 +178,24 @@ orcamento() {
   return 0
 }
 
-# executa_hook — roda o pre-push efetivo como o Git (na raiz, argumentos da
-# prova, a linha de protocolo na entrada) em grupo de processos próprio
-# (`set -m`), com o orçamento: o `timeout` comprovado, ou um vigia em Bash
-# que, estourado o PRAZO, marca `estouro` e mata o grupo (TERM e, 5 s depois,
-# KILL). No fim, o que sobrar do grupo do hook é morto: nenhum processo órfão.
-# Imprime nada; devolve o código do hook.
+# executa_hook <lado> — roda o pre-push efetivo como o Git (na raiz,
+# argumentos da prova, a linha de protocolo linha-<lado> na entrada,
+# MERGEX_PRE_PUSH_SINAL=sinal-<lado>, saída em saida-<lado>) em grupo de
+# processos próprio (`set -m`), com o orçamento: o `timeout` comprovado, ou um
+# vigia em Bash que, estourado o PRAZO, marca estouro-<lado> e mata o grupo
+# (TERM e, 5 s depois, KILL). No fim, o que sobrar do grupo do hook é morto:
+# nenhum processo órfão. Devolve o código do hook; DURACAO em segundos.
+DURACAO=0
 executa_hook() {
-  local pid vigia="" rc
-  rm -f "$TMP_DIR/estouro"
+  local l="$1" pid vigia="" rc ini
+  rm -f "$TMP_DIR/estouro-$l"; : > "$TMP_DIR/sinal-$l"
+  ini="$(date +%s)"
   set -m
   # shellcheck disable=SC2086
-  ( cd "$RAIZ" && export MERGEX_PRE_PUSH_SINAL="$TMP_DIR/sinal" && exec $LIMITE "$HOOK" prova-mergex file:///dev/null \
-      < "$TMP_DIR/linha" > "$TMP_DIR/saida" 2>&1 ) &
+  ( cd "$RAIZ" && export MERGEX_PRE_PUSH_SINAL="$TMP_DIR/sinal-$l" && exec $LIMITE "$HOOK" prova-mergex file:///dev/null       < "$TMP_DIR/linha-$l" > "$TMP_DIR/saida-$l" 2>&1 ) &
   pid=$!
   if [ -z "$LIMITE" ]; then
-    ( sleep "$PRAZO"; : > "$TMP_DIR/estouro"; kill -TERM -- "-$pid" 2>/dev/null
+    ( sleep "$PRAZO"; : > "$TMP_DIR/estouro-$l"; kill -TERM -- "-$pid" 2>/dev/null
       sleep 5; kill -KILL -- "-$pid" 2>/dev/null ) >/dev/null 2>&1 &
     vigia=$!
   fi
@@ -191,7 +203,24 @@ executa_hook() {
   if [ -n "$vigia" ]; then kill -KILL -- "-$vigia" 2>/dev/null; wait "$vigia" 2>/dev/null; fi
   kill -KILL -- "-$pid" 2>/dev/null
   set +m
+  DURACAO=$(( $(date +%s) - ini ))
+  PROVA_SAIDA="$TMP_DIR/saida-$l"
   return "$rc"
+}
+
+# tempo_ok <lado> <rc> — o hook terminou sozinho, dentro do orçamento. Com o
+# `timeout`, 124 é estouro, e 137 também quando o prazo inteiro passou (o hook
+# ignorou o TERM e levou o KILL do `-k`); antes do prazo, 137 é término por
+# sinal do próprio hook.
+tempo_ok() {
+  local est="o pre-push estourou o orçamento de ${PRAZO}s ($1)"
+  [ ! -e "$TMP_DIR/estouro-$1" ] || { PROVA_ERRO="$est"; return 1; }
+  if [ -n "$LIMITE" ]; then
+    [ "$2" != 124 ] || { PROVA_ERRO="$est"; return 1; }
+    [ "$2" != 137 ] || [ "$DURACAO" -lt "$PRAZO" ] || { PROVA_ERRO="$est"; return 1; }
+  fi
+  [ "$2" -lt 128 ] || { PROVA_ERRO="o pre-push terminou por sinal (código $2, $1)"; return 1; }
+  return 0
 }
 
 # para_git <caminho> — o temporário como o git o lê: no Git Bash do Windows,
@@ -204,8 +233,8 @@ para_git() {
 PROVA_ERRO=""
 PROVA_RC=""
 provar() {
-  local head b c arvore blob_e blob_p nulo produto rc tg
-  PROVA_ERRO=""; PROVA_RC=""
+  local head b c c2 livre n arvore blob_e blob_p nulo produto rc tg
+  PROVA_ERRO=""; PROVA_RC=""; PROVA_SAIDA=""
   [ -f "$HOOK" ] && [ -x "$HOOK" ] || { PROVA_ERRO="nenhum pre-push executável no diretório efetivo $HOOKS"; return 1; }
   [ -f "$RAIZ/$ENTREGA" ] && [ ! -L "$RAIZ/$ENTREGA" ] || { PROVA_ERRO="$ENTREGA não é arquivo regular"; return 1; }
   carrega_editor || { PROVA_ERRO="editor de frontmatter indisponível ($RB_SH)"; return 1; }
@@ -235,29 +264,44 @@ provar() {
       git -C "$RAIZ" commit-tree --no-gpg-sign "$arvore" -p "$head" -m 'chore: prova funcional do pre-push da mergex' 2>/dev/null)" \
     || { PROVA_ERRO='não foi possível montar o commit solto da prova'; return 1; }
   nulo="$(printf '%s' "$c" | sed 's/./0/g')"
-  printf 'refs/heads/%s %s refs/heads/%s %s\n' "$b" "$c" "$b" "$nulo" > "$TMP_DIR/linha"
-  : > "$TMP_DIR/sinal"
   orcamento
-  executa_hook 2>/dev/null; rc=$?
+
+  # (a) a ref aplicável com o portão sabidamente vencido: o hook tem de barrar
+  # (código diferente de zero), e o validador tem de ter decidido `barra` para
+  # o SHA do commit solto DESTA prova (a linha vem do portao-push.sh depois da
+  # decisão; linha antiga, SHA alheio ou decisão diferente não contam)
+  printf 'refs/heads/%s %s refs/heads/%s %s
+' "$b" "$c" "$b" "$nulo" > "$TMP_DIR/linha-a"
+  executa_hook a 2>/dev/null; rc=$?
   PROVA_RC="$rc"
-  [ ! -e "$TMP_DIR/estouro" ] || { PROVA_ERRO="o pre-push estourou o orçamento de ${PRAZO}s"; return 1; }
-  [ -z "$LIMITE" ] || [ "$rc" != 124 ] || { PROVA_ERRO="o pre-push estourou o orçamento de ${PRAZO}s"; return 1; }
-  [ "$rc" -lt 128 ] || { PROVA_ERRO="o pre-push terminou por sinal (código $rc)"; return 1; }
+  tempo_ok a "$rc" || return 1
   [ "$rc" != 0 ] || { PROVA_ERRO='o pre-push saiu com código 0: liberou a ref sabidamente inválida da prova, ou não propagou o código do validador'; return 1; }
-  # o validador decidiu `barra` para o SHA do commit solto DESTA prova (a linha
-  # vem do portao-push.sh depois da decisão); linha antiga, SHA alheio ou
-  # decisão diferente não contam
-  grep -Fxq "mergex-pre-push $c barra" "$TMP_DIR/sinal" || { PROVA_ERRO="o pre-push saiu com código $rc sem que o validador da MergeX barrasse a ref da prova ($c): nenhuma decisão dele no sinal"; return 1; } # guarda:ATVTXT
+  grep -Fxq "mergex-pre-push $c barra" "$TMP_DIR/sinal-a" || { PROVA_ERRO="o pre-push saiu com código $rc sem que o validador da MergeX barrasse a ref da prova ($c): nenhuma decisão dele no sinal"; return 1; } # guarda:ATVTXT
+
+  # (b) controle positivo: outro commit solto (a árvore de HEAD, sem nenhum
+  # ENTREGA.md que declare a branch usada) numa ref NÃO aplicável — um nome que
+  # não existe localmente. O validador decide `passa` e o hook tem de sair 0:
+  # prova que o código do hook é o do validador (não uma regra própria) e que
+  # o validador de fato avalia neste ambiente (não barra tudo por erro)
+  n=0; livre="mergex-prova-livre-$$"
+  while git -C "$RAIZ" show-ref -q --verify "refs/heads/$livre"; do n=$((n + 1)); livre="mergex-prova-livre-$$-$n"; done
+  c2="$(GIT_AUTHOR_NAME='MergeX prova' GIT_AUTHOR_EMAIL='prova@mergex.invalid'       GIT_COMMITTER_NAME='MergeX prova' GIT_COMMITTER_EMAIL='prova@mergex.invalid'       git -C "$RAIZ" commit-tree --no-gpg-sign "$head^{tree}" -p "$head" -m 'chore: controle positivo da prova do pre-push da mergex' 2>/dev/null)"     || { PROVA_ERRO='não foi possível montar o commit solto do controle positivo'; return 1; }
+  printf 'refs/heads/%s %s refs/heads/%s %s
+' "$livre" "$c2" "$livre" "$nulo" > "$TMP_DIR/linha-b"
+  executa_hook b 2>/dev/null; rc=$?
+  tempo_ok b "$rc" || return 1
+  [ "$rc" = 0 ] || { PROVA_ERRO="controle positivo: o pre-push barrou (código $rc) uma ref não aplicável (refs/heads/$livre): não propaga o código do validador (regra própria) ou o validador barra tudo neste ambiente"; return 1; } # guarda:ATVTXT
+  grep -Fxq "mergex-pre-push $c2 passa" "$TMP_DIR/sinal-b" || { PROVA_ERRO="controle positivo: o validador da MergeX não decidiu \`passa\` para a ref não aplicável ($c2)"; return 1; } # guarda:ATVTXT
   return 0
 }
 
 aprovada() {
-  diz "prova funcional aprovada: o pre-push efetivo ($HOOK) executou o validador da MergeX e barrou a ref inválida da prova (código $PROVA_RC)"
+  diz "prova funcional aprovada: o pre-push efetivo ($HOOK) executou o validador da MergeX, barrou a ref inválida da prova (código $PROVA_RC) e liberou o controle positivo (código 0)"
 }
 reprovada() {
   erro "prova funcional reprovada: $PROVA_ERRO"
-  if [ -n "$TMP_DIR" ] && [ -s "$TMP_DIR/saida" ]; then
-    sed -n '1,20s/^/  pre-push: /p' "$TMP_DIR/saida" >&2
+  if [ -n "${PROVA_SAIDA:-}" ] && [ -s "$PROVA_SAIDA" ]; then
+    sed -n '1,20s/^/  pre-push: /p' "$PROVA_SAIDA" >&2
   fi
 }
 

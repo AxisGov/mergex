@@ -88,15 +88,25 @@ A mesma prova serve ao E0 e ao E2, e não confia no caminho nem na existência d
    apontando para um temporário. O validador de push escreve ali, **depois de decidir** cada ref
    recebida na entrada padrão, a linha `mergex-pre-push <SHA avaliado> <passa|avisa|barra>`, sem
    mudar a decisão.
-3. **Aprova só se** o hook sair com código diferente de zero **e** o sinal tiver a linha
-   `mergex-pre-push <SHA do commit solto desta prova> barra`. Reprovam: `pre-push` ausente ou não
-   executável, término por sinal (código 128 ou mais), código zero (liberou a ref inválida ou não
-   propagou o código), a falta dessa linha (o validador não rodou, rodou sem receber a entrada, ou a
-   linha foi escrita por outro com SHA alheio) e o estouro do orçamento de tempo.
-4. **Orçamento de tempo:** 120 s. Vale um `timeout` que comprove, pelo comportamento, matar um
-   processo dentro do prazo (GNU, uutils ou outro); sem ele, um vigia em Bash. O hook roda em grupo
-   de processos próprio, morto inteiro no estouro e ao fim da prova: nenhum processo fica órfão.
-   Estouro reprova.
+3. **A prova tem dois lados**, cada um uma execução do hook, e **aprova só com os dois**:
+   - **(a) ref aplicável vencida:** o hook sai com código diferente de zero **e** o sinal tem a
+     linha `mergex-pre-push <SHA do commit solto desta prova> barra`;
+   - **(b) controle positivo:** um segundo commit solto (a árvore de `HEAD`, sem nenhum
+     `ENTREGA.md` que declare a branch usada) numa ref **não aplicável**
+     (`refs/heads/mergex-prova-livre-<pid>`, conferida como inexistente localmente): o hook sai com
+     código **0** **e** o sinal tem `mergex-pre-push <SHA desse commit> passa`.
+
+   O lado (b) pega o que o (a) não distingue: o hook que chama a MergeX mas decide o código por
+   regra própria (no push real, ele liberaria um portão vencido) e o ambiente em que o validador
+   barra tudo por erro (por exemplo, objetos ou `safe.directory` inacessíveis para ele). Reprovam
+   também: `pre-push` ausente ou não executável, término por sinal (código 128 ou mais), a falta de
+   qualquer das duas linhas (o validador não rodou, rodou sem receber a entrada, ou a linha foi
+   escrita por outro com SHA alheio) e o estouro do orçamento de tempo.
+4. **Orçamento de tempo:** 120 s por execução. Vale um `timeout` que comprove, pelo comportamento,
+   matar um processo dentro do prazo (GNU, uutils ou outro); sem ele, um vigia em Bash. O hook roda
+   em grupo de processos próprio, morto inteiro no estouro e ao fim da prova: nenhum processo fica
+   órfão. Estouro reprova — com o `timeout`, o código 124, ou 137 depois do prazo inteiro (o hook
+   ignorou o TERM e levou o KILL).
 
 **Limite da prova.** Ela pega erro normal: hook que não chama a MergeX, que só a cita, que a chama
 sem a entrada, que não propaga o código, que forja o sinal antigo ou uma linha com outro SHA. Um hook

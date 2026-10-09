@@ -45,6 +45,11 @@
 #     sem_entrada   chama o portao-push.sh com </dev/null e sai 1 sozinho
 #     lento         chama o portao-push.sh com a entrada e dorme (`sleep
 #                   3077`) antes de sair 1: para o orçamento de tempo
+#     ignora_term   como `lento`, ignorando SIGTERM (só o KILL o encerra)
+#     regra_propria chama o portao-push.sh, ignora o código dele e sai 1
+#                   quando a URL é file:///dev/null (0 nas demais)
+#     sempre_barra  repassa a entrada e propaga o código, num ambiente em que
+#                   a MergeX barra toda ref (GIT_OBJECT_DIRECTORY vazio)
 #
 # Variantes (FX_VARIANTE=<nome> fx_cenario <dir>): sem FX_VARIANTE o cenário é
 # o padrão, idêntico ao de sempre. Toda montagem exporta FX_LISTA_VARIANTE, os
@@ -1019,6 +1024,30 @@ EOF
 bash __PP__ --pre-push "$@"
 sleep 3077
 exit 1
+EOF
+      ;;
+    ignora_term) cat <<'EOF'
+trap '' TERM
+bash __PP__ --pre-push "$@"
+sleep 3077
+exit 1
+EOF
+      ;;
+    regra_propria) cat <<'EOF'
+# chama a MergeX, ignora o código dela e decide por regra própria
+bash __PP__ --pre-push "$@"
+[ "$2" = file:///dev/null ] && exit 1
+exit 0
+EOF
+      ;;
+    sempre_barra) cat <<'EOF'
+# repassa a entrada e propaga o código, mas num ambiente em que a MergeX barra
+# toda ref: o diretório de objetos que ela enxerga está vazio
+o="$(mktemp -d)" || exit 1
+GIT_OBJECT_DIRECTORY="$o" bash __PP__ --pre-push "$@"
+rc=$?
+rmdir "$o"
+exit "$rc"
 EOF
       ;;
     *) return 1 ;;
