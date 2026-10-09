@@ -445,7 +445,9 @@ Chaves novas, sempre presentes:
    - o `pre-push` do Git é a barreira **local autoritativa contra erro normal** (itens 6 e 7);
    - o hook do Claude `pr-so-com-portao` é só **aviso antecipado**, não fronteira de segurança
      (item 8);
-   - o CI com proteção de merge é a barreira **contra contorno deliberado** (item 8).
+   - o CI com proteção de merge é a barreira **contra contorno deliberado** (item 8), nos limites
+     da DM-185: contra o `--no-verify` e o contorno pelo nome da branch, não contra todo contorno
+     deliberado (seção 15.1, itens 1 e 12).
 
    As três camadas chamam o mesmo `validade-do-portao.sh --rev`; nenhuma tem regra própria de
    validade. A **seleção** das entregas avaliadas pode diferir por desenho (DM-185): o CI seleciona
@@ -688,6 +690,15 @@ comportamento atual, e documenta os demais no cabeçalho do executável afetado:
 11. **Base do evento defasada.** Se `pull_request.base.sha` é mais antigo que a base que a cabeça
     do PR já integrou, o merge-base recua e as entregas trazidas pela base entram na seleção: o PR
     barra (falso bloqueio, nunca aprovação). O diagnóstico manda gerar novo evento com a base atual.
+    O mesmo vale para a base do `pre-push` (parcela (a) do item 7 da seção 13): se
+    `refs/remotes/<remoto>/HEAD` está defasado, ou não é a base de integração da branch (branch
+    empilhada, `develop`), as entregas trazidas pela base entram na seleção e o push de um SHA
+    válido é barrado (falso bloqueio, nunca aprovação; a decisão não muda). O diagnóstico cita a
+    base usada (`refs/remotes/<remoto>/HEAD` e o SHA dela), diz que entregas trazidas pela base
+    podem ter sido selecionadas e manda `git fetch <remoto>` e `git remote set-head <remoto> -a`
+    antes de rodar o E2 de novo. Limite do outro lado: sem `refs/remotes/<remoto>/HEAD` e sem
+    outra parcela que alcance a árvore enviada, o `pre-push` avisa `cobertura_indeterminada` e
+    não barra.
 12. **Limite do CI frente ao autor do PR.** A DM-185 fecha o contorno pelo nome da branch. Com
     `on: pull_request`, o autor do PR controla os scripts, o workflow e `.expx/hooks.json` da cabeça
     do PR (CODEOWNERS e revisão obrigatória para `.expx/**`, `.claude/**` e `.github/**` no
