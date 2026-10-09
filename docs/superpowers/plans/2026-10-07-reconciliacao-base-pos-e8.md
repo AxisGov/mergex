@@ -5,7 +5,7 @@
 **Goal:** Dar à MergeX um caminho fechado e verificável para integrar uma base que avançou depois do E8: artefato de reconciliação com quatro provas recalculadas do Git, V9 executável por SHA, E3 obrigatório para reconciliados e portão vinculado a commit.
 
 **Architecture:** Um executável novo (`reconciliacao-base.sh`) registra e verifica a reconciliação, apoiado numa biblioteca de artefato (`reconciliacao-artefato.sh`) que emite, lê, valida e assina `RECONCILIACAO-BASE-NNN.md`. A V9 passa a ser o executável `portao-v9.sh`, que compõe a união das tasks (exposta por `ownership-da-task.sh --uniao`) com os caminhos que a verificação da reconciliação declara cobertos. A validade do portão é o executável `validade-do-portao.sh --rev`. A barreira de push segue a DM-184 e tem três consumidores do mesmo validador, através da biblioteca de decisão por ref `portao-regras.sh`:
-- o `pre-push` do Git (`portao-push.sh`), ativado pelo E0 e provado funcionalmente pelo E2 (`ativacao-pre-push.sh`): barreira local contra erro normal;
+- o `pre-push` do Git (`portao-push.sh`), ativado pelo E0 e provado funcionalmente pelo E2 (`ativacao-pre-push.sh`): barreira local contra erro normal. O resultado do E2 só é gravado por `registrar-portao.sh`, que roda a prova antes de gravar `pronto`, e os checkpoints `pre-e6` e `e8` recusam persistir `pronto` sem a prova;
 - o executável de CI (`portao-ci.sh`), com template de workflow: barreira contra contorno deliberado, não ativada em produto nesta branch;
 - o hook do Claude `pr-so-com-portao`, só consultivo.
 
@@ -52,6 +52,7 @@ O checkpoint `reconciliacao-base` entra no enum fechado de `contrato-de-commit.s
 11. **Clone raso ou objeto ausente** — `historia_incompleta` e push barrado, com diagnóstico próprio. Teste na Task 14 (`clone raso barra com historia_incompleta` e `objeto ausente é historia_incompleta`).
 12. **`--no-verify`** — o hook do Claude bloqueia o reconhecido com certeza; o CI é a barreira contra o contorno. Teste na Task 17 (`--no-verify reconhecido bloqueia`) e na Task 16 (`ci reprova o SHA que o pre-push barraria`).
 13. **`portao: null` nos modos existentes** — `pre-push`, CI e hook dão o mesmo resultado em `bloqueio`, `aviso` e `desligado`. Teste na Task 17 (`null nos três modos: consumidores iguais`).
+14. **E2 sem `pre-push` funcional** — nem a saída `PRONTO` nem a sua gravação ou persistência acontecem; o teste invoca os entrypoints executáveis reais (`registrar-portao.sh` e `persistir-metodo.sh --checkpoint pre-e6`/`e8`), e o contrato exige as chamadas nos comandos em prosa. Teste na Task 15 (`E2 sem pre-push funcional não emite nem grava PRONTO` e `pre-e6 recusa persistir pronto sem pre-push funcional`).
 
 ---
 
@@ -834,11 +835,32 @@ git commit -m "feat(mergex): pre-push decide pelas refs enviadas"
 
 ### Task 15: Ativação no E0 e prova funcional no E2
 
+O E0 e o E2 não têm entrypoint executável próprio. São comandos em prosa que o agente segue:
+- E0: `.claude/commands/mergex-abrir.md:5` e `.opencode/commands/mergex-abrir.md:5`, que mandam seguir `references/00-abertura.md`, e a linha E0 de `.claude/commands/mergex.md:17` e `.opencode/commands/mergex.md:17`.
+- E2: `.claude/commands/mergex-check.md:5` e `.opencode/commands/mergex-check.md:5`, que mandam seguir `references/02-prontidao.md`, e a linha E2 de `.claude/commands/mergex.md:24` e `.opencode/commands/mergex.md:24`.
+
+As verificações V1–V11 são aplicadas pelo agente com apoio de scripts (`persistir-metodo.sh --verificar --checkpoint pre-e2`, `portao-v9.sh`, `prova-de-commit.sh`). A decisão `PRONTO`/`BLOQUEADO` e a gravação de `portao: pronto` estão só em prosa, em `references/02-prontidao.md:271-273`.
+
+Por isso esta task combina três camadas:
+1. **Prosa dos entrypoints:** E0 chama `--instalar` e para quando falha; E2 chama `--provar` antes de V1.
+2. **Teste de contrato:** exige essas chamadas nos entrypoints reais, na ordem.
+3. **Enforcement executável:** não depende da obediência do agente.
+   - Um gravador único do resultado do portão (`registrar-portao.sh`) roda a prova antes de gravar `pronto`.
+   - Os checkpoints `pre-e6` e `e8` do `persistir-metodo.sh` recusam persistir `portao: pronto` sem a prova. Sem essa persistência, o `pronto` nunca chega ao SHA que o `pre-push` avalia.
+
 **Files:**
 - Create: `.claude/skills/mergex/scripts/ativacao-pre-push.sh` (100644)
+- Create: `.claude/skills/mergex/scripts/registrar-portao.sh` (100644; único gravador de `portao`, `portao_sha`, `falhas_portao` e `atualizado_em` pelo E2)
 - Create: `.claude/skills/mergex/assets/pre-push-gerenciado.sh` (modelo do chamador gerenciado, 100644; instalado com 100755)
 - Create: `.claude/skills/mergex/references/12-barreira-de-push.md` (seções "Ativação", "Composição com hook de terceiro", "Prova funcional", "Reversão")
-- Modify: `scripts/ci/test-r2-barreira-push.sh` (grupo `ativacao`)
+- Modify: `.claude/skills/mergex/scripts/persistir-metodo.sh` (checkpoints `pre-e6` e `e8`: recusa persistir `portao: pronto` sem prova funcional)
+- Modify: `.claude/commands/mergex-abrir.md`, `.opencode/commands/mergex-abrir.md` (E0 chama `ativacao-pre-push.sh --instalar` e para quando falha)
+- Modify: `.claude/commands/mergex-check.md`, `.opencode/commands/mergex-check.md` (E2 chama `ativacao-pre-push.sh --provar` antes de V1 e grava o resultado só por `registrar-portao.sh`)
+- Modify: `.claude/commands/mergex.md`, `.opencode/commands/mergex.md` (linhas E0 e E2 do fluxo completo, com as mesmas chamadas)
+- Modify: `.claude/skills/mergex/references/00-abertura.md` (passo novo depois de criar ou retomar o `ENTREGA.md`: `--instalar`; rc diferente de zero dá `mergex E0 BLOQUEADO — pre-push`, encerra o E0 e mostra a instrução de composição; o checklist final ganha o item do `pre-push` ativo)
+- Modify: `.claude/skills/mergex/references/02-prontidao.md` (barreira inicial ganha `--provar` ao lado da `pre-e2`: falhou, o E2 não começa e nada é gravado; as linhas 271 e 273 passam a gravar só por `registrar-portao.sh`)
+- Modify: `scripts/ci/validate-mergex-contract.sh` (asserções de contrato dos entrypoints)
+- Modify: `scripts/ci/test-r2-barreira-push.sh` (grupos `ativacao` e `entrypoints`)
 - Modify: `scripts/ci/lib/fixture-reconciliacao.sh` (`fx_hook_terceiro`, `fx_worktree_vinculada`)
 
 **Interfaces:**
@@ -849,6 +871,11 @@ git commit -m "feat(mergex): pre-push decide pelas refs enviadas"
   - `--provar` (E0 e E2): cria, sem tocar remoto nem ref, um commit solto (`git commit-tree`) sobre `HEAD` com um arquivo de produto e o `ENTREGA.md` em `portao: pronto` com `portao_sha` = `HEAD`, que é sabidamente vencido. Executa o `pre-push` efetivo como o Git o executaria (argumentos `prova-mergex file:///dev/null`, uma linha de protocolo para `refs/heads/<branch da entrega>`, `MERGEX_PRE_PUSH_SINAL` num temporário). Aprova só se o hook sair com código diferente de zero **e** o sinal registrar a execução do `portao-push.sh` (`# guarda:ATVTXT`). Término por sinal, código zero ou ausência do sinal reprovam.
   - `--reverter`: remove o arquivo só se tiver o marcador de gerenciado; diante de integração externa ou hook de terceiro, só informa e sai 0, sem tocar o arquivo.
   - Códigos: 0 ok; 1 prova reprovada; 3 pré-requisito ausente (hook de terceiro não composto); 64 uso. Sem opção de força.
+- Produces: `registrar-portao.sh --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> --resultado <pronto|bloqueado> [--falhas <vN>...]`:
+  - Com `--resultado pronto`: roda `ativacao-pre-push.sh --provar` **antes** de qualquer escrita (`# guarda:E2SEMHOOK`). Reprovou: imprime `RESULTADO: BLOQUEADO — pre-push sem prova funcional`, não grava nada no `ENTREGA.md` e sai 3. Aprovou: grava `portao: pronto`, `portao_sha` = SHA de 40 hex do `HEAD`, `falhas_portao: []` e `atualizado_em`, pelo editor de frontmatter da Task 6, e imprime `RESULTADO: PRONTO`.
+  - Com `--resultado bloqueado`: grava `portao: bloqueado` e `falhas_portao` pela forma de `causa-do-portao.sh --lista`; não exige a prova.
+  - O resultado gravado passa em `causa-do-portao.sh --validar`. Códigos: 0 gravado; 3 prova ausente ou reprovada; 5 contrato inválido; 64 uso.
+- Produces: em `persistir-metodo.sh --persistir` e `--verificar` com `--checkpoint pre-e6` ou `e8`: se o `ENTREGA.md` a persistir tem `portao: pronto`, roda `ativacao-pre-push.sh --provar` antes de commitar (`# guarda:E2SEMHOOK`). Reprovou: sai diferente de zero com `pre-push sem prova funcional`, sem commit e com o stage intacto. Os outros checkpoints não mudam.
 
 - [ ] **Step 1: Escrever o grupo `ativacao` (RED)**
 
@@ -867,29 +894,49 @@ Casos:
 - `diretório com espaço e acento` (raiz do cenário e `core.hooksPath` com espaço, acento e apóstrofo);
 - `git for windows: diretório efetivo sobre UNC` (com `git.exe` e `wslpath` disponíveis, resolve o diretório efetivo e roda `--provar` pelo Git Bash; sem eles, imprime `NAO_EXECUTADO: git for windows indisponível` e não conta como ok).
 
+Grupo `entrypoints`. Invoca os entrypoints executáveis reais do E2 e da persistência, nunca só o script de ativação:
+- `E2 sem pre-push funcional não emite nem grava PRONTO` (`registrar-portao.sh --resultado pronto` sem `pre-push`, com hook de terceiro não composto e com hook que só cita a MergeX: sai 3, a saída não contém `RESULTADO: PRONTO`, e o `ENTREGA.md` fica byte a byte igual);
+- `E2 com chamador gerenciado grava PRONTO` (sai 0, `portao: pronto` e `portao_sha` = `HEAD` gravados, `causa-do-portao.sh --validar` aprova);
+- `E2 com hook externo composto grava PRONTO`;
+- `pre-e6 recusa persistir pronto sem pre-push funcional` (`portao: pronto` editado à mão no disco, `pre-push` removido: `persistir-metodo.sh --persistir --checkpoint pre-e6` sai diferente de zero, sem commit e com o stage intacto; o mesmo para `e8`);
+- `pre-e6 persiste pronto com pre-push funcional` (gerenciado e externo composto);
+- `BLOQUEADO não depende da prova` (`--resultado bloqueado` grava sem `pre-push`).
+
+Em `validate-mergex-contract.sh`, asserções de contrato sobre os entrypoints em prosa:
+- `mergex-abrir.md` (as duas cópias) e `00-abertura.md` citam `ativacao-pre-push.sh --instalar` e a parada `mergex E0 BLOQUEADO — pre-push`;
+- `mergex-check.md` (as duas cópias) e `02-prontidao.md` citam `ativacao-pre-push.sh --provar` antes da primeira menção a `V1`;
+- `02-prontidao.md` manda gravar o resultado só por `registrar-portao.sh` e não manda mais editar `portao: pronto` diretamente;
+- `mergex.md` (as duas cópias) cita as duas chamadas nas linhas E0 e E2.
+
 - [ ] **Step 2: Rodar e ver falhar**
 
-Run: `bash scripts/ci/test-r2-barreira-push.sh ativacao`
-Expected: FAIL com `ativacao-pre-push.sh: No such file`.
+Run: `bash scripts/ci/test-r2-barreira-push.sh ativacao entrypoints; bash scripts/ci/validate-mergex-contract.sh`
+Expected: FAIL. `ativacao` e `entrypoints` falham com `ativacao-pre-push.sh: No such file` e `registrar-portao.sh: No such file`; o `validate-mergex-contract.sh` falha com `mergex-abrir sem ativacao-pre-push.sh --instalar`.
 
 - [ ] **Step 3: Implementar**
 
-O executável, o modelo e o reference `12-barreira-de-push.md`. A instrução de composição da mensagem de erro é a mesma do reference: o hook existente chama `portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída.
+O executável de ativação, o gravador `registrar-portao.sh`, a guarda nos checkpoints `pre-e6` e `e8` do `persistir-metodo.sh`, o modelo, o reference `12-barreira-de-push.md` e a prosa dos entrypoints listados em Files. A instrução de composição da mensagem de erro é a mesma do reference: o hook existente chama `portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída.
 
 - [ ] **Step 4: Rodar e ver passar**
 
-Run: `bash scripts/ci/test-r2-barreira-push.sh ativacao prepush && bash scripts/ci/validate-mergex-contract.sh`
-Expected: todos `ok` (os casos `NAO_EXECUTADO`, se houver, listados à parte), rc 0.
+Run: `bash scripts/ci/test-r2-barreira-push.sh ativacao entrypoints prepush && bash scripts/ci/validate-mergex-contract.sh && bash scripts/ci/test-m2-lifecycle-recuperacao.sh lifecycle && bash scripts/ci/test-causa-portao.sh`
+Expected: todos `ok` (os casos `NAO_EXECUTADO`, se houver, listados à parte), rc 0. Os checkpoints sem `portao: pronto` se comportam como antes.
 
 - [ ] **Step 5: Revisão independente**
 
-Revisor novo, com o diff e a seção 13, item 6, da spec. Foco: nenhuma escrita em `core.hooksPath` nem em hook de terceiro; reconhecimento só por comportamento; prova sem efeito colateral em refs e remoto; reversão.
+Revisor novo, com o diff e a seção 13, item 6, da spec. Foco:
+- nenhuma escrita em `core.hooksPath` nem em hook de terceiro;
+- reconhecimento só por comportamento;
+- prova sem efeito colateral em refs e remoto;
+- reversão;
+- nenhum caminho executável grava ou persiste `portao: pronto` sem a prova;
+- os entrypoints em prosa fazem as chamadas na ordem.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add .claude/skills/mergex/scripts/ativacao-pre-push.sh .claude/skills/mergex/assets/pre-push-gerenciado.sh .claude/skills/mergex/references/12-barreira-de-push.md scripts/ci/test-r2-barreira-push.sh scripts/ci/lib/fixture-reconciliacao.sh
-git commit -m "feat(mergex): ativa e prova o pre-push sem tocar hook de terceiro"
+git add .claude/skills/mergex/scripts/ativacao-pre-push.sh .claude/skills/mergex/scripts/registrar-portao.sh .claude/skills/mergex/scripts/persistir-metodo.sh .claude/skills/mergex/assets/pre-push-gerenciado.sh .claude/skills/mergex/references/12-barreira-de-push.md .claude/skills/mergex/references/00-abertura.md .claude/skills/mergex/references/02-prontidao.md .claude/commands/mergex-abrir.md .opencode/commands/mergex-abrir.md .claude/commands/mergex-check.md .opencode/commands/mergex-check.md .claude/commands/mergex.md .opencode/commands/mergex.md scripts/ci/validate-mergex-contract.sh scripts/ci/test-r2-barreira-push.sh scripts/ci/lib/fixture-reconciliacao.sh
+git commit -m "feat(mergex): ativa e prova o pre-push nos entrypoints do e0 e do e2"
 ```
 
 ### Task 16: Contrato e template de CI
@@ -1048,16 +1095,16 @@ git commit -m "fix(mergex): hooks reconhecem o commit de integracao da base"
 
 **Files:**
 - Create: `.claude/skills/mergex/references/11-reconciliacao-base.md`
-- Modify: `.claude/skills/mergex/references/00-abertura.md` (E0 grava `base_validada_sha` e `origem_base: registrada_e0`; E0 roda `ativacao-pre-push.sh --instalar`)
+- Modify: `.claude/skills/mergex/references/00-abertura.md` (E0 grava `base_validada_sha` e `origem_base: registrada_e0`; o passo do `pre-push` já vem da Task 15)
 - Modify: `.claude/skills/mergex/references/00-schema.md` (chaves novas do `kind: entrega`; `kind: reconciliacao_base`; "Arquivos SEM frontmatter" não lista o artefato novo)
 - Modify: `.claude/skills/mergex/references/01-commits.md` (classe integração; enum de checkpoints)
-- Modify: `.claude/skills/mergex/references/02-prontidao.md` (ordem reconciliação → validade → push; barreira `--verificar --checkpoint reconciliacao-base`; V9 roda `portao-v9.sh`; E2 roda `ativacao-pre-push.sh --provar`; E2 grava `portao_sha`)
+- Modify: `.claude/skills/mergex/references/02-prontidao.md` (ordem reconciliação → validade → push; barreira `--verificar --checkpoint reconciliacao-base`; V9 roda `portao-v9.sh`; a prova do `pre-push` e a gravação por `registrar-portao.sh`, com o `portao_sha`, já vêm da Task 15)
 - Modify: `.claude/skills/mergex/references/06-push.md`, `07-abertura-pr.md` (pré-requisito de validade; o `pre-push` decide; o hook do Claude é consultivo; aponta para `12-barreira-de-push.md`)
 - Modify: `.claude/skills/mergex/references/08-registro.md` (tabela "Quando o arquivo é escrito" com a reconciliação; catálogo cumulativo)
 - Modify: `.claude/skills/mergex/SKILL.md` (fluxo e enum de checkpoints)
 - Modify: `.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md` (chaves novas)
 - Modify: `.claude/skills/mergex/DECISOES-DA-SKILL.md` (DM-178 a DM-184, texto da spec)
-- Modify: `.claude/commands/mergex-check.md`, `.opencode/commands/mergex-check.md` (V9 por script; prova do `pre-push`)
+- Modify: `.claude/commands/mergex-check.md`, `.opencode/commands/mergex-check.md` (V9 por script; a prova do `pre-push` já vem da Task 15)
 - Modify: `.claude/hooks/README.md` (validade do portão; integração; o texto do hook consultivo já vem da Task 17)
 - Modify: `AGENTS.md` e `.claude/skills/mergex/SKILL.md`:
   - a frase "Uma única condição de método barra **mesmo em aviso**", que trata da regra de task irmã do `commit-por-task`, ganha a ressalva de que, fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo (DM-184);
@@ -1069,7 +1116,7 @@ git commit -m "fix(mergex): hooks reconhecem o commit de integracao da base"
 - Consumes: os executáveis e o reference `12-barreira-de-push.md` das Tasks 14–17.
 - Produces: asserções de prosa:
   - enum `pre-e2 | reconciliacao-base | pre-e6 | e8` idêntico em `SKILL.md`, `01-commits.md`, `08-registro.md`, `catalogo-de-metodo.sh`, `persistir-metodo.sh` e `contrato-de-commit.sh`;
-  - `02-prontidao.md` cita `portao-v9.sh`, `validade-do-portao.sh` e `ativacao-pre-push.sh --provar`; `00-abertura.md` cita `ativacao-pre-push.sh --instalar`;
+  - `02-prontidao.md` cita `portao-v9.sh` e `validade-do-portao.sh` (as asserções de `ativacao-pre-push.sh` e `registrar-portao.sh` nos entrypoints são da Task 15 e continuam valendo);
   - `11-reconciliacao-base.md` tem as quatro provas, a tabela de códigos de saída e os riscos residuais da seção 15.1 da spec;
   - DM-178..DM-184 presentes;
   - nenhum texto versionado trata `pr-so-com-portao` como barreira autoritativa;
@@ -1083,8 +1130,6 @@ for f in "$SKILL" "$REF/01-commits.md" "$REF/08-registro.md"; do
 done
 grep -Fq 'portao-v9.sh' "$REF/02-prontidao.md" || fail "02-prontidao não manda rodar portao-v9.sh"
 grep -Fq 'portao_sha' "$REF/02-prontidao.md" || fail "02-prontidao não grava portao_sha"
-grep -Fq 'ativacao-pre-push.sh --provar' "$REF/02-prontidao.md" || fail "02-prontidao não prova o pre-push"
-grep -Fq 'ativacao-pre-push.sh --instalar' "$REF/00-abertura.md" || fail "00-abertura não ativa o pre-push"
 for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184; do
   grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
 done
@@ -1128,7 +1173,7 @@ O grupo `fluxo` executa, na ordem da spec (seção 16), sobre o cenário:
 3. `persistir-metodo --checkpoint reconciliacao-base`;
 4. barreira `--verificar --checkpoint reconciliacao-base`;
 5. `portao-v9.sh` ok e `ativacao-pre-push.sh --provar` ok;
-6. grava `portao: pronto` e `portao_sha`;
+6. `registrar-portao.sh --resultado pronto` grava `portao: pronto` e `portao_sha`;
 7. `persistir-metodo --checkpoint pre-e6`, com `ATENCAO.md` contendo os dois reconciliados em O10;
 8. validade ok;
 9. `persistir-metodo --checkpoint e8`;
@@ -1169,7 +1214,7 @@ Expected: FAIL (`fx_fluxo_completo: command not found`); `fx_worktree_vinculada`
 
 - [ ] **Step 3: Implementar os helpers de fixture**
 
-`fx_fluxo_completo` só chama os executáveis da skill e grava os campos do `ENTREGA.md` que o contrato manda o agente gravar (`portao`, `portao_sha`); falha na primeira etapa com rc diferente de 0, preenchendo `FX_ERRO`. `fx_commit_produto_apos_portao <dir>` faz um commit de produto comum na branch do trabalho. O push é sempre real, pelo `pre-push` instalado no passo 1; o hook do Claude não participa desta suíte.
+`fx_fluxo_completo` só chama os executáveis da skill (inclusive `registrar-portao.sh` para `portao` e `portao_sha`) e nunca edita o `ENTREGA.md` à mão; falha na primeira etapa com rc diferente de 0, preenchendo `FX_ERRO`. `fx_commit_produto_apos_portao <dir>` faz um commit de produto comum na branch do trabalho. O push é sempre real, pelo `pre-push` instalado no passo 1; o hook do Claude não participa desta suíte.
 
 - [ ] **Step 4: Rodar e ver passar**
 
@@ -1190,7 +1235,7 @@ git commit -m "test(mergex): fluxo completo depois da reconciliacao de base"
 
 **Interfaces:**
 - Consumes: as linhas marcadas `# guarda:<ID>` das Tasks 3–18 e a verificação `CIATIVO` de `validate-mergex-contract.sh` (Task 16).
-- Produces: matriz com controle verde e 24 mutantes, no padrão de `mutacao-m3-fixture-lock-lf.sh` (`copia`, troca da linha marcada por `: # mutante <ID>`, suíte alvo, resultado `morto|vivo`); rc 0 só com controle verde e todos mortos. Os 17 primeiros são a lista da spec (seção 21); os 7 seguintes completam a barreira de push da DM-184.
+- Produces: matriz com controle verde e 25 mutantes, no padrão de `mutacao-m3-fixture-lock-lf.sh` (`copia`, troca de **todas** as linhas marcadas com o ID por `: # mutante <ID>`, suíte alvo, resultado `morto|vivo`); rc 0 só com controle verde e todos mortos. Os 17 primeiros são a lista da spec (seção 21); os 8 seguintes completam a barreira de push da DM-184.
 
 | # | ID | Mutação | Suíte que tem de reprovar |
 |---|---|---|---|
@@ -1218,6 +1263,7 @@ git commit -m "test(mergex): fluxo completo depois da reconciliacao de base"
 | 22 | `ATVHP` | E0 grava `core.hooksPath` | `r2 ativacao` |
 | 23 | `HKNV` | hook do Claude aceita `--no-verify` como se a proteção local bastasse | `.claude/hooks/teste.sh` |
 | 24 | `CIATIVO` | o contrato aceita texto que afirma CI ativo sem instalação no produto (a verificação é desligada e o mutante insere a frase-alvo no reference) | `validate-mergex-contract.sh`, `r2 ci` |
+| 25 | `E2SEMHOOK` | E2 ignora a prova funcional e emite/persiste `PRONTO` (as linhas marcadas em `registrar-portao.sh` e em `persistir-metodo.sh` são neutralizadas juntas) | `r2 entrypoints` |
 
 - [ ] **Step 1: Escrever a matriz e rodar o controle**
 
@@ -1227,7 +1273,7 @@ Expected: `controle verde`.
 - [ ] **Step 2: Rodar a matriz**
 
 Run: `bash scripts/ci/mutacao-r1-reconciliacao-base.sh`
-Expected: `24 mortos, 0 vivos`, rc 0. Um mutante vivo é teste faltando na task dona da guarda: voltar àquela task, acrescentar o caso e só então reexecutar.
+Expected: `25 mortos, 0 vivos`, rc 0. Um mutante vivo é teste faltando na task dona da guarda: voltar àquela task, acrescentar o caso e só então reexecutar.
 
 - [ ] **Step 3: Commit**
 
