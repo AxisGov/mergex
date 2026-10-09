@@ -95,10 +95,16 @@
 #                           ausente (busque os objetos que faltam). Objeto
 #                           necessário ausente (guarda VALOBJ), num repositório
 #                           Git legível: o commit para o qual um NOME de
-#                           revisão (ref, HEAD) aponta; ou um objeto que falta
+#                           revisão (ref, HEAD) aponta; um objeto que falta
 #                           ao percorrer a história de HEAD, quando a
 #                           ancestralidade de portao_sha ou o rev-list do
-#                           intervalo falha. Um SHA literal sem objeto não é
+#                           intervalo falha; ou uma árvore ou um blob que
+#                           falta na árvore de HEAD (ENTREGA.md ausente ou
+#                           ilegível) ou de um commit do intervalo (contrato
+#                           de commit, materialização do catálogo, ENTREGA.md
+#                           do commit ou diff-tree que falham). Sem objeto
+#                           faltando, cada falha mantém o motivo de sempre.
+#                           Um SHA literal sem objeto não é
 #                           distinguível de um SHA que nunca existiu: continua
 #                           erro_ambiente (--rev) ou portao_sha_nao_ancestral.
 #                           O diagnóstico vem num `aviso=`.
@@ -158,6 +164,17 @@ historia_integra() { g rev-list "$REV_SHA" >/dev/null 2>&1; }
 ambiente_ou_objeto() {
   historia_integra || objeto_ausente "$1" # guarda:VALOBJ
   ambiente "$1"
+}
+# objetos_faltam <commit>... — rc 0 se falta algum objeto (árvore ou blob) da
+# árvore de algum dos commits. Também só nos caminhos de falha: percorre a
+# árvore inteira (`rev-list --objects --no-walk --missing=print`).
+objetos_faltam() {
+  local cf
+  for cf in "$@"; do
+    g rev-list --objects --no-walk --missing=print "$cf" > "$TMP_DIR/objetos" 2>/dev/null || return 0
+    grep -q '^?' "$TMP_DIR/objetos" && return 0
+  done
+  return 1
 }
 
 MODO=""; ENTREGA=""; REV=""; REV_DADA=0
@@ -224,12 +241,16 @@ modo_em() { g ls-tree -z "$1" -- "$2" 2>/dev/null | tr '\0' '\n' | sed -n '1s/ .
 # O ENTREGA.md da revisão (a versão commitada).
 # ---------------------------------------------------------------------------
 ENTREGA_H="$TMP_DIR/entrega-head.md"
+# ausente ou ilegível: antes de concluir, falta objeto da árvore de <rev>?
+F=0
 case "$(modo_em "$REV_SHA" "$ENTREGA")" in
-  100644|100755) g cat-file blob "$REV_SHA:$ENTREGA" > "$ENTREGA_H" 2>/dev/null \
-    || { aviso "$ENTREGA ilegível em $REV"; invalido portao_nao_pronto; } ;;
-  '') aviso "$ENTREGA ausente em $REV"; invalido portao_nao_pronto ;;
+  100644|100755) g cat-file blob "$REV_SHA:$ENTREGA" > "$ENTREGA_H" 2>/dev/null || F=ilegivel ;;
+  '') F=ausente ;;
   *) aviso "$ENTREGA não é arquivo regular em $REV"; invalido portao_nao_pronto ;;
 esac
+[ "$F" = 0 ] || ! objetos_faltam "$REV_SHA" || objeto_ausente "a árvore de $REV não se lê inteira ($ENTREGA)" # guarda:VALOBJ
+[ "$F" != ilegivel ] || { aviso "$ENTREGA ilegível em $REV"; invalido portao_nao_pronto; }
+[ "$F" != ausente ] || { aviso "$ENTREGA ausente em $REV"; invalido portao_nao_pronto; }
 [ "$(catalogo_fm "$ENTREGA_H" kind)" = entrega ] || { aviso "$ENTREGA de $REV não declara kind: entrega"; invalido portao_nao_pronto; }
 [ "$(catalogo_fm "$ENTREGA_H" trabalho_id)" = "$TRABALHO" ] \
   || { aviso "ENTREGA.trabalho_id de $REV diverge do caminho ($TRABALHO)"; invalido portao_nao_pronto; }
@@ -284,27 +305,36 @@ while IFS= read -r c <&3; do
       CP="$cand"; break
     fi
   done
+  # o contrato lê o commit pelo Git: sem CP, falta objeto da árvore de c?
+  [ -n "$CP" ] || ! objetos_faltam "$c" || objeto_ausente "a árvore de $c não se lê inteira" # guarda:VALOBJ
   [ -n "$CP" ] || invalido commit_de_produto "$c" # guarda:PTMET
 
   # o catálogo de CP sobre a árvore deste commit: a pasta do trabalho e o
   # ENTREGA.md dele, materializados (sem subshell: ARVORE_* e CATALOGO_ERRO)
   arv="$TMP_DIR/arvore-$i"
-  arvore_materializa "$c" "$arv" "$ORIGEM" "$TRABALHO" "$c" '' \
-    || { aviso "catálogo de $c não calculável: $ARVORE_ERRO"; invalido metodo_fora_do_catalogo "$c"; }
+  F=0
+  arvore_materializa "$c" "$arv" "$ORIGEM" "$TRABALHO" "$c" '' || F=1
+  [ "$F" = 0 ] || ! objetos_faltam "$c" || objeto_ausente "a árvore de $c não se lê inteira" # guarda:VALOBJ
+  [ "$F" = 0 ] || { aviso "catálogo de $c não calculável: $ARVORE_ERRO"; invalido metodo_fora_do_catalogo "$c"; }
+  F=0
   case "$(modo_em "$c" "$ENTREGA")" in
     100644|100755)
       mkdir -p "$ARVORE_RAIZ/docs/entregas/$TRABALHO" 2>/dev/null \
         && g cat-file blob "$c:$ENTREGA" > "$ARVORE_RAIZ/$ENTREGA" 2>/dev/null \
-        || { aviso "$ENTREGA ilegível em $c"; invalido metodo_fora_do_catalogo "$c"; } ;;
+        || F=1 ;;
     '') ;;
     *) aviso "$ENTREGA não é arquivo regular em $c"; invalido metodo_fora_do_catalogo "$c" ;;
   esac
+  [ "$F" = 0 ] || ! objetos_faltam "$c" || objeto_ausente "$ENTREGA de $c não se lê" # guarda:VALOBJ
+  [ "$F" = 0 ] || { aviso "$ENTREGA ilegível em $c"; invalido metodo_fora_do_catalogo "$c"; }
   catalogo_metodo "$ARVORE_RAIZ" "$ORIGEM" "$TRABALHO" "$ARVORE_PASTA" "$CP" > "$TMP_DIR/catalogo-$i" \
     || { aviso "catálogo $CP de $c inválido: $CATALOGO_ERRO"; invalido metodo_fora_do_catalogo "$c"; } # guarda:PTARV
 
   # --raw: os mesmos caminhos de --name-only, com os modos (gitlink)
-  g diff-tree --no-commit-id -r --root --raw -z --no-abbrev --no-renames --ignore-submodules=none "$c" > "$TMP_DIR/toca-$i" 2>/dev/null \
-    || { aviso "diff-tree de $c não calculável"; invalido metodo_fora_do_catalogo "$c"; }
+  F=0
+  g diff-tree --no-commit-id -r --root --raw -z --no-abbrev --no-renames --ignore-submodules=none "$c" > "$TMP_DIR/toca-$i" 2>/dev/null || F=1
+  [ "$F" = 0 ] || ! objetos_faltam "$c" "$c^" || objeto_ausente "diff-tree de $c não se lê" # guarda:VALOBJ
+  [ "$F" = 0 ] || { aviso "diff-tree de $c não calculável"; invalido metodo_fora_do_catalogo "$c"; }
   while IFS= read -r -d '' cab <&4 && IFS= read -r -d '' p <&4; do
     # NL faria o grep -Fx casar uma linha do caminho com o catálogo
     case "$p" in *"$NL"*|*"$TAB"*|*[[:cntrl:]]*) invalido metodo_fora_do_catalogo "$c" ;; esac # guarda:PTPROD

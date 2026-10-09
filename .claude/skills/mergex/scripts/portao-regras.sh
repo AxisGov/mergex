@@ -29,8 +29,12 @@
 #       do SHA enviado, do SHA remoto anterior (quando o objeto existe aqui) e
 #       da ponta local de refs/heads/<b>. Nada (rc 0) quando a ref não é
 #       aplicável: outro namespace, nenhuma dessas árvores declara a branch.
-#       rc 1: SHA enviado sem objeto, árvore ou blob que não se lê, ou mais de
-#       um ENTREGA.md diferente declarando a branch (ambíguo).
+#       rc 1: SHA enviado sem objeto, árvore ou blob que não se lê (com
+#       PR_FALTA=1 quando é objeto Git ausente), ou mais de um ENTREGA.md
+#       diferente declarando a branch (ambíguo; inclusive reúso de nome de
+#       branch por uma entrega antiga). `branch:` é lido como catalogo_fm lê,
+#       mas com um ls-tree e um cat-file --batch por árvore: o número de
+#       processos não cresce com as entregas da árvore.
 #
 #   pr_decide_ref <raiz> <ref_local> <sha_local> <ref_remota> <sha_remoto>
 #       Imprime
@@ -52,13 +56,20 @@
 #           todo o resto barra, em qualquer modo, com o motivo da validade:
 #             pronto vencido, ausente, inconsistente ou ilegível,
 #             historia_incompleta, erro_ambiente (inclusive o validador
-#             ausente ou saída inesperada) e entrega_indeterminada.
+#             ausente ou saída inesperada) e entrega_indeterminada; objeto
+#             ausente já na leitura das entregas da ref é historia_incompleta.
 #       Os diagnósticos de historia_incompleta e de erro_ambiente são
 #       distintos: o primeiro manda completar a história, o segundo descreve a
 #       falha do ambiente.
 #
-# Custo: uma validade por ref aplicável; nenhuma varredura de branches nem de
-# entregas fora das três árvores da própria ref.
+# Custo: uma validade por ref aplicável; nenhuma varredura de branches; um
+# número constante de processos Git por árvore lida (até três por ref).
+#
+# Risco residual: um SHA remoto anterior que este repositório não conhece é
+# pulado; se nem o SHA enviado nem a ponta local declaram a branch, a ref não
+# é aplicável. Só se alcança com push forçado (sem força o Git recusa antes
+# do pre-push), que o hook git-perigoso bloqueia; o CI é a barreira contra o
+# contorno.
 #
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
@@ -68,6 +79,7 @@ PR_ERRO=""
 PR_DIAG=""
 PR_MODO=""
 PR_ENTREGA=""
+PR_FALTA=0
 
 if [ ! -r "$PR_AQUI/catalogo-de-metodo.sh" ] || [ ! -r "$PR_AQUI/reconciliacao-arvore.sh" ]; then
   PR_ERRO="dependência indisponível ao lado de $PR_AQUI/portao-regras.sh"
@@ -110,29 +122,80 @@ pr_modo_null() {
   return "$rc"
 }
 
+# _pr_falta_objeto <raiz> <rev> — rc 0 se falta algum objeto (árvore ou blob)
+# da árvore de <rev>. Só nos caminhos de falha.
+_pr_falta_objeto() {
+  local o
+  o="$(_pr_g -C "$1" rev-list --objects --no-walk --missing=print "$2" 2>/dev/null)" || return 0
+  printf '%s\n' "$o" | grep -q '^?'
+}
+
+# Leitura de `branch:` igual à de catalogo_fm, num fluxo `git cat-file --batch`
+# inteiro: cada blob começa por `<sha> blob <tamanho>` (ou `<sha> missing`),
+# seguido de exatamente <tamanho> bytes e de uma quebra de linha. Para cada
+# blob, o frontmatter só existe se a primeira linha é `---` (espaços e CR no
+# fim aceitos); vale a primeira linha que começa por `branch:` antes do `---`
+# seguinte (sem CR, sem um par de aspas nas pontas, sem espaços no fim).
+# Imprime o número de ordem de cada blob cujo valor é a branch, FALTA para um
+# objeto ausente e ERRO para um cabeçalho que não se entende.
+_PR_AWK_BRANCH='
+  est == 0 {
+    if ($0 ~ / missing$/) { print "FALTA"; i++; next }
+    if (split($0, h, " ") != 3 || h[2] != "blob") { print "ERRO"; exit }
+    i++; resta = h[3] + 0; nl = 0; para = 0
+    est = (resta == 0) ? 2 : 1
+    next
+  }
+  est == 2 { est = 0; next }
+  {
+    resta -= length($0) + 1; nl++
+    if (!para) {
+      if (nl == 1) { if ($0 !~ /^---[[:space:]]*\r?$/) para = 1 }
+      else if ($0 ~ /^---[[:space:]]*\r?$/) para = 1
+      else {
+        linha = $0; gsub(/\r/, "", linha)
+        if (index(linha, "branch:") == 1) {
+          sub(/^[^:]*:[[:space:]]*/, "", linha)
+          gsub(/^["\047]|["\047]$/, "", linha)
+          gsub(/[[:space:]]+$/, "", linha)
+          if (linha == b) print i
+          para = 1
+        }
+      }
+    }
+    if (resta == 0) est = 2
+    else if (resta < 0) est = 0
+  }
+'
+
 # _pr_entregas_em <raiz> <rev> <branch> <arquivo de saída> — acrescenta ao
-# arquivo os ENTREGA.md da árvore de <rev> que declaram `branch: <branch>`
+# arquivo os ENTREGA.md da árvore de <rev> que declaram `branch: <branch>`.
+# Custo constante em processos: um ls-tree e um cat-file --batch por árvore,
+# qualquer que seja o número de entregas. Objeto ausente: PR_FALTA=1.
 _pr_entregas_em() {
-  local raiz="$1" rev="$2" b="$3" saida="$4" cab p modo valor
+  local raiz="$1" rev="$2" b="$3" saida="$4"
   _pr_g -C "$raiz" ls-tree -r -z "$rev" -- docs/entregas > "$saida.lista" 2>/dev/null \
+    || { _pr_falta_objeto "$raiz" "$rev" && PR_FALTA=1; PR_ERRO="árvore de $rev não se lê"; return 1; }
+  # candidatos: `<sha> <caminho>` dos docs/entregas/<id>/ENTREGA.md regulares
+  tr '\0' '\n' < "$saida.lista" | LC_ALL=C awk -F'\t' '
+    NF == 2 && $2 ~ "^docs/entregas/[^/[:cntrl:]]+/ENTREGA[.]md$" && $1 ~ "^100(644|755) blob [0-9a-f]+$" {
+      split($1, m, " "); print m[3] " " $2 }' > "$saida.cand" \
     || { PR_ERRO="árvore de $rev não se lê"; return 1; }
-  while IFS= read -r -d '' cab; do
-    p="${cab#*	}"; modo="${cab%% *}"
-    case "$p" in docs/entregas/*/ENTREGA.md) ;; *) continue ;; esac
-    case "${p#docs/entregas/}" in */*/*) continue ;; esac
-    case "$modo" in 100644|100755) ;; *) continue ;; esac
-    _pr_g -C "$raiz" cat-file blob "$rev:$p" > "$saida.blob" 2>/dev/null \
-      || { PR_ERRO="$p de $rev não se lê"; return 1; }
-    valor="$(catalogo_fm "$saida.blob" branch)"
-    [ "$valor" = "$b" ] && printf '%s\n' "$p" >> "$saida"
-  done < "$saida.lista"
+  [ -s "$saida.cand" ] || return 0
+  cut -d' ' -f1 "$saida.cand" | _pr_g -C "$raiz" cat-file --batch > "$saida.batch" 2>/dev/null \
+    || { PR_ERRO="entregas de $rev não se leem"; return 1; }
+  LC_ALL=C awk -v b="$b" "$_PR_AWK_BRANCH" "$saida.batch" > "$saida.idx" \
+    || { PR_ERRO="entregas de $rev não se leem"; return 1; }
+  if grep -qx FALTA "$saida.idx"; then PR_FALTA=1; PR_ERRO="ENTREGA.md de $rev com objeto Git ausente"; return 1; fi
+  grep -qx ERRO "$saida.idx" && { PR_ERRO="entregas de $rev não se leem"; return 1; }
+  awk 'NR == FNR { q[$1] = 1; next } (FNR in q) { sub(/^[^ ]* /, ""); print }' "$saida.idx" "$saida.cand" >> "$saida"
   return 0
 }
 
 # _pr_entrega <raiz> <ref_remota> <sha_local> <sha_remoto> — PR_ENTREGA
 _pr_entrega() {
   local raiz="$1" rr="$2" sl="$3" sr="$4" b tmp rev ponta n rc=0 vistos=""
-  PR_ERRO=""; PR_ENTREGA=""
+  PR_ERRO=""; PR_ENTREGA=""; PR_FALTA=0
   case "$rr" in refs/heads/?*) b="${rr#refs/heads/}" ;; *) return 0 ;; esac
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/mergex-portao-regras.XXXXXX")" || { PR_ERRO="não foi possível criar diretório temporário"; return 1; }
   : > "$tmp/achados"
@@ -223,6 +286,8 @@ pr_decide_ref() {
   _pr_nulo "$sl" && { _pr_sai passa exclusao - ""; return; }
   case "$rr" in refs/tags/*) _pr_sai passa tag - ""; return ;; esac
   if ! _pr_entrega "$raiz" "$rr" "$sl" "$sr"; then
+    # objeto ausente nas entregas da ref: história incompleta, não ambiente
+    [ "$PR_FALTA" != 1 ] || { _pr_sai barra historia_incompleta - "$(_pr_diag_invalido historia_incompleta) [$PR_ERRO]"; return; } # guarda:VALOBJ
     _pr_sai barra entrega_indeterminada - "$(_pr_diag_invalido entrega_indeterminada): $PR_ERRO"; return
   fi
   ent="$PR_ENTREGA"

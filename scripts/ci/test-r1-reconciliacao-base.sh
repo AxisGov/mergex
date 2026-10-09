@@ -3262,6 +3262,36 @@ docs/entregas/ft-rec/PR.md"
   done
   PT_REV=0123456789abcdef0123456789abcdef01234567 pt_espera "controle: --rev inexistente com a história inteira continua erro_ambiente" 1 ok=false erro_ambiente -
 
+  # árvore ou blob ausente (não só commit): a árvore de um commit do intervalo,
+  # a árvore de <rev>, o blob do ENTREGA.md de <rev> e uma subárvore que só o
+  # diff-tree lê (src/ de um commit de método que toca produto)
+  local v
+  for x in arvore_intervalo arvore_rev blob_entrega arvore_diff; do
+    fx_portao_em "$d" HEAD; v="$(git rev-parse HEAD)"
+    case "$x" in
+      arvore_diff) fx_commit_metodo "$d" pre-e6 "src/fora-$x.ts" ;;
+      *) fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/PR.md ;;
+    esac
+    case "$x" in
+      arvore_intervalo) o="$(git rev-parse "$v^{tree}")" ;;
+      arvore_rev) o="$(git rev-parse "HEAD^{tree}")" ;;
+      blob_entrega) o="$(git rev-parse "HEAD:$FX_ENTREGA")" ;;
+      arvore_diff) o="$(git rev-parse "HEAD:src")" ;;
+    esac
+    rm -rf "$t/obj"; cp -a "$d" "$t/obj"
+    f="$t/obj/.git/objects/$(printf '%s' "$o" | cut -c1-2)/$(printf '%s' "$o" | cut -c3-)"
+    [ -f "$f" ] && ok "controle: $x é objeto solto na cópia" || falha "controle: $x não é solto"
+    rm -f "$f"
+    cd "$t/obj" || return
+    pt_espera "objeto ausente que não é commit é historia_incompleta ($x)" 1 ok=false historia_incompleta -
+    out="$("${p[@]}" 2>/dev/null)"
+    printf '%s\n' "$out" | grep -q '^aviso=.*objeto Git ausente' && ok "objeto ausente ($x): aviso= de história incompleta" || falha "objeto ausente ($x) sem aviso: $(printf '%s' "$out" | tr '\n' '|')"
+    cd "$d" || return
+  done
+  # controle: sem objeto ausente, o mesmo tipo de commit mantém o motivo de sempre
+  fx_portao_em "$d" HEAD; fx_commit_metodo "$d" pre-e6 src/fora-controle.ts
+  pt_espera "controle: método tocando src com a história inteira continua metodo_fora_do_catalogo" 1 ok=false metodo_fora_do_catalogo "$(git rev-parse HEAD)"
+
   # ---- risco residual 5: isenção por prefixo da V9 não vale para a validade --------
   fx_portao_em "$d" HEAD
   fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/x.ts

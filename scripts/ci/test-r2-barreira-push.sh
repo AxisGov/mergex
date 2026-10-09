@@ -91,6 +91,81 @@ Metodo: $3"
     else git commit -q -m "docs: entrega"; fi )
 }
 
+# _arvore_entregas <repo> <n> — commit (na branch atual) com n ENTREGA.md
+# simples (docs/entregas/e<i>/ENTREGA.md, branch: feature/e<i>) e as variantes
+# de leitura de `branch:` que catalogo_fm aceita ou recusa:
+#   alvo     `branch: "feature/alvo"` com CRLF (casa)
+#   esp      `branch: feature/esp` com espaços no fim, e `---  ` (casa)
+#   base     só `branch_base: feature/alvo` (não casa)
+#   corpo    `branch: feature/alvo` depois do frontmatter (não casa)
+#   sem-fm   primeira linha não é `---` (não casa)
+#   segunda  segunda chave `branch:` (só a primeira vale; não casa)
+# Imprime o SHA do commit.
+_arvore_entregas() {
+  local r="$1" n="$2" i b
+  ( cd "$r" || exit 1
+    rm -f .git/fx-idx
+    _e() { printf '%s' "$2" | git hash-object -w --stdin > .git/fx-blob \
+      && GIT_INDEX_FILE=.git/fx-idx git update-index --add --cacheinfo "100644,$(cat .git/fx-blob),docs/entregas/$1/ENTREGA.md"; }
+    i=1
+    while [ "$i" -le "$n" ]; do
+      _e "e$i" "$(printf -- '---\nkind: entrega\ntrabalho_id: e%s\nbranch: feature/e%s\nbranch_base: main\n---\n\n# Entrega\n' "$i" "$i")" || exit 1
+      i=$((i + 1))
+    done
+    _e alvo "$(printf -- '---\r\nkind: entrega\r\nbranch: "feature/alvo"\r\n---\r\n')" || exit 1
+    _e esp "$(printf -- '---  \nbranch: feature/esp   \n---\n')" || exit 1
+    _e base "$(printf -- '---\nbranch_base: feature/alvo\n---\n')" || exit 1
+    _e corpo "$(printf -- '---\nkind: entrega\n---\nbranch: feature/alvo\n')" || exit 1
+    _e sem-fm "$(printf -- 'branch: feature/alvo\n---\n')" || exit 1
+    _e segunda "$(printf -- '---\nbranch: feature/outra\nbranch: feature/alvo\n---\n')" || exit 1
+    b="$(GIT_INDEX_FILE=.git/fx-idx git write-tree)" || exit 1
+    rm -f .git/fx-idx .git/fx-blob
+    git commit-tree "$b" -m "entregas: $n" )
+}
+
+# entregas_custo <tmp> — pr_entrega_da_ref com 2 e com 300 ENTREGA.md na
+# árvore: o resultado é o mesmo, com a mesma quantidade de processos Git
+# (contados por um git de mentira no PATH que registra cada chamada)
+entregas_custo() {
+  local t="$1" r="$1/muitas" real c2 c300 n2 n300 out2 out300 rc
+  real="$(command -v git)"
+  mkdir -p "$t/gitstub" && git init -q "$r" && git -C "$r" config user.email teste@expx.local && git -C "$r" config user.name "Teste Expx"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexec %q "$@"\n' "$t/git-chamadas" "$real" > "$t/gitstub/git"
+  chmod +x "$t/gitstub/git"
+  c2="$(_arvore_entregas "$r" 2)" && c300="$(_arvore_entregas "$r" 300)" || { falha "árvores de entregas não montaram"; return; }
+  # roda pr_entrega_da_ref <ref> <sha> e imprime "<saída>|<rc>|<chamadas git>"
+  _conta() {
+    : > "$t/git-chamadas"
+    ( PATH="$t/gitstub:$PATH"; . "$REGRAS" || exit 9; arvore_ambiente_git
+      o="$(pr_entrega_da_ref "$r" "$1" "$2" "$ZERO")"; rc=$?
+      printf '%s|%s|' "$o" "$rc" )
+    wc -l < "$t/git-chamadas" | tr -d ' '
+  }
+  out2="$(_conta refs/heads/feature/alvo "$c2")"; out300="$(_conta refs/heads/feature/alvo "$c300")"
+  n2="${out2##*|}"; n300="${out300##*|}"
+  [ "${out300%|*}" = "docs/entregas/alvo/ENTREGA.md|0" ] && [ "${out2%|*}" = "docs/entregas/alvo/ENTREGA.md|0" ] \
+    && ok "pr_entrega_da_ref com 300 ENTREGA.md: acha a entrega (aspas e CRLF)" || falha "pr_entrega_da_ref: 2 [$out2] 300 [$out300]"
+  out300="$(_conta refs/heads/feature/esp "$c300")"
+  [ "${out300%|*}" = "docs/entregas/esp/ENTREGA.md|0" ] && ok "pr_entrega_da_ref: espaços no fim do valor e do ---" || falha "esp: [$out300]"
+  [ "$n300" = "$n2" ] && [ "$n300" -le 6 ] \
+    && ok "custo independe das entregas na árvore ($n300 processos Git com 2 ou 300 ENTREGA.md)" || falha "custo: $n2 processos Git com 2 entregas, $n300 com 300"
+  out300="$(_conta refs/heads/feature/e150 "$c300")"
+  [ "${out300%|*}" = "docs/entregas/e150/ENTREGA.md|0" ] && ok "pr_entrega_da_ref: entrega comum no meio de 300" || falha "e150: [$out300]"
+  out300="$(_conta refs/heads/feature/nenhuma "$c300")"
+  [ "${out300%|*}" = "|0" ] && ok "pr_entrega_da_ref: branch que nenhuma entrega declara não é aplicável" || falha "nenhuma: [$out300]"
+  out300="$(_conta refs/heads/main "$c300")"
+  [ "${out300%|*}" = "|0" ] && ok "pr_entrega_da_ref: branch_base não casa com branch" || falha "main: [$out300]"
+  out300="$(_conta refs/heads/feature/outra "$c300")"
+  [ "${out300%|*}" = "docs/entregas/segunda/ENTREGA.md|0" ] && ok "pr_entrega_da_ref: só a primeira chave branch: vale" || falha "outra: [$out300]"
+  # duas entregas declaram a mesma branch: falha fechada
+  c2="$( cd "$r" && b="$(printf -- '---\nbranch: feature/e1\n---\n' | git hash-object -w --stdin)" \
+    && GIT_INDEX_FILE=.git/fx-idx git read-tree "$c300" \
+    && GIT_INDEX_FILE=.git/fx-idx git update-index --add --cacheinfo "100644,$b,docs/entregas/dup/ENTREGA.md" \
+    && git commit-tree "$(GIT_INDEX_FILE=.git/fx-idx git write-tree)" -m dup; rm -f .git/fx-idx )"
+  out2="$(_conta refs/heads/feature/e1 "$c2")"
+  [ "${out2%|*}" = "|1" ] && ok "pr_entrega_da_ref: duas entregas declarando a mesma branch falham fechado" || falha "dup: [$out2]"
+}
+
 # ---------------------------------------------------------------------------
 # Grupos
 # ---------------------------------------------------------------------------
@@ -231,6 +306,29 @@ grupo_prepush() {
   err_tem "objeto ausente: diagnóstico indica buscar os objetos" "busque os objetos que faltam"
   cp "$PUSH_ERR" "$t/err-historia"
 
+  # árvore de um commit do intervalo e blob do ENTREGA.md do SHA enviado (o
+  # segundo falta já na leitura das entregas da ref, antes da validade)
+  for x in arvore_intervalo blob_entrega; do
+    mkdir -p "$t/obj-$x"; cp -a "$d" "$t/obj-$x/repo"
+    case "$x" in
+      arvore_intervalo)
+        fx_commit_metodo "$t/obj-$x/repo" pre-e6 docs/entregas/ft-rec/PR.md || falha "commit de método na cópia"
+        o="$(git rev-parse "$v8^{tree}")" ;;
+      blob_entrega) o="$(git rev-parse "$v8:docs/entregas/ft-rec/ENTREGA.md")" ;;
+    esac
+    f="$t/obj-$x/repo/.git/objects/$(printf '%s' "$o" | cut -c1-2)/$(printf '%s' "$o" | cut -c3-)"
+    [ -f "$f" ] && ok "controle: $x é objeto solto na cópia" || falha "controle: $x não é solto"
+    rm -f "$f"
+    ( cd "$t/obj-$x/repo" && fx_remoto_bare "$t/obj-$x/repo" && \
+      out="$(fx_push_real "$t/obj-$x/repo" origin feature/ft-rec)" && printf '%s\n' "$out" ) > "$t/obj-$x/saida" 2>/dev/null
+    PUSH_ERR="$(sed -n 's/^stderr=//p' "$t/obj-$x/saida")"
+    [ "$(sed -n 's/^rc=//p' "$t/obj-$x/saida")" = 1 ] && [ "$(sed -n 's/^ref=//p' "$t/obj-$x/saida")" = - ] \
+      && ok "objeto ausente que não é commit ($x): push barrado" || falha "objeto ausente ($x): $(tr '\n' '|' < "$t/obj-$x/saida")"
+    err_tem "objeto ausente ($x): diagnóstico historia_incompleta" "historia_incompleta"
+    err_tem "objeto ausente ($x): diagnóstico indica buscar os objetos" "busque os objetos que faltam"
+    err_sem "objeto ausente ($x): não é erro de ambiente" "erro de ambiente"
+  done
+
   # ---- validador ausente ----------------------------------------------------------
   mkdir -p "$t/sem-validade"; cp "$S"/*.sh "$t/sem-validade/"; rm -f "$t/sem-validade/validade-do-portao.sh"
   FX_PORTAO_PUSH="$t/sem-validade/portao-push.sh" push_espera "validador ausente é erro_ambiente e barra" 1 "$v7" "$d" origin feature/ft-rec
@@ -259,6 +357,9 @@ grupo_prepush() {
   n="$(wc -l < "$conta" | tr -d ' ')"
   [ "$n" -le 1 ] && [ "$n" -ge 1 ] && ok "custo independe das branches entregues (1 chamada da validade com 50 branches)" \
     || falha "custo: $n chamadas da validade para uma ref"
+
+  # ---- custo: centenas de ENTREGA.md na árvore, processos Git constantes ------------
+  entregas_custo "$t"
 
   # ---- o validador de push direto: sinal, linhas e uso ------------------------------
   fx_commit_metodo "$d" pre-e6 docs/entregas/ft-rec/QA-PACOTE.md; v9="$(git rev-parse HEAD)"
