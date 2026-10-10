@@ -24,6 +24,19 @@
 #   (rc 0); reprovada, rc 3 com `mergex E0 BLOQUEADO — pre-push` e a instrução
 #   de composição. O marcador serve só para a idempotência e a reversão: a
 #   aceitação de qualquer pre-push é sempre a prova funcional.
+#   Diretório efetivo FORA do repositório (DM-186): quando o diretório de
+#   hooks efetivo não está sob a raiz da árvore de trabalho nem sob o
+#   diretório Git comum (`git rev-parse --git-common-dir`) — um core.hooksPath
+#   compartilhado, global —, o chamador gerenciado NÃO é instalado: rc 3 com
+#   `mergex E0 BLOQUEADO — pre-push` e a instrução de composição, para quem
+#   mantém aquele diretório. Instalado ali, ele viraria o pre-push de todos os
+#   repositórios da máquina, preso ao validador deste checkout. A comparação é
+#   por caminho canônico (links simbólicos e `..` resolvidos com `cd && pwd -P`,
+#   dos três lados). Um pre-push já presente nesse diretório segue a regra do
+#   hook de terceiro acima: só a prova funcional o aceita.
+#   Fora de um repositório Git (DM-186): não há push a proteger; --instalar não
+#   instala nada e sai 0. O critério é só o Git real (`git rev-parse
+#   --show-toplevel`), nunca o campo `versionado` do ENTREGA.md.
 #
 # --provar (E0 e E2)
 #   Prova por comportamento, nunca por busca textual no hook. Monta, sem tocar
@@ -69,9 +82,11 @@
 #   de um hook de terceiro (composto ou não) só informa que a integração
 #   externa é removida pelo responsável dela, e sai 0 sem tocar o arquivo.
 #
-# Códigos: 0 ok; 1 prova reprovada; 3 pré-requisito ausente (hook de terceiro
-# que não passa na prova, modelo ausente, diretório de hooks sem escrita,
-# fora de um repositório Git); 64 uso. Nenhuma opção de força.
+# Códigos: 0 ok (inclusive --instalar fora de um repositório Git: nada a
+# instalar); 1 prova reprovada; 3 pré-requisito ausente (hook de terceiro que
+# não passa na prova, diretório de hooks efetivo fora do repositório, modelo
+# ausente, diretório de hooks sem escrita, --provar ou --reverter fora de um
+# repositório Git); 64 uso. Nenhuma opção de força.
 #
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
@@ -130,8 +145,17 @@ trap 'exit 1' HUP INT TERM
 . "$CATALOGO_SH" || pre_requisito "dependência ilegível: $CATALOGO_SH"
 set +e
 
-RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" \
-  || pre_requisito 'fora de um repositório Git com árvore de trabalho'
+RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  # DM-186: fora de um repositório Git não há push a proteger. O critério é o
+  # Git real, nunca o campo `versionado` do ENTREGA.md. --instalar sai 0 sem
+  # instalar; --provar e --reverter continuam pré-requisito ausente (o E2
+  # dispensa a prova pelo mesmo critério, em registrar-portao.sh).
+  if [ "$MODO" = instalar ]; then
+    diz 'fora de um repositório Git com árvore de trabalho: não há push a proteger; nada a instalar (o E2 dispensa a prova pelo mesmo critério)'
+    exit 0
+  fi
+  pre_requisito 'fora de um repositório Git com árvore de trabalho'
+}
 # O diretório efetivo vem do próprio Git, na raiz: core.hooksPath (relativo à
 # raiz ou absoluto) e o diretório comum de worktree vinculada já resolvidos.
 # A primeira linha é só o ponto de partida ingênuo (<git comum>/hooks, que
@@ -140,6 +164,43 @@ HOOKS="$(git -C "$RAIZ" rev-parse --path-format=absolute --git-common-dir 2>/dev
 HOOKS="$(git -C "$RAIZ" rev-parse --path-format=absolute --git-path hooks 2>/dev/null)" # guarda:ATVHP
 [ -n "$HOOKS" ] || pre_requisito 'o Git não resolveu o diretório de hooks efetivo'
 HOOK="$HOOKS/pre-push"
+COMUM="$(git -C "$RAIZ" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+[ -n "$COMUM" ] || pre_requisito 'o Git não resolveu o diretório Git comum'
+
+# canonico <caminho> — o caminho absoluto com links simbólicos e `..`
+# resolvidos (`cd && pwd -P`). O caminho pode ainda não existir (o diretório de
+# hooks é criado na instalação): sobe até o primeiro ancestral existente,
+# canoniza esse e devolve o resto por baixo dele. No Git Bash do Windows, o
+# `pwd -P` mantém a forma UNC (//servidor/...) e a de unidade (/c/...) que o
+# `cd` recebeu; como RAIZ, COMUM e HOOKS passam todos por aqui, a comparação é
+# entre formas iguais. Bash 3.2.
+canonico() {
+  local p="$1" resto="" pai
+  # absoluto: POSIX (/...), UNC (//servidor/...) ou unidade do Windows (C:/...)
+  case "$p" in /*|[A-Za-z]:/*) ;; *) p="$PWD/$p" ;; esac
+  while [ ! -d "$p" ]; do
+    pai="${p%/*}"; [ -n "$pai" ] || pai=/
+    [ "$pai" != "$p" ] || return 1
+    resto="/${p##*/}$resto"; p="$pai"
+  done
+  p="$(cd "$p" 2>/dev/null && pwd -P)" || return 1
+  [ "$p" != / ] || p=""
+  printf '%s\n' "$p$resto"
+}
+# dentro_de <caminho> <base> — os dois canônicos; o próprio <base> conta
+dentro_de() { case "$1/" in "$2"/*) return 0 ;; esac; return 1; }
+
+# hooks_no_repositorio — o diretório efetivo está sob a raiz da árvore de
+# trabalho ou sob o diretório Git comum (worktree vinculada), por caminho
+# canônico. Não está: core.hooksPath compartilhado (global) — o E0 não instala
+# ali (DM-186). Falha fechada quando algum caminho não canoniza.
+HOOKS_CANON=""; RAIZ_CANON=""; COMUM_CANON=""
+hooks_no_repositorio() {
+  HOOKS_CANON="$(canonico "$HOOKS")" || return 1
+  RAIZ_CANON="$(canonico "$RAIZ")" || return 1
+  COMUM_CANON="$(canonico "$COMUM")" || return 1
+  dentro_de "$HOOKS_CANON" "$RAIZ_CANON" || dentro_de "$HOOKS_CANON" "$COMUM_CANON"
+}
 
 # gerenciado — o pre-push é o chamador gerenciado (arquivo regular com o
 # marcador). Só para a idempotência e a reversão; nunca aceita nada sozinho.
@@ -148,12 +209,22 @@ gerenciado() {
 }
 existe() { [ -e "$HOOK" ] || [ -L "$HOOK" ]; }
 
+# instrucao <motivo> <quem compõe> — a parada do E0 com a instrução de
+# composição, a mesma de references/12-barreira-de-push.md
 instrucao() {
   printf '%s\n' \
-    "mergex E0 BLOQUEADO — pre-push: o pre-push de terceiro em $HOOK não passou na prova funcional ($PROVA_ERRO); o arquivo não foi alterado." \
-    "Composição deliberada, feita à mão por quem mantém o hook: $COMPOSICAO." \
+    "mergex E0 BLOQUEADO — pre-push: $1" \
+    "Composição deliberada, feita à mão por quem mantém $2: $COMPOSICAO." \
     "Validador desta instalação: $PORTAO_PUSH" \
     'Exemplo e detalhes: .claude/skills/mergex/references/12-barreira-de-push.md, "Composição com hook de terceiro". Depois de compor, rode o E0 de novo.' >&2
+}
+
+# fora_do_repositorio — o diretório efetivo está fora da árvore e do diretório
+# Git comum (DM-186): nada é instalado, core.hooksPath não é tocado, rc 3.
+fora_do_repositorio() {
+  instrucao "o diretório de hooks efetivo $HOOKS (canônico: ${HOOKS_CANON:-não resolvido}) está fora da árvore de trabalho ($RAIZ) e do diretório Git comum ($COMUM): um core.hooksPath compartilhado. O chamador gerenciado NÃO foi instalado — ali ele viraria o pre-push de todos os repositórios da máquina, preso ao validador deste checkout. core.hooksPath não foi alterado." \
+    'aquele diretório de hooks'
+  exit 3
 }
 
 # ---------------------------------------------------------------------------
@@ -345,7 +416,7 @@ terceiro() {
     exit 0
   fi
   reprovada
-  instrucao
+  instrucao "o pre-push de terceiro em $HOOK não passou na prova funcional ($PROVA_ERRO); o arquivo não foi alterado." 'o hook'
   exit 3
 }
 
@@ -371,7 +442,14 @@ case "$MODO" in
   instalar)
     # pre-push de terceiro: só a prova decide, e o arquivo nunca é tocado
     ! existe || gerenciado || terceiro # guarda:ATVSOB
-    if gerenciado; then diz "chamador gerenciado já ativo em $HOOK; nada mudou"; else instala; fi
+    if gerenciado; then
+      diz "chamador gerenciado já ativo em $HOOK; nada mudou"
+    else
+      # DM-186: sem pre-push e com o diretório efetivo fora do repositório,
+      # nada é instalado (um gerenciado já presente ali segue acima: a prova)
+      hooks_no_repositorio || fora_do_repositorio
+      instala
+    fi
     if provar; then aprovada; exit 0; fi
     reprovada
     erro "mergex E0 BLOQUEADO — pre-push: o chamador gerenciado em $HOOK não passou na prova funcional; confira o validador ($PORTAO_PUSH) e rode --reverter e --instalar de novo"

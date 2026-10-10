@@ -17,6 +17,8 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --provar \
 
 Falhou: o E2 não começa e nada é gravado; mande rodar o E0 (`ativacao-pre-push.sh --instalar`).
 
+**Fora de um repositório Git** (`git rev-parse --show-toplevel` falha): não há push a proteger — não rode a prova; o `registrar-portao.sh` também a dispensa e grava `portao_sha: null`. O critério é só o Git real, **nunca pelo campo `versionado`** do `ENTREGA.md`: dentro de um repositório Git, um `ENTREGA.md` com `versionado: false` continua exigindo a prova.
+
 Depois execute somente a barreira:
 
 ```bash

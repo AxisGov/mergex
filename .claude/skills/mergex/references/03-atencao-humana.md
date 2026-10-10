@@ -323,8 +323,22 @@ printf '%s\t%s\t%s\n' src/auth/sessao.ts "O4: cria o token de sessão (T-01.02)"
   `O10: arquivo reconciliado da base (RECONCILIACAO-BASE-NNN.md)`; NNN fora do formato, ou lista
   ausente ou ilegível, faz o classificador falhar (rc 66) sem classificar nada. Todo caminho da
   lista sai em OLHO OBRIGATÓRIO, mesmo ausente da entrada. Monte a lista a partir do
-  `reconciliacao-base.sh --verificar`:
-  `... --verificar | awk -F'\t' '$1=="coberto"{print $2"\t"$3}' > reconciliados.tsv`.
+  `reconciliacao-base.sh --verificar`, **só depois de ele aprovar** (DM-186): grave a saída num
+  arquivo, exija código `0` e a linha `ok=true`, e só então extraia os `coberto`:
+
+  ```bash
+  bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
+    --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+    --origem <sprintx|runx> --trabalho <trabalho_id> > verificar.out; rc=$?
+  [ "$rc" = 0 ] && grep -Fxq 'ok=true' verificar.out \
+    && awk -F'\t' '$1=="coberto"{print $2"\t"$3}' verificar.out > reconciliados.tsv
+  ```
+
+  Código diferente de `0`, ou saída sem `ok=true`: a reconciliação está reprovada e
+  **o E3 não classifica** — relate os `motivo` da saída e volte ao E2, cuja barreira é essa mesma
+  verificação (`references/11-reconciliacao-base.md`). Encadear o `--verificar` direto no `awk`
+  perderia o código de saída: uma cadeia quebrada produziria uma lista vazia ou parcial, e o E3
+  classificaria por cima dela.
 - `--catalogo` imprime o catálogo; `--ordem`, a ordem. O validador de contrato confere que as
   duas batem com este reference e com o prompt do agente.
 - O resultado vem do trabalho corrente resolvido pela branch (exatamente um `ENTREGA.md` com

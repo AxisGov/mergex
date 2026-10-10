@@ -1452,6 +1452,40 @@ done
 grep -Fq 'o `pre-push` funcional quando o `ENTREGA.md` tem `portao: pronto`' "$push" \
   || fail '06-push: a barreira pre-e6 não diz que exige o pre-push funcional com portao: pronto'
 
+# ---------------------------------------------------------------------------
+# DM-186 — ajustes da revisão do PR (spec, seção 13, itens 6 e 9; seção 15)
+# ---------------------------------------------------------------------------
+# E0: o diretório efetivo fora da árvore e do diretório Git comum não recebe o
+# chamador; a regra está no executável, no reference da barreira, no E0 e no
+# comando. Fora de um repositório Git, --instalar sai 0 sem instalar.
+grep -Fq 'hooks_no_repositorio || fora_do_repositorio' "$ativacao_sh" \
+  || fail 'ativacao-pre-push.sh: o braço instalar) não recusa o diretório efetivo fora do repositório (DM-186)'
+grep -Fq 'pwd -P' "$ativacao_sh" || fail 'ativacao-pre-push.sh: a comparação do diretório efetivo não é por caminho canônico (pwd -P)'
+for f in "$barreira_ref" "$abertura" "$abrir_cmd" "$abrir_oc"; do
+  grep -Fq 'fora da árvore de trabalho e do diretório Git comum' "$f" \
+    || fail "$f não diz que o E0 não instala o chamador num diretório de hooks fora da árvore de trabalho e do diretório Git comum (DM-186)"
+done
+# E2: fora de um repositório Git a prova é dispensada — pelo Git real, nunca
+# pelo campo `versionado`; o gravador e a prosa dizem o mesmo
+grep -Fq '[ "$SEM_GIT" = 1 ] ||' "$registrar_sh" || fail 'registrar-portao.sh não dispensa a prova fora de um repositório Git (DM-186)'
+grep -F '# guarda:E2SEMHOOK' "$registrar_sh" | grep -Fq 'SEM_GIT' || fail 'registrar-portao.sh: a dispensa sem Git não está na linha da guarda E2SEMHOOK'
+codigo "$registrar_sh" | grep -Fq 'versionado' && fail 'registrar-portao.sh decide a dispensa pelo campo versionado (o critério é só o Git real)'
+for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao" "$barreira_ref"; do
+  grep -Fq 'nunca pelo campo `versionado`' "$f" \
+    || fail "$f não diz que fora de um repositório Git a prova é dispensada pelo Git real, nunca pelo campo versionado (DM-186)"
+done
+# E3: a lista de reconciliados só depois de o --verificar aprovar (rc 0 e ok=true)
+grep -Fq -- "--verificar | awk" "$atencao" && fail '03-atencao-humana ainda encadeia o --verificar direto no awk, sem conferir o código de saída (DM-186)'
+grep -Fq "grep -Fxq 'ok=true'" "$atencao" || fail '03-atencao-humana não exige ok=true do --verificar antes de extrair os coberto (DM-186)'
+grep -Fq 'o E3 não classifica' "$atencao" || fail '03-atencao-humana não diz que a reconciliação reprovada impede o E3 de classificar'
+# E7: a validade sobre o SHA publicado, que tem de ser o enviado no E6
+grep -Fq -- '--rev "$remoto"' "$abertura_pr" || fail '07-abertura-pr não roda a validade sobre a ponta remota (--rev) (DM-186)'
+grep -Fq 'git fetch origin' "$abertura_pr" || fail '07-abertura-pr não busca a ref remota da branch antes de validar (DM-186)'
+for f in "$abertura_pr" .claude/commands/mergex-pr.md .opencode/commands/mergex-pr.md; do
+  grep -Fq 'SHA enviado no E6' "$f" || fail "$f não exige que a ponta remota seja o SHA enviado no E6 (DM-186)"
+  grep -Fq 'não abre nem retoma o PR' "$f" || fail "$f não diz que a divergência impede o E7 de abrir ou retomar o PR (DM-186)"
+done
+
 # E0: base por SHA, nunca reescrita na retomada
 grep -Fq 'base_validada_sha' "$abertura" || fail '00-abertura não grava base_validada_sha'
 grep -Fq 'origem_base: registrada_e0' "$abertura" || fail '00-abertura não grava origem_base: registrada_e0'
@@ -1499,7 +1533,7 @@ grep -Fq '12-barreira-de-push.md' "$reconc_ref" || fail '11-reconciliacao-base n
 grep -Fq 'references/11-reconciliacao-base.md' "$skill" || fail 'SKILL.md não aponta para 11-reconciliacao-base.md'
 
 # Decisões
-for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184 DM-185; do
+for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184 DM-185 DM-186; do
   grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
 done
 # DM-185: a linha registra a seleção pelo conteúdo, o que ela substitui na

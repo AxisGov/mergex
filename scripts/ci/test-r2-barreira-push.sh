@@ -895,19 +895,71 @@ grupo_ativacao() {
   [ ! -e "$d/.githooks-fx/pre-push" ] && [ "$(git -C "$d" config --get-all core.hooksPath)" = "$cfg" ] \
     && ok "core.hooksPath relativo: reversão remove o gerenciado e não muda a config" || falha "hooksPath relativo: reversão"
   rmdir "$d/.githooks-fx"
-  abs="$t/hooks absolutos"
+  # absoluto DENTRO da árvore de trabalho: continua instalando
+  abs="$d/hooks absolutos"
   git -C "$d" config core.hooksPath "$abs"; cfg="$(git -C "$d" config --get-all core.hooksPath)"
-  atv_espera "core.hooksPath absoluto: E0 sai 0" 0 "$d" --instalar
+  atv_espera "core.hooksPath absoluto dentro da árvore: E0 sai 0" 0 "$d" --instalar
   [ -f "$abs/pre-push" ] && [ ! -e "$hk" ] && [ "$(git -C "$d" config --get-all core.hooksPath)" = "$cfg" ] \
-    && ok "core.hooksPath já configurado é respeitado e não muda (absoluto)" || falha "hooksPath absoluto: instalação fora do efetivo ou config mudou"
-  atv_espera "core.hooksPath absoluto: a prova aprova" 0 "$d" --provar
-  atv_espera "core.hooksPath absoluto: reversão sai 0" 0 "$d" --reverter
+    && ok "core.hooksPath já configurado é respeitado e não muda (absoluto, dentro da árvore)" || falha "hooksPath absoluto: instalação fora do efetivo ou config mudou"
+  atv_espera "core.hooksPath absoluto dentro da árvore: a prova aprova" 0 "$d" --provar
+  atv_espera "core.hooksPath absoluto dentro da árvore: reversão sai 0" 0 "$d" --reverter
   git -C "$d" config --unset core.hooksPath
+  rm -rf "$abs"
+  # absoluto com `..` e link simbólico que resolvem para DENTRO da árvore: a
+  # comparação é por caminho canônico, não textual
+  ln -s "$d" "$t/atalho-repo" || falha "controle: link simbólico para o repositório"
+  git -C "$d" config core.hooksPath "$t/atalho-repo/../atalho-repo/hooks-canonicos"; cfg="$(git -C "$d" config --get-all core.hooksPath)"
+  atv_espera "core.hooksPath com .. e link simbólico que resolvem para dentro da árvore: E0 sai 0" 0 "$d" --instalar
+  [ -f "$d/hooks-canonicos/pre-push" ] && [ "$(git -C "$d" config --get-all core.hooksPath)" = "$cfg" ] \
+    && ok "caminho canônico: o chamador vai para o diretório resolvido dentro da árvore" || falha "canônico: instalação ($(ls "$d/hooks-canonicos" 2>&1 | tr '\n' '|'))"
+  atv_espera "caminho canônico: reversão sai 0" 0 "$d" --reverter
+  git -C "$d" config --unset core.hooksPath
+  rm -rf "$d/hooks-canonicos" "$t/atalho-repo"
 
-  # ---- diretório com espaço, acento e apóstrofo ----------------------------------------------------
+  # ---- DM-186: diretório efetivo FORA da árvore e do diretório Git comum ------------------------
+  # (a) core.hooksPath absoluto, na config LOCAL, apontando para fora do repositório
+  fora="$t/hooks fora do repositório"
+  git -C "$d" config core.hooksPath "$fora"; cfg="$(git -C "$d" config --get-all core.hooksPath)"
+  [ "$(hooks_de "$d")" = "$fora" ] && ok "controle: core.hooksPath absoluto fora do repositório é o efetivo" || falha "controle: hooksPath fora ($(hooks_de "$d"))"
+  atv_espera "diretório efetivo fora do repositório (config local): E0 sai 3" 3 "$d" --instalar
+  [ ! -e "$fora" ] && [ ! -e "$hk" ] && ok "fora do repositório: nenhum arquivo nem diretório criado" || falha "fora do repositório: criou $(ls -A "$fora" 2>&1 | tr '\n' '|')"
+  out_tem "fora do repositório: parada mergex E0 BLOQUEADO — pre-push" "mergex E0 BLOQUEADO — pre-push"
+  out_tem "fora do repositório: a mensagem traz a instrução de composição" "$COMPOSICAO"
+  [ "$(git -C "$d" config --get-all core.hooksPath)" = "$cfg" ] && ok "fora do repositório: core.hooksPath não muda" || falha "fora do repositório: core.hooksPath mudou"
+  git -C "$d" config --unset core.hooksPath
+  # (b) core.hooksPath GLOBAL: numa config global TEMPORÁRIA (GIT_CONFIG_GLOBAL
+  # só nos processos do caso); a config global do usuário não é lida nem escrita
+  gcfg="$t/gitconfig-global"; glob="$t/hooks globais"
+  printf '[core]\n\thooksPath = %s\n' "$glob" > "$gcfg"
+  [ "$(GIT_CONFIG_GLOBAL="$gcfg" hooks_de "$d")" = "$glob" ] && [ -z "$(git -C "$d" config --get-all core.hooksPath)" ] \
+    && ok "controle: core.hooksPath global resolve para fora do repositório, sem config local" || falha "controle: hooksPath global ($(GIT_CONFIG_GLOBAL="$gcfg" hooks_de "$d"))"
+  GIT_CONFIG_GLOBAL="$gcfg" atv_espera "core.hooksPath global: E0 sai 3 (não instala o chamador gerenciado)" 3 "$d" --instalar
+  [ ! -e "$glob" ] && [ ! -e "$hk" ] && ok "core.hooksPath global: nenhum arquivo nem diretório criado" || falha "core.hooksPath global: criou $(ls -A "$glob" 2>&1 | tr '\n' '|')"
+  out_tem "core.hooksPath global: parada mergex E0 BLOQUEADO — pre-push" "mergex E0 BLOQUEADO — pre-push"
+  out_tem "core.hooksPath global: a mensagem traz a instrução de composição" "$COMPOSICAO"
+  [ -z "$(git -C "$d" config --get-all core.hooksPath)" ] && [ "$(GIT_CONFIG_GLOBAL="$gcfg" git config --global --get-all core.hooksPath)" = "$glob" ] \
+    && ok "core.hooksPath global: nem a config local nem a global mudaram" || falha "core.hooksPath global: config mudou"
+  # (c) hook de terceiro já COMPOSTO no diretório global: só a prova decide
+  GIT_CONFIG_GLOBAL="$gcfg" fx_hook_terceiro "$d" composto || falha "hook composto no diretório global"
+  [ -f "$glob/pre-push" ] && ok "controle: o hook composto está no diretório global" || falha "controle: hook composto fora do global"
+  a1="$(assinatura "$glob/pre-push")"
+  sleep 1
+  GIT_CONFIG_GLOBAL="$gcfg" atv_espera "hook de terceiro composto num diretório global: E0 sai 0 (passa pela prova)" 0 "$d" --instalar
+  out_tem "hook composto num diretório global: reconhecido como integração externa válida" "integração externa válida"
+  [ "$(assinatura "$glob/pre-push")" = "$a1" ] && ok "hook composto num diretório global: E0 não toca o arquivo" || falha "E0 tocou o hook composto global"
+  GIT_CONFIG_GLOBAL="$gcfg" atv_espera "hook de terceiro composto num diretório global: a prova aprova" 0 "$d" --provar
+  # (d) hook de terceiro NÃO composto no diretório global: reprova, sem tocar
+  GIT_CONFIG_GLOBAL="$gcfg" fx_hook_terceiro "$d" nao_composto || falha "hook nao_composto no diretório global"
+  a1="$(assinatura "$glob/pre-push")"
+  GIT_CONFIG_GLOBAL="$gcfg" atv_espera "hook de terceiro não composto num diretório global: E0 sai 3" 3 "$d" --instalar
+  [ "$(assinatura "$glob/pre-push")" = "$a1" ] && ok "hook não composto num diretório global: E0 não toca o arquivo" || falha "E0 tocou o hook não composto global"
+  out_tem "hook não composto num diretório global: instrução de composição" "$COMPOSICAO"
+  rm -rf "$glob" "$gcfg"
+
+  # ---- diretório com espaço, acento e apóstrofo (dentro da árvore) ----------------------------------
   esp="$t/raiz com espaço e ação d'água"
   fx_cenario "$esp/repo" || falha "cenário com espaço e acento não montou"
-  abs="$esp/hooks d'ação"
+  abs="$esp/repo/hooks d'ação"
   git -C "$esp/repo" config core.hooksPath "$abs"; cfg="$(git -C "$esp/repo" config --get-all core.hooksPath)"
   atv_espera "diretório com espaço e acento: E0 sai 0" 0 "$esp/repo" --instalar
   [ -f "$abs/pre-push" ] && [ "$(git -C "$esp/repo" config --get-all core.hooksPath)" = "$cfg" ] \
@@ -1014,6 +1066,38 @@ grupo_entrypoints() {
   fx_hook_terceiro "$d" sempre_barra || falha "hook sempre_barra"
   sem_pronto "E2 sem pre-push funcional não emite nem grava PRONTO (MergeX que barra tudo no ambiente do hook)" "$t"
   rm -f "$hk"
+
+  # ---- DM-186: fora de um repositório Git a prova é dispensada, pelo Git real ------------------
+  # o mesmo projeto (só a pasta docs/) copiado para um diretório que não é
+  # repositório Git: não há push a proteger
+  sg="$t/sem-git"
+  mkdir -p "$sg" && cp -R "$d/docs" "$sg/docs" || falha "cópia do projeto sem Git"
+  ( cd "$sg" && ! git rev-parse --show-toplevel >/dev/null 2>&1 ) && [ -f "$sg/$e" ] \
+    && ok "controle: o projeto copiado não está em repositório Git nenhum" || falha "controle: $sg está num repositório Git"
+  ( cd "$sg" && bash "$ATV" --instalar --entrega "$e" >/dev/null 2>&1 ); rc=$?
+  [ "$rc" = 0 ] && [ ! -e "$sg/.git" ] && [ -z "$(find "$sg" -name pre-push 2>/dev/null)" ] \
+    && ok "sem Git: E0 (--instalar) não instala nada e sai 0" || falha "sem Git: --instalar rc=$rc ($(find "$sg" -name pre-push | tr '\n' '|'))"
+  ( cd "$sg" && bash "$ATV" --provar --entrega "$e" >/dev/null 2>&1 ); rc=$?
+  [ "$rc" = 3 ] && ok "sem Git: --provar continua pré-requisito ausente (rc 3): a dispensa é de quem registra" || falha "sem Git: --provar rc=$rc"
+  cd "$sg" || return
+  registra pronto
+  [ "$REG_RC" = 0 ] && printf '%s\n' "$REG_OUT" | grep -Fxq 'RESULTADO: PRONTO' && [ "$(fm_e portao)" = pronto ] \
+    && [ "$(fm_e portao_sha)" = null ] && [ "$(fm_e falhas_portao)" = '[]' ] && [ "$(fm_e atualizado_em)" = "$hoje" ] \
+    && ok "sem Git: E2 grava PRONTO sem a prova (portao_sha: null, falhas [], atualizado_em de hoje)" \
+    || falha "sem Git: registrar pronto rc=$REG_RC $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  printf '%s\n' "$REG_OUT" | grep -Fq 'prova funcional aprovada' && falha "sem Git: a prova rodou" || ok "sem Git: a prova do pre-push não rodou (dispensada, não aprovada)"
+  printf '%s\n' "$REG_OUT" | grep -Fq 'fora de um repositório Git' && ok "sem Git: a saída diz que a prova foi dispensada por não haver Git" || falha "sem Git: saída sem o motivo da dispensa: $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  rc_igual "sem Git: o PRONTO gravado passa em causa-do-portao --validar" 0 bash "$CAUSA" --validar "$e"
+  registra bloqueado v1
+  [ "$REG_RC" = 0 ] && [ "$(fm_e portao)" = bloqueado ] && [ "$(fm_e portao_sha)" = null ] && [ "$(fm_e falhas_portao)" = '[v1]' ] \
+    && ok "sem Git: BLOQUEADO grava com portao_sha: null" || falha "sem Git: registrar bloqueado rc=$REG_RC $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  cd "$d" || return
+  # o critério é o Git real: dentro de um repositório Git, `versionado: false`
+  # no ENTREGA.md NÃO dispensa a prova
+  edita_e 's/^versionado: .*/versionado: false/'
+  [ "$(fm_e versionado)" = false ] && [ ! -e "$hk" ] && ok "controle: versionado: false dentro do Git, sem pre-push" || falha "controle: versionado ($(fm_e versionado))"
+  sem_pronto "dentro de um repositório Git, versionado: false não dispensa a prova (sem pre-push: nada gravado)" "$t"
+  edita_e 's/^versionado: .*/versionado: true/'
 
   # ---- BLOQUEADO não depende da prova --------------------------------------------------------
   registra bloqueado v7 v1

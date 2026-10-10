@@ -30,12 +30,24 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --instalar \
 - **Sem `pre-push` nesse diretório:** instala o chamador gerenciado (`assets/pre-push-gerenciado.sh`,
   com o marcador `# mergex: pre-push gerenciado`), que só chama o validador de push e propaga o
   código de saída dele. O modelo é versionado sem o bit de execução; a cópia instalada recebe o bit.
+- **Diretório efetivo fora do repositório** (DM-186): quando o diretório de hooks efetivo está
+  **fora da árvore de trabalho e do diretório Git comum** — um `core.hooksPath` global,
+  compartilhado por vários repositórios —, o E0 **não instala** o chamador gerenciado: sai `3` com
+  a instrução de composição, para quem mantém aquele diretório. Instalado ali, o chamador viraria
+  o `pre-push` de todos os repositórios da máquina, preso ao validador deste checkout; removido o
+  checkout, todo push da máquina seria barrado. A comparação é por caminho canônico (links
+  simbólicos e `..` resolvidos), dos três lados. Um `pre-push` já presente nesse diretório segue a
+  regra do hook de terceiro abaixo: só a prova funcional o aceita.
 - **Já é o chamador gerenciado:** nada muda (idempotente).
 - **Existe um `pre-push` de terceiro:** o E0 nunca o sobrescreve, renomeia ou edita. Quem decide é
   a prova funcional: aprovada, é **integração externa válida** e o E0 segue; reprovada, o script sai
   `3` com a instrução de composição.
 - Em todos os casos o E0 termina com a prova funcional. Código diferente de zero:
   **`mergex E0 BLOQUEADO — pre-push`**, o E0 encerra e mostra a instrução que o script imprimiu.
+- **Fora de um repositório Git** (DM-186): não há push a proteger. `--instalar` sai `0` sem
+  instalar nada, e o E2 dispensa a prova (`registrar-portao.sh` grava `portao_sha: null`). O
+  critério é só o Git real (`git rev-parse --show-toplevel`), **nunca pelo campo `versionado`** do
+  `ENTREGA.md`: dentro de um repositório Git, `versionado: false` continua exigindo a prova.
 
 O marcador serve só para a idempotência e para a reversão. A aceitação de qualquer `pre-push`,
 gerenciado ou de terceiro, sempre passa pela prova funcional.

@@ -19,6 +19,8 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --provar \
 
 Falhou: **E2 não começa e nada é gravado** — nem `portao`, nem `falhas_portao`. Relate a saída do script e mande rodar o E0 (`ativacao-pre-push.sh --instalar`, que mostra a instrução de composição quando há hook de terceiro). Sem essa prova o E2 não emite `PRONTO`.
 
+**Fora de um repositório Git** (`git rev-parse --show-toplevel` falha; DM-186): não há push a proteger, e a prova é **dispensada** — não a rode; o `registrar-portao.sh` também a dispensa, grava `portao_sha: null` e emite `PRONTO` normalmente. O critério é só o Git real, **nunca pelo campo `versionado`** do `ENTREGA.md`: dentro de um repositório Git, um `ENTREGA.md` com `versionado: false` continua exigindo a prova.
+
 **2. A barreira `pre-e2`:**
 
 ```bash
@@ -314,7 +316,7 @@ bash .claude/skills/mergex/scripts/registrar-portao.sh \
   --origem <sprintx|runx> --trabalho <trabalho_id> --resultado pronto
 ```
 
-Ele roda de novo a prova funcional do `pre-push` **antes de qualquer escrita** e só então grava `portao: pronto`, `portao_sha` (o SHA completo do `HEAD` avaliado), `falhas_portao: []` e `atualizado_em`, imprimindo `RESULTADO: PRONTO`. Siga para o E3 só com essa saída. Se ele imprimir `RESULTADO: BLOQUEADO — pre-push sem prova funcional` (código `3`), nada foi gravado e o portão **não** está `PRONTO`: relate e mande rodar o E0.
+Ele roda de novo a prova funcional do `pre-push` **antes de qualquer escrita** e só então grava `portao: pronto`, `portao_sha` (o SHA completo do `HEAD` avaliado), `falhas_portao: []` e `atualizado_em`, imprimindo `RESULTADO: PRONTO`. Siga para o E3 só com essa saída. Se ele imprimir `RESULTADO: BLOQUEADO — pre-push sem prova funcional` (código `3`), nada foi gravado e o portão **não** está `PRONTO`: relate e mande rodar o E0. Fora de um repositório Git (pelo Git real, DM-186) ele dispensa a prova e grava `portao_sha: null`.
 
 **O portão vale para um SHA** (DM-181). `portao_sha` é o `HEAD` que este E2 avaliou. O `pronto` só continua valendo para um `HEAD` posterior se **todo** commit em `portao_sha..HEAD` é commit de método `pre-e6` ou `e8`, de um pai, tocando só o catálogo daquele checkpoint. Qualquer commit de produto, de teste, de plano, ou merge (inclusive de base nova) invalida o portão, e o E2 roda de novo. Quem prova isso é, só leitura:
 
@@ -348,7 +350,7 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | `tasks.md` sem frontmatter | Leia da prosa e registre o aviso; se não for possível determinar o status, é `FALHA` em V1 |
 | `QA.md` ausente em trabalho da runx | `FALHA` em V5 — a entrega ainda não passou pelo E4 da runx |
 | `PERFIL.md` ausente | V8 inteira é `n/a`; não invente modo legado |
-| Sem versionador | `portao-v9.sh` exige Git: fora de um repositório ele sai `v9_sem_prova` com o motivo `fora de um repositório Git` (código `3`). Por isso, com `versionado: false`, não o rode: V9 e V10 seguem a regra em prosa sobre os arquivos declarados nas tasks e a árvore de trabalho ("Repositório sem versionador", na V10); as demais não mudam |
+| Sem versionador | `portao-v9.sh` exige Git: fora de um repositório ele sai `v9_sem_prova` com o motivo `fora de um repositório Git` (código `3`). Por isso, com `versionado: false`, não o rode: V9 e V10 seguem a regra em prosa sobre os arquivos declarados nas tasks e a árvore de trabalho ("Repositório sem versionador", na V10); as demais não mudam. A prova do `pre-push` é dispensada **só** fora de um repositório Git real (DM-186), nunca pelo campo `versionado` |
 | Branch base indisponível para o diff da V10 | Use `git diff HEAD~<n>..HEAD` sobre os commits do trabalho registrados no `ENTREGA.md`; registre a imprecisão como aviso. A V9 não usa o nome da base: o que ela não consegue provar é `v9_sem_prova` |
 | `portao-v9.sh` devolve `v9_sem_prova` (código `3`) | `FALHA` em V9, registrada como `v9_sem_prova`, com os `motivo` do script. Raso: `git fetch --unshallow` e o E2 de novo |
 | Barreira `reconciliacao-base` reprovada | E2 não emite `PRONTO`; relate os `motivo`; persistência pendente se resolve com o checkpoint explícito `reconciliacao-base`, fora do portão |

@@ -26,14 +26,21 @@
 #   `falhas_portao` na forma de `causa-do-portao.sh --lista` e `atualizado_em`,
 #   e imprime `RESULTADO: BLOQUEADO` e `falhas_portao=<lista>`.
 #
+# Fora de um repositório Git (DM-186): o próprio Git não resolve a raiz
+# (`git rev-parse --show-toplevel` falha). Não há push a proteger, então a
+# prova do pre-push é DISPENSADA: a raiz é o diretório corrente, `portao_sha`
+# é `null` (não há HEAD) e o `pronto` grava sem `--provar`. O critério é só o
+# Git real — nunca o campo `versionado` do ENTREGA.md: dentro de um
+# repositório Git, `versionado: false` continua exigindo a prova.
+#
 # O resultado é montado numa cópia e só substitui o ENTREGA.md depois de
 # passar em `causa-do-portao.sh --validar`; qualquer recusa deixa o arquivo
 # byte a byte igual.
 #
-# Códigos: 0 gravado; 1 ambiente (fora de repositório, temporário, editor
-# indisponível); 3 prova ausente ou reprovada; 5 contrato inválido (entrega,
-# origem, trabalho, falhas ou resultado que não passa em --validar); 64 uso.
-# Nenhuma opção de força: o PRONTO só existe com a prova.
+# Códigos: 0 gravado; 1 ambiente (temporário, editor indisponível); 3 prova
+# ausente ou reprovada; 5 contrato inválido (entrega, origem, trabalho, falhas
+# ou resultado que não passa em --validar); 64 uso. Nenhuma opção de força: o
+# PRONTO só existe com a prova — ou sem Git, quando não há push a proteger.
 #
 # Bash 3.2 (macOS): sem arrays associativos, mapfile ou recursos de Bash 4+.
 
@@ -99,7 +106,11 @@ contrato() { printf 'registrar-portao: %s\n' "$1" >&2; exit 5; }
 . "$CATALOGO_SH" || ambiente "dependência ilegível: $CATALOGO_SH"
 set +e
 
-RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || ambiente 'fora de um repositório Git com árvore de trabalho'
+# DM-186: fora de um repositório Git não há push a proteger; a raiz é o
+# diretório corrente e a prova do pre-push é dispensada (adiante). Só o Git
+# real decide isso, nunca o campo `versionado` do ENTREGA.md.
+SEM_GIT=0
+RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || { SEM_GIT=1; RAIZ="$PWD"; }
 
 # A entrega é evidência explícita, na forma canônica, conferida com os
 # argumentos (como em persistir-metodo.sh).
@@ -117,20 +128,28 @@ if [ "$RESULTADO" = bloqueado ]; then
   LISTA="$(bash "$CAUSA_SH" --lista $FALHAS 2>&1)" || contrato "falhas inválidas: $LISTA"
 fi
 
-HEAD_SHA="$(git -C "$RAIZ" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)" || contrato 'HEAD não resolve para um commit'
-printf '%s\n' "$HEAD_SHA" | grep -Eqx '[0-9a-f]{40}|[0-9a-f]{64}' || contrato "HEAD sem SHA completo: $HEAD_SHA"
+if [ "$SEM_GIT" = 1 ]; then
+  # sem Git não há HEAD: `portao_sha: null` (00-schema.md), como antes do E2
+  HEAD_SHA=null
+else
+  HEAD_SHA="$(git -C "$RAIZ" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)" || contrato 'HEAD não resolve para um commit'
+  printf '%s\n' "$HEAD_SHA" | grep -Eqx '[0-9a-f]{40}|[0-9a-f]{64}' || contrato "HEAD sem SHA completo: $HEAD_SHA"
+fi
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-registrar-portao.XXXXXX")" || { TMP_DIR=""; ambiente 'não foi possível criar diretório temporário'; }
 
 # O PRONTO só existe com a prova funcional do pre-push, antes de qualquer
-# escrita. Reprovada (ou o ativador ausente): BLOQUEADO, nada gravado.
+# escrita. Reprovada (ou o ativador ausente): BLOQUEADO, nada gravado. Fora de
+# um repositório Git (SEM_GIT, pelo Git real) a prova é dispensada: não há
+# push a proteger (DM-186).
 sem_prova() {
   sed 's/^/  /' "$TMP_DIR/prova" >&2
   printf '%s\n' 'RESULTADO: BLOQUEADO — pre-push sem prova funcional'
   printf '%s\n' "registrar-portao: nada foi gravado em $ENTREGA; rode o E0 (ativacao-pre-push.sh --instalar) e o E2 de novo" >&2
   exit 3
 }
-[ "$RESULTADO" != pronto ] || ( cd "$RAIZ" && bash "$ATIVACAO_SH" --provar --entrega "$ENTREGA" ) > "$TMP_DIR/prova" 2>&1 || sem_prova # guarda:E2SEMHOOK
+[ "$RESULTADO" != pronto ] || [ "$SEM_GIT" = 1 ] || ( cd "$RAIZ" && bash "$ATIVACAO_SH" --provar --entrega "$ENTREGA" ) > "$TMP_DIR/prova" 2>&1 || sem_prova # guarda:E2SEMHOOK
+[ "$SEM_GIT" = 0 ] || printf 'registrar-portao: fora de um repositório Git: não há push a proteger; prova do pre-push dispensada e portao_sha: null\n' >&2
 
 # O editor de frontmatter do registro (Task 6), reutilizado literalmente.
 [ -r "$RB_SH" ] || ambiente "editor de frontmatter indisponível: $RB_SH"

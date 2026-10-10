@@ -10,14 +10,26 @@ A regra que governa esta etapa inteira: **ferramenta ausente não é erro** (reg
 
 - O E6 devolveu `push_feito: true`. Sem push não há o que abrir.
 - `docs/entregas/<trabalho_id>/PR.md` existe (E4).
-- O portão ainda vale para o que foi publicado (DM-181), pela mesma validade do E6:
+- O portão ainda vale para o que foi **publicado** (DM-181, DM-186): a validade roda sobre o **SHA
+  publicado** — a ponta da ref remota da branch, buscada agora —, nunca sobre o `HEAD` do checkout,
+  e essa ponta tem de ser o **SHA enviado no E6**. O SHA enviado no E6 é o `HEAD` que o passo 4 do
+  E6 confirmou igual a `origin/<branch>`; nada commita entre o E6 e o E7, então ele continua sendo
+  `git rev-parse HEAD`:
 
 ```bash
+git fetch origin <branch>
+remoto="$(git rev-parse --verify 'refs/remotes/origin/<branch>^{commit}')"
+enviado="$(git rev-parse HEAD)"
+[ "$remoto" = "$enviado" ] || echo "a ref remota avançou depois do E6 ($remoto, enviado $enviado)"
 bash .claude/skills/mergex/scripts/validade-do-portao.sh --verificar \
-  --entrega docs/entregas/<trabalho_id>/ENTREGA.md
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md --rev "$remoto"
 ```
 
-`ok=false`: o E7 não abre nem retoma o PR; relate o `motivo` e mande rodar o E2. A validade é a mesma que o `pre-push` do Git aplicou ao SHA enviado no E6 — ele é quem decide o push; o hook do Claude `pr-so-com-portao` é consultivo e não abre nem barra PR. O CI com proteção de merge repete a validade sobre o SHA da cabeça do PR quando o produto o ativar; esta skill não o ativa (`references/12-barreira-de-push.md`).
+Ponta remota diferente do SHA enviado (alguém empurrou na branch depois do E6; ou a busca falhou e
+nada resolveu), ou validade `ok=false`: o E7 **não abre nem retoma o PR**. Relate os dois SHAs e o
+`motivo` e mande rodar o E2 — e, se a ref avançou, o E6 de novo sobre o que o E2 aprovar. Abrir
+ou retomar o PR sobre uma ponta que não foi a validada seria afirmar um portão para código que ele
+não avaliou. A validade é a mesma que o `pre-push` do Git aplicou ao SHA enviado no E6 — ele é quem decide o push; o hook do Claude `pr-so-com-portao` é consultivo e não abre nem barra PR. O CI com proteção de merge repete a validade sobre o SHA da cabeça do PR quando o produto o ativar; esta skill não o ativa (`references/12-barreira-de-push.md`).
 
 Se `push_feito: false` (sem remoto, ou sem versionador), o E7 não roda: siga direto para o E8. `PR.md` fica como o documento da entrega.
 
@@ -165,7 +177,8 @@ Siga para o E8.
 | Comando falhou por permissão | Passo 3, com o erro literal registrado |
 | PR já existe | Recupere a URL e registre; é retomada |
 | Sem push | O E7 não roda; siga para o E8 |
-| Portão vencido (`validade-do-portao.sh` com `ok=false`) | O E7 não roda; relate o `motivo` e mande rodar o E2 |
+| Ponta da ref remota da branch diferente do SHA enviado no E6 (a ref avançou, ou a busca não resolveu) | O E7 não abre nem retoma o PR; relate os dois SHAs; o E2 e o E6 de novo |
+| Portão vencido (`validade-do-portao.sh --rev <SHA remoto>` com `ok=false`) | O E7 não roda; relate o `motivo` e mande rodar o E2 |
 | Alguém pediu para forçar a abertura com credencial | Recuse: a skill nunca configura credencial nem armazena segredo |
 | `.expx/` não existe | Segue sem gravar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
 | Gravação do `estado.json` falhou | Segue **em silêncio**, sem rastro (`10-estado.md`, "A lacuna"); o E7 continua OK e o PR continua aberto |

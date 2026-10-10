@@ -25,6 +25,6 @@ Se nenhum trabalho for informado, descubra qual é pelo disco, nesta ordem: `doc
      --entrega docs/entregas/<trabalho_id>/ENTREGA.md
    ```
 
-   O script usa o diretório de hooks efetivo do Git, **nunca altera `core.hooksPath`** e **nunca sobrescreve, renomeia ou edita** um `pre-push` de terceiro; termina sempre com a prova funcional. **Código diferente de zero: `mergex E0 BLOQUEADO — pre-push`** — pare aqui, não devolva o controle como OK, e mostre a instrução que o script imprimiu (com hook de terceiro, a de composição: `references/12-barreira-de-push.md`).
+   O script usa o diretório de hooks efetivo do Git, **nunca altera `core.hooksPath`** e **nunca sobrescreve, renomeia ou edita** um `pre-push` de terceiro; termina sempre com a prova funcional. Diretório efetivo **fora da árvore de trabalho e do diretório Git comum** (`core.hooksPath` global): o script **não instala** o chamador e sai `3` com a instrução de composição. Fora de um repositório Git: sai `0` sem instalar nada. **Código diferente de zero: `mergex E0 BLOQUEADO — pre-push`** — pare aqui, não devolva o controle como OK, e mostre a instrução que o script imprimiu (com hook de terceiro ou diretório fora do repositório, a de composição: `references/12-barreira-de-push.md`).
 
 Ao terminar, devolva uma linha com o nome da branch, a base e como ela chegou até aqui, e devolva o controle: quem executa as tasks é a skill de origem.

@@ -256,14 +256,21 @@ O script resolve o diretório de hooks efetivo pelo próprio Git (respeita `core
 worktree vinculada, **nunca altera `core.hooksPath`**), instala o chamador gerenciado quando não há
 `pre-push`, não muda nada quando ele já é o gerenciado, e **nunca sobrescreve, renomeia ou edita**
 um `pre-push` de terceiro. Em todos os casos termina com a prova funcional
-(`references/12-barreira-de-push.md`).
+(`references/12-barreira-de-push.md`). Quando o diretório efetivo está
+**fora da árvore de trabalho e do diretório Git comum** (um `core.hooksPath` global, compartilhado
+por vários repositórios), o script **não instala** o chamador (DM-186): sai `3` com a instrução de
+composição, para quem mantém aquele diretório — instalado ali, o chamador viraria o `pre-push` de
+todos os repositórios da máquina, preso ao validador deste checkout. Um `pre-push` já presente ali
+segue a regra do hook de terceiro: só a prova funcional o aceita.
 
 **Código diferente de zero: `mergex E0 BLOQUEADO — pre-push`.** O E0 encerra ali — não siga para o
 item 4 nem devolva o controle como OK — e mostre ao usuário a instrução que o script imprimiu. Com
 hook de terceiro (código `3`), a instrução é a de composição: o `pre-push` existente chama
 `portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída
 dele. A composição é feita à mão pelo responsável do hook; depois dela, o E0 roda de novo e a
-prova decide. Repositório sem versionador (passo 1): não há `pre-push` a ativar; pule este item.
+prova decide. Repositório sem versionador (passo 1): não há `pre-push` a ativar; pule este item —
+e, se o script rodar fora de um repositório Git, ele próprio sai `0` sem instalar nada (DM-186;
+o critério é o Git real, nunca o campo `versionado`).
 
 **4. Atualize `.expx/estado.json`**, o arquivo que a barra de status lê:
 
