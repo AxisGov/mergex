@@ -68,6 +68,38 @@ CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null
 # sem git pagava a normalização inteira (re-revisão da rodada 1).
 case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
 
+# Teto de tamanho, falha FECHADA. A normalização e as regras são lineares, mas
+# têm custo por byte, e acima de certo tamanho um comando com `git` passaria a
+# disputar com o tempo limite do harness (30 s) — e hook morto pelo tempo
+# limite NÃO bloqueia: o comando rodaria (re-revisão da rodada 2: 125 KB de
+# `git;` + push forçado, morto aos 30 s, push liberado). Então, acima do teto,
+# o hook não avalia: barra e pede para dividir o comando. Medido no hook
+# inteiro, no pior caso (`git ` repetido, uma palavra git a cada 4 bytes;
+# WSL, bash 5.3): 128 KB 1,2 s; 256 KB 2,5 s; 512 KB 5,2-5,8 s; 1 MB 10,7 s;
+# 2 MB 22,6 s; 4 MB morto aos 30 s. Esparso (um `git` por 25 bytes) com push
+# no fim: 1 MB 0,9 s. Sem `git`: ~15 ms (saída antecipada acima). O teto fica
+# em 512 KB — mais de 5x de folga para o tempo limite, para máquina mais lenta.
+GIT_TETO=524288
+if [ "${#CMD}" -gt "$GIT_TETO" ]; then
+  CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
+  RAIZ="$(expx_raiz "${CWD:-$PWD}")"
+  MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
+  [ "$MODO" = "desligado" ] && exit 0
+  expx_barra "$MODO" "$RAIZ" "$HOOK" "comando com git grande demais para avaliar" \
+"mergex/git-perigoso — comando com git acima do teto de avaliação
+
+Tamanho: ${#CMD} bytes (teto: $GIT_TETO)
+
+Este hook lê o comando inteiro antes de decidir. Acima deste tamanho a leitura
+disputaria com o tempo limite do harness, e um hook morto pelo tempo limite não
+bloqueia nada — então ele não avalia: barra.
+
+O que fazer:
+  - Divida o comando em partes menores, e deixe o git numa parte só dele.
+  - Conteúdo grande (heredoc, dados) vai para um arquivo, numa chamada sem git."
+  exit 0
+fi
+
 # A palavra do programa git, normalizada UMA vez para a grafia `git` — antes do
 # pré-filtro, da leitura do push e das regras por regex, que leem CMD_N; as
 # mensagens continuam mostrando CMD como foi escrito. Somem: as aspas pareadas
@@ -87,46 +119,80 @@ case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
 GIT_SEP='[[:space:];&|`(){}]'
 # normaliza_git <comando> — CMD_N recebe o comando com cada palavra que é o
 # programa git reduzida a `git`; separadores (GIT_SEP, a quebra de linha
-# inclusive) e as demais palavras ficam como estão, byte a byte. Anda de
-# OCORRÊNCIA em ocorrência de `git` (poucas, mesmo num comando grande): copia
-# de uma vez o que vem antes, isola a palavra que a contém (do separador
-# anterior ao seguinte) e decide por ela. Cada passo é uma expansão em C sobre
-# o comando ou um laço curto SÓ sobre a palavra; nunca um padrão literal longo
-# (`${rest#"$pre"git}` com `pre` de 100 KB tenta cada comprimento e é
-# quadrático) nem laço por caractere sobre o comando — a versão anterior
-# refatiava o restante a cada palavra (10 KB sem git: ~1 s; 100 KB: ~90 s).
-# LC_ALL=C local: o índice `${s:i:1}` é por byte, O(1), e um byte de
-# continuação UTF-8 nunca é separador. Custo O(ocorrências × tamanho): um
-# comando de 100 KB com um `git` custa ~0,1 s; 100 KB só de `git status;`
-# (milhares de ocorrências) custa segundos — caso patológico, aceito.
+# inclusive) e as demais palavras ficam como estão, byte a byte. Palavra é um
+# trecho máximo sem separador. Linear no tamanho, sem processo externo:
+#   - toda expansão `${s:i:k}` do bash custa O(tamanho de s) — ele recalcula o
+#     comprimento a cada uma, mesmo em LC_ALL=C (medido: 25 mil índices numa
+#     string de 100 KB, 2,6 s) —, então NADA indexa a string inteira: ela é
+#     cortada UMA vez em pedaços de 4 KB (`${s:off:4096}`, uma extração por
+#     pedaço) e todo índice é dentro do pedaço;
+#   - no pedaço, `read -a` com IFS = GIT_SEP dá as palavras de uma vez, em C (um
+#     campo vazio do read — dois separadores não brancos colados — não é
+#     palavra e é pulado); um índice `p` anda pelo pedaço, os separadores antes
+#     de cada palavra são copiados por posição, a palavra é decidida pela regra
+#     abaixo, e os pedaços de saída vão para um array que `printf -v` junta de
+#     uma vez. Nunca se copia o resto da string por ocorrência — era isso
+#     (`${rest:n+3}`) que dava O(ocorrências × tamanho): 125 KB de `git;`
+#     levavam 35 s e estouravam o timeout do harness, que não bloqueia
+#     (re-revisão da rodada 2);
+#   - a última palavra de um pedaço pode continuar no seguinte: quando o pedaço
+#     termina em byte que não é separador, essa palavra (a última que o `read`
+#     devolveu) não é emitida — fica pendente (`pend`) e abre o próximo pedaço,
+#     para ser decidida inteira. Nenhum padrão com `*` toca o pedaço: `${c##*…}`
+#     numa palavra de 70 KB sem separador tentava cada prefixo e era quadrático.
+# LC_ALL=C local: índice por byte; byte de continuação UTF-8 nunca é separador
+# (um caractere partido entre pedaços cai dentro da palavra pendente e volta
+# inteiro). A saída é byte a byte a mesma das versões anteriores (fuzz
+# diferencial, 12 mil entradas, C e C.UTF-8). Medido no hook inteiro: ver o
+# teto acima.
 normaliza_git() {
-  local LC_ALL=C rest="$1" pre i n m w t
+  local LC_ALL=C s="$1" off=0 c nc pend="" W P w t p j m k=0 n nw i
+  n=${#s}                          # (fora do `local`: os argumentos dele expandem antes de qualquer atribuição)
   CMD_N=""
-  while :; do
-    case "$rest" in *git*) ;; *) CMD_N="$CMD_N$rest"; return ;; esac
-    pre="${rest%%git*}"            # tudo antes da primeira ocorrência (O(n), em C)
-    n=${#pre}
-    rest="${rest:n+3}"             # tudo depois dela (por posição, não por padrão)
-    i=$n                           # início da palavra: do `git` ao separador anterior
-    while [ "$i" -gt 0 ]; do case "${pre:i-1:1}" in $GIT_SEP) break ;; esac; i=$((i - 1)); done
-    n=0; m=${#rest}                # fim da palavra: do `git` ao separador seguinte
-    while [ "$n" -lt "$m" ]; do case "${rest:n:1}" in $GIT_SEP) break ;; esac; n=$((n + 1)); done
-    w="${pre:i}git${rest:0:n}"; t="$w"
-    rest="${rest:n}"
-    case "$t" in
-      \"?*\") t="${t#\"}"; t="${t%\"}" ;;
-      \'?*\') t="${t#\'}"; t="${t%\'}" ;;
+  P=()
+  while [ "$off" -lt "$n" ] || [ -n "$pend" ]; do
+    if [ "$off" -lt "$n" ]; then c="$pend${s:off:4096}"; off=$((off + 4096)); else c="$pend"; fi
+    pend=""
+    [ -n "$c" ] || continue
+    IFS=$' \t\n\v\f\r;&|`(){}' read -r -d '' -a W <<<"$c"
+    nw=${#W[@]}
+    if [ "$off" -lt "$n" ]; then
+      # o pedaço termina dentro de uma palavra: a última fica pendente
+      case "${c: -1}" in $GIT_SEP) ;; *) nw=$((nw - 1)); pend="${W[nw]}" ;; esac
+    fi
+    nc=${#c}; p=0; i=0
+    # pedaço sem `git` na parte a emitir: copiado inteiro, sem laço por palavra
+    # (num comando grande e esparso, só os pedaços com `git` pagam o laço)
+    case "${c:0:nc-${#pend}}" in
+      *git*) ;;
+      *) P[k]="${c:0:nc-${#pend}}"; k=$((k + 1)); continue ;;
     esac
-    t="${t#\\}"
-    # aspa que sobrou sem par (a de abertura de um embrulho ou de um `echo
-    # "..."`) e `=` (atribuição `GIT=/usr/bin/git`, opção `--git-dir=…/git`)
-    # não são programa: a palavra fica como está
-    case "$t" in
-      *[\"\'=]*) ;;
-      git|*/git|git.exe|*/git.exe) w=git ;;
-    esac
-    CMD_N="$CMD_N${pre:0:i}$w"
+    while [ "$i" -lt "$nw" ]; do
+      w="${W[i]}"; i=$((i + 1))
+      [ -n "$w" ] || continue
+      j=$p                         # pula os separadores antes da palavra
+      while [ "$j" -lt "$nc" ]; do case "${c:j:1}" in $GIT_SEP) j=$((j + 1)) ;; *) break ;; esac; done
+      m=${#w}; t="$w"
+      case "$t" in
+        \"?*\") t="${t#\"}"; t="${t%\"}" ;;
+        \'?*\') t="${t#\'}"; t="${t%\'}" ;;
+      esac
+      t="${t#\\}"
+      # aspa que sobrou sem par (a de abertura de um embrulho ou de um `echo
+      # "..."`) e `=` (atribuição `GIT=/usr/bin/git`, opção `--git-dir=…/git`)
+      # não são programa: a palavra fica como está
+      case "$t" in
+        *[\"\'=]*) ;;
+        git|*/git|git.exe|*/git.exe) w=git ;;
+      esac
+      P[k]="${c:p:j-p}$w"; k=$((k + 1))
+      p=$((j + m))
+    done
+    # os separadores depois da última palavra emitida (até a pendente, se houver)
+    P[k]="${c:p:nc-${#pend}-p}"; k=$((k + 1))
   done
+  [ "$k" -gt 0 ] || return 0
+  printf -v CMD_N '%s' "${P[@]}"
 }
 normaliza_git "$CMD"
 

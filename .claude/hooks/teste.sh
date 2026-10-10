@@ -248,7 +248,23 @@ custo_ok() { # <desc> <json> <rc esperado> — rc certo e menos de 2 s
 }
 custo_ok "10 KB sem git: passa em menos de 2 s"                     "$(bash_json "$GRANDE")" 0
 custo_ok "10 KB com git push --force no fim: barra em menos de 2 s" "$(bash_json "${GRANDE}git push --force origin feature/x")" 2
-unset GRANDE
+# Denso em git (rodada 3 da revisao): ~100 KB de `git;` e um push forcado no fim.
+# A normalizacao tem de ser linear no tamanho: em a8b63b8 custava 19 s e, com
+# 125 KB, estourava o timeout de 30 s do harness, que NAO bloqueia (falha aberta).
+# O JSON vai por stdin do jq: --arg nao aceita argumento desse tamanho.
+DENSO=""; while [ "${#DENSO}" -lt 102400 ]; do DENSO="${DENSO}git;git;git;git;git;git;git;git;git;git;git;git;git;git;git;git;"; done
+custo_ok "100 KB de git; + git push --force no fim: barra em menos de 2 s" \
+  "$(printf '%s' "${DENSO}git push --force origin feature/x" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 2
+# Teto que falha FECHADO: acima de GIT_TETO bytes (512 KB) com git, o hook nao
+# avalia e barra (um hook morto pelo timeout do harness nao bloqueia). Mesmo um
+# comando inofensivo (git status) barra ali; e o limite de tempo prova que ele
+# nem tentou. Sem git, o tamanho nao importa: passa.
+TETO=""; while [ "${#TETO}" -lt 524289 ]; do TETO="${TETO}${TETO:-echo aaaa bbbb cccc dddd; }"; done
+custo_ok "acima do teto (>512 KB) com git: barra sem avaliar, em menos de 2 s" \
+  "$(printf '%s' "${TETO}git status" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 2
+custo_ok "acima do teto (>512 KB) sem git: passa, em menos de 2 s" \
+  "$(printf '%s' "$TETO" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 0
+unset GRANDE DENSO TETO
 
 echo
 echo "branch-limpa"
