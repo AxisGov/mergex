@@ -278,7 +278,7 @@ expx_push_segmentos() {
 EXPX_PUSH_OPCOES=(); EXPX_PUSH_REFSPECS=(); EXPX_PUSH_REMOTO=""; EXPX_PUSH_TEM_REMOTO=0
 EXPX_PUSH_GLOBAIS=(); EXPX_PUSH_AMBIENTE_GIT=0
 expx_push_le() {
-  local tok seg atribuiu=0
+  local tok seg atribuiu=0 aberta=""
   EXPX_PUSH_OPCOES=(); EXPX_PUSH_REFSPECS=(); EXPX_PUSH_REMOTO=""; EXPX_PUSH_TEM_REMOTO=0
   EXPX_PUSH_GLOBAIS=(); EXPX_PUSH_AMBIENTE_GIT=0
   seg="$(expx_sem_descritor "$1")"
@@ -288,15 +288,26 @@ expx_push_le() {
   set +f
 
   # Prefixo de ambiente: `GIT_DIR=/tmp/x git push ...` continua sendo um push.
-  # Valor com espaço (`GIT_SSH_COMMAND="ssh -v" git push`) chega partido em
-  # vários tokens, então, depois da primeira atribuição, os pedaços soltos
-  # também são pulados até o nome do programa.
+  # Valor com espaço (`GIT_SSH_COMMAND="ssh -v" git push`, `FOO="a b" git
+  # push`) chega partido em vários tokens: a aspa que o valor abre e não fecha
+  # no mesmo token é lembrada (`aberta`), e os tokens seguintes são pulados até
+  # o que a fecha — sem isso `b"` era lido como programa e o push não era lido
+  # (re-revisão da rodada 1). Depois da primeira atribuição, pedaços soltos que
+  # começam por `-` também são pulados.
   while [ "$#" -gt 0 ]; do
+    if [ -n "$aberta" ]; then
+      case "$1" in *"$aberta"*) aberta="" ;; esac
+      shift; continue
+    fi
     case "$(expx_sem_aspas "$1")" in
       GIT_*=*)         atribuiu=1; EXPX_PUSH_AMBIENTE_GIT=1 ;;
       [_[:alpha:]]*=*) atribuiu=1 ;;
       -*)              [ "$atribuiu" = 1 ] || break ;;
       *)               break ;;
+    esac
+    case "$1" in
+      *=\"*) case "${1#*=\"}" in *\"*) ;; *) aberta='"' ;; esac ;;
+      *=\'*) case "${1#*=\'}" in *\'*) ;; *) aberta="'" ;; esac ;;
     esac
     shift
   done

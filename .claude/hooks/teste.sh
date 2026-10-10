@@ -222,6 +222,33 @@ caso "git add tools/git push passa"          mergex/git-perigoso.sh "$(bash_json
 caso "which git passa"                       mergex/git-perigoso.sh "$(bash_json 'which git')" 0
 caso "cat .gitignore passa"                  mergex/git-perigoso.sh "$(bash_json 'cat .gitignore')" 0
 caso "cat foo/digit passa"                   mergex/git-perigoso.sh "$(bash_json 'cat foo/digit')" 0
+# Atribuicao com valor entre aspas e espaco antes do programa: a leitura do push
+# (comum/base.sh) pula o resto do valor ate a aspa fechar (rodada 2 da revisao).
+caso "FOO=\"a b\" git push --force barra"          mergex/git-perigoso.sh "$(bash_json 'FOO="a b" git push --force origin feature/x')" 2
+caso "FOO=\"a b\" /usr/bin/git push --force barra" mergex/git-perigoso.sh "$(bash_json 'FOO="a b" /usr/bin/git push --force origin feature/x')" 2
+caso "FOO='a b c' git push origin main barra"      mergex/git-perigoso.sh "$(bash_json "FOO='a b c' git push origin main")" 2
+caso "FOO=\"a b\" git push na feature passa"       mergex/git-perigoso.sh "$(bash_json 'FOO="a b" git push origin feature/x')" 0
+# Custo: comando grande SEM git sai antes de normalizar (so builtins); com git
+# no fim, a normalizacao e linear. Limite folgado: menos de 2 s cada.
+# (rodada 2 da revisao: a normalizacao O(n^2) antes do pre-filtro levava 0,5-3 s em 10 KB)
+echo "git-perigoso — custo em comando de 10 KB"
+GRANDE=""; while [ "${#GRANDE}" -lt 10240 ]; do GRANDE="${GRANDE}echo aaaa bbbb; x y z; "; done
+custo_ok() { # <desc> <json> <rc esperado> — rc certo e menos de 2 s
+  local desc="$1" json="$2" esperado="$3" ini fim rc ms
+  if [ "$SEM_JQ" = "1" ]; then PULADOS=$((PULADOS+1)); printf '  pulado %s (sem jq)\n' "$desc"; return 0; fi
+  ini="$(date +%s%N 2>/dev/null)"
+  printf '%s' "$json" | bash "$H/mergex/git-perigoso.sh" >/dev/null 2>&1; rc=$?
+  fim="$(date +%s%N 2>/dev/null)"
+  case "$ini$fim" in ''|*[!0-9]*) ms=0 ;; *) ms=$(( (fim - ini) / 1000000 )) ;; esac
+  if [ "$rc" = "$esperado" ] && [ "$ms" -lt 2000 ]; then
+    OK=$((OK+1)); printf '  ok    %s (%s ms)\n' "$desc" "$ms"
+  else
+    FALHOU=$((FALHOU+1)); printf '  FALHA %s (rc %s, esperava %s; %s ms, limite 2000)\n' "$desc" "$rc" "$esperado" "$ms"
+  fi
+}
+custo_ok "10 KB sem git: passa em menos de 2 s"                     "$(bash_json "$GRANDE")" 0
+custo_ok "10 KB com git push --force no fim: barra em menos de 2 s" "$(bash_json "${GRANDE}git push --force origin feature/x")" 2
+unset GRANDE
 
 echo
 echo "branch-limpa"

@@ -62,6 +62,12 @@ fi
 CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 [ -n "$CMD" ] || exit 0
 
+# Sem `git` em nenhuma grafia, este hook não tem assunto — e sai ANTES de
+# normalizar, só com builtins, a custo constante. É o que mantém o custo perto
+# de zero na maioria esmagadora das chamadas: um `cat > arquivo <<EOF` de 10 KB
+# sem git pagava a normalização inteira (re-revisão da rodada 1).
+case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
+
 # A palavra do programa git, normalizada UMA vez para a grafia `git` — antes do
 # pré-filtro, da leitura do push e das regras por regex, que leem CMD_N; as
 # mensagens continuam mostrando CMD como foi escrito. Somem: as aspas pareadas
@@ -80,31 +86,46 @@ CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null
 # deixaria CMD_N vazio e o hook sairia por 0 antes das regras.
 GIT_SEP='[[:space:];&|`(){}]'
 # normaliza_git <comando> — CMD_N recebe o comando com cada palavra que é o
-# programa git reduzida a `git`; separadores e as demais palavras ficam como
-# estão. Palavra = o trecho até o próximo separador (GIT_SEP).
+# programa git reduzida a `git`; separadores (GIT_SEP, a quebra de linha
+# inclusive) e as demais palavras ficam como estão, byte a byte. Anda de
+# OCORRÊNCIA em ocorrência de `git` (poucas, mesmo num comando grande): copia
+# de uma vez o que vem antes, isola a palavra que a contém (do separador
+# anterior ao seguinte) e decide por ela. Cada passo é uma expansão em C sobre
+# o comando ou um laço curto SÓ sobre a palavra; nunca um padrão literal longo
+# (`${rest#"$pre"git}` com `pre` de 100 KB tenta cada comprimento e é
+# quadrático) nem laço por caractere sobre o comando — a versão anterior
+# refatiava o restante a cada palavra (10 KB sem git: ~1 s; 100 KB: ~90 s).
+# LC_ALL=C local: o índice `${s:i:1}` é por byte, O(1), e um byte de
+# continuação UTF-8 nunca é separador. Custo O(ocorrências × tamanho): um
+# comando de 100 KB com um `git` custa ~0,1 s; 100 KB só de `git status;`
+# (milhares de ocorrências) custa segundos — caso patológico, aceito.
 normaliza_git() {
-  local rest="$1" w t
+  local LC_ALL=C rest="$1" pre i n m w t
   CMD_N=""
-  while [ -n "$rest" ]; do
-    w="${rest%%$GIT_SEP*}"
-    rest="${rest#"$w"}"
-    if [ -n "$w" ]; then
-      t="$w"
-      case "$t" in
-        \"?*\") t="${t#\"}"; t="${t%\"}" ;;
-        \'?*\') t="${t#\'}"; t="${t%\'}" ;;
-      esac
-      t="${t#\\}"
-      # aspa que sobrou sem par (a de abertura de um embrulho ou de um `echo
-      # "..."`) e `=` (atribuição `GIT=/usr/bin/git`, opção `--git-dir=…/git`)
-      # não são programa: a palavra fica como está
-      case "$t" in
-        *[\"\'=]*) ;;
-        git|*/git|git.exe|*/git.exe) w=git ;;
-      esac
-      CMD_N="$CMD_N$w"
-    fi
-    if [ -n "$rest" ]; then CMD_N="$CMD_N${rest:0:1}"; rest="${rest:1}"; fi
+  while :; do
+    case "$rest" in *git*) ;; *) CMD_N="$CMD_N$rest"; return ;; esac
+    pre="${rest%%git*}"            # tudo antes da primeira ocorrência (O(n), em C)
+    n=${#pre}
+    rest="${rest:n+3}"             # tudo depois dela (por posição, não por padrão)
+    i=$n                           # início da palavra: do `git` ao separador anterior
+    while [ "$i" -gt 0 ]; do case "${pre:i-1:1}" in $GIT_SEP) break ;; esac; i=$((i - 1)); done
+    n=0; m=${#rest}                # fim da palavra: do `git` ao separador seguinte
+    while [ "$n" -lt "$m" ]; do case "${rest:n:1}" in $GIT_SEP) break ;; esac; n=$((n + 1)); done
+    w="${pre:i}git${rest:0:n}"; t="$w"
+    rest="${rest:n}"
+    case "$t" in
+      \"?*\") t="${t#\"}"; t="${t%\"}" ;;
+      \'?*\') t="${t#\'}"; t="${t%\'}" ;;
+    esac
+    t="${t#\\}"
+    # aspa que sobrou sem par (a de abertura de um embrulho ou de um `echo
+    # "..."`) e `=` (atribuição `GIT=/usr/bin/git`, opção `--git-dir=…/git`)
+    # não são programa: a palavra fica como está
+    case "$t" in
+      *[\"\'=]*) ;;
+      git|*/git|git.exe|*/git.exe) w=git ;;
+    esac
+    CMD_N="$CMD_N${pre:0:i}$w"
   done
 }
 normaliza_git "$CMD"
