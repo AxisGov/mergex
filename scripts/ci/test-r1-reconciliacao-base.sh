@@ -27,8 +27,12 @@ TRAVA="${TRAVA:-$S/trava-do-e1.sh}"
 [ -r "$S/reconciliacao-artefato.sh" ] && . "$S/reconciliacao-artefato.sh"
 
 OK=0; FALHOU=0
-TMPS=""
-trap 'cd "$REPO" 2>/dev/null; for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Os temporários num array: a lista em string partia os caminhos no espaço, e
+# com TMPDIR="…/com espaco" o `rm -rf` apagava o diretório irmão `…/com`
+# (CodeAnt 4235534540). `${TMPS[@]+…}` evita o erro de `set -u` com o array
+# vazio em bash < 4.4.
+TMPS=()
+trap 'cd "$REPO" 2>/dev/null; rm -rf ${TMPS[@]+"${TMPS[@]}"}' EXIT
 
 ok()    { OK=$((OK+1)); printf '  ok    %s\n' "$1"; }
 falha() { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; }
@@ -52,8 +56,8 @@ rc_igual() {
 
 grupo_reproducao() {
   local d dl f st rc cp c n catf
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
-  dl="$(mktemp -d)"; catf="$(mktemp)"; TMPS="$TMPS $dl $catf"
+  d="$(mktemp -d)"; TMPS+=("$d")
+  dl="$(mktemp -d)"; catf="$(mktemp)"; TMPS+=("$dl" "$catf")
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   . "$S/catalogo-de-metodo.sh" || { falha "catálogo ausente"; return; }
   fx_cenario "$d" || { falha "cenário não montou"; return; }
@@ -117,7 +121,7 @@ grupo_reproducao() {
 }
 
 grupo_contrato() {
-  local d; d="$(mktemp -d)"; TMPS="$TMPS $d"
+  local d; d="$(mktemp -d)"; TMPS+=("$d")
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
@@ -161,7 +165,7 @@ grupo_contrato() {
 
 grupo_artefato() {
   local d fx esc arq a rc chave dd tsv ret1 ret2 esp motivo
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   . "$S/reconciliacao-artefato.sh" || { falha "biblioteca ausente"; return; }
   fx="$REPO/scripts/ci/fixtures/r1"; esc="$fx/escalares-001.tsv"; arq="$fx/arquivos-001.tsv"
   a="$d/RECONCILIACAO-BASE-001.md"
@@ -474,7 +478,7 @@ grupo_provas() {
   . "$S/catalogo-de-metodo.sh" || { falha "catálogo ausente"; return; }
 
   # catalogo_pasta_do_trabalho: as regras de persistir-metodo.sh
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   mkdir -p "$d/docs/sprintx/features/fc" "$d/docs/fl" "$d/docs/sprintx/features/fd" "$d/docs/fd" "$d/docs/manutencao/rx"
   [ "$(catalogo_pasta_do_trabalho "$d" sprintx fc)" = docs/sprintx/features/fc ] && ok "pasta: SprintX canônica" || falha "pasta canônica"
   [ "$(catalogo_pasta_do_trabalho "$d" sprintx fl)" = docs/fl ] && ok "pasta: SprintX legada" || falha "pasta legada"
@@ -485,7 +489,7 @@ grupo_provas() {
   catalogo_pasta_do_trabalho "$d" runx nada >/dev/null && falha "pasta RunX ausente passou" || ok "pasta: RunX ausente é erro"
   catalogo_pasta_do_trabalho "$d" n/a fc >/dev/null && falha "pasta de origem n/a passou" || ok "pasta: origem sem pasta é erro"
 
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   antes="$(_foto)"
@@ -504,7 +508,7 @@ grupo_provas() {
     "$FX_NOVO1" "$FX_NOVO2" 'tests/ui/*-ksmv-primitives.test.tsx'
 
   # plano e entrega lidos do disco: têm de estar iguais a HEAD
-  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  t="$(mktemp -d)"; TMPS+=("$t")
   awk -v nova="      altera: [src/painel.ts, $FX_NOVO2]" '/^      altera: / { print nova; next } { print }' \
     docs/sprintx/features/ft-rec/sprint-01/tasks.md > "$t/tasks.md" && cat "$t/tasks.md" > docs/sprintx/features/ft-rec/sprint-01/tasks.md
   grep -Fq "$FX_NOVO2" docs/sprintx/features/ft-rec/sprint-01/tasks.md || falha "tasks.md não foi editado"
@@ -614,7 +618,7 @@ grupo_provas() {
   for variante in base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados \
     fora_primeiro_pai m_sem_integra_base m_com_metodo substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 \
     b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_symlink plano_symlink entrega_no_merge; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    d="$(mktemp -d)"; TMPS+=("$d")
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
     lista=(); while IFS= read -r l; do lista+=("$l"); done <<EOF
@@ -645,7 +649,7 @@ EOF
 
   # catálogo vem de M: um 00-INDICE.md só no disco (ignorado) não transforma
   # em método a área que o merge criou
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=merge_area_base fx_cenario "$d" || { falha "variante merge_area_base não montou"; return; }
   cd "$d" || return
   printf -- '---\nexpx_schema: 1\nkind: base_indice\ntrabalho_id: ft-rec\nareas:\n  - arquivo: notas.md\n---\n' \
@@ -657,7 +661,7 @@ EOF
 
   # a pasta do trabalho é resolvida em M: uma pasta legada só no disco
   # (ignorada) não cria a ambiguidade "duas pastas"
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   mkdir -p docs/ft-rec; printf 'x\n' > docs/ft-rec/rascunho.md
   printf 'docs/ft-rec/\n' >> .git/info/exclude
@@ -667,8 +671,8 @@ EOF
   # nome com quebra de linha na pasta do trabalho em M: a lista de tasks.md da
   # união é separada por linha, e `foo<NL>/abs/tasks.md` viraria um tasks.md
   # do disco. A materialização recusa o nome (rc 5) antes de qualquer prova.
-  local alvo; alvo="$(mktemp -d)"; TMPS="$TMPS $alvo"
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  local alvo; alvo="$(mktemp -d)"; TMPS+=("$alvo")
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_NL_ALVO="$alvo" FX_VARIANTE=plano_nl fx_cenario "$d" || { falha "variante plano_nl não montou"; return; }
   cd "$d" || return
   sed "s|altera: \[src/painel.ts\]|altera: [src/painel.ts, $FX_NOVO2]|" docs/sprintx/features/ft-rec/sprint-01/tasks.md > "$alvo/tasks.md"
@@ -678,7 +682,7 @@ EOF
   reprova "caminho com quebra de linha em M aponta para tasks.md do disco" 5 \
     "pasta do trabalho em M com caminho inválido" "$FX_NOVO1"
   cd "$REPO" || return
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=plano_tab fx_cenario "$d" || { falha "variante plano_tab não montou"; return; }
   cd "$d" || return
   reprova "caminho com TAB na pasta do trabalho em M" 5 "pasta do trabalho em M com caminho inválido" "$FX_NOVO1" "$FX_NOVO2"
@@ -690,8 +694,8 @@ EOF
   # O mesmo com componente `.` (fica dentro do temporário, mas também é recusado).
   local fora cadeia comp i ftrec feat sx docs raiz mlinha osx odocs oraiz pontual
   for pontual in .. .; do
-  fora="$(mktemp -d)"; TMPS="$TMPS $fora"
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fora="$(mktemp -d)"; TMPS+=("$fora")
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   cadeia="$(printf 'escrito fora do temporário\n' | git hash-object -w --stdin)"
   cadeia="$(printf '100644 blob %s\tescrito.txt\n' "$cadeia" | git mktree)"
@@ -724,7 +728,7 @@ EOF
   done
 
   # canônica e legada em M: erro, com o motivo do catálogo no stderr
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=duas_pastas fx_cenario "$d" || { falha "variante duas_pastas não montou"; return; }
   cd "$d" || return
   reprova "canônica e legada em M" 4 "pasta do trabalho não determinável em M: há duas pastas SprintX para ft-rec" \
@@ -732,7 +736,7 @@ EOF
   cd "$REPO" || return
 
   # RunX: a pasta docs/manutencao/<t> de M é a pasta do trabalho
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=runx fx_cenario "$d" || { falha "variante runx não montou"; return; }
   cd "$d" || return
   r_orig=("${r[@]}")
@@ -742,7 +746,7 @@ EOF
   cd "$REPO" || return
 
   # enxertos locais (refs/replace e .git/info/grafts) não falsificam os pais de M
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=m_um_pai fx_cenario "$d" || { falha "variante m_um_pai não montou"; return; }
   cd "$d" || return
   git replace --graft "$FX_M" "$FX_P1" "$FX_B1"
@@ -756,7 +760,7 @@ EOF
   cd "$REPO" || return
 
   # branch_base sujo no disco não afrouxa a condição estrutural da base
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=fora_primeiro_pai fx_cenario "$d" || { falha "variante fora_primeiro_pai não montou"; return; }
   cd "$d" || return
   sed 's|^branch_base: main$|branch_base: feature/ft-rec|' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
@@ -765,7 +769,7 @@ EOF
   cd "$REPO" || return
 
   # diretório nunca é caminho reconciliado
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=diretorio fx_cenario "$d" || { falha "variante diretorio não montou"; return; }
   cd "$d" || return
   reprova "diretório na lista reprova" 4 "arquivo: tests/base: não é arquivo (blob)" \
@@ -784,7 +788,7 @@ EOF
   # ordem barra o merge lateral antes de M. O --verificar, sobre um 001
   # forjado, chega à prova e tem de reprovar.
   local v VT
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=lateral_reverte fx_cenario "$d" || { falha "variante lateral_reverte não montou"; return; }
   cd "$d" || return
   [ "$(git rev-list --parents -n1 "$FX_P1" | wc -w)" = 3 ] && git merge-base --is-ancestor "$FX_B0" "$FX_P1" \
@@ -808,7 +812,7 @@ EOF
     && ok "prova 2: só o README.md reprova; NOVO1 e NOVO2 passam" || falha "prova 2: motivos: $("${v[@]}" 2>/dev/null | tr '\n\t' '|>')"
   cd "$REPO" || return
   for variante in caminho_especial base_alterou; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    d="$(mktemp -d)"; TMPS+=("$d")
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
     lista=(); while IFS= read -r l; do lista+=("$l"); done <<EOF
@@ -827,11 +831,11 @@ EOF
     cd "$REPO" || return
   done
 
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
   cd "$d" || return
   reprova "merge em andamento" 3 "merge em andamento" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   bash "$TRAVA" --adquirir teste-r1 >/dev/null
   rc_motivo "trava C5 ocupada" 2 "trava" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
@@ -966,10 +970,10 @@ _interrompe() {
 grupo_entrega() {
   local d t r variante hoje1 hoje2 esperado k out c modo_antes ls_antes antes antes_commits antes_tasks
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  t="$(mktemp -d)"; TMPS+=("$t")
 
   # ---- cenário padrão: reabertura e base validada --------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   cp "$FX_ENTREGA" "$t/antes.md"
@@ -1014,7 +1018,7 @@ grupo_entrega() {
   cd "$REPO" || return
 
   # ---- edição alheia no ENTREGA.md: nunca sobrescrita ----------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   printf '\nNota de quem editou.\n' >> "$FX_ENTREGA"
@@ -1024,9 +1028,34 @@ grupo_entrega() {
   ls "docs/entregas/ft-rec" | grep -q 'registro\|\.tmp\|\.novo' && falha "temporário deixado na pasta da entrega" || ok "sem temporário na pasta da entrega"
   cd "$REPO" || return
 
+  # ---- edição concorrente entre a conferência do disco e o mv (CodeAnt 4235534531) ----
+  # Cópia da skill em que rb_emitir — o último passo antes da troca — edita o
+  # ENTREGA.md do disco antes de emitir, como um editor salvando nesse instante.
+  # O registro tem de reconferir o disco antes do mv: rc 3, a edição fica, o
+  # artefato novo sai e nada mais fica na pasta da entrega.
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
+  rm -rf "$t/skill" && cp -R "$S" "$t/skill" || { falha "cópia da skill"; return; }
+  cat >> "$t/skill/reconciliacao-artefato.sh" <<'EOF'
+# (bancada) edição concorrente do ENTREGA.md imediatamente antes do ponto de commit
+eval "rb_emitir_original() $(declare -f rb_emitir | sed 1d)"
+rb_emitir() { printf '\nEdição salva durante o registro.\n' >> "$ENTREGA"; rb_emitir_original "$@"; }
+EOF
+  cd "$d" || return
+  cp "$FX_ENTREGA" "$t/concorrente-antes.md"
+  out="$(bash "$t/skill/reconciliacao-base.sh" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; c=$?
+  [ "$c" = 3 ] && ok "edição concorrente antes do mv: rc 3 (o estado mudou), como a conferência do disco" || falha "edição concorrente: rc=$c: $(printf '%s' "$out" | tr '\n' '|')"
+  cmp -s "$FX_ENTREGA" <(cat "$t/concorrente-antes.md"; printf '\nEdição salva durante o registro.\n') \
+    && ok "edição concorrente: o ENTREGA.md do disco é o de antes mais a edição (nunca a cópia do registro)" \
+    || falha "edição concorrente perdida ou ENTREGA.md diferente do esperado: $(git diff --stat -- "$FX_ENTREGA" | tail -1)"
+  [ ! -e docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md ] && ok "edição concorrente: o artefato novo foi removido" || falha "artefato novo ficou"
+  ls docs/entregas/ft-rec | grep -q 'registro\|\.tmp\|\.novo' && falha "edição concorrente: temporário deixado na pasta da entrega" || ok "edição concorrente: sem temporário na pasta da entrega"
+  [ "$(git status --porcelain=v1 --untracked-files=all)" = " M $FX_ENTREGA" ] && ok "edição concorrente: só o ENTREGA.md editado mudou na árvore" || falha "status inesperado: $(git status --porcelain | tr '\n' '|')"
+  rm -rf "$t/skill"
+  cd "$REPO" || return
+
   # ---- tudo ou nada: a substituição do ENTREGA.md falha -------------------
   # `mv` que recusa o destino ENTREGA.md (determinístico, vale também para root)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   mkdir -p "$t/shim-mv"
@@ -1048,7 +1077,7 @@ grupo_entrega() {
 
   # ---- variantes do ENTREGA.md --------------------------------------------
   for variante in entrega_sem_chaves entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    d="$(mktemp -d)"; TMPS+=("$d")
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
     r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
@@ -1097,7 +1126,7 @@ grupo_entrega() {
 
   # variantes que o registro recusa sem gravar nada
   for variante in entrega_dup entrega_reconc_cheia entrega_bloco_estranho entrega_aspas_d entrega_aspas_s; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"
+    d="$(mktemp -d)"; TMPS+=("$d")
     FX_VARIANTE="$variante" fx_cenario "$d" || { falha "variante $variante não montou"; continue; }
     cd "$d" || return
     r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
@@ -1115,7 +1144,7 @@ grupo_entrega() {
   # `mv` do destino ENTREGA.md parado (marcador) antes do mv real; o teste mata
   # o registro (SIGTERM) com o artefato já emitido e o temporário já ao lado
   # do ENTREGA.md.
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   mkdir -p "$t/shim-lento"
@@ -1177,8 +1206,8 @@ AR3=docs/entregas/ft-rec/RECONCILIACAO-BASE-003.md
 grupo_verificar() {
   local d v out rc antes tok campo valor esperado lateral VT
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  VT="$(mktemp -d)"; TMPS="$TMPS $VT"
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  VT="$(mktemp -d)"; TMPS+=("$VT")
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
 
@@ -1303,7 +1332,7 @@ coberto	$FX_NOVO1	001"
 
   # âncora: o b0_sha do 001 é a base_validada_sha da entrega em P1 (antes do
   # merge; a variante grava B1 num commit da feature logo antes do merge)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=b0_fora_p1 fx_cenario "$d" || { falha "variante b0_fora_p1 não montou"; return; }
   cd "$d" || return
   fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja da âncora"
@@ -1311,7 +1340,7 @@ coberto	$FX_NOVO1	001"
   cd "$REPO" || return
 
   # M fora da linha de primeiro pai de HEAD
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=fora_primeiro_pai fx_cenario "$d" || { falha "variante fora_primeiro_pai não montou"; return; }
   cd "$d" || return
   lateral="$(git rev-parse HEAD^2)"
@@ -1322,7 +1351,7 @@ coberto	$FX_NOVO1	001"
   cd "$REPO" || return
 
   # caminho com espaço, acento e apóstrofo (core.quotepath true no repositório)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=caminho_especial fx_cenario "$d" || { falha "variante caminho_especial não montou"; return; }
   cd "$d" || return
   bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" "$FX_ESPECIAL" >/dev/null 2>&1 \
@@ -1332,7 +1361,7 @@ coberto	$FX_NOVO1	001"
   cd "$REPO" || return
 
   # cadeia 001 -> 002 (dois merges de base)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "emissão do 001"
@@ -1358,7 +1387,7 @@ coberto	$FX_NOVO1	001"
 
   # cadeia em que o 002 reconcilia de novo um caminho do 001: vale o blob_m da
   # reconciliação mais recente que o lista
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" reajusta || { falha "segunda base (reajusta) não montou"; return; }
   cd "$d" || return
   FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "emissão do 001"
@@ -1371,7 +1400,7 @@ coberto	$FX_NOVO1	001"
 
   # o plano de cada reconciliação é o da árvore do M dela: um commit de plano
   # entre M1 e M2 que declara NOVO3 vale para o 002
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   sed 's|altera: \[src/painel.ts\]|altera: [src/painel.ts, tests/ui/frequency-ksmv-primitives.test.tsx]|' \
     docs/sprintx/features/ft-rec/sprint-01/tasks.md > "$VT/tasks.md" && cat "$VT/tasks.md" > docs/sprintx/features/ft-rec/sprint-01/tasks.md
@@ -1387,7 +1416,7 @@ coberto	$FX_NOVO1	001"
   # o tocou entre b0 e b1 do 002 E M2 tem o blob_m do 001
   local modo
   for modo in descarta ressuscita esconde; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
     fx_segunda_base "$d" "$modo" || { falha "segunda base ($modo) não montou"; continue; }
     cd "$d" || return
     FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "$modo: emissão do 001"
@@ -1407,7 +1436,7 @@ coberto	$FX_NOVO1	001"
   done
 
   # o merge de integração não pode reescrever o ENTREGA.md (âncora em P1)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=entrega_no_merge fx_cenario "$d" || { falha "variante entrega_no_merge não montou"; return; }
   cd "$d" || return
   fx_forja_artefato "$d" "$FX_NOVO1" "$FX_NOVO2" && fx_entrega_sincroniza "$d" || falha "forja entrega_no_merge"
@@ -1417,7 +1446,7 @@ coberto	$FX_NOVO1	001"
   # ordem dos M, isolada: 001 aponta m1 (posterior), 002 aponta m2 (anterior);
   # tudo o mais confere (CAD, âncora, estrutura, inventário)
   local idx tree0 m0 by m2o m1o
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   idx="$VT/idx-ordem"; rm -f "$idx"
   GIT_INDEX_FILE="$idx" git read-tree "$FX_M"
@@ -1456,10 +1485,10 @@ _instantaneo() {
 grupo_cadeia() {
   local d r v out c t lido tt esperado caso antes ls_antes x m2x lateral pid i
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  t="$(mktemp -d)"; TMPS+=("$t")
 
   # ---- cadeia 001 -> 002 sem commit entre os registros (brief) -------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d"; fx_segunda_base "$d"; cd "$d" || return
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d"; fx_segunda_base "$d"; cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
   v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
   rc_igual "registra M1 com HEAD em M2" 0 "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2"
@@ -1550,7 +1579,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # ---- 001: a mesma lista em outra ordem é noop; outra lista, rc 5 ---------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
   antes="$(_instantaneo)"
@@ -1562,7 +1591,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # ---- ordem: o merge mais antigo ainda não registrado vem primeiro ---------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   reprova "M2 (--merge) antes de M1 reprova pela ordem" 5 "não é o merge mais antigo ainda não registrado" --merge "$FX_M2" -- "$FX_NOVO3"
@@ -1579,7 +1608,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # --merge fora da linha de primeiro pai de HEAD (guarda EST)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=fora_primeiro_pai fx_cenario "$d" || { falha "variante fora_primeiro_pai não montou"; return; }
   cd "$d" || return
   lateral="$(git rev-parse HEAD^2)"
@@ -1592,7 +1621,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # um merge que não é de integração trava a fila: a mensagem o nomeia
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
   x="$(printf 'auxiliar\n' | git commit-tree "$FX_M^{tree}" -p "$FX_M")"
@@ -1604,7 +1633,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # M^2 do merge seguinte não descende do b1_sha da última reconciliação
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
   x="$(printf 'base paralela\n' | git commit-tree "$FX_B0^{tree}" -p "$FX_B0")"
@@ -1614,7 +1643,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # ---- órfão de registro interrompido -------------------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
@@ -1626,14 +1655,14 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # ---- antes do ponto de commit (o mv do ENTREGA.md): SIGTERM desfaz tudo --
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
   mkdir -p "$t/shim-lento"
   _shim_bloqueio "$t/shim-lento/mv" '*/ENTREGA.md|ENTREGA.md' antes "$t/marca-janela"
   cp "$AR" "$t/janela-a1.md"; cp "$FX_ENTREGA" "$t/janela-e.md"; ls_antes="$(ls -A docs/entregas/ft-rec)"; antes="$(_foto)"
-  local tdj; tdj="$(mktemp -d)"; TMPS="$TMPS $tdj"
+  local tdj; tdj="$(mktemp -d)"; TMPS+=("$tdj")
   env TMPDIR="$tdj" PATH="$t/shim-lento:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
   pid=$!
   _espera_ponto "$pid" "$t/marca-janela" "janela"
@@ -1658,7 +1687,7 @@ grupo_cadeia() {
   local modo_int real_mv tdi
   real_mv="$(command -v mv)"
   for modo_int in g2 term kill falha; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
     fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
     cd "$d" || return
     "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "$modo_int: registro do 001"
@@ -1672,7 +1701,7 @@ grupo_cadeia() {
     esac
     # o temporário do registro fica num TMPDIR do teste: o SIGKILL impede o
     # encerrar do script de removê-lo, e a limpeza da suíte o remove
-    tdi="$(mktemp -d)"; TMPS="$TMPS $tdi"
+    tdi="$(mktemp -d)"; TMPS+=("$tdi")
     if [ "$modo_int" = falha ]; then
       out="$(env TMPDIR="$tdi" PATH="$t/shim-$modo_int:$PATH" "${r[@]}" -- "$FX_NOVO3" 2>&1 >/dev/null)"; c=$?
       { [ "$c" = 1 ] && case "$out" in *"registro efetivado"*"rode --registrar de novo"*) true ;; *) false ;; esac; } \
@@ -1730,7 +1759,7 @@ grupo_cadeia() {
   # ---- o resíduo é reconhecido pela estrutura, nunca pelo texto ------------
   local frase='registro interrompido: rode --registrar de novo com o mesmo --merge/M' err
   # X1b/X1c/X2b: cadeia 001 -> 002 completa; o 001 traz a frase num valor
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "X: registro do 001"
@@ -1769,18 +1798,18 @@ grupo_cadeia() {
     env PATH="$t/shim-falha:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1
     [ -e "$AR2" ] && grep -q '^estado: ativa$' "$AR"
   }
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
   fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" README.md || falha "resíduo+prova: forja do 002"
   reprova "resíduo + prova reprovada no 002: rc 4, sem conclusão" 4 "prova 1: README.md" -- "$FX_NOVO3" README.md
   grep -q '^estado: ativa$' "$AR" && ok "resíduo + prova: o 001 continua ativa" || falha "resíduo + prova: o 001 mudou"
   cd "$REPO" || return
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
   sed -i 's/^estado: ativa$/estado: quebrado/' "$AR2"
   reprova "resíduo + última ilegível: rc 5 cadeia ilegível, sem conclusão" 5 "cadeia ilegível: RECONCILIACAO-BASE-002.md" -- "$FX_NOVO3"
   cd "$REPO" || return
   # X9: resíduo + a frase num campo não assinado da última que só a
   # verificação lê (branch): o artefato é lido, mas a falha não é resíduo
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
   sed -i "s|^branch: .*|branch: \"$frase\"|" "$AR2"
   rb_validar "$AR2" ft-rec 2 || falha "X9: o 002 com a frase no branch deveria continuar válido: $RB_ERRO"
   reprova "X9: resíduo + frase no branch da última: rc 5, sem conclusão" 5 "branch ($frase) diverge de ENTREGA.branch" -- "$FX_NOVO3"
@@ -1789,7 +1818,7 @@ grupo_cadeia() {
   # X7: sobra rastreada nunca é removida pelo registro. O commit da sobra tira
   # HEAD do merge: o registro roda com --merge M2, o mesmo M da última, para
   # chegar à conclusão; a cadeia a reprova (não é resíduo) antes dela.
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
   printf 'commitada\n' > "$AR.superada.99"
   git add -f -- "$AR.superada.99" && git commit -q -m "sobra commitada" -- "$AR.superada.99" || falha "X7: commit da sobra"
   cp "$AR" "$t/x7-a1.md"
@@ -1803,7 +1832,7 @@ grupo_cadeia() {
   # resíduo; rc 5 `sobra inválida`, validada antes de qualquer escrita
   local tipo_sobra
   for tipo_sobra in diretorio link; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
     cp "$AR" "$t/si-a1.md"; printf 'alvo\n' > "$t/si-alvo"
     case "$tipo_sobra" in
       diretorio) mkdir "$AR.superada.88" ;;
@@ -1825,7 +1854,7 @@ grupo_cadeia() {
     cd "$REPO" || return
   done
   # o prefixo da sobra é exatamente o nome de um artefato da cadeia
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
   cp "$AR" "$t/sp-a1.md"
   cp "$AR" docs/entregas/ft-rec/RECONCILIACAO-BASE-009.md.superada.123
   reprova "sobra de 009 sem 009 na cadeia: rc 5 pela cadeia, nada completado" 5 \
@@ -1844,7 +1873,7 @@ grupo_cadeia() {
   cd "$REPO" || return
   # a remoção da sobra falha: nenhum erro deixa o 001 superada com rc ≠ 0
   # (as sobras saem antes da marcação); a reexecução, sem a falha, completa
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); _residuo "$d" || { falha "resíduo não montou"; cd "$REPO"; return; }
   cp "$AR" "$AR.superada.321"; cp "$AR" "$t/rm-a1.md"
   mkdir -p "$t/shim-rm"
   printf '#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in *.superada.[0-9]*) echo "rm: recusado de propósito" >&2; exit 1 ;; esac; done\nexec %s "$@"\n' "$(command -v rm)" > "$t/shim-rm/rm"
@@ -1862,7 +1891,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # três elos com a ANTEPENÚLTIMA ativa: não é resíduo, não completa
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" reajusta || { falha "segunda base não montou"; return; }
   fx_terceira_base "$d" || { falha "terceira base não montou"; return; }
   cd "$d" || return
@@ -1880,12 +1909,12 @@ grupo_cadeia() {
 
   # SIGKILL ANTES do ponto de commit: nenhuma sobra .superada; o órfão tem
   # instrução que leva ao registro
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "kill-antes: registro do 001"
   cp "$AR" "$t/ka-a1.md"; cp "$FX_ENTREGA" "$t/ka-e.md"
-  tdi="$(mktemp -d)"; TMPS="$TMPS $tdi"
+  tdi="$(mktemp -d)"; TMPS+=("$tdi")
   mkdir -p "$t/shim-ka"
   _shim_bloqueio "$t/shim-ka/mv" '*/ENTREGA.md|ENTREGA.md' antes "$t/marca-ka"
   setsid env TMPDIR="$tdi" PATH="$t/shim-ka:$PATH" "${r[@]}" -- "$FX_NOVO3" >/dev/null 2>&1 &
@@ -1902,7 +1931,7 @@ grupo_cadeia() {
   rc_igual "kill-antes: seguida a instrução, o M2 registra" 0 "${r[@]}" -- "$FX_NOVO3"
   cd "$REPO" || return
   # órfão + sobra (estado de versão anterior): a instrução nomeia os dois
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "órfão+sobra: registro do 001"
@@ -1915,7 +1944,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # ---- a cadeia existente é verificada antes de servir de base -------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" README.md && fx_entrega_sincroniza "$d" || falha "forja do 001"
@@ -1929,7 +1958,7 @@ grupo_cadeia() {
   cd "$REPO" || return
 
   # ---- checkpoint commitado entre M1 e M2 (fluxo real) ---------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001"
   fx_persiste_reconciliacao "$d" || falha "checkpoint reconciliacao-base"
@@ -1951,7 +1980,7 @@ m=$FX_M2"
   cd "$REPO" || return
 
   # ---- condição 2 da cadeia: M2 muda só o modo de um caminho do 001 --------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   git update-index --chmod=+x "$FX_NOVO2"; chmod +x "$FX_NOVO2"
@@ -1963,7 +1992,7 @@ m=$FX_M2"
   cd "$REPO" || return
 
   # ---- três elos: 001 -> 002 (relista NOVO1) -> 003 ------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" reajusta || { falha "segunda base (reajusta) não montou"; return; }
   fx_terceira_base "$d" || { falha "terceira base não montou"; return; }
   cd "$d" || return
@@ -2017,11 +2046,11 @@ _nada_gravado() {
 grupo_legado() {
   local d r v t VT out c antes st lido tt esperado variante mb raiz trecho m2x caso
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"; VT="$t"
+  t="$(mktemp -d)"; TMPS+=("$t"); VT="$t"
   _shim_merge_base "$t/shim-mb"
 
   # ---- brief: o legado infere B0; o ambíguo falha fechado ------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado; cd "$d" || return
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado; cd "$d" || return
   cp "$FX_ENTREGA" "$t/antes.md"; antes="$(bash "$SEQ" --ler "$FX_ENTREGA")"
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   rc_igual "legado infere B0" 0 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
@@ -2107,7 +2136,7 @@ grupo_legado() {
   cd "$REPO" || return
 
   # ---- 002 sem commit entre os registros ----------------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   rc_igual "sem commit: 001 legado (--merge M1)" 0 "${r[@]}" --merge "$FX_M" -- "$FX_NOVO1" "$FX_NOVO2"
@@ -2124,7 +2153,7 @@ grupo_legado() {
   cd "$REPO" || return
 
   # ---- cadeia presente e base_validada_sha apagada de P1: rc 5 -------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
   cd "$d" || return
   "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "registro do 001 legado"
   fx_persiste_reconciliacao "$d" || falha "checkpoint do 001 legado"
@@ -2136,7 +2165,7 @@ grupo_legado() {
 
   # ---- nunca reinfere: a cadeia apagada do histórico corrente --------------
   for caso in historico origem; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
     cd "$d" || return
     "${r[@]}" -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1 || falha "$caso: registro do 001 legado"
     fx_persiste_reconciliacao "$d" || falha "$caso: checkpoint do 001 legado"
@@ -2155,7 +2184,7 @@ grupo_legado() {
   # ---- brief: legado ambíguo falha fechado, sem gravar nada ----------------
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
   for variante in criss_cross merge_previo; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$variante" fx_cenario "$d" legado; cd "$d" || return
+    d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE="$variante" fx_cenario "$d" legado; cd "$d" || return
     st="$(git status --porcelain=v1 --untracked-files=all)"
     rc_igual "legado ambíguo ($variante) falha fechado" 6 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
     git diff --quiet && ok "nada gravado ($variante)" || falha "gravou algo ($variante)"
@@ -2175,7 +2204,7 @@ grupo_legado() {
   done
 
   # ---- merge-base não ancestral de B1 (git simulado) -----------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "cenário legado não montou"; return; }
   cd "$d" || return
   st="$(git status --porcelain=v1 --untracked-files=all)"
   git merge-base --is-ancestor "$(git merge-base "$FX_P1" "$FX_B1")" "$FX_B1" && ok "controle: com o git real, o merge-base é ancestral de B1" || falha "controle: ancestralidade"
@@ -2185,14 +2214,14 @@ grupo_legado() {
   cd "$REPO" || return
 
   # ---- P1 sem o ENTREGA.md (pais trocados) num legado: não infere ----------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=pais_trocados fx_cenario "$d" legado || { falha "pais_trocados legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=pais_trocados fx_cenario "$d" legado || { falha "pais_trocados legado não montou"; return; }
   cd "$d" || return
   reprova "legado com P1 sem o ENTREGA.md (pais trocados): rc 4, sem inferir" 4 "a base legada não é inferível" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
 
   # ---- chave presente (vazia, null, entre aspas) ou origem sem base: rc 5 ---
   for variante in entrega_base_vazia entrega_base_null entrega_base_aspas entrega_sem_base; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$variante" fx_cenario "$d" || { falha "$variante não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE="$variante" fx_cenario "$d" || { falha "$variante não montou"; return; }
     cd "$d" || return
     case "$variante" in entrega_sem_base) trecho="origem_base sem base_validada_sha" ;; *) trecho="base_validada_sha não é SHA de 40 hex" ;; esac
     reprova "$variante: rc 5 (contrato), sem inferir" 5 "$trecho" "$FX_NOVO1" "$FX_NOVO2"
@@ -2201,7 +2230,7 @@ grupo_legado() {
 
   # ---- a fonte é P1: nem o disco nem M sem a chave alimentam a inferência --
   # (merge_previo não legado: com a base de P1, a ordem fala, rc 5; inferir daria 6)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=merge_previo fx_cenario "$d" || { falha "merge_previo não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_previo fx_cenario "$d" || { falha "merge_previo não montou"; return; }
   cd "$d" || return
   sed '/^base_validada_sha:/d' "$FX_ENTREGA" > "$t/e.md" && cat "$t/e.md" > "$FX_ENTREGA"
   reprova "ENTREGA.md do disco sem a chave: B0 vem de P1 (rc 5 pela ordem, não 6)" 5 "ordem:" "$FX_NOVO1" "$FX_NOVO2"
@@ -2214,7 +2243,7 @@ grupo_legado() {
 
   # ---- --verificar: 001 inferida_legado forjado ----------------------------
   # b0_sha diferente do merge-base (B0 com pai: a raiz também é ancestral comum)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=base_com_pai fx_cenario "$d" legado || { falha "base_com_pai não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=base_com_pai fx_cenario "$d" legado || { falha "base_com_pai não montou"; return; }
   cd "$d" || return
   rc_igual "base_com_pai: o legado registra" 0 "${r[@]}" "$FX_NOVO1" "$FX_NOVO2"
   v_ok "base_com_pai: verifica" "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001' "$FX_NOVO2" "$FX_NOVO1")"
@@ -2227,7 +2256,7 @@ grupo_legado() {
 
   # criss_cross e merge_previo: 001 forjado (assinado, ENTREGA.md coerente)
   for variante in criss_cross merge_previo; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$variante" fx_cenario "$d" legado || { falha "$variante não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE="$variante" fx_cenario "$d" legado || { falha "$variante não montou"; return; }
     cd "$d" || return
     mb="$(git merge-base --all "$FX_P1" "$FX_B1" | sed -n 1p)"
     FX_ORIGEM_BASE=inferida_legado fx_emite_reconciliacao "$d" 1 "$mb" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "$variante: forja"
@@ -2247,7 +2276,7 @@ grupo_legado() {
 # o rc e a saída exatos e o stderr vazio.
 v9_espera() {
   local desc="$1" esperado="$2" saida="$3" out rc err
-  err="$(mktemp)"; TMPS="$TMPS $err"
+  err="$(mktemp)"; TMPS+=("$err")
   out="$("${v[@]}" 2>"$err")"; rc=$?
   if [ "$rc" = "$esperado" ] && [ "$out" = "$saida" ] && [ ! -s "$err" ]; then ok "$desc"
   else falha "$desc — rc=$rc (esperava $esperado) out=$(printf '%s' "$out" | tr '\n\t' '|>') err=$(tr '\n' ' ' < "$err")"; fi
@@ -2276,10 +2305,10 @@ _v9_commit() {
 grupo_v9() {
   local d v t out tk lt e x
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  t="$(mktemp -d)"; TMPS+=("$t")
 
   # ---- o fluxo do plano: antes e depois do registro, ref parada, produto ----
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   v=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
   rc_igual "antes do registro: V9 reprova os dois" 1 "${v[@]}"
@@ -2330,7 +2359,7 @@ grupo_v9() {
   cd "$REPO" || return
 
   # ---- sem reconciliação: base de HEAD:ENTREGA, nunca do disco ------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   sed "s/^base_validada_sha: .*/base_validada_sha: $FX_M/" "$FX_ENTREGA" > "$t/e" && cat "$t/e" > "$FX_ENTREGA"
   out="$("${v[@]}" 2>/dev/null)"
@@ -2353,7 +2382,7 @@ grupo_v9() {
   cd "$REPO" || return
 
   # ---- artefato com contrato quebrado: ok=false → v9_sem_prova ------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null
   sed 's/^estado: ativa$/estado: superada/' "$AR" > "$t/a" && cat "$t/a" > "$AR"
@@ -2362,7 +2391,7 @@ grupo_v9() {
   cd "$REPO" || return
 
   # ---- caminho com espaço, acento e apóstrofo -------------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=caminho_especial fx_cenario "$d" || { falha "caminho_especial não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=caminho_especial fx_cenario "$d" || { falha "caminho_especial não montou"; return; }
   cd "$d" || return
   out="$("${v[@]}" 2>/dev/null)"
   printf '%s\n' "$out" | grep -Fxq "fora_do_plano	$FX_ESPECIAL" \
@@ -2373,7 +2402,7 @@ grupo_v9() {
   cd "$REPO" || return
 
   # ---- RunX: HISTORICO.md não é isento --------------------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=runx fx_cenario "$d" || { falha "runx não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=runx fx_cenario "$d" || { falha "runx não montou"; return; }
   cd "$d" || return
   bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec -- "$FX_NOVO1" "$FX_NOVO2" >/dev/null
   v=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec)
@@ -2386,7 +2415,7 @@ grupo_v9() {
   v=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
 
   # ---- legado sem a chave: merge-base único, só leitura ---------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "legado não montou"; return; }
   cd "$d" || return
   lt="$(_leitura)"
   v9_espera "legado sem base_validada_sha: merge-base único com branch_base (inferida_leitura)" 1 \
@@ -2401,12 +2430,39 @@ grupo_v9() {
   v9_sem_prova "legado com dois merge-bases: v9_sem_prova" "merge-base"
   cd "$REPO" || return
 
+  # ---- base com um merge -s ours que DESCARTOU a pasta do trabalho ----------
+  # A árvore da base não tem a pasta; só a história tem (o 2º pai do merge). A
+  # simplificação de histórico do rev-list com pathspec segue o pai TREESAME e
+  # esconde esse commit; a guarda (b) precisa de --full-history (CodeAnt
+  # 4235520258). Legado, para a base ser o merge-base único com branch_base.
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  cd "$d" || return
+  # S: sobre B0, toca a pasta do trabalho (sem Trabalho: e fora de ENTREGA.commits)
+  git switch -q --detach "$FX_B0" && mkdir -p docs/sprintx/features/ft-rec \
+    && printf 'lateral\n' > docs/sprintx/features/ft-rec/lateral.md \
+    && git add docs/sprintx/features/ft-rec/lateral.md && git commit -qm 'lateral: toca a pasta do trabalho' || { falha "S não montou"; cd "$REPO"; return; }
+  x="$(git rev-parse HEAD)"
+  # B2: merge -s ours de S em B1 (árvore de B1, S na história); main passa a ser B2
+  git switch -q --detach "$FX_B1" && git merge -q -s ours -m 'merge -s ours: descarta a pasta do trabalho' "$x" || { falha "B2 não montou"; cd "$REPO"; return; }
+  x="$(git rev-parse HEAD)"
+  git branch -f main "$x"
+  # HEAD passa a descender de B2 sem mudar a árvore de M: merge-base único = B2
+  git switch -q feature/ft-rec || { falha "volta à feature"; cd "$REPO"; return; }
+  git update-ref refs/heads/feature/ft-rec "$(git commit-tree "$FX_M^{tree}" -p "$FX_M" -p "$x" -m 'merge: traz B2')"
+  [ "$(git merge-base --all HEAD main)" = "$x" ] && [ -z "$(git ls-tree main docs/sprintx)" ] && [ -z "$(git status --porcelain)" ] \
+    && [ -z "$(git rev-list -n1 main -- docs/sprintx/features/ft-rec docs/entregas/ft-rec)" ] \
+    && [ "$(git rev-list -n1 --full-history main -- docs/sprintx/features/ft-rec docs/entregas/ft-rec)" = "$x" ] \
+    && ok "controle: a base é B2 (merge-base único), sem a pasta na árvore; o rev-list simplificado não a vê, o --full-history vê" \
+    || falha "controle do merge -s ours: mb=$(git merge-base --all HEAD main | tr '\n' ' ') simples='$(git rev-list -n1 main -- docs/sprintx/features/ft-rec)' full='$(git rev-list -n1 --full-history main -- docs/sprintx/features/ft-rec)'"
+  v9_sem_prova "base com merge -s ours que descartou a pasta do trabalho: v9_sem_prova (a base contém o trabalho)" "toca a pasta do trabalho"
+  cd "$REPO" || return
+
   # ---- chave presente e inválida em HEAD; contexto divergente --------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE=entrega_base_null fx_cenario "$d" || { falha "entrega_base_null não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=entrega_base_null fx_cenario "$d" || { falha "entrega_base_null não montou"; return; }
   cd "$d" || return
   v9_sem_prova "base_validada_sha null em HEAD: v9_sem_prova" "base_validada_sha malformada"
   cd "$REPO" || return
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   e=(bash "$V9" --verificar --entrega "$FX_ENTREGA" --origem runx --trabalho ft-rec)
   rc_igual "origem divergente do ENTREGA.md: rc 3" 3 "${e[@]}"
@@ -2472,13 +2528,13 @@ _v9_ambiguo() {
 grupo_v9_robusto() {
   local d v t out modo x plano msg r
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  t="$(mktemp -d)"; TMPS+=("$t")
   v=(bash "$V9" --verificar --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec)
   r=(bash "$RB" --registrar --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec --)
 
   # ---- submódulo depois de M: nunca escondido, nunca isento ------------------
   for modo in config gitmodules; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
     cd "$d" || return
     "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1
     _v9_gitlink vendor/lib
@@ -2488,7 +2544,7 @@ grupo_v9_robusto() {
       "$(printf 'base=%s\norigem_base=reconciliacao\nresultado=v9\nfora_do_plano\tvendor/lib' "$FX_B1")"
     cd "$REPO" || return
   done
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1
   _v9_gitlink docs/entregas/ft-rec/sub
@@ -2502,7 +2558,7 @@ grupo_v9_robusto() {
 
   # ---- submódulo criado DENTRO do merge M: registro, verificação e V9 --------
   for modo in config gitmodules; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
     cd "$d" || return
     _v9_gitlink vendor/lib
     case "$modo" in config) git config diff.ignoreSubmodules all ;; gitmodules) _v9_gitmodules ;; esac
@@ -2522,7 +2578,7 @@ grupo_v9_robusto() {
   done
 
   # ---- base que contém o trabalho: v9_sem_prova -----------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "legado não montou"; return; }
   cd "$d" || return
   git branch -f main HEAD
   v9_sem_prova "legado com a ref de base movida para HEAD" "é o próprio HEAD"
@@ -2531,14 +2587,14 @@ grupo_v9_robusto() {
   v9_sem_prova "legado com branch_base = a própria branch" "é o próprio HEAD"
   cd "$REPO" || return
 
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $FX_M/"
   v9_sem_prova "base_validada_sha = M commitado" "a base contém o trabalho"
   cd "$REPO" || return
 
   # só o trailer Trabalho: um commit lateral da base com o trailer
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   x="$(printf 'parte do trabalho na base\n\nTrabalho: ft-rec\n' | git commit-tree "$FX_B0^{tree}" -p "$FX_B0")"
   _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $x/"
@@ -2546,7 +2602,7 @@ grupo_v9_robusto() {
   cd "$REPO" || return
 
   # só ENTREGA.commits: o commit do plano (sem trailer) listado e usado como base
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   plano="$(git rev-parse "$FX_P1~4")"
   git show -s --format=%B "$plano" | grep -q '^Trabalho:' && falha "controle: o commit do plano tem trailer" || ok "controle: o commit do plano não tem trailer"
@@ -2557,7 +2613,7 @@ grupo_v9_robusto() {
   # ---- base ancorada na entrega (a) e sem a pasta do trabalho (b) -----------
   # S1: X (cria src/evil.ts, sem trailer) logo depois de B0 e a feature refeita
   # por cima; com base_validada_sha = X commitado, evil.ts sumiria do diff
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   _v9_reconstroi "chore: utilitario" || falha "reconstrução (S1)"
   out="$("${v[@]}" 2>/dev/null)"
@@ -2567,7 +2623,7 @@ grupo_v9_robusto() {
   cd "$REPO" || return
 
   # trailer fora da forma canônica num commit lateral usado como base: (a)
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   x="$(printf 'parte do trabalho\n\nTrabalho:ft-rec\n' | git commit-tree "$FX_B0^{tree}" -p "$FX_B0")"
   _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $x/"
@@ -2578,7 +2634,7 @@ grupo_v9_robusto() {
   # R3/R3b/R3c/R3d: um lado saído de X traz o ENTREGA.md com base X por merge
   local modo_m
   for modo_m in R3 R3b R3c R3d; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
     cd "$d" || return
     _v9_reconstroi "chore: utilitario" || falha "reconstrução ($modo_m)"
     cp "$FX_ENTREGA" "$t/e-$modo_m"
@@ -2605,7 +2661,7 @@ grupo_v9_robusto() {
   done
 
   # R8: a chave tirada num commit (rebaixamento a legado) e a ref de base em X
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   _v9_reconstroi "chore: utilitario" || falha "reconstrução (R8)"
   _v9_entrega_commit '/^base_validada_sha:/d; /^origem_base:/d; /^reconciliacoes:/d; /^portao_sha:/d'
@@ -2614,7 +2670,7 @@ grupo_v9_robusto() {
   cd "$REPO" || return
 
   # fluxo normal em P1 (E0, E1, E2): git mv e ENTREGA.md recriado com o mesmo valor
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   git switch -q -c p1 "$FX_P1"
   out="$(printf 'base=%s\norigem_base=registrada_e0\nresultado=ok' "$FX_B0")"
@@ -2633,7 +2689,7 @@ grupo_v9_robusto() {
   # residual: âncora nascida errada (R5). O ENTREGA.md já nasce com a base num
   # commit só de produto (sem marca, sem tocar a pasta); todas as versões
   # concordam. Documentado, não corrigido.
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   git switch -q --detach "$FX_B0"
   printf 'export const mal = 1;\n' > src/evil.ts; git add src/evil.ts; git commit -q -m "chore: utilitario"; X="$(git rev-parse HEAD)"
@@ -2650,14 +2706,14 @@ grupo_v9_robusto() {
   cd "$REPO" || return
 
   # S3 (legado, só a regra b): a ref movida para o commit do plano
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "legado não montou"; return; }
   cd "$d" || return
   git branch -f main "$(git rev-parse "$FX_P1~4")"
   v9_sem_prova "S3: legado com a base num commit que toca a pasta do trabalho" "toca a pasta do trabalho ou a entrega"
   cd "$REPO" || return
 
   # S5f (legado, só o trailer): i18n.commitEncoding UTF-16 local não desliga a guarda
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "legado não montou"; return; }
   cd "$d" || return
   _v9_reconstroi "$(printf 'chore: utilitario\n\nTrabalho: ft-rec')" || falha "reconstrução (S5)"
   git branch -f main "$X"
@@ -2670,7 +2726,7 @@ grupo_v9_robusto() {
   # residual: legado com ref movida (S2b). A spec lê a ref no legado e o Git
   # local não distingue: X sem trailer e sem tocar a pasta, a ref movida para
   # ele, aprova. Documentado, não corrigido.
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "legado não montou"; return; }
   cd "$d" || return
   _v9_reconstroi "chore: utilitario" || falha "reconstrução (S2)"
   git branch -f main "$FX_B1"
@@ -2682,12 +2738,12 @@ grupo_v9_robusto() {
   cd "$REPO" || return
 
   # ---- ENTREGA.commits com entrada que não resolve para um único commit -----
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   _v9_entrega_commit 's/^commits:$/commits:\n  - seq: 0\n    task: T-00.00\n    commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/'
   v9_sem_prova "S6c: ENTREGA.commits com SHA inexistente" "não resolve para um único commit"
   cd "$REPO" || return
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   x="$(_v9_ambiguo)" || falha "S6b: colisão de prefixo não gerada"
   git rev-parse --verify -q "$x^{commit}" >/dev/null 2>&1 && falha "controle S6b: $x resolve" || ok "controle S6b: $x é ambíguo"
@@ -2697,7 +2753,7 @@ grupo_v9_robusto() {
 
   # ---- branch_base inválida (legado) ----------------------------------------
   for x in HEAD '@{-1}' '@'; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" legado || { falha "legado não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" legado || { falha "legado não montou"; return; }
     cd "$d" || return
     _v9_entrega_commit "s#^branch_base: main\$#branch_base: $x#"
     v9_sem_prova "legado com branch_base: $x" "branch_base"
@@ -2706,14 +2762,14 @@ grupo_v9_robusto() {
 
   # ---- chave presente e ilegível: nunca cai no legado por ref ---------------
   for x in entrega_base_vazia entrega_base_aspas; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_VARIANTE="$x" fx_cenario "$d" || { falha "$x não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE="$x" fx_cenario "$d" || { falha "$x não montou"; return; }
     cd "$d" || return
     v9_sem_prova "$x: v9_sem_prova, sem legado por ref" "base_validada_sha malformada"
     cd "$REPO" || return
   done
 
   # ---- duas reconciliações: a base é o b1_sha da ÚLTIMA ----------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_segunda_base "$d" ajusta || { falha "segunda base não montou"; return; }
   cd "$d" || return
   FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "emissão do 001"
@@ -2723,7 +2779,7 @@ grupo_v9_robusto() {
   cd "$REPO" || return
 
   # ---- renomeação para a pasta isenta: o caminho antigo continua no diff ----
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" >/dev/null 2>&1
   git mv README.md docs/entregas/ft-rec/README.md; git commit -q -m "move produto para a pasta da entrega"
@@ -2732,9 +2788,9 @@ grupo_v9_robusto() {
   cd "$REPO" || return
 
   # ---- guardas da árvore de HEAD (biblioteca comum) --------------------------
-  local alvo; alvo="$(mktemp -d)"; TMPS="$TMPS $alvo"
+  local alvo; alvo="$(mktemp -d)"; TMPS+=("$alvo")
   for x in plano_tab plano_symlink plano_nl; do
-    d="$(mktemp -d)"; TMPS="$TMPS $d"; FX_NL_ALVO="$alvo" FX_VARIANTE="$x" fx_cenario "$d" || { falha "$x não montou"; return; }
+    d="$(mktemp -d)"; TMPS+=("$d"); FX_NL_ALVO="$alvo" FX_VARIANTE="$x" fx_cenario "$d" || { falha "$x não montou"; return; }
     cd "$d" || return
     case "$x" in plano_symlink) out="link simbólico ou submódulo" ;; *) out="caminho inválido" ;; esac
     v9_sem_prova "$x em HEAD: v9_sem_prova" "$out"
@@ -2745,8 +2801,8 @@ grupo_v9_robusto() {
 grupo_barreira() {
   local d b out rc esperado t
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  t="$(mktemp -d)"; TMPS+=("$t")
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   b=(bash "$RB" --verificar --checkpoint reconciliacao-base --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
   out="$("${b[@]}" 2>&1)"; rc=$?
@@ -2861,11 +2917,11 @@ raso_registrar() {
 grupo_raso() {
   local d c w t out rc mg sh
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  t="$(mktemp -d)"; TMPS+=("$t")
   v=(bash "$V9" --verificar --entrega docs/entregas/ft-rec/ENTREGA.md --origem sprintx --trabalho ft-rec)
 
   # ---- S2: .git/shallow no commit que pôs X, HEAD merge com X ----------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   _v9_reconstroi "chore: utilitario" || falha "reconstrução (S2)"
   _v9_entrega_commit "s/^base_validada_sha: .*/base_validada_sha: $X/"; c="$(git rev-parse HEAD)"
@@ -2885,7 +2941,7 @@ grupo_raso() {
   cd "$REPO" || return
 
   # ---- .git/shallow forjado: --registrar e --verificar ----------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   printf '%s\n' "$FX_B0" > .git/shallow
   raso_registrar "--registrar com .git/shallow forjado: rc 4, nada gravado" "$FX_NOVO1" "$FX_NOVO2"
@@ -2900,7 +2956,7 @@ grupo_raso() {
   cd "$REPO" || return
 
   # ---- clone --depth real e clone completo ------------------------------------
-  d="$(mktemp -d)"; TMPS="$TMPS $d"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$REPO" || return
   git clone -q --depth 2 --no-single-branch -b feature/ft-rec "file://$d" "$t/raso" 2>/dev/null || falha "clone --depth 2"
   cd "$t/raso" || return
@@ -2975,7 +3031,7 @@ _pt_entrega_commit() {
 grupo_portao() {
   local d t p out rc antes c c9 m s pai solto filho e e2
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  d="$(mktemp -d)"; t="$(mktemp -d)"; TMPS="$TMPS $d $t"; PT_MSG="$t/msg"; PT_ENTREGA=""
+  d="$(mktemp -d)"; t="$(mktemp -d)"; TMPS+=("$d" "$t"); PT_MSG="$t/msg"; PT_ENTREGA=""
   fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   e="$FX_ENTREGA"
@@ -3494,7 +3550,7 @@ fl_pushes() {
 grupo_fluxo() {
   local t d
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"; d="$t/repo"
+  t="$(mktemp -d)"; TMPS+=("$t"); d="$t/repo"
   fx_cenario "$d" || { falha "cenário não montou"; return; }
   cd "$d" || return
   fx_fluxo_completo "$d" || { falha "fluxo: ${FX_ERRO:-}"; cd "$REPO"; return; }
@@ -3509,7 +3565,7 @@ grupo_fluxo() {
 grupo_invariantes() {
   local t d plano seq hk
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
-  t="$(mktemp -d)"; TMPS="$TMPS $t"; d="$t/repo"
+  t="$(mktemp -d)"; TMPS+=("$t"); d="$t/repo"
   fx_cenario "$d" || { falha "cenário não montou"; return; }
   fx_worktree_vinculada "$d" || { falha "worktree vinculada não montou"; return; }
   cd "$FX_WT" || return

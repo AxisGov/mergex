@@ -1550,6 +1550,15 @@ TMP_ENTREGA="$ENTREGA.registro.$$"
 RB_ERRO=""
 ARTEFATO_NOVO=1 # guarda:JANELA
 rb_emitir "$DESTINO" "$ESC" "$ARQ" || para 5 "artefato não emitido: $RB_ERRO"
+# Imediatamente antes da troca, o disco é reconferido com a MESMA conferência
+# de antes: a leitura lá em cima e o `mv` aqui não são atômicos entre si, e uma
+# edição salva nesse intervalo não pode ser substituída pela cópia. Mudou: rc
+# 3, como a conferência original; o encerrar remove o artefato novo e nada
+# fica (CodeAnt 4235534531).
+if [ "$N_CAD" = 0 ]; then
+  { [ -f "$ENTREGA" ] && [ ! -L "$ENTREGA" ] && cmp -s "$ENTREGA" "$ENTREGA_M"; } \
+    || para 3 'ENTREGA.md mudou durante o registro; nada foi gravado'
+else confere_disco_cadeia; fi
 if ! mv "$TMP_ENTREGA" "$ENTREGA" 2>/dev/null; then
   para 1 'não foi possível atualizar o ENTREGA.md; o artefato foi removido e nada foi gravado'
 fi

@@ -123,11 +123,22 @@ MATRIZ='1|P1|r1:provas|prova 1 desligada
 37|PPCOB|r2:prepush|pre-push sem o aviso cobertura_indeterminada
 38|M3CHAM|r2:prepush|chamador gerenciado sem conferir o validador'
 
+# Grupo de processos próprio. interrompe() derruba a árvore inteira com
+# `kill -TERM 0`, que alcança o GRUPO: lançado de um bash não interativo (outro
+# script, CI, `wsl.exe -- bash`), este script herda o grupo do chamador e o TERM
+# derrubaria quem o chamou. Então, quando não é líder de grupo, re-executa-se
+# sob `setsid` (sem fork: mesmo pid, o chamador continua enxergando-o). Sem
+# `setsid` (macOS), interrompe() mata só os próprios jobs.
+if [ "$(ps -o pgid= -p $$ | tr -d ' ')" != "$$" ] && command -v setsid >/dev/null 2>&1; then
+  exec setsid -w bash "$0" "$@"
+fi
+
 RAIZ_TMP="$(mktemp -d "${TMPDIR:-/tmp}/mutacao-r1.XXXXXX")" || { echo 'sem diretório temporário' >&2; exit 1; }
 limpa() { rm -rf "$RAIZ_TMP"; }
 interrompe() {
   trap '' INT TERM
-  kill -TERM 0 2>/dev/null
+  if [ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ]; then kill -TERM 0 2>/dev/null
+  else kill -TERM $(jobs -p) 2>/dev/null; fi
   wait 2>/dev/null
   limpa
   exit 130
@@ -141,7 +152,11 @@ export TMPDIR="$RAIZ_TMP/tmp"
 copia() { # <nome> — cópia do repositório num Git novo, com um commit
   local d="$RAIZ_TMP/copias/$1"
   mkdir -p "$d" || return 1
-  ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
+  # uma só invocação do tar, com os nomes lidos pelo `-T -` (NUL-separados):
+  # nunca como argumento, onde um nome `--checkpoint-action=exec=…` seria opção
+  # e os iniciados por `-` nem entrariam na cópia; e sem a partição do xargs,
+  # cujo segundo tar concatenado o `tar -x` ignora
+  ( cd "$REPO" && git ls-files -z -co --exclude-standard | tar -cf - --null -T - ) \
     | ( cd "$d" && tar -xf - ) || return 1
   (
     cd "$d" || exit 1

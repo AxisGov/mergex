@@ -101,16 +101,14 @@ CONTRATO_COMMIT="$DIR/../../skills/mergex/scripts/contrato-de-commit.sh"
 # escolher a primeira task do plano, ou a do arquivo mais recente, inventaria
 # o dono. Duas declarações diferentes, ou nenhuma, é "não determinada".
 MSG="$CMD"
-MSG_LIDA=""   # a mensagem do commit só como o hook a leu (arquivo ou -m), sem o comando
-ARQ_MSG="$(printf '%s' "$CMD" | sed -n 's/.*[[:space:]]-F[[:space:]]*\([^[:space:]]*\).*/\1/p; s/.*--file=\([^[:space:]]*\).*/\1/p' | head -1)"
+# A mensagem só como o hook a leu (arquivo de -F/--file, com ou sem aspas, ou
+# -m), sem o comando: a leitura é a da biblioteca (integracao-da-mensagem.sh),
+# a mesma do arquivo-fora-do-plano — uma implementação só, provada pelo
+# teste.sh, em vez de um sed repetido aqui.
+MSG_LIDA="$(integracao_mensagem_do_comando "$CMD")"
+ARQ_MSG="$(integracao_arquivo_do_comando "$CMD")"
 if [ -n "$ARQ_MSG" ]; then
-  ARQ_MSG="$(printf '%s' "$ARQ_MSG" | sed "s/^['\"]//; s/['\"]$//")"
-  case "$ARQ_MSG" in
-    /*) : ;;
-    *) ARQ_MSG="$RAIZ/$ARQ_MSG" ;;
-  esac
   if [ -r "$ARQ_MSG" ]; then
-    MSG_LIDA="$(cat "$ARQ_MSG" 2>/dev/null)"
     MSG="$MSG
 $MSG_LIDA"
   fi
@@ -123,7 +121,6 @@ else
     *"$MARCADOR_M"*)
       MSG="${CMD#*"$MARCADOR_M"}"
       MSG="${MSG%\"*}"
-      MSG_LIDA="$(integracao_le_m "$CMD")"
       ;;
   esac
 fi

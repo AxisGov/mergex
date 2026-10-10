@@ -204,6 +204,17 @@ expx_executor() {
   return 1
 }
 
+# expx_e_git <token> — o token é o programa git: `git`, por caminho
+# (`/usr/bin/git`, `./git`), `git.exe`, ou com a barra que pula alias (`\git`).
+# É o mesmo programa; ler só a grafia `git` deixava o push por caminho passar
+# sem ser lido (CodeAnt 4235529191).
+expx_e_git() {
+  local t
+  t="$(expx_sem_aspas "$1")"; t="${t#\\}"
+  case "$t" in git|*/git|git.exe|*/git.exe) return 0 ;; esac
+  return 1
+}
+
 # O número que ABRE um redirecionamento sobra no fim do segmento depois da
 # quebra (`git push origin main 2>/tmp/log` vira `git push origin main 2`). Ele
 # é descritor só quando é uma palavra INTEIRA de dígitos: `main2` é outra
@@ -291,13 +302,14 @@ expx_push_le() {
   done
   [ "$#" -gt 0 ] || return 1
 
-  # O `git` só é procurado adiante quando o programa do segmento é executor.
-  tok="$(expx_sem_aspas "$1")"
-  if [ "$tok" != git ]; then
+  # O programa é o git (por qualquer grafia: expx_e_git), ou é um executor, e
+  # então o git só é procurado adiante.
+  if ! expx_e_git "$1"; then
+    tok="$(expx_sem_aspas "$1")"
     expx_executor "${tok##*/}" || return 1
     while [ "$#" -gt 0 ]; do
+      expx_e_git "$1" && break
       case "$(expx_sem_aspas "$1")" in
-        git) break ;;
         GIT_*=*) EXPX_PUSH_AMBIENTE_GIT=1 ;;
       esac
       shift

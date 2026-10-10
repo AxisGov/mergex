@@ -1157,6 +1157,27 @@ grupo_entrypoints() {
     && ok "o registro do portão só muda portao, portao_sha, falhas_portao e atualizado_em" || falha "o registro mudou outras chaves"
   [ -z "$(git diff --cached --name-only)" ] && [ "$(git status --porcelain)" = " M $e" ] \
     && ok "registrar-portao só grava o ENTREGA.md, fora do índice" || falha "registrar-portao: $(git status --porcelain | tr '\n' '|')"
+
+  # ---- gravação atômica (CodeAnt 4235529223): conteúdo novo ilegível na hora de gravar ----
+  # Cópia da skill em que causa-do-portao.sh valida de verdade e, depois, tira a
+  # leitura do arquivo validado (o $NOVO do registrador). `cat NOVO > ARQ`
+  # truncava o ENTREGA.md antes de ler: ficava com 0 bytes. Tem de ficar intacto.
+  rm -rf "$t/skill" && cp -R "$S" "$t/skill" || falha "cópia da skill"
+  cat > "$t/skill/causa-do-portao.sh" <<EOF
+#!/usr/bin/env bash
+# (bancada) valida de verdade e, depois, tira a leitura do arquivo validado: o \$NOVO do registrador
+rc=0; bash "$S/causa-do-portao.sh" "\$@" || rc=\$?
+[ "\${1:-}" = --validar ] && chmod 000 "\$2"
+exit \$rc
+EOF
+  cp "$e" "$t/antes"
+  REG_OUT="$(bash "$t/skill/registrar-portao.sh" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado bloqueado --falhas v1 2>&1)"; REG_RC=$?
+  [ "$REG_RC" = 1 ] && [ -s "$e" ] && cmp -s "$e" "$t/antes" && printf '%s\n' "$REG_OUT" | grep -Fq 'não foi possível gravar' \
+    && ok "conteúdo novo ilegível na gravação: rc 1 (ambiente) e ENTREGA.md intacto (não 0 bytes)" \
+    || falha "gravação com NOVO ilegível: rc=$REG_RC tamanho=$(wc -c < "$e" | tr -d ' ') $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  ls docs/entregas/ft-rec | grep -q '\.portao\.' && falha "gravação falhada deixou temporário .portao. na pasta da entrega" || ok "gravação falhada não deixa temporário na pasta da entrega"
+  [ "$(git status --porcelain)" = " M $e" ] && ok "gravação falhada: a árvore continua só com o ENTREGA.md gravado antes" || falha "gravação falhada: $(git status --porcelain | tr '\n' '|')"
+  rm -rf "$t/skill"
   c0="$(git rev-parse HEAD)"
   persiste --persistir pre-e6; rc=$?
   [ "$rc" = 0 ] && [ "$(git rev-parse HEAD)" != "$c0" ] && git log -1 --format=%B | grep -Fxq 'Metodo: pre-e6' \

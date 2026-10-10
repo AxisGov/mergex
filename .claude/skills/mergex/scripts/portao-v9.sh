@@ -322,8 +322,13 @@ fi
 arvore_materializa "$HEAD_SHA" "$TMP_DIR/arvore-head" "$ORIGEM" "$TRABALHO" HEAD '' || sem_prova "$ARVORE_ERRO"
 RAIZ_H="$ARVORE_RAIZ"
 PASTA="$ARVORE_PASTA"
-# (b) nenhum commit que toca a pasta do trabalho ou a entrega é da base
-c="$(g rev-list -n1 "$BASE" -- "$PASTA" "$DIR_E" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível"
+# (b) nenhum commit que toca a pasta do trabalho ou a entrega é da base.
+# --full-history, como nas versões do ENTREGA.md acima (e no CIFULL2 de
+# portao-regras.sh): a simplificação de histórico com pathspec segue o pai
+# TREESAME e esconderia o 2º pai de um merge que descartou a pasta (-s ours,
+# resolução que ficou com o lado da base); a árvore da base não a tem, só a
+# história — e esta guarda é sobre a história.
+c="$(g rev-list -n1 --full-history "$BASE" -- "$PASTA" "$DIR_E" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível" # guarda:V9FULL
 [ -z "$c" ] || sem_prova "a base $BASE contém o commit $c, que toca a pasta do trabalho ou a entrega: a base contém o trabalho" # guarda:V9SHA
 bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 2> "$TMP_DIR/uniao.err" \
   || sem_prova "união das tasks de HEAD não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")" # guarda:V9UNIAO

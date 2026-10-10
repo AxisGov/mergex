@@ -90,8 +90,10 @@ esac
 [ -n "$ENTREGA" ] || uso 'falta --entrega'
 
 TMP_DIR=""
+TMP_ARQ="" # o ENTREGA.md novo ao lado do atual, até a troca
 encerrar() {
   local rc="$1"
+  [ -z "$TMP_ARQ" ] || rm -f "$TMP_ARQ"
   [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
   exit "$rc"
 }
@@ -204,8 +206,15 @@ entrega_define "$NOVO" portao "$RESULTADO" \
 
 VALIDA="$(bash "$CAUSA_SH" --validar "$NOVO" 2>&1)" || contrato "o resultado não passa em causa-do-portao --validar ($VALIDA); nada foi gravado"
 
-# Gravação: o conteúdo novo sobre o mesmo arquivo (modo e inode preservados).
-cat "$NOVO" > "$ARQ" || ambiente "não foi possível gravar $ENTREGA"
+# Gravação atômica, no padrão do registro (reconciliacao-base.sh): o conteúdo
+# novo vai para um temporário na pasta da entrega (`cp -p`: mesmo modo) e troca
+# de lugar com o ENTREGA.md por `mv`. Qualquer falha de leitura ou escrita
+# deixa o arquivo como estava — `cat NOVO > ARQ` truncava antes de ler, e um
+# NOVO ilegível deixava o ENTREGA.md com 0 bytes (CodeAnt 4235529223).
+TMP_ARQ="$ARQ.portao.$$"
+{ cp -p "$ARQ" "$TMP_ARQ" && cat "$NOVO" > "$TMP_ARQ" && mv "$TMP_ARQ" "$ARQ"; } \
+  || { rm -f "$TMP_ARQ"; TMP_ARQ=""; ambiente "não foi possível gravar $ENTREGA; o arquivo não foi alterado"; }
+TMP_ARQ=""
 
 if [ "$RESULTADO" = pronto ]; then
   printf '%s\n' 'RESULTADO: PRONTO' "portao_sha=$HEAD_SHA"

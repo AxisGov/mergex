@@ -181,6 +181,21 @@ caso "FOO=1 git push origin main"   mergex/git-perigoso.sh "$(bash_json 'FOO=1 g
 # falso positivo que atrapalha o dia inteiro. Regressao de um caso real.
 caso "restore --staged (so o stage)" mergex/git-perigoso.sh "$(bash_json 'git restore --staged f.txt')" 0
 caso "checkout de branch"            mergex/git-perigoso.sh "$(bash_json 'git checkout outra-branch')" 0
+# git por caminho (/usr/bin/git, ./git), git.exe e `\git` (que pula alias) sao o
+# MESMO programa: nenhuma dessas formas pode sair no pre-filtro antes das regras,
+# senao o hook inteiro e contornado (CodeAnt 4235529191). /usr/lib/git-core/git-push
+# fica para follow-up.
+echo "git-perigoso — git invocado por caminho, git.exe e \\git"
+caso "/usr/bin/git push --force barra"      mergex/git-perigoso.sh "$(bash_json '/usr/bin/git push --force origin feature/x')" 2
+caso "./git push --force barra"             mergex/git-perigoso.sh "$(bash_json './git push --force origin feature/x')" 2
+caso "\\git push --force barra"             mergex/git-perigoso.sh "$(bash_json '\git push --force origin feature/x')" 2
+caso "git.exe push --force barra"           mergex/git-perigoso.sh "$(bash_json 'git.exe push --force origin feature/x')" 2
+caso "/usr/bin/git push origin main barra"  mergex/git-perigoso.sh "$(bash_json '/usr/bin/git push origin main')" 2
+caso "/usr/bin/git push feature/x:main barra" mergex/git-perigoso.sh "$(bash_json '/usr/bin/git push origin feature/x:main')" 2
+caso "sudo /usr/bin/git push --force barra" mergex/git-perigoso.sh "$(bash_json 'sudo /usr/bin/git push --force origin feature/x')" 2
+caso "/usr/bin/git push na feature passa"   mergex/git-perigoso.sh "$(bash_json '/usr/bin/git push origin feature/x')" 0
+caso "/usr/bin/git log passa"               mergex/git-perigoso.sh "$(bash_json '/usr/bin/git log --oneline')" 0
+caso "echo sobre /usr/bin/git push --force passa" mergex/git-perigoso.sh "$(bash_json 'echo "/usr/bin/git push --force"')" 0
 
 echo
 echo "branch-limpa"
@@ -1414,6 +1429,17 @@ Integra-base: $(git rev-parse -q --verify MERGE_HEAD)\""
 caso "integração por -m válida passa" mergex/commit-por-task.sh "$(bash_json "$MSG_INT_M")" 0
 caso "-m sem Integra-base segue as regras de sempre (bloqueio: mistura)" mergex/commit-por-task.sh "$(bash_json 'git commit -m "integra a base"')" 2
 caso "fora-do-plano não acusa o que veio da base" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-integracao.txt')" 0
+# -F/--file com caminho entre aspas e espaco (CodeAnt 4235529198): a mensagem tem
+# de ser lida inteira. Truncada no espaco, a integracao virava commit comum:
+# commit-por-task via mistura de tasks e fora-do-plano acusava o que veio da base.
+mkdir -p "com espaco" && cp msg-integracao.txt "com espaco/msg.txt"
+caso "integração por -F \"caminho com espaço\" (commit-por-task)"       mergex/commit-por-task.sh "$(bash_json 'git commit -F "com espaco/msg.txt"')" 0
+caso "integração por -F 'caminho com espaço' (commit-por-task)"         mergex/commit-por-task.sh "$(bash_json "git commit -F 'com espaco/msg.txt'")" 0
+caso "integração por --file=\"caminho com espaço\" (commit-por-task)"   mergex/commit-por-task.sh "$(bash_json 'git commit --file="com espaco/msg.txt"')" 0
+caso "integração por -F \"caminho absoluto com espaço\" (commit-por-task)" mergex/commit-por-task.sh "$(bash_json "git commit -F \"$INT_T/com espaco/msg.txt\"")" 0
+caso "integração por -F \"caminho com espaço\" (fora-do-plano)"         mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F "com espaco/msg.txt"')" 0
+caso "integração por --file='caminho com espaço' (fora-do-plano)"       mergex/arquivo-fora-do-plano.sh "$(bash_json "git commit --file='com espaco/msg.txt'")" 0
+rm -rf "com espaco"
 # Sem isto o caso acima nao distingue "avalia o diff contra MERGE_HEAD" de
 # "nao avalia nada": produto que a base NAO trouxe e o plano NAO declara
 # continua desvio, mesmo dentro da integracao.

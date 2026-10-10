@@ -28,14 +28,36 @@ integracao_le_m() {
   printf '%s' "$out"
 }
 
-# integracao_mensagem_do_comando <comando> — `-F <arquivo>` (relativo à RAIZ) ou
-# `-m`; vazio se o hook não consegue ler a mensagem.
+# integracao_arquivo_do_comando <comando> — o caminho de `-F <arquivo>` ou
+# `--file=<arquivo>`, absoluto ou resolvido contra a RAIZ; vazio se o comando
+# não os tem. As formas entre aspas (`-F "com espaço/msg"`, `-F '…'`,
+# `--file="…"`, `--file='…'`) são lidas ANTES da forma sem aspas, que para no
+# primeiro espaço e devolvia `"com` — caminho ilegível, mensagem vazia, e o
+# merge de integração checado como commit comum (CodeAnt 4235529198). É a única
+# leitura do -F dos hooks: commit-por-task.sh e arquivo-fora-do-plano.sh usam
+# esta função, não um sed próprio.
+integracao_arquivo_do_comando() {
+  local arq
+  arq="$(printf '%s' "$1" | sed -n \
+    -e 's/.*[[:space:]]-F[[:space:]]*"\([^"]*\)".*/\1/p' \
+    -e "s/.*[[:space:]]-F[[:space:]]*'\([^']*\)'.*/\1/p" \
+    -e 's/.*--file="\([^"]*\)".*/\1/p' \
+    -e "s/.*--file='\([^']*\)'.*/\1/p" \
+    -e 's/.*[[:space:]]-F[[:space:]]*\([^[:space:]]*\).*/\1/p' \
+    -e 's/.*--file=\([^[:space:]]*\).*/\1/p' | head -1)"
+  [ -n "$arq" ] || return 0
+  arq="$(printf '%s' "$arq" | sed "s/^['\"]//; s/['\"]$//")"
+  case "$arq" in /*) : ;; *) arq="$RAIZ/$arq" ;; esac
+  printf '%s' "$arq"
+}
+
+# integracao_mensagem_do_comando <comando> — o conteúdo de `-F`/`--file`
+# (integracao_arquivo_do_comando) ou a mensagem de `-m`; vazio se o hook não
+# consegue ler a mensagem (arquivo ilegível, nem -F nem -m).
 integracao_mensagem_do_comando() {
   local arq
-  arq="$(printf '%s' "$1" | sed -n 's/.*[[:space:]]-F[[:space:]]*\([^[:space:]]*\).*/\1/p; s/.*--file=\([^[:space:]]*\).*/\1/p' | head -1)"
+  arq="$(integracao_arquivo_do_comando "$1")"
   if [ -n "$arq" ]; then
-    arq="$(printf '%s' "$arq" | sed "s/^['\"]//; s/['\"]$//")"
-    case "$arq" in /*) : ;; *) arq="$RAIZ/$arq" ;; esac
     [ -r "$arq" ] && cat "$arq" 2>/dev/null
     return 0
   fi

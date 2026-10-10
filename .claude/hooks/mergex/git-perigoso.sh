@@ -72,7 +72,12 @@ CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null
 # embrulhar o comando desligava o hook inteiro — não só o push. A saída sem jq
 # (acima) sempre enxergou essa forma; era esta lista que estava mais estreita
 # do que a de lá, e a diferença entre as duas era o bypass.
-printf '%s' "$CMD" | grep -Eq '(^|[;&|`(){}'\''"[:space:]])git([[:space:]]|$)' || exit 0
+#
+# A barra (`/usr/bin/git`, `./git`), a barra invertida que pula alias (`\git`)
+# e `git.exe` também: é o mesmo programa, e sem elas aqui TODAS as regras eram
+# contornadas por um git invocado por caminho (CodeAnt 4235529191). A leitura
+# do push (comum/base.sh, expx_e_git) reconhece as mesmas formas.
+printf '%s' "$CMD" | grep -Eq '(^|[;&|`(){}'\''"[:space:]/\\])git(\.exe)?([[:space:]]|$)' || exit 0
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 RAIZ="$(expx_raiz "${CWD:-$PWD}")"
