@@ -42,7 +42,7 @@ ENTRADA="$(cat)"
 # deste hook. Sem jq, o modo em `.expx/hooks.json` também não pode ser lido —
 # nem o "desligado".
 if ! command -v jq >/dev/null 2>&1; then
-  printf '%s' "$ENTRADA" | grep -Eq '(^|[^A-Za-z0-9_./\\-])git([[:space:]]|\\[nrt]|"|$)' || exit 0
+  printf '%s' "$ENTRADA" | grep -E '(^|[^A-Za-z0-9_./\\-])git([[:space:]]|\\[nrt]|"|$)' >/dev/null || exit 0
   printf '%s\n' \
 "mergex/git-perigoso — dependência ausente: jq
 
@@ -93,15 +93,15 @@ case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
 # 512 KB — o pior caso da normalização e das regras decide em ~6 s, 5x de
 # folga para o tempo limite, para máquina mais lenta.
 #
-# O que este teto NÃO cobre (achado N3 da rodada 4, fora deste arquivo): a
-# leitura por token de um segmento que contém `push` (comum/base.sh) é
-# quadrática no tamanho de UM token — `${v##*[[:space:]]}` em
-# `expx_sem_descritor`, `${tok##*/}` em `expx_push_le` e, em locale UTF-8,
-# `${v#[\"\']}` em `expx_sem_aspas` tentam cada prefixo. Medido: uma palavra
-# de 16 KB terminada em `push` custa 3,4 s (C) a 16,7 s (C.UTF-8); de 32 KB,
-# 14 s a 67 s. `git push --force …; <32 KB>push` morre no tempo limite nas duas
-# locales, muito abaixo deste teto — e o push forçado passa. Baixar o teto não
-# resolve (16 KB já não cabe); a correção é tornar essas leituras lineares.
+# Fora deste teto ficava a leitura por token do segmento com `push`
+# (comum/base.sh), que era quadrática no tamanho de UM token:
+# `${v##*[[:space:]]}` em `expx_sem_descritor`, `${tok##*/}` em `expx_push_le`
+# e, em UTF-8, `${v#[\"\']}` em `expx_sem_aspas` tentavam cada prefixo — uma
+# palavra de 32 KB terminada em `push` custava 14 s (C) a 67 s (C.UTF-8), e um
+# push forçado seguido de `; <32 KB>push` morria no tempo limite, abaixo deste
+# teto (achado N3 da rodada 4). Corrigido na rodada 5: essas leituras são
+# lineares (uma passada por token), e o teste.sh cobre 32 KB e 128 KB em C e
+# C.UTF-8. O mesmo vale para `destino_do_refspec` abaixo.
 GIT_TETO=524288
 # tamanho_em_bytes <texto> — CMD_BYTES recebe o tamanho de <texto> em bytes,
 # qualquer que seja a locale de quem chamou. (A locale é ajustada no `local`;
@@ -242,7 +242,13 @@ normaliza_git "$CMD"
 # embrulho (`bash -c "/usr/bin/git push"`), que a normalização acima não reduz
 # (a aspa de abertura não é a do programa); a leitura do push (comum/base.sh,
 # expx_e_git) lê essa forma por token.
-printf '%s' "$CMD_N" | grep -Eq '(^|[;&|`(){}'\''"[:space:]/\\])git(\.exe)?([[:space:]]|$)' || exit 0
+#
+# Sem `-q`, de propósito — aqui e em todo grep sobre CMD_N abaixo: comum/base.sh
+# liga `pipefail`, e um grep que casa na primeira linha e sai dá SIGPIPE ao
+# printf quando o comando passa do buffer do pipe; o pipeline devolvia 141 e
+# este `|| exit 0` liberava um push forçado seguido de milhares de linhas
+# (rodada 5 da revisão). Sem `-q` o grep lê até o fim, e o status é só dele.
+printf '%s' "$CMD_N" | grep -E '(^|[;&|`(){}'\''"[:space:]/\\])git(\.exe)?([[:space:]]|$)' >/dev/null || exit 0
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 RAIZ="$(expx_raiz "${CWD:-$PWD}")"
@@ -337,10 +343,12 @@ PUSH_OBSCURO=0      # há destino, mas ele não foi classificado
 # Destino de um refspec: o lado direito do `:` quando ele existe, o próprio
 # refspec quando não existe. `HEAD` e `@` são a branch ativa.
 destino_do_refspec() {
-  local r
+  local r d
   r="$(expx_sem_aspas "$1")"
   r="${r#+}"
-  case "$r" in *:*) r="${r##*:}" ;; esac
+  # o que vem depois do último `:`, numa passada: `${r%:*}` para no último `:`
+  # (`${r##*:}` tentava cada prefixo — quadrático num refspec longo; rodada 5)
+  case "$r" in *:*) d="${r%:*}"; r="${r:${#d}+1}" ;; esac
   r="$(expx_sem_aspas "$r")"
   r="${r#refs/heads/}"
   case "$r" in HEAD|@) r="$ATUAL" ;; esac
@@ -376,7 +384,7 @@ le_push() {
     d="$(destino_do_refspec "$tok")"
     if [ "$d" = "$PRINCIPAL" ]; then
       PUSH_PRINCIPAL=1
-    elif ! printf '%s' "$d" | grep -Eq '^[A-Za-z0-9@][A-Za-z0-9._/@-]*$'; then
+    elif ! printf '%s' "$d" | grep -E '^[A-Za-z0-9@][A-Za-z0-9._/@-]*$' >/dev/null; then
       PUSH_OBSCURO=1
     fi
   done
@@ -418,7 +426,7 @@ fi
 # 2. Push ou commit direto na branch principal
 # --------------------------------------------------------------------------
 # commit: barra quando a branch ativa É a principal
-if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' >/dev/null; then
   if [ -n "$ATUAL" ] && [ "$ATUAL" = "$PRINCIPAL" ]; then
     barra "commit na branch principal" \
 "mergex/git-perigoso — commit direto na branch principal
@@ -524,9 +532,9 @@ fi
 # --------------------------------------------------------------------------
 # 3. Reescrita de histórico já enviado
 # --------------------------------------------------------------------------
-if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(rebase|filter-branch|filter-repo)([[:space:]]|$)' \
-|| printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit[^|;&]*[[:space:]]--amend([[:space:]]|$)' \
-|| printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+reset[^|;&]*[[:space:]]--hard([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(rebase|filter-branch|filter-repo)([[:space:]]|$)' >/dev/null \
+|| printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit[^|;&]*[[:space:]]--amend([[:space:]]|$)' >/dev/null \
+|| printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+reset[^|;&]*[[:space:]]--hard([[:space:]]|$)' >/dev/null; then
   # Só é perigoso se o que seria reescrito já foi enviado ao remoto.
   # Sem upstream, é histórico local: não barra (precisão, regra 1).
   UP="$(git -C "$RAIZ" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
@@ -560,19 +568,19 @@ fi
 # --------------------------------------------------------------------------
 # git checkout -- <path> / git restore <path> / git stash drop|clear
 DESCARTA=0
-if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+checkout[^|;&]*[[:space:]]--([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+checkout[^|;&]*[[:space:]]--([[:space:]]|$)' >/dev/null; then
   DESCARTA=1
-elif printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+rest''ore([[:space:]]|$)'; then
+elif printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+rest''ore([[:space:]]|$)' >/dev/null; then
   # Só desfazer o stage nao toca a arvore de trabalho e nao destroi nada.
   # Barrar isso seria o falso positivo que atrapalha o dia inteiro.
-  if printf '%s' "$CMD_N" | grep -Eq '[[:space:]]--worktree([[:space:]]|=|$)'; then
+  if printf '%s' "$CMD_N" | grep -E '[[:space:]]--worktree([[:space:]]|=|$)' >/dev/null; then
     DESCARTA=1
-  elif printf '%s' "$CMD_N" | grep -Eq '[[:space:]]--staged([[:space:]]|=|$)'; then
+  elif printf '%s' "$CMD_N" | grep -E '[[:space:]]--staged([[:space:]]|=|$)' >/dev/null; then
     DESCARTA=0
   else
     DESCARTA=1
   fi
-elif printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+stash[[:space:]]+(drop|clear)([[:space:]]|$)'; then
+elif printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+stash[[:space:]]+(drop|clear)([[:space:]]|$)' >/dev/null; then
   DESCARTA=1
 fi
 if [ "$DESCARTA" = "1" ]; then
@@ -601,8 +609,8 @@ fi
 # --------------------------------------------------------------------------
 # 5. Limpeza destrutiva de arquivo não rastreado
 # --------------------------------------------------------------------------
-if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+clean([[:space:]]|$)'; then
-  if printf '%s' "$CMD_N" | grep -Eq '[[:space:]]-[a-zA-Z]*[fdx]'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+clean([[:space:]]|$)' >/dev/null; then
+  if printf '%s' "$CMD_N" | grep -E '[[:space:]]-[a-zA-Z]*[fdx]' >/dev/null; then
     ALVOS="$(git -C "$RAIZ" clean -nd 2>/dev/null | head -20)"
     barra "limpeza destrutiva" \
 "mergex/git-perigoso — limpeza destrutiva de arquivos não rastreados

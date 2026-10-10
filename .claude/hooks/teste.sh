@@ -237,7 +237,13 @@ custo_ok() { # <desc> <json> <rc esperado> — rc certo e menos de 2 s
   local desc="$1" json="$2" esperado="$3" ini fim rc ms
   if [ "$SEM_JQ" = "1" ]; then PULADOS=$((PULADOS+1)); printf '  pulado %s (sem jq)\n' "$desc"; return 0; fi
   ini="$(date +%s%N 2>/dev/null)"
-  printf '%s' "$json" | bash "$H/mergex/git-perigoso.sh" >/dev/null 2>&1; rc=$?
+  # O limite de 30 s espelha o do harness: um caso que o estoura e morto (rc 124)
+  # e falha, em vez de travar a suite por minutos (rodada 5 da revisao).
+  if command -v timeout >/dev/null 2>&1; then
+    printf '%s' "$json" | timeout 30 bash "$H/mergex/git-perigoso.sh" >/dev/null 2>&1; rc=$?
+  else
+    printf '%s' "$json" | bash "$H/mergex/git-perigoso.sh" >/dev/null 2>&1; rc=$?
+  fi
   fim="$(date +%s%N 2>/dev/null)"
   case "$ini$fim" in ''|*[!0-9]*) ms=0 ;; *) ms=$(( (fim - ini) / 1000000 )) ;; esac
   if [ "$rc" = "$esperado" ] && [ "$ms" -lt 2000 ]; then
@@ -290,6 +296,36 @@ if LC_ALL=C.UTF-8 bash -c 'x=é; [ "${#x}" = 1 ]' 2>/dev/null; then
 else
   nao_executado "multibyte em C.UTF-8: locale indisponivel nesta maquina (4 casos)"
 fi
+# Leitura linear do push (rodada 5 da revisao, achado N3). A leitura por token de
+# um segmento com `push` (comum/base.sh: expx_sem_descritor, expx_push_le,
+# expx_sem_aspas) era quadratica no tamanho de UM token: um push forcado seguido
+# de `; <32 KB>push` levava 15 s em C e mais de 40 s em C.UTF-8 — morto pelo
+# timeout do harness, o push passava. E o pre-filtro `printf | grep -q` sob
+# `pipefail` devolvia 141 (SIGPIPE) quando o grep casava cedo numa entrada maior
+# que o buffer do pipe: `git push --force …; <100 KB>` saia por 0 sem avaliar.
+# Cada caso roda em C e, quando a locale existe, em C.UTF-8.
+TOKEN32="$(yes a | head -n 32768 | tr -d '\n')"                    # 32 KB sem separador
+TOKEN128="${TOKEN32}${TOKEN32}${TOKEN32}${TOKEN32}"               # 128 KB
+CAUDA="$(yes 'echo aaaa bbbb' | head -n 8000)"                     # ~120 KB em 8 000 linhas, sem `push`
+LINHAS="$(yes 'git aaaaaaaaaaaa' | head -n 10000)"                 # 10 000 linhas `git …` (160 KB: mais que o buffer do pipe)
+json_grande() { printf '%s' "$1" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}'; }
+LOCALES="C"
+LC_ALL=C.UTF-8 bash -c 'x=é; [ "${#x}" = 1 ]' 2>/dev/null && LOCALES="C C.UTF-8"
+for LOC in $LOCALES; do
+  LC_ANTES="${LC_ALL-__nao_definida__}"; export LC_ALL="$LOC"
+  custo_ok "[$LOC] push forcado; token de 32 KB terminado em push: barra em menos de 2 s" \
+    "$(json_grande "git push --force origin feature/x; ${TOKEN32}push")" 2
+  custo_ok "[$LOC] push forcado; token de 128 KB terminado em push: barra em menos de 2 s" \
+    "$(json_grande "git push --force origin feature/x; ${TOKEN128}push")" 2
+  custo_ok "[$LOC] token de 128 KB como programa + git push --force: git e argumento, passa em menos de 2 s" \
+    "$(json_grande "${TOKEN128} git push --force origin feature/x")" 0
+  custo_ok "[$LOC] push forcado na 1a linha + 120 KB em 8 000 linhas sem push (pre-filtro sob pipefail): barra" \
+    "$(json_grande "git push --force origin feature/x"$'\n'"${CAUDA}")" 2
+  custo_ok "[$LOC] 10 000 linhas 'git …' (160 KB) + push forcado na ultima (pre-filtro sob pipefail): barra" \
+    "$(json_grande "${LINHAS}"$'\n'"git push --force origin feature/x")" 2
+  if [ "$LC_ANTES" = "__nao_definida__" ]; then unset LC_ALL; else LC_ALL="$LC_ANTES"; fi
+done
+unset TOKEN32 TOKEN128 CAUDA LINHAS LOCALES LC_ANTES
 unset GRANDE DENSO TETO
 
 echo
