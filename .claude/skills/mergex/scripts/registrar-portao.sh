@@ -106,11 +106,46 @@ contrato() { printf 'registrar-portao: %s\n' "$1" >&2; exit 5; }
 . "$CATALOGO_SH" || ambiente "dependência ilegível: $CATALOGO_SH"
 set +e
 
+# sem_repositorio_git — fora de QUALQUER repositório Git, pelo próprio Git
+# (DM-186, rodada 1). Só quando as três valem: (1) o ambiente não aponta
+# repositório (GIT_DIR, GIT_WORK_TREE e GIT_COMMON_DIR vazios); (2) não há
+# `.git` no diretório corrente nem em nenhum ancestral; (3) o Git não acha
+# repositório nenhum (`rev-parse --git-dir` falha com "not a git repository",
+# em LC_ALL=C). Qualquer outra falha do Git — GIT_DIR inválido, dubious
+# ownership, cwd dentro de .git, repositório bare ou corrompido — NÃO é "sem
+# Git": é erro de ambiente, e SEM_GIT_ERRO leva o diagnóstico. A mesma função,
+# byte a byte, em registrar-portao.sh e ativacao-pre-push.sh (o validador do
+# contrato confere). Bash 3.2.
+SEM_GIT_ERRO=""
+sem_repositorio_git() {
+  local p saida
+  SEM_GIT_ERRO=""
+  if [ -n "${GIT_DIR:-}${GIT_WORK_TREE:-}${GIT_COMMON_DIR:-}" ]; then
+    SEM_GIT_ERRO="GIT_DIR, GIT_WORK_TREE ou GIT_COMMON_DIR está definido e o Git não resolveu a árvore de trabalho"; return 1
+  fi
+  p="$PWD"
+  while :; do
+    if [ -e "${p%/}/.git" ]; then SEM_GIT_ERRO="há um .git em ${p%/}/ e o Git não resolveu a árvore de trabalho"; return 1; fi
+    case "$p" in ''|/) break ;; esac
+    p="${p%/*}"; [ -n "$p" ] || p=/
+  done
+  if saida="$(LC_ALL=C git rev-parse --git-dir 2>&1)"; then
+    SEM_GIT_ERRO="o Git acha um repositório ($saida) mas não resolve a árvore de trabalho"; return 1
+  fi
+  case "$saida" in *'not a git repository'*) return 0 ;; esac
+  SEM_GIT_ERRO="o Git falhou: $saida"; return 1
+}
+
 # DM-186: fora de um repositório Git não há push a proteger; a raiz é o
 # diretório corrente e a prova do pre-push é dispensada (adiante). Só o Git
-# real decide isso, nunca o campo `versionado` do ENTREGA.md.
+# real decide isso, nunca o campo `versionado` do ENTREGA.md — e só a AUSÊNCIA
+# de repositório dispensa: qualquer outra falha do Git é ambiente (rc 1), nada
+# gravado.
 SEM_GIT=0
-RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || { SEM_GIT=1; RAIZ="$PWD"; }
+RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  sem_repositorio_git || ambiente "o Git não resolveu a árvore de trabalho e isto não é 'sem repositório' ($SEM_GIT_ERRO; git: $(LC_ALL=C git rev-parse --show-toplevel 2>&1 | sed -n 1p)); a prova NÃO foi dispensada e nada foi gravado"
+  SEM_GIT=1; RAIZ="$PWD"
+}
 
 # A entrega é evidência explícita, na forma canônica, conferida com os
 # argumentos (como em persistir-metodo.sh).

@@ -13,23 +13,28 @@ A regra que governa esta etapa inteira: **ferramenta ausente não é erro** (reg
 - O portão ainda vale para o que foi **publicado** (DM-181, DM-186): a validade roda sobre o **SHA
   publicado** — a ponta da ref remota da branch, buscada agora —, nunca sobre o `HEAD` do checkout,
   e essa ponta tem de ser o **SHA enviado no E6**. O SHA enviado no E6 é o `HEAD` que o passo 4 do
-  E6 confirmou igual a `origin/<branch>`; nada commita entre o E6 e o E7, então ele continua sendo
-  `git rev-parse HEAD`:
+  E6 confirmou igual à ref remota; nada commita entre o E6 e o E7, então ele continua sendo
+  `git rev-parse HEAD`. O remoto e a ref vêm do **upstream da branch** (`@{u}`, o que o E6 gravou
+  com `--set-upstream`), nunca de um `origin` fixo; a busca é **conferida**, porque uma busca que
+  falha deixa a ref remota local com o SHA antigo e a comparação passaria sem ter olhado o remoto;
+  e a divergência **aborta**, não só avisa:
 
 ```bash
-git fetch origin <branch>
-remoto="$(git rev-parse --verify 'refs/remotes/origin/<branch>^{commit}')"
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1   # ex.: origin/<branch>
+remoto="${upstream%%/*}"; ref_remota="${upstream#*/}"
+git fetch "$remoto" "$ref_remota" || { echo "busca de $upstream falhou: o E7 não abre nem retoma o PR"; exit 1; }
+publicado="$(git rev-parse --verify "refs/remotes/$upstream^{commit}")" || exit 1
 enviado="$(git rev-parse HEAD)"
-[ "$remoto" = "$enviado" ] || echo "a ref remota avançou depois do E6 ($remoto, enviado $enviado)"
+[ "$publicado" = "$enviado" ] || { echo "a ponta remota ($publicado) não é o SHA enviado no E6 ($enviado): o E7 não abre nem retoma o PR"; exit 1; }
 bash .claude/skills/mergex/scripts/validade-do-portao.sh --verificar \
-  --entrega docs/entregas/<trabalho_id>/ENTREGA.md --rev "$remoto"
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md --rev "$publicado"
 ```
 
-Ponta remota diferente do SHA enviado (alguém empurrou na branch depois do E6; ou a busca falhou e
-nada resolveu), ou validade `ok=false`: o E7 **não abre nem retoma o PR**. Relate os dois SHAs e o
-`motivo` e mande rodar o E2 — e, se a ref avançou, o E6 de novo sobre o que o E2 aprovar. Abrir
-ou retomar o PR sobre uma ponta que não foi a validada seria afirmar um portão para código que ele
-não avaliou. A validade é a mesma que o `pre-push` do Git aplicou ao SHA enviado no E6 — ele é quem decide o push; o hook do Claude `pr-so-com-portao` é consultivo e não abre nem barra PR. O CI com proteção de merge repete a validade sobre o SHA da cabeça do PR quando o produto o ativar; esta skill não o ativa (`references/12-barreira-de-push.md`).
+Sem upstream configurado, busca que falha, ponta remota diferente do SHA enviado (alguém empurrou
+na branch depois do E6), ou validade `ok=false`: o E7 **não abre nem retoma o PR**. Relate os dois
+SHAs (ou o erro da busca) e o `motivo` e mande rodar o E2 — e, se a ref avançou, o E6 de novo
+sobre o que o E2 aprovar. Abrir ou retomar o PR sobre uma ponta que não foi a validada seria
+afirmar um portão para código que ele não avaliou. A validade é a mesma que o `pre-push` do Git aplicou ao SHA enviado no E6 — ele é quem decide o push; o hook do Claude `pr-so-com-portao` é consultivo e não abre nem barra PR. O CI com proteção de merge repete a validade sobre o SHA da cabeça do PR quando o produto o ativar; esta skill não o ativa (`references/12-barreira-de-push.md`).
 
 Se `push_feito: false` (sem remoto, ou sem versionador), o E7 não roda: siga direto para o E8. `PR.md` fica como o documento da entrega.
 
@@ -177,8 +182,9 @@ Siga para o E8.
 | Comando falhou por permissão | Passo 3, com o erro literal registrado |
 | PR já existe | Recupere a URL e registre; é retomada |
 | Sem push | O E7 não roda; siga para o E8 |
-| Ponta da ref remota da branch diferente do SHA enviado no E6 (a ref avançou, ou a busca não resolveu) | O E7 não abre nem retoma o PR; relate os dois SHAs; o E2 e o E6 de novo |
-| Portão vencido (`validade-do-portao.sh --rev <SHA remoto>` com `ok=false`) | O E7 não roda; relate o `motivo` e mande rodar o E2 |
+| Branch sem upstream (`@{u}` não resolve) ou `git fetch` do upstream falhou | O E7 não abre nem retoma o PR; relate o erro literal; a ref remota local não vale como prova do remoto |
+| Ponta da ref remota da branch diferente do SHA enviado no E6 (a ref avançou) | O E7 não abre nem retoma o PR; relate os dois SHAs; o E2 e o E6 de novo |
+| Portão vencido (`validade-do-portao.sh --rev <SHA publicado>` com `ok=false`) | O E7 não roda; relate o `motivo` e mande rodar o E2 |
 | Alguém pediu para forçar a abertura com credencial | Recuse: a skill nunca configura credencial nem armazena segredo |
 | `.expx/` não existe | Segue sem gravar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
 | Gravação do `estado.json` falhou | Segue **em silêncio**, sem rastro (`10-estado.md`, "A lacuna"); o E7 continua OK e o PR continua aberto |

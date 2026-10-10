@@ -1099,6 +1099,40 @@ grupo_entrypoints() {
   sem_pronto "dentro de um repositório Git, versionado: false não dispensa a prova (sem pre-push: nada gravado)" "$t"
   edita_e 's/^versionado: .*/versionado: true/'
 
+  # ---- DM-186 (rodada 1): só a AUSÊNCIA de repositório dispensa a prova; qualquer
+  # outra falha do Git é erro de ambiente (rc 1, nada gravado) e, no E0, rc 3
+  cp "$e" "$t/antes"
+  # (a) GIT_DIR inválido, dentro do repositório
+  GIT_DIR=/nao/existe/git registra pronto
+  [ "$REG_RC" = 1 ] && ! printf '%s\n' "$REG_OUT" | grep -Fq 'RESULTADO: PRONTO' && cmp -s "$e" "$t/antes" \
+    && printf '%s\n' "$REG_OUT" | grep -Fq 'nada foi gravado' && ! printf '%s\n' "$REG_OUT" | grep -Fq 'prova do pre-push dispensada' \
+    && ok "GIT_DIR inválido não é 'sem Git': registrar sai 1 (ambiente), nada gravado, prova não dispensada" \
+    || falha "GIT_DIR inválido: rc=$REG_RC $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+  ( cd "$d" && GIT_DIR=/nao/existe/git bash "$ATV" --instalar --entrega "$e" >/dev/null 2>&1 ); rc=$?
+  [ "$rc" = 3 ] && [ ! -e "$hk" ] && ok "GIT_DIR inválido: E0 sai 3 e não instala (não é 'sem Git')" || falha "GIT_DIR inválido: --instalar rc=$rc"
+  # (b) cwd dentro de .git
+  ( cd "$d/.git" && bash "$REGISTRA" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado pronto > "$t/reg.out" 2>&1 ); rc=$?
+  [ "$rc" = 1 ] && ! grep -Fq 'RESULTADO: PRONTO' "$t/reg.out" && cmp -s "$e" "$t/antes" && ! grep -Fq 'prova do pre-push dispensada' "$t/reg.out" \
+    && ok "cwd dentro de .git não é 'sem Git': registrar sai 1, nada gravado" || falha "cwd em .git: rc=$rc $(tr '\n' '|' < "$t/reg.out")"
+  ( cd "$d/.git" && bash "$ATV" --instalar --entrega "$e" >/dev/null 2>&1 ); rc=$?
+  [ "$rc" = 3 ] && [ ! -e "$hk" ] && ok "cwd dentro de .git: E0 sai 3 e não instala" || falha "cwd em .git: --instalar rc=$rc"
+  # (c) dubious ownership, pelo knob do próprio Git (GIT_TEST_ASSUME_DIFFERENT_OWNER)
+  if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$d" rev-parse --show-toplevel >/dev/null 2>&1; then
+    nao_executado "dubious ownership — este git ignora GIT_TEST_ASSUME_DIFFERENT_OWNER ($(git --version))"
+  else
+    ok "controle: GIT_TEST_ASSUME_DIFFERENT_OWNER=1 faz o Git recusar o repositório (dubious ownership)"
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 registra pronto
+    [ "$REG_RC" = 1 ] && ! printf '%s\n' "$REG_OUT" | grep -Fq 'RESULTADO: PRONTO' && cmp -s "$e" "$t/antes" \
+      && ! printf '%s\n' "$REG_OUT" | grep -Fq 'prova do pre-push dispensada' \
+      && ok "dubious ownership não é 'sem Git': registrar sai 1, nada gravado" || falha "dubious ownership: rc=$REG_RC $(printf '%s' "$REG_OUT" | tr '\n' '|')"
+    ( cd "$d" && GIT_TEST_ASSUME_DIFFERENT_OWNER=1 bash "$ATV" --instalar --entrega "$e" >/dev/null 2>&1 ); rc=$?
+    [ "$rc" = 3 ] && [ ! -e "$hk" ] && ok "dubious ownership: E0 sai 3 e não instala" || falha "dubious ownership: --instalar rc=$rc"
+  fi
+  # (d) o caso legítimo continua dispensando: sem .git em nenhum ancestral e sem GIT_DIR
+  ( cd "$sg" && bash "$REGISTRA" --entrega "$e" --origem sprintx --trabalho ft-rec --resultado pronto > "$t/reg.out" 2>&1 ); rc=$?
+  [ "$rc" = 0 ] && grep -Fxq 'RESULTADO: PRONTO' "$t/reg.out" && grep -Fq 'prova do pre-push dispensada' "$t/reg.out" \
+    && ok "sem repositório Git de verdade: a dispensa continua (rc 0, PRONTO)" || falha "sem Git legítimo: rc=$rc $(tr '\n' '|' < "$t/reg.out")"
+
   # ---- BLOQUEADO não depende da prova --------------------------------------------------------
   registra bloqueado v7 v1
   [ "$REG_RC" = 0 ] && [ "$(fm_e portao)" = bloqueado ] && [ "$(fm_e falhas_portao)" = '[v1, v7]' ] \

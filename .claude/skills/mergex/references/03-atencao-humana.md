@@ -324,17 +324,20 @@ printf '%s\t%s\t%s\n' src/auth/sessao.ts "O4: cria o token de sessão (T-01.02)"
   ausente ou ilegível, faz o classificador falhar (rc 66) sem classificar nada. Todo caminho da
   lista sai em OLHO OBRIGATÓRIO, mesmo ausente da entrada. Monte a lista a partir do
   `reconciliacao-base.sh --verificar`, **só depois de ele aprovar** (DM-186): grave a saída num
-  arquivo, exija código `0` e a linha `ok=true`, e só então extraia os `coberto`:
+  arquivo **temporário** (nunca na raiz da árvore, que o E1 e o E2 inventariam), exija código `0` e
+  a linha `ok=true`, e só então extraia os `coberto`:
 
   ```bash
+  e3="$(mktemp -d "${TMPDIR:-/tmp}/mergex-e3.XXXXXX")"
   bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
     --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
-    --origem <sprintx|runx> --trabalho <trabalho_id> > verificar.out; rc=$?
-  [ "$rc" = 0 ] && grep -Fxq 'ok=true' verificar.out \
-    && awk -F'\t' '$1=="coberto"{print $2"\t"$3}' verificar.out > reconciliados.tsv
+    --origem <sprintx|runx> --trabalho <trabalho_id> > "$e3/verificar.out"; rc=$?
+  [ "$rc" = 0 ] && grep -Fxq 'ok=true' "$e3/verificar.out" \
+    && awk -F'\t' '$1=="coberto"{print $2"\t"$3}' "$e3/verificar.out" > "$e3/reconciliados.tsv"
   ```
 
-  Código diferente de `0`, ou saída sem `ok=true`: a reconciliação está reprovada e
+  Passe `--reconciliados "$e3/reconciliados.tsv"` ao classificador e remova `"$e3"` ao fim: nada
+  disso fica na árvore de trabalho. Código diferente de `0`, ou saída sem `ok=true`: a reconciliação está reprovada e
   **o E3 não classifica** — relate os `motivo` da saída e volte ao E2, cuja barreira é essa mesma
   verificação (`references/11-reconciliacao-base.md`). Encadear o `--verificar` direto no `awk`
   perderia o código de saída: uma cadeia quebrada produziria uma lista vazia ou parcial, e o E3

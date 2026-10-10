@@ -1468,6 +1468,18 @@ done
 # E2: fora de um repositório Git a prova é dispensada — pelo Git real, nunca
 # pelo campo `versionado`; o gravador e a prosa dizem o mesmo
 grep -Fq '[ "$SEM_GIT" = 1 ] ||' "$registrar_sh" || fail 'registrar-portao.sh não dispensa a prova fora de um repositório Git (DM-186)'
+# "sem Git" é só a ausência de repositório (ambiente limpo, nenhum .git nos
+# ancestrais e o Git sem repositório); outra falha do Git é ambiente. A função
+# é a mesma, byte a byte, nos dois executáveis que dispensam.
+fn_sem_git() { awk '/^sem_repositorio_git\(\) \{/,/^}$/' "$1"; }
+[ -n "$(fn_sem_git "$registrar_sh")" ] || fail 'registrar-portao.sh sem sem_repositorio_git() (DM-186, rodada 1)'
+[ -n "$(fn_sem_git "$ativacao_sh")" ] || fail 'ativacao-pre-push.sh sem sem_repositorio_git() (DM-186, rodada 1)'
+[ "$(fn_sem_git "$registrar_sh")" = "$(fn_sem_git "$ativacao_sh")" ] || fail 'sem_repositorio_git() diverge entre registrar-portao.sh e ativacao-pre-push.sh'
+for s in 'GIT_DIR' 'not a git repository' '/.git'; do
+  fn_sem_git "$registrar_sh" | grep -Fq -- "$s" || fail "sem_repositorio_git() não confere: $s"
+done
+grep -Fq 'sem_repositorio_git ||' "$registrar_sh" || fail 'registrar-portao.sh não exige sem_repositorio_git antes de dispensar'
+grep -Fq 'sem_repositorio_git ||' "$ativacao_sh" || fail 'ativacao-pre-push.sh não exige sem_repositorio_git antes de sair 0'
 grep -F '# guarda:E2SEMHOOK' "$registrar_sh" | grep -Fq 'SEM_GIT' || fail 'registrar-portao.sh: a dispensa sem Git não está na linha da guarda E2SEMHOOK'
 codigo "$registrar_sh" | grep -Fq 'versionado' && fail 'registrar-portao.sh decide a dispensa pelo campo versionado (o critério é só o Git real)'
 for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao" "$barreira_ref"; do
@@ -1478,9 +1490,16 @@ done
 grep -Fq -- "--verificar | awk" "$atencao" && fail '03-atencao-humana ainda encadeia o --verificar direto no awk, sem conferir o código de saída (DM-186)'
 grep -Fq "grep -Fxq 'ok=true'" "$atencao" || fail '03-atencao-humana não exige ok=true do --verificar antes de extrair os coberto (DM-186)'
 grep -Fq 'o E3 não classifica' "$atencao" || fail '03-atencao-humana não diz que a reconciliação reprovada impede o E3 de classificar'
-# E7: a validade sobre o SHA publicado, que tem de ser o enviado no E6
-grep -Fq -- '--rev "$remoto"' "$abertura_pr" || fail '07-abertura-pr não roda a validade sobre a ponta remota (--rev) (DM-186)'
-grep -Fq 'git fetch origin' "$abertura_pr" || fail '07-abertura-pr não busca a ref remota da branch antes de validar (DM-186)'
+# os arquivos de trabalho do E3 vão para um temporário, nunca para a raiz da árvore
+grep -Fq 'mktemp -d' "$atencao" || fail '03-atencao-humana não manda verificar.out e reconciliados.tsv para um temporário (mktemp -d)'
+grep -Eq '> (verificar\.out|reconciliados\.tsv)' "$atencao" && fail '03-atencao-humana ainda grava verificar.out ou reconciliados.tsv na raiz da árvore'
+# E7: a validade sobre o SHA publicado, que tem de ser o enviado no E6; remoto e
+# ref vêm do upstream da branch, a busca é conferida e a divergência aborta
+grep -Fq -- '--rev "$publicado"' "$abertura_pr" || fail '07-abertura-pr não roda a validade sobre a ponta remota (--rev "$publicado") (DM-186)'
+grep -Fq "'@{u}'" "$abertura_pr" || fail '07-abertura-pr não deriva remoto e ref do upstream da branch (@{u})'
+grep -Fq 'git fetch "$remoto" "$ref_remota" ||' "$abertura_pr" || fail '07-abertura-pr não confere o git fetch (falhou: o E7 não abre nem retoma)'
+grep -Fq 'git fetch origin' "$abertura_pr" && fail '07-abertura-pr ainda fixa origin no E7 (o remoto vem do upstream)'
+grep -Fq '[ "$publicado" = "$enviado" ] ||' "$abertura_pr" || fail '07-abertura-pr não aborta na divergência entre a ponta remota e o SHA enviado'
 for f in "$abertura_pr" .claude/commands/mergex-pr.md .opencode/commands/mergex-pr.md; do
   grep -Fq 'SHA enviado no E6' "$f" || fail "$f não exige que a ponta remota seja o SHA enviado no E6 (DM-186)"
   grep -Fq 'não abre nem retoma o PR' "$f" || fail "$f não diz que a divergência impede o E7 de abrir ou retomar o PR (DM-186)"

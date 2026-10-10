@@ -33,10 +33,17 @@
 #   repositórios da máquina, preso ao validador deste checkout. A comparação é
 #   por caminho canônico (links simbólicos e `..` resolvidos com `cd && pwd -P`,
 #   dos três lados). Um pre-push já presente nesse diretório segue a regra do
-#   hook de terceiro acima: só a prova funcional o aceita.
+#   hook de terceiro acima: só a prova funcional o aceita. Limite conhecido
+#   (não corrigido): no Git for Windows a comparação canônica é textual sobre
+#   o que `pwd -P` devolve — sistema de arquivos insensível a caixa
+#   (`c:/users/x` vs `C:/Users/X`) ou nome curto 8.3 podem dar recusa indevida,
+#   sempre para o lado seguro (rc 3 com a instrução); e um repositório cuja
+#   árvore é o próprio $HOME (dotfiles) tem qualquer hooksPath sob $HOME como
+#   "dentro".
 #   Fora de um repositório Git (DM-186): não há push a proteger; --instalar não
-#   instala nada e sai 0. O critério é só o Git real (`git rev-parse
-#   --show-toplevel`), nunca o campo `versionado` do ENTREGA.md.
+#   instala nada e sai 0. O critério é só o Git real, nunca o campo
+#   `versionado` do ENTREGA.md — e só a AUSÊNCIA de repositório conta
+#   (sem_repositorio_git, abaixo): outra falha do Git é pré-requisito ausente.
 #
 # --provar (E0 e E2)
 #   Prova por comportamento, nunca por busca textual no hook. Monta, sem tocar
@@ -145,11 +152,45 @@ trap 'exit 1' HUP INT TERM
 . "$CATALOGO_SH" || pre_requisito "dependência ilegível: $CATALOGO_SH"
 set +e
 
+# sem_repositorio_git — fora de QUALQUER repositório Git, pelo próprio Git
+# (DM-186, rodada 1). Só quando as três valem: (1) o ambiente não aponta
+# repositório (GIT_DIR, GIT_WORK_TREE e GIT_COMMON_DIR vazios); (2) não há
+# `.git` no diretório corrente nem em nenhum ancestral; (3) o Git não acha
+# repositório nenhum (`rev-parse --git-dir` falha com "not a git repository",
+# em LC_ALL=C). Qualquer outra falha do Git — GIT_DIR inválido, dubious
+# ownership, cwd dentro de .git, repositório bare ou corrompido — NÃO é "sem
+# Git": é erro de ambiente, e SEM_GIT_ERRO leva o diagnóstico. A mesma função,
+# byte a byte, em registrar-portao.sh e ativacao-pre-push.sh (o validador do
+# contrato confere). Bash 3.2.
+SEM_GIT_ERRO=""
+sem_repositorio_git() {
+  local p saida
+  SEM_GIT_ERRO=""
+  if [ -n "${GIT_DIR:-}${GIT_WORK_TREE:-}${GIT_COMMON_DIR:-}" ]; then
+    SEM_GIT_ERRO="GIT_DIR, GIT_WORK_TREE ou GIT_COMMON_DIR está definido e o Git não resolveu a árvore de trabalho"; return 1
+  fi
+  p="$PWD"
+  while :; do
+    if [ -e "${p%/}/.git" ]; then SEM_GIT_ERRO="há um .git em ${p%/}/ e o Git não resolveu a árvore de trabalho"; return 1; fi
+    case "$p" in ''|/) break ;; esac
+    p="${p%/*}"; [ -n "$p" ] || p=/
+  done
+  if saida="$(LC_ALL=C git rev-parse --git-dir 2>&1)"; then
+    SEM_GIT_ERRO="o Git acha um repositório ($saida) mas não resolve a árvore de trabalho"; return 1
+  fi
+  case "$saida" in *'not a git repository'*) return 0 ;; esac
+  SEM_GIT_ERRO="o Git falhou: $saida"; return 1
+}
+
 RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   # DM-186: fora de um repositório Git não há push a proteger. O critério é o
-  # Git real, nunca o campo `versionado` do ENTREGA.md. --instalar sai 0 sem
-  # instalar; --provar e --reverter continuam pré-requisito ausente (o E2
-  # dispensa a prova pelo mesmo critério, em registrar-portao.sh).
+  # Git real, nunca o campo `versionado` do ENTREGA.md — e só a AUSÊNCIA de
+  # repositório conta (sem_repositorio_git): GIT_DIR inválido, dubious
+  # ownership, cwd dentro de .git ou repositório corrompido são pré-requisito
+  # ausente (rc 3), nunca "sem Git". --instalar sai 0 sem instalar; --provar e
+  # --reverter continuam pré-requisito ausente (o E2 dispensa a prova pelo
+  # mesmo critério, em registrar-portao.sh).
+  sem_repositorio_git || pre_requisito "o Git não resolveu a árvore de trabalho e isto não é 'sem repositório' ($SEM_GIT_ERRO; git: $(LC_ALL=C git rev-parse --show-toplevel 2>&1 | sed -n 1p)); nada foi instalado"
   if [ "$MODO" = instalar ]; then
     diz 'fora de um repositório Git com árvore de trabalho: não há push a proteger; nada a instalar (o E2 dispensa a prova pelo mesmo critério)'
     exit 0

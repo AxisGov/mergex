@@ -37,7 +37,11 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --instalar \
   o `pre-push` de todos os repositórios da máquina, preso ao validador deste checkout; removido o
   checkout, todo push da máquina seria barrado. A comparação é por caminho canônico (links
   simbólicos e `..` resolvidos), dos três lados. Um `pre-push` já presente nesse diretório segue a
-  regra do hook de terceiro abaixo: só a prova funcional o aceita.
+  regra do hook de terceiro abaixo: só a prova funcional o aceita. **Limite conhecido:** no Git for
+  Windows a comparação é textual sobre o que `pwd -P` devolve; sistema de arquivos insensível a
+  caixa (`c:/users/x` contra `C:/Users/X`) ou nome curto 8.3 podem dar recusa indevida — sempre para
+  o lado seguro (código `3` com a instrução) —, e um repositório cuja árvore é o próprio `$HOME`
+  (dotfiles) tem qualquer `core.hooksPath` sob `$HOME` como "dentro".
 - **Já é o chamador gerenciado:** nada muda (idempotente).
 - **Existe um `pre-push` de terceiro:** o E0 nunca o sobrescreve, renomeia ou edita. Quem decide é
   a prova funcional: aprovada, é **integração externa válida** e o E0 segue; reprovada, o script sai
