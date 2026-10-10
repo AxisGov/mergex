@@ -128,9 +128,12 @@ MATRIZ='1|P1|r1:provas|prova 1 desligada
 # script, CI, `wsl.exe -- bash`), este script herda o grupo do chamador e o TERM
 # derrubaria quem o chamou. Então, quando não é líder de grupo, re-executa-se
 # sob `setsid` (sem fork: mesmo pid, o chamador continua enxergando-o). Sem
-# `setsid` (macOS), interrompe() mata só os próprios jobs.
-if [ "$(ps -o pgid= -p $$ | tr -d ' ')" != "$$" ] && command -v setsid >/dev/null 2>&1; then
-  exec setsid -w bash "$0" "$@"
+# `setsid` (macOS), interrompe() mata só os próprios jobs. A sentinela
+# MUTACAO_R1_SETSID impede uma segunda reexecução: se `ps` falhar ou faltar, a
+# comparação daria "não é líder" para sempre e o exec viraria laço.
+if [ -z "${MUTACAO_R1_SETSID:-}" ] && [ "$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')" != "$$" ] \
+  && command -v setsid >/dev/null 2>&1; then
+  MUTACAO_R1_SETSID=1 exec setsid -w bash "$0" "$@"
 fi
 
 RAIZ_TMP="$(mktemp -d "${TMPDIR:-/tmp}/mutacao-r1.XXXXXX")" || { echo 'sem diretório temporário' >&2; exit 1; }

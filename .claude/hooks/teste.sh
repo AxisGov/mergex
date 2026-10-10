@@ -196,6 +196,32 @@ caso "sudo /usr/bin/git push --force barra" mergex/git-perigoso.sh "$(bash_json 
 caso "/usr/bin/git push na feature passa"   mergex/git-perigoso.sh "$(bash_json '/usr/bin/git push origin feature/x')" 0
 caso "/usr/bin/git log passa"               mergex/git-perigoso.sh "$(bash_json '/usr/bin/git log --oneline')" 0
 caso "echo sobre /usr/bin/git push --force passa" mergex/git-perigoso.sh "$(bash_json 'echo "/usr/bin/git push --force"')" 0
+# A palavra do programa e normalizada UMA vez (CMD_N: sem aspas pareadas, sem
+# caminho, sem `\`, sem .exe) antes do pre-filtro e de TODAS as regras: a forma
+# entre aspas nao sai no pre-filtro, e git.exe cai nas regras 2-5 como git
+# (rodada 1 da revisao: I1 e I2). Sem falso bloqueio: caminho que termina em
+# `git` como argumento nao e programa.
+echo "git-perigoso — programa normalizado: aspas, git.exe nas regras 2-5, sem falso bloqueio"
+caso "\"/usr/bin/git\" push --force barra"   mergex/git-perigoso.sh "$(bash_json '"/usr/bin/git" push --force origin feature/x')" 2
+caso "'/usr/bin/git' push --force barra"     mergex/git-perigoso.sh "$(bash_json "'/usr/bin/git' push --force origin feature/x")" 2
+caso "\"git\" push -f barra"                 mergex/git-perigoso.sh "$(bash_json '"git" push -f')" 2
+caso "\"git.exe\" push -f barra"             mergex/git-perigoso.sh "$(bash_json '"git.exe" push -f')" 2
+caso "\"/usr/bin/git\" push origin main barra" mergex/git-perigoso.sh "$(bash_json '"/usr/bin/git" push origin main')" 2
+caso "git.exe commit na principal barra"     mergex/git-perigoso.sh "$(bash_json 'git.exe commit -m x')" 2
+caso "\"/usr/bin/git\" commit na principal barra" mergex/git-perigoso.sh "$(bash_json '"/usr/bin/git" commit -m x')" 2
+caso "git.exe clean -fd barra"               mergex/git-perigoso.sh "$(bash_json 'git.exe clean -fd')" 2
+caso "\"git\" clean -fd barra"               mergex/git-perigoso.sh "$(bash_json '"git" clean -fd')" 2
+caso "git.exe status passa"                  mergex/git-perigoso.sh "$(bash_json 'git.exe status')" 0
+caso "\"git\" status passa"                  mergex/git-perigoso.sh "$(bash_json '"git" status')" 0
+caso "git.exe clean -n passa"                mergex/git-perigoso.sh "$(bash_json 'git.exe clean -n')" 0
+caso "ls ./tools/git passa"                  mergex/git-perigoso.sh "$(bash_json 'ls ./tools/git')" 0
+caso "cat src/git passa"                     mergex/git-perigoso.sh "$(bash_json 'cat src/git')" 0
+caso "cat src/git push --force passa"        mergex/git-perigoso.sh "$(bash_json 'cat src/git push --force')" 0
+caso "git log -- src/git passa"              mergex/git-perigoso.sh "$(bash_json 'git log -- src/git')" 0
+caso "git add tools/git push passa"          mergex/git-perigoso.sh "$(bash_json 'git add tools/git push')" 0
+caso "which git passa"                       mergex/git-perigoso.sh "$(bash_json 'which git')" 0
+caso "cat .gitignore passa"                  mergex/git-perigoso.sh "$(bash_json 'cat .gitignore')" 0
+caso "cat foo/digit passa"                   mergex/git-perigoso.sh "$(bash_json 'cat foo/digit')" 0
 
 echo
 echo "branch-limpa"
@@ -205,6 +231,11 @@ caso "troca com arvore suja"   comum/branch-limpa.sh "$(bash_json 'git switch ou
 # Descarte so e perigoso quando ha o que perder: aqui a arvore esta suja.
 caso "restore sem flag"   mergex/git-perigoso.sh "$(bash_json 'git restore arquivo.txt')" 2
 caso "restore --worktree" mergex/git-perigoso.sh "$(bash_json 'git restore --worktree arquivo.txt')" 2
+# git.exe e a forma entre aspas sao o mesmo git tambem na regra de descarte
+caso "git.exe restore barra"            mergex/git-perigoso.sh "$(bash_json 'git.exe restore arquivo.txt')" 2
+caso "git.exe checkout -- barra"        mergex/git-perigoso.sh "$(bash_json 'git.exe checkout -- arquivo.txt')" 2
+caso "\"/usr/bin/git\" restore barra"   mergex/git-perigoso.sh "$(bash_json '"/usr/bin/git" restore arquivo.txt')" 2
+caso "git.exe restore --staged passa"   mergex/git-perigoso.sh "$(bash_json 'git.exe restore --staged arquivo.txt')" 0
 caso "switch -c com suja"      comum/branch-limpa.sh "$(bash_json 'git switch -c nova')" 2
 caso "checkout -- nao e troca" comum/branch-limpa.sh "$(bash_json 'git checkout -- arquivo.txt')" 0
 caso "npm run switch"          comum/branch-limpa.sh "$(bash_json 'npm run switch')" 0

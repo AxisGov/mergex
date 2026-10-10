@@ -62,6 +62,53 @@ fi
 CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 [ -n "$CMD" ] || exit 0
 
+# A palavra do programa git, normalizada UMA vez para a grafia `git` — antes do
+# pré-filtro, da leitura do push e das regras por regex, que leem CMD_N; as
+# mensagens continuam mostrando CMD como foi escrito. Somem: as aspas pareadas
+# (`"git"`, `'/usr/bin/git'`), o caminho (`/usr/bin/git`, `./git`), a barra que
+# pula alias (`\git`) e o `.exe`. É o mesmo programa; sem isto `"git" push -f`
+# saía no pré-filtro (a aspa de fechamento colada no `git`) e `git.exe commit`
+# passava pelas regras 2-5, que casam só a grafia `git` (CodeAnt 4235529191 e
+# revisão). Um caminho que termina em `git` como ARGUMENTO (`ls ./tools/git`,
+# `git log -- src/git`) também vira `git`, mas não é programa do segmento nem é
+# seguido de subcomando perigoso: nenhuma regra dispara. Não resolve variável,
+# substituição de comando, alias nem caminho com espaço: o hook lê texto, não
+# valor (follow-up declarado).
+#
+# Só expansões do bash: este hook não invoca sed (test-m4a 6.18 — com sed
+# ausente ou BSD a decisão não pode mudar de lado), e um utilitário que falhasse
+# deixaria CMD_N vazio e o hook sairia por 0 antes das regras.
+GIT_SEP='[[:space:];&|`(){}]'
+# normaliza_git <comando> — CMD_N recebe o comando com cada palavra que é o
+# programa git reduzida a `git`; separadores e as demais palavras ficam como
+# estão. Palavra = o trecho até o próximo separador (GIT_SEP).
+normaliza_git() {
+  local rest="$1" w t
+  CMD_N=""
+  while [ -n "$rest" ]; do
+    w="${rest%%$GIT_SEP*}"
+    rest="${rest#"$w"}"
+    if [ -n "$w" ]; then
+      t="$w"
+      case "$t" in
+        \"?*\") t="${t#\"}"; t="${t%\"}" ;;
+        \'?*\') t="${t#\'}"; t="${t%\'}" ;;
+      esac
+      t="${t#\\}"
+      # aspa que sobrou sem par (a de abertura de um embrulho ou de um `echo
+      # "..."`) e `=` (atribuição `GIT=/usr/bin/git`, opção `--git-dir=…/git`)
+      # não são programa: a palavra fica como está
+      case "$t" in
+        *[\"\'=]*) ;;
+        git|*/git|git.exe|*/git.exe) w=git ;;
+      esac
+      CMD_N="$CMD_N$w"
+    fi
+    if [ -n "$rest" ]; then CMD_N="$CMD_N${rest:0:1}"; rest="${rest:1}"; fi
+  done
+}
+normaliza_git "$CMD"
+
 # Saída antecipada: se não invoca git, este hook não tem assunto.
 # É o que mantém o custo perto de zero na maioria esmagadora das chamadas.
 #
@@ -73,11 +120,11 @@ CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null
 # (acima) sempre enxergou essa forma; era esta lista que estava mais estreita
 # do que a de lá, e a diferença entre as duas era o bypass.
 #
-# A barra (`/usr/bin/git`, `./git`), a barra invertida que pula alias (`\git`)
-# e `git.exe` também: é o mesmo programa, e sem elas aqui TODAS as regras eram
-# contornadas por um git invocado por caminho (CodeAnt 4235529191). A leitura
-# do push (comum/base.sh, expx_e_git) reconhece as mesmas formas.
-printf '%s' "$CMD" | grep -Eq '(^|[;&|`(){}'\''"[:space:]/\\])git(\.exe)?([[:space:]]|$)' || exit 0
+# A barra e `.exe` continuam na lista para o git por caminho DENTRO de um
+# embrulho (`bash -c "/usr/bin/git push"`), que a normalização acima não reduz
+# (a aspa de abertura não é a do programa); a leitura do push (comum/base.sh,
+# expx_e_git) lê essa forma por token.
+printf '%s' "$CMD_N" | grep -Eq '(^|[;&|`(){}'\''"[:space:]/\\])git(\.exe)?([[:space:]]|$)' || exit 0
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 RAIZ="$(expx_raiz "${CWD:-$PWD}")"
@@ -223,7 +270,7 @@ le_push() {
 # Todo segmento que pode ser um push é lido.
 while IFS= read -r SEG; do
   le_push "$SEG" || true
-done <<<"$(expx_push_segmentos "$CMD")"
+done <<<"$(expx_push_segmentos "$CMD_N")"
 
 # --------------------------------------------------------------------------
 # 1. Push forçado — em qualquer forma
@@ -253,7 +300,7 @@ fi
 # 2. Push ou commit direto na branch principal
 # --------------------------------------------------------------------------
 # commit: barra quando a branch ativa É a principal
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)'; then
   if [ -n "$ATUAL" ] && [ "$ATUAL" = "$PRINCIPAL" ]; then
     barra "commit na branch principal" \
 "mergex/git-perigoso — commit direto na branch principal
@@ -359,9 +406,9 @@ fi
 # --------------------------------------------------------------------------
 # 3. Reescrita de histórico já enviado
 # --------------------------------------------------------------------------
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(rebase|filter-branch|filter-repo)([[:space:]]|$)' \
-|| printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit[^|;&]*[[:space:]]--amend([[:space:]]|$)' \
-|| printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+reset[^|;&]*[[:space:]]--hard([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(rebase|filter-branch|filter-repo)([[:space:]]|$)' \
+|| printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit[^|;&]*[[:space:]]--amend([[:space:]]|$)' \
+|| printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+reset[^|;&]*[[:space:]]--hard([[:space:]]|$)'; then
   # Só é perigoso se o que seria reescrito já foi enviado ao remoto.
   # Sem upstream, é histórico local: não barra (precisão, regra 1).
   UP="$(git -C "$RAIZ" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
@@ -395,19 +442,19 @@ fi
 # --------------------------------------------------------------------------
 # git checkout -- <path> / git restore <path> / git stash drop|clear
 DESCARTA=0
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+checkout[^|;&]*[[:space:]]--([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+checkout[^|;&]*[[:space:]]--([[:space:]]|$)'; then
   DESCARTA=1
-elif printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+rest''ore([[:space:]]|$)'; then
+elif printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+rest''ore([[:space:]]|$)'; then
   # Só desfazer o stage nao toca a arvore de trabalho e nao destroi nada.
   # Barrar isso seria o falso positivo que atrapalha o dia inteiro.
-  if printf '%s' "$CMD" | grep -Eq '[[:space:]]--worktree([[:space:]]|=|$)'; then
+  if printf '%s' "$CMD_N" | grep -Eq '[[:space:]]--worktree([[:space:]]|=|$)'; then
     DESCARTA=1
-  elif printf '%s' "$CMD" | grep -Eq '[[:space:]]--staged([[:space:]]|=|$)'; then
+  elif printf '%s' "$CMD_N" | grep -Eq '[[:space:]]--staged([[:space:]]|=|$)'; then
     DESCARTA=0
   else
     DESCARTA=1
   fi
-elif printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+stash[[:space:]]+(drop|clear)([[:space:]]|$)'; then
+elif printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+stash[[:space:]]+(drop|clear)([[:space:]]|$)'; then
   DESCARTA=1
 fi
 if [ "$DESCARTA" = "1" ]; then
@@ -436,8 +483,8 @@ fi
 # --------------------------------------------------------------------------
 # 5. Limpeza destrutiva de arquivo não rastreado
 # --------------------------------------------------------------------------
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+clean([[:space:]]|$)'; then
-  if printf '%s' "$CMD" | grep -Eq '[[:space:]]-[a-zA-Z]*[fdx]'; then
+if printf '%s' "$CMD_N" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+clean([[:space:]]|$)'; then
+  if printf '%s' "$CMD_N" | grep -Eq '[[:space:]]-[a-zA-Z]*[fdx]'; then
     ALVOS="$(git -C "$RAIZ" clean -nd 2>/dev/null | head -20)"
     barra "limpeza destrutiva" \
 "mergex/git-perigoso — limpeza destrutiva de arquivos não rastreados
