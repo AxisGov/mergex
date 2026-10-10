@@ -100,10 +100,10 @@ programa_casa() {
   [ "$#" -gt 0 ] || return 1
   b="${1##*/}"; b="${b%.exe}"
   case "$b" in
-    git) printf '%s\n' "$*" | grep -Eq "^[^[:space:]]*${OPT_}${SUB_}${cauda}" ;;
-    git-push|git-send-pack) printf '%s\n' "$*" | grep -Eq "^[^[:space:]]*${cauda}" ;;
+    git) printf '%s\n' "$*" | grep -E "^[^[:space:]]*${OPT_}${SUB_}${cauda}" >/dev/null ;;
+    git-push|git-send-pack) printf '%s\n' "$*" | grep -E "^[^[:space:]]*${cauda}" >/dev/null ;;
     *) expx_executor "$b" || return 1
-       printf '%s\n' "$s" | grep -Eq -e "${G_}${OPT_}${SUB_}${cauda}" -e "${GITX_}${cauda}" ;;
+       printf '%s\n' "$s" | grep -E -e "${G_}${OPT_}${SUB_}${cauda}" -e "${GITX_}${cauda}" >/dev/null ;;
   esac
 }
 # algum_segmento <cauda ERE>
@@ -215,7 +215,9 @@ export GIT_OPTIONAL_LOCKS=0
 # 5. O push simples, lido sem ambiguidade
 # --------------------------------------------------------------------------
 case "$CMD" in *$'\n'*) indeterminado "comando com mais de uma linha" ;; esac
-printf '%s\n' "$CMD" | grep -Eq '^[[:space:]]*git[[:space:]]+push([[:space:]]+[A-Za-z0-9._/:@+=,^~%-]+)*[[:space:]]*$' \
+# Sem `-q`, por uniformidade com os demais hooks (sob `pipefail`, um grep que sai
+# cedo dá SIGPIPE ao printf e o pipeline devolve 141 — rodada extra da revisão).
+printf '%s\n' "$CMD" | grep -E '^[[:space:]]*git[[:space:]]+push([[:space:]]+[A-Za-z0-9._/:@+=,^~%-]+)*[[:space:]]*$' >/dev/null \
   || indeterminado "comando composto, com expansão, opção global, prefixo de ambiente ou outro programa"
 
 g() { git -C "$RAIZ" "$@"; }
@@ -243,11 +245,11 @@ while [ "$#" -gt 0 ]; do
       -*)
         # aglomerado curto: `-uv`; terminado em `o`, o valor vem a seguir
         C="${T#-}"
-        if printf '%s' "$C" | grep -Eq '^[uvqf46]+$'; then continue; fi
-        if printf '%s' "$C" | grep -Eq '^[uvqf46]*o$'; then
+        if printf '%s' "$C" | grep -E '^[uvqf46]+$' >/dev/null; then continue; fi
+        if printf '%s' "$C" | grep -E '^[uvqf46]*o$' >/dev/null; then
           [ "$#" -gt 0 ] || indeterminado "opção sem valor: $T"; shift; continue
         fi
-        if printf '%s' "$C" | grep -Eq '^[uvqf46]*o.+$'; then continue; fi
+        if printf '%s' "$C" | grep -E '^[uvqf46]*o.+$' >/dev/null; then continue; fi
         indeterminado "opção do push não lida pelo hook: $T" ;;
     esac
   fi

@@ -74,10 +74,12 @@ integracao_da_mensagem() {
   # Invólucro do heredoc `-m "$(cat <<'EOF' ... EOF)"`.
   txt="$(printf '%s\n' "$1" | awk 'NR==1 && /^\$\(cat[[:space:]]*<</ { h=1; next } h && /^[A-Z_]+[[:space:]]*$/ { exit } { print }')"
   tr="$(printf '%s\n' "$txt" | git interpret-trailers --parse 2>/dev/null)"
-  printf '%s\n' "$tr" | grep -Eq '^Integra-base:' || return 0
+  # Sem `-q` (sob `pipefail`, um grep que sai cedo dá SIGPIPE ao printf e o
+  # pipeline devolve 141 — rodada extra da revisão): o grep lê até o fim.
+  printf '%s\n' "$tr" | grep -E '^Integra-base:' >/dev/null || return 0
   integra="$(printf '%s\n' "$tr" | sed -n 's/^Integra-base:[[:space:]]*//p' | head -1)"
   # Lixo depois dos 40 hex: a leitura não isolou o trailer.
-  printf '%s' "$integra" | grep -Eq '^[0-9a-f]{40}[^0-9a-f]' && return 0
+  printf '%s' "$integra" | grep -E '^[0-9a-f]{40}[^0-9a-f]' >/dev/null && return 0
   trab="$2"
   [ -n "$trab" ] || trab="$(printf '%s\n' "$tr" | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
   if [ ! -r "$3" ]; then

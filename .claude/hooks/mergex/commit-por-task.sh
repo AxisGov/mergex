@@ -37,7 +37,11 @@ ENTRADA="$(cat)"
 
 CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 [ -n "$CMD" ] || exit 0
-printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' || exit 0
+# Sem `-q`, de propósito: base.sh liga `pipefail`, e um grep que casa na primeira
+# linha e sai dá SIGPIPE ao printf quando o comando passa do buffer do pipe — o
+# pipeline devolvia 141 e este `|| exit 0` pulava o hook (rodada extra da
+# revisão). Sem `-q` o grep lê até o fim, e o status é só dele.
+printf '%s' "$CMD" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' >/dev/null || exit 0
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 RAIZ="$(expx_raiz "${CWD:-$PWD}")"
@@ -405,7 +409,10 @@ fi
 # 2. Task não concluída, ou com registro de suíte que não sustenta um commit
 # --------------------------------------------------------------------------
 for id in $TASKS_TOCADAS; do
-  linha="$(grep -F "$id	" "$TMP" | head -1)" || continue
+  # o `head -1` sai cedo: o status do pipeline sob `pipefail` pode ser 141; a
+  # decisão é pelo conteúdo (rodada extra da revisão)
+  linha="$(grep -F "$id	" "$TMP" | head -1)"
+  [ -n "$linha" ] || continue
   status="$(printf '%s' "$linha" | cut -f2)"
   suite="$(printf '%s' "$linha" | cut -f3)"
 

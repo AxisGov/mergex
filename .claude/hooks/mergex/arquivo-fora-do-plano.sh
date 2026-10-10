@@ -24,7 +24,11 @@ ENTRADA="$(cat)"
 
 CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 [ -n "$CMD" ] || exit 0
-printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' || exit 0
+# Sem `-q`, de propósito: base.sh liga `pipefail`, e um grep que casa na primeira
+# linha e sai dá SIGPIPE ao printf quando o comando passa do buffer do pipe — o
+# pipeline devolvia 141 e este `|| exit 0` pulava o hook (rodada extra da
+# revisão). Sem `-q` o grep lê até o fim, e o status é só dele.
+printf '%s' "$CMD" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' >/dev/null || exit 0
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 RAIZ="$(expx_raiz "${CWD:-$PWD}")"
@@ -147,7 +151,7 @@ while IFS= read -r arquivo; do
   [ -n "$arquivo" ] || continue
   eh_artefato_de_metodo "$arquivo" && continue
   eh_historico_global_sprintx "$arquivo" && continue
-  printf '%s\n' "$DECLARADOS" | grep -Fxq "$arquivo" || FORA="$FORA  - $arquivo
+  printf '%s\n' "$DECLARADOS" | grep -Fx "$arquivo" >/dev/null || FORA="$FORA  - $arquivo
 "
 done <<< "$PREP"
 

@@ -90,8 +90,11 @@ case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
 # seguida de `; git push` 2,6-3,3 s; esparso (um `git` por 25 bytes) com push
 # no fim, 1 MB sem teto, 0,9 s. Acima do teto: 0,1-0,4 s, barra (1,5 MB de
 # `日`: 0,4 s). Sem `git`: ~15 ms (saída antecipada acima). O teto fica em
-# 512 KB — o pior caso da normalização e das regras decide em ~6 s, 5x de
-# folga para o tempo limite, para máquina mais lenta.
+# 512 KB: a normalização e as regras por regex decidem em até ~6 s nesse
+# tamanho. O que este teto NÃO limita é a leitura por SEGMENTO com `push`: ela
+# custa por segmento, não por byte, e tem teto próprio (PUSH_TETO, abaixo) —
+# era o pior caso real (80 KB em 16 000 linhas `push`: 39 s; re-revisão das
+# rodadas 4-5, N4).
 #
 # Fora deste teto ficava a leitura por token do segmento com `push`
 # (comum/base.sh), que era quadrática no tamanho de UM token:
@@ -393,10 +396,44 @@ le_push() {
   return 0
 }
 
-# Todo segmento que pode ser um push é lido.
+# Todo segmento que pode ser um push é lido — até um teto, falha FECHADA. A
+# leitura por token custa ~2,4 ms por segmento (subshells de expx_sem_aspas e
+# afins), e o teto de bytes não limita isso: um push forçado seguido de 16 000
+# linhas `push` (80 KB) levava 39 s em C.UTF-8 — morto pelo tempo limite do
+# harness, o push passava (re-revisão das rodadas 4-5, N4). Acima de PUSH_TETO
+# segmentos com `push`, o hook não lê: barra e pede para dividir o comando.
+# Medido no hook inteiro, C.UTF-8 (C é igual ou mais rápido), sem o teto: 250
+# segmentos `push` 0,7 s; 500 1,3 s; 1 000 2,5 s; 2 000 4,8 s; 4 000 11 s;
+# 16 000 39 s — e um push COMPLETO (`git push origin feature/x`, com remoto e
+# refspec lidos) custa ~6,6 ms: 1 000 deles, 6,6 s. Nenhum comando legítimo
+# tem centenas de pushes; o teto fica em 500 — pior caso medido 2,9 s (500
+# pushes completos), 3x de folga para 10 s e 10x para o tempo limite; acima
+# dele, 0,1-0,3 s até 384 KB. A contagem é por `wc -l`, que lê tudo e
+# é linear nas duas locales (a expansão `${v//[!\n]/}` do bash é quadrática em
+# UTF-8: 64 000 linhas, 22 s).
+PUSH_TETO=500
+PUSH_SEGS="$(expx_push_segmentos "$CMD_N")"
+PUSH_N=0
+[ -n "$PUSH_SEGS" ] && PUSH_N=$(( $(printf '%s\n' "$PUSH_SEGS" | wc -l) ))
+if [ "$PUSH_N" -gt "$PUSH_TETO" ]; then
+  barra "comando com segmentos de push demais para avaliar" \
+"mergex/git-perigoso — comando com mais segmentos de push do que o hook avalia
+
+Segmentos com push: $PUSH_N (teto: $PUSH_TETO)
+
+Este hook lê por token cada segmento que pode ser um push. Acima deste número a
+leitura disputaria com o tempo limite do harness, e um hook morto pelo tempo
+limite não bloqueia nada — então ele não avalia: barra.
+
+O que fazer:
+  - Divida o comando em partes menores, com poucos pushes em cada uma.
+  - Texto que só cita push (documentação, dados) vai para um arquivo, numa
+    chamada sem git."
+  exit 0
+fi
 while IFS= read -r SEG; do
   le_push "$SEG" || true
-done <<<"$(expx_push_segmentos "$CMD_N")"
+done <<<"$PUSH_SEGS"
 
 # --------------------------------------------------------------------------
 # 1. Push forçado — em qualquer forma

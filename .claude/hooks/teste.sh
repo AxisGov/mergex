@@ -130,6 +130,12 @@ fm_sem_chave() {
 
 bash_json() { jq -cn --arg c "$1" --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:$c}}'; }
 write_json() { jq -cn --arg c "$1" --arg w "$HOOK_CWD" '{tool_name:"Write",cwd:$w,tool_input:{content:$c}}'; }
+# Comando grande: vai por stdin do jq (`--arg` nao aceita argumento acima de 128 KB).
+json_grande() { printf '%s' "$1" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}'; }
+# Linhas de enchimento para os casos de SIGPIPE sob pipefail (rodada extra da
+# revisao): mais que o buffer do pipe (64 KB) e bem mais.
+LINHAS70="$(yes 'echo xxxxxxxx' | head -n 5600)"      # ~73 KB
+LINHAS200="$(yes 'echo xxxxxxxx' | head -n 16000)"    # ~208 KB
 
 echo
 echo "sem-segredo — tem que BARRAR"
@@ -155,6 +161,17 @@ caso "marcador de template" comum/sem-segredo.sh "$(write_json 'token: {{seu_tok
 caso "variavel de shell"    comum/sem-segredo.sh "$(write_json 'SECRET=${MINHA_VAR}')" 0
 caso "prosa sobre senha"    comum/sem-segredo.sh "$(write_json 'O campo senha e validado no login')" 0
 caso "comando comum"        comum/sem-segredo.sh "$(bash_json 'npm test')" 0
+# SIGPIPE sob pipefail (rodada extra da revisao): a saida antecipada
+# `printf | grep -q … || exit 0` devolvia 141 quando o grep casava na 1a linha e
+# o comando passava do buffer do pipe — `git commit -m x` seguido de 70 KB de
+# linhas pulava a varredura, e a chave em preparacao passava. O criterio nao
+# muda; so o encanamento. A chave e sintetica e montada em pedacos (acima).
+printf '%s\n' "$PK" > segredo.pem && git add segredo.pem
+caso "commit com chave privada em preparacao: barra"              comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+caso "commit + 70 KB de linhas: a varredura continua, barra"      comum/sem-segredo.sh "$(json_grande "git commit -m x"$'\n'"$LINHAS70")" 2
+caso "commit + 200 KB de linhas: barra"                           comum/sem-segredo.sh "$(json_grande "git commit -m x"$'\n'"$LINHAS200")" 2
+caso "comando legitimo + 200 KB de linhas: passa"                 comum/sem-segredo.sh "$(json_grande "npm test"$'\n'"$LINHAS200")" 0
+git rm -q --cached segredo.pem && rm -f segredo.pem
 
 echo
 echo "git-perigoso — tem que BARRAR"
@@ -291,6 +308,14 @@ if LC_ALL=C.UTF-8 bash -c 'x=é; [ "${#x}" = 1 ]' 2>/dev/null; then
     "$(printf '%s' "$MULTI" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 0
   custo_ok "multibyte em C.UTF-8: 50 000 x 日 (150 KB) + git status: abaixo do teto, avalia e passa" \
     "$(printf '%s' "${MULTI} git status" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 0
+  # Fronteira exata em bytes com multibyte (rodada extra): 174 760 x 日 = 524 280 B;
+  # + ' git sta' (8 B) = 524 288 = teto, avalia (sem limite de tempo: ~3 s de
+  # leitura legitima); + ' git stat' (9 B) = 524 289, barra sem avaliar.
+  MULTI="$(yes '日' | head -n 174760 | tr -d '\n')"
+  caso "multibyte em C.UTF-8: 524 288 bytes exatos (174 760 x 日 + ' git sta'): no teto, avalia e passa" \
+    mergex/git-perigoso.sh "$(json_grande "${MULTI} git sta")" 0
+  custo_ok "multibyte em C.UTF-8: 524 289 bytes (174 760 x 日 + ' git stat'): um acima, barra em menos de 2 s" \
+    "$(json_grande "${MULTI} git stat")" 2
   if [ "$LC_ANTES" = "__nao_definida__" ]; then unset LC_ALL; else LC_ALL="$LC_ANTES"; fi
   unset MULTI LC_ANTES
 else
@@ -308,7 +333,7 @@ TOKEN32="$(yes a | head -n 32768 | tr -d '\n')"                    # 32 KB sem s
 TOKEN128="${TOKEN32}${TOKEN32}${TOKEN32}${TOKEN32}"               # 128 KB
 CAUDA="$(yes 'echo aaaa bbbb' | head -n 8000)"                     # ~120 KB em 8 000 linhas, sem `push`
 LINHAS="$(yes 'git aaaaaaaaaaaa' | head -n 10000)"                 # 10 000 linhas `git …` (160 KB: mais que o buffer do pipe)
-json_grande() { printf '%s' "$1" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}'; }
+PUSHES16K="$(yes push | head -n 16000)"                            # 16 000 segmentos com `push` (80 KB)
 LOCALES="C"
 LC_ALL=C.UTF-8 bash -c 'x=é; [ "${#x}" = 1 ]' 2>/dev/null && LOCALES="C C.UTF-8"
 for LOC in $LOCALES; do
@@ -323,9 +348,22 @@ for LOC in $LOCALES; do
     "$(json_grande "git push --force origin feature/x"$'\n'"${CAUDA}")" 2
   custo_ok "[$LOC] 10 000 linhas 'git …' (160 KB) + push forcado na ultima (pre-filtro sob pipefail): barra" \
     "$(json_grande "${LINHAS}"$'\n'"git push --force origin feature/x")" 2
+  # Teto de segmentos com push (rodada extra da revisao, N4): cada segmento com
+  # `push` custa ~2,4 ms de leitura por token, e o teto de bytes nao limita isso
+  # — um push forcado seguido de 16 000 linhas `push` (80 KB) levava 39 s em
+  # C.UTF-8: morto pelo timeout do harness, o push passava. Acima de PUSH_TETO
+  # segmentos com `push` o hook nao le: barra, falha fechada.
+  custo_ok "[$LOC] push forcado + 16 000 linhas 'push': barra pelo teto de segmentos, em menos de 2 s" \
+    "$(json_grande "git push --force origin feature/x"$'\n'"$PUSHES16K")" 2
+  custo_ok "[$LOC] push forcado + 32 000 linhas 'push': barra pelo teto de segmentos, em menos de 2 s" \
+    "$(json_grande "git push --force origin feature/x"$'\n'"$PUSHES16K"$'\n'"$PUSHES16K")" 2
+  custo_ok "[$LOC] tres pushes legitimos em tres linhas: passa, em menos de 2 s" \
+    "$(json_grande "git push origin feature/x"$'\n'"git push origin feature/x"$'\n'"git push origin feature/x")" 0
+  caso "[$LOC] push forcado + 400 linhas 'push': abaixo do teto, le e barra" \
+    mergex/git-perigoso.sh "$(json_grande "git push --force origin feature/x"$'\n'"$(yes push | head -n 400)")" 2
   if [ "$LC_ANTES" = "__nao_definida__" ]; then unset LC_ALL; else LC_ALL="$LC_ANTES"; fi
 done
-unset TOKEN32 TOKEN128 CAUDA LINHAS LOCALES LC_ANTES
+unset TOKEN32 TOKEN128 CAUDA LINHAS PUSHES16K LOCALES LC_ANTES
 unset GRANDE DENSO TETO
 
 echo
@@ -344,6 +382,15 @@ caso "git.exe restore --staged passa"   mergex/git-perigoso.sh "$(bash_json 'git
 caso "switch -c com suja"      comum/branch-limpa.sh "$(bash_json 'git switch -c nova')" 2
 caso "checkout -- nao e troca" comum/branch-limpa.sh "$(bash_json 'git checkout -- arquivo.txt')" 0
 caso "npm run switch"          comum/branch-limpa.sh "$(bash_json 'npm run switch')" 0
+# SIGPIPE sob pipefail (rodada extra da revisao): `git switch -c y` seguido de
+# mais de 64 KB de linhas liberava a troca com a arvore suja — a saida
+# antecipada `printf | grep -q … || exit 0` devolvia 141. Criterio igual.
+caso "switch -c + 70 KB de linhas, suja: barra"    comum/branch-limpa.sh "$(json_grande "git switch -c nova"$'\n'"$LINHAS70")" 2
+caso "switch -c + 200 KB de linhas, suja: barra"   comum/branch-limpa.sh "$(json_grande "git switch -c nova"$'\n'"$LINHAS200")" 2
+caso "checkout -b + 200 KB de linhas, suja: barra" comum/branch-limpa.sh "$(json_grande "git checkout -b nova"$'\n'"$LINHAS200")" 2
+caso "npm test + 200 KB de linhas: passa"          comum/branch-limpa.sh "$(json_grande "npm test"$'\n'"$LINHAS200")" 0
+caso "git status + 200 KB de linhas: passa"        comum/branch-limpa.sh "$(json_grande "git status"$'\n'"$LINHAS200")" 0
+unset LINHAS70 LINHAS200
 git checkout -q -- arquivo.txt
 
 echo
