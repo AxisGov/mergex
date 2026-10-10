@@ -69,18 +69,49 @@ CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null
 case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
 
 # Teto de tamanho, falha FECHADA. A normalização e as regras são lineares, mas
-# têm custo por byte, e acima de certo tamanho um comando com `git` passaria a
+# têm custo por BYTE, e acima de certo tamanho um comando com `git` passaria a
 # disputar com o tempo limite do harness (30 s) — e hook morto pelo tempo
 # limite NÃO bloqueia: o comando rodaria (re-revisão da rodada 2: 125 KB de
 # `git;` + push forçado, morto aos 30 s, push liberado). Então, acima do teto,
-# o hook não avalia: barra e pede para dividir o comando. Medido no hook
-# inteiro, no pior caso (`git ` repetido, uma palavra git a cada 4 bytes;
-# WSL, bash 5.3): 128 KB 1,2 s; 256 KB 2,5 s; 512 KB 5,2-5,8 s; 1 MB 10,7 s;
-# 2 MB 22,6 s; 4 MB morto aos 30 s. Esparso (um `git` por 25 bytes) com push
-# no fim: 1 MB 0,9 s. Sem `git`: ~15 ms (saída antecipada acima). O teto fica
-# em 512 KB — mais de 5x de folga para o tempo limite, para máquina mais lenta.
+# o hook não avalia: barra e pede para dividir o comando.
+#
+# O teto é medido em BYTES, não em caracteres: `${#CMD}` conta caracteres na
+# locale do harness (C.UTF-8 no WSL e na maioria dos Linux), e 500 000 × `日`
+# são 500 000 caracteres mas 1,5 MB — passavam do teto por baixo, a
+# normalização levava 21 s e, com `; git push --force` no fim, o hook morria
+# no tempo limite: push liberado (re-revisão da rodada 3, N2). A conta é feita
+# por `tamanho_em_bytes`, em `LC_ALL=C` local, sem processo externo.
+#
+# Medido no hook inteiro, em bytes, nas duas locales — C e C.UTF-8 dão o mesmo
+# (a normalização já roda em C; WSL, bash 5.3): `git ` denso (uma palavra git a
+# cada 4 bytes) 128 KB 1,2 s; 256 KB 2,5 s; 512 KB 4,9-5,3 s; `git;` denso +
+# push forçado em 512 KB 5,1-5,9 s; `é git `, `😀 git ` e `git 日;` densos em
+# 512 KB 4,4-6,0 s; palavra única sem separador de 512 KB (ASCII ou `日`)
+# seguida de `; git push` 2,6-3,3 s; esparso (um `git` por 25 bytes) com push
+# no fim, 1 MB sem teto, 0,9 s. Acima do teto: 0,1-0,4 s, barra (1,5 MB de
+# `日`: 0,4 s). Sem `git`: ~15 ms (saída antecipada acima). O teto fica em
+# 512 KB — o pior caso da normalização e das regras decide em ~6 s, 5x de
+# folga para o tempo limite, para máquina mais lenta.
+#
+# O que este teto NÃO cobre (achado N3 da rodada 4, fora deste arquivo): a
+# leitura por token de um segmento que contém `push` (comum/base.sh) é
+# quadrática no tamanho de UM token — `${v##*[[:space:]]}` em
+# `expx_sem_descritor`, `${tok##*/}` em `expx_push_le` e, em locale UTF-8,
+# `${v#[\"\']}` em `expx_sem_aspas` tentam cada prefixo. Medido: uma palavra
+# de 16 KB terminada em `push` custa 3,4 s (C) a 16,7 s (C.UTF-8); de 32 KB,
+# 14 s a 67 s. `git push --force …; <32 KB>push` morre no tempo limite nas duas
+# locales, muito abaixo deste teto — e o push forçado passa. Baixar o teto não
+# resolve (16 KB já não cabe); a correção é tornar essas leituras lineares.
 GIT_TETO=524288
-if [ "${#CMD}" -gt "$GIT_TETO" ]; then
+# tamanho_em_bytes <texto> — CMD_BYTES recebe o tamanho de <texto> em bytes,
+# qualquer que seja a locale de quem chamou. (A locale é ajustada no `local`;
+# a medida vem na linha seguinte: os argumentos do `local` expandem antes dele.)
+tamanho_em_bytes() {
+  local LC_ALL=C
+  CMD_BYTES=${#1}
+}
+tamanho_em_bytes "$CMD"
+if [ "$CMD_BYTES" -gt "$GIT_TETO" ]; then
   CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
   RAIZ="$(expx_raiz "${CWD:-$PWD}")"
   MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
@@ -88,7 +119,7 @@ if [ "${#CMD}" -gt "$GIT_TETO" ]; then
   expx_barra "$MODO" "$RAIZ" "$HOOK" "comando com git grande demais para avaliar" \
 "mergex/git-perigoso — comando com git acima do teto de avaliação
 
-Tamanho: ${#CMD} bytes (teto: $GIT_TETO)
+Tamanho: $CMD_BYTES bytes (teto: $GIT_TETO bytes; ${#CMD} caracteres)
 
 Este hook lê o comando inteiro antes de decidir. Acima deste tamanho a leitura
 disputaria com o tempo limite do harness, e um hook morto pelo tempo limite não

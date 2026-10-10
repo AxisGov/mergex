@@ -264,6 +264,32 @@ custo_ok "acima do teto (>512 KB) com git: barra sem avaliar, em menos de 2 s" \
   "$(printf '%s' "${TETO}git status" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 2
 custo_ok "acima do teto (>512 KB) sem git: passa, em menos de 2 s" \
   "$(printf '%s' "$TETO" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 0
+# O teto conta BYTES, nao caracteres (re-revisao da rodada 3, N2). Em locale
+# UTF-8 `${#CMD}` conta caracteres, e o custo da normalizacao e por byte:
+# 500 000 x `日` sao 500 000 caracteres e 1,5 MB — passavam do teto por baixo, a
+# normalizacao levava 21 s e, com push forcado no fim, o hook morria no timeout
+# do harness (rc 124), que nao bloqueia: push liberado. Os casos rodam em
+# C.UTF-8 de proposito (e a locale padrao do WSL e da maioria dos Linux); sem
+# ela nesta maquina, ficam NAO_EXECUTADO. O texto e montado por byte (yes/head/
+# tr), para o tamanho nao depender da locale de quem roda a suite.
+if LC_ALL=C.UTF-8 bash -c 'x=é; [ "${#x}" = 1 ]' 2>/dev/null; then
+  LC_ANTES="${LC_ALL-__nao_definida__}"
+  export LC_ALL=C.UTF-8
+  MULTI="$(yes '日' | head -n 500000 | tr -d '\n')"   # 500 000 caracteres, 1 500 000 bytes
+  custo_ok "multibyte em C.UTF-8: 500 000 x 日 (1,5 MB) + git status: barra pelo teto em bytes, em menos de 2 s" \
+    "$(printf '%s' "${MULTI} git status" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 2
+  custo_ok "multibyte em C.UTF-8: 500 000 x 日 (1,5 MB); git push --force: barra sem disputar com o timeout" \
+    "$(printf '%s' "${MULTI}; git push --force origin feature/x" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 2
+  MULTI="$(yes '日' | head -n 50000 | tr -d '\n')"    # 50 000 caracteres, 150 000 bytes: abaixo do teto
+  custo_ok "multibyte em C.UTF-8: 50 000 x 日 (150 KB) sem git: passa" \
+    "$(printf '%s' "$MULTI" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 0
+  custo_ok "multibyte em C.UTF-8: 50 000 x 日 (150 KB) + git status: abaixo do teto, avalia e passa" \
+    "$(printf '%s' "${MULTI} git status" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}')" 0
+  if [ "$LC_ANTES" = "__nao_definida__" ]; then unset LC_ALL; else LC_ALL="$LC_ANTES"; fi
+  unset MULTI LC_ANTES
+else
+  nao_executado "multibyte em C.UTF-8: locale indisponivel nesta maquina (4 casos)"
+fi
 unset GRANDE DENSO TETO
 
 echo
