@@ -498,6 +498,14 @@ Chaves novas, sempre presentes:
    - **Sem `pre-push` nesse diretório:** o E0 instala o chamador gerenciado pela MergeX, um
      `pre-push` mínimo, identificado por um marcador próprio, que só chama o validador de push da
      skill e propaga o código de saída dele.
+   - **Diretório efetivo fora do repositório** (DM-186): quando o diretório de hooks efetivo não
+     está dentro da árvore de trabalho do repositório nem do diretório Git comum dele (por
+     exemplo, um `core.hooksPath` global, compartilhado por vários repositórios), o E0 **não
+     instala** o chamador gerenciado: falha fechado como pré-requisito ausente e mostra a
+     instrução de composição deliberada, para quem mantém aquele diretório. Instalar ali tornaria
+     a MergeX o `pre-push` de todos os repositórios da máquina, preso ao validador deste checkout.
+     Um `pre-push` já presente nesse diretório segue a regra do hook de terceiro: só é aceito pela
+     prova funcional.
    - **Já é o chamador gerenciado:** a ativação é idempotente e não muda nada. O marcador serve só
      para a idempotência e para a reversão: a aceitação de qualquer `pre-push`, gerenciado ou de
      terceiro, sempre passa pela prova funcional.
@@ -530,6 +538,10 @@ Chaves novas, sempre presentes:
      Executa o `pre-push` efetivo numa prova controlada, alimentando-o com uma ref aplicável
      sabidamente inválida, sem contato com nenhum remoto. Exige que ele chame a MergeX e bloqueie
      com código diferente de zero. Sem essa prova o E2 não emite `PRONTO`.
+   - **Repositório sem Git** (DM-186): fora de um repositório Git (o próprio Git não resolve a
+     raiz) não há push a proteger; o E0 não instala e o E2 dispensa a prova, sem erro e sem
+     bloqueio. O critério é só o Git real, nunca o campo `versionado` do `ENTREGA.md`: dentro de
+     um repositório Git a prova é sempre exigida.
    - **Reversão:** remove apenas o chamador gerenciado pela MergeX, reconhecido pelo marcador.
      Nunca toca num hook de terceiro, composto ou não. Diante de uma integração externa, só informa
      que ela precisa ser removida pelo responsável.
@@ -601,7 +613,9 @@ Chaves novas, sempre presentes:
      template ou ponto de integração do workflow, os testes e a documentação do contrato de
      instalação. **Não afirma que o CI está ativo** em nenhum produto: a ativação no produto e o
      empacotamento pelo ExpxDev são handoffs posteriores e separados (seção 18).
-9. **E6 e E7** exigem a mesma validade como pré-requisito, além do `pre-e6`.
+9. **E6 e E7** exigem a mesma validade como pré-requisito, além do `pre-e6`. O E7 avalia o SHA
+   publicado (`--rev` com a ponta da ref remota da branch, depois de buscá-la) e exige que ele
+   seja o que o E6 enviou; se a ref remota avançou, o E7 não abre nem retoma o PR (DM-186).
 
 ## 14. Compatibilidade e base legada
 
@@ -635,6 +649,8 @@ Chaves novas, sempre presentes:
 | Mais de um merge-base entre a base e o SHA | `base_ambigua`; CI e `pre-push` (parcela do conteúdo) barram |
 | Sem merge-base num clone raso | `historia_incompleta`; barra |
 | `pre-push` sem base conhecida, sem entrega pelo nome nem pelo trailer, e com `ENTREGA.md` canônico na árvore enviada | Avisa (`cobertura_indeterminada`); não barra |
+| Diretório de hooks efetivo fora da árvore e do diretório Git comum do repositório (`core.hooksPath` global) | E0 não instala o chamador; falha fechado com a instrução de composição |
+| E7 com a ref remota da branch diferente do SHA enviado no E6 | E7 não abre nem retoma o PR |
 | Chamador gerenciado sem o validador no checkout | Barra (código 1) com instrução: reinstalar a skill ou reverter o chamador |
 | Repositório raso ou objeto Git ausente | Validade `historia_incompleta`; V9 `v9_sem_prova`; reconciliação código 4 (`estrutura[raso]`); `pre-push` e CI barram, com diagnóstico de história incompleta |
 | Ambiente impede a avaliação (dependência ausente, fora de repositório, temporário, validador ausente) | Validade `erro_ambiente`; `pre-push` e CI barram, com diagnóstico de ambiente |
@@ -1035,3 +1051,16 @@ A matriz também mantém os oito mutantes da barreira de push da DM-184 e acresc
   - **Plano:** Task 23 (seleção pelo conteúdo no CI e no `pre-push`, chamador, template e
     references) e Task 24 (13 mutantes novos, matriz de 25 para 38). As Tasks 1–22 continuam
     aprovadas.
+- `DM-186`: ajustes da revisão automática do PR da MergeX (aprovados pelo usuário em 2026-10-09).
+  - **Diretório efetivo fora do repositório:** o E0 não instala o chamador gerenciado num
+    diretório de hooks fora da árvore e do diretório Git comum do repositório (por exemplo,
+    `core.hooksPath` global); falha fechado com a instrução de composição (seção 13, item 6).
+    Motivo: instalado ali, o chamador vira o `pre-push` de todos os repositórios da máquina, preso
+    ao validador de um checkout; removido esse checkout, todo push da máquina é barrado.
+  - **Repositório sem Git:** o E0 não instala e o E2 dispensa a prova do `pre-push`, pelo Git real,
+    nunca pelo campo `versionado`. Motivo: a prova exige Git e impedia o E2 de emitir `PRONTO` no
+    fluxo sem versionador.
+  - **E7 pelo SHA publicado:** a validade do E7 roda sobre a ponta da ref remota e exige que ela
+    seja o SHA enviado no E6.
+  - **E3:** o comando que monta a lista de reconciliados confere o código de saída do
+    `reconciliacao-base.sh --verificar` antes de extrair os `coberto`.
