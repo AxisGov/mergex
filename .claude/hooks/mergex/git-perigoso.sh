@@ -91,10 +91,11 @@ case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
 # no fim, 1 MB sem teto, 0,9 s. Acima do teto: 0,1-0,4 s, barra (1,5 MB de
 # `日`: 0,4 s). Sem `git`: ~15 ms (saída antecipada acima). O teto fica em
 # 512 KB: a normalização e as regras por regex decidem em até ~6 s nesse
-# tamanho. O que este teto NÃO limita é a leitura por SEGMENTO com `push`: ela
-# custa por segmento, não por byte, e tem teto próprio (PUSH_TETO, abaixo) —
-# era o pior caso real (80 KB em 16 000 linhas `push`: 39 s; re-revisão das
-# rodadas 4-5, N4).
+# tamanho. O que este teto NÃO limita é a leitura por TOKEN dos segmentos com
+# `push`: ela custa por token e por segmento, não por byte do comando, e tem
+# tetos próprios (PUSH_BYTES_TETO e PUSH_TETO, abaixo) — era o pior caso real
+# (80 KB em 16 000 linhas `push`: 39 s; 16 KB de tokens num push: 33 s;
+# re-revisões da rodada extra, N4 e N5).
 #
 # Fora deste teto ficava a leitura por token do segmento com `push`
 # (comum/base.sh), que era quadrática no tamanho de UM token:
@@ -396,25 +397,61 @@ le_push() {
   return 0
 }
 
-# Todo segmento que pode ser um push é lido — até um teto, falha FECHADA. A
-# leitura por token custa ~2,4 ms por segmento (subshells de expx_sem_aspas e
-# afins), e o teto de bytes não limita isso: um push forçado seguido de 16 000
-# linhas `push` (80 KB) levava 39 s em C.UTF-8 — morto pelo tempo limite do
-# harness, o push passava (re-revisão das rodadas 4-5, N4). Acima de PUSH_TETO
-# segmentos com `push`, o hook não lê: barra e pede para dividir o comando.
-# Medido no hook inteiro, C.UTF-8 (C é igual ou mais rápido), sem o teto: 250
-# segmentos `push` 0,7 s; 500 1,3 s; 1 000 2,5 s; 2 000 4,8 s; 4 000 11 s;
-# 16 000 39 s — e um push COMPLETO (`git push origin feature/x`, com remoto e
-# refspec lidos) custa ~6,6 ms: 1 000 deles, 6,6 s. Nenhum comando legítimo
-# tem centenas de pushes; o teto fica em 500 — pior caso medido 2,9 s (500
-# pushes completos), 3x de folga para 10 s e 10x para o tempo limite; acima
-# dele, 0,1-0,3 s até 384 KB. A contagem é por `wc -l`, que lê tudo e
-# é linear nas duas locales (a expansão `${v//[!\n]/}` do bash é quadrática em
-# UTF-8: 64 000 linhas, 22 s).
+# Todo segmento que pode ser um push é lido — até dois tetos, falha FECHADA. A
+# leitura por token (expx_push_le: um subshell de expx_sem_aspas por token)
+# custa ~3-4 ms por TOKEN em C.UTF-8, mais ~2,4 ms de piso por segmento, e o
+# teto de bytes do comando (512 KB) não limita isso: um push forçado seguido de
+# um push com 2 000 tokens de 1 byte (4 KB) levava 6-8,5 s, com 8 000 tokens
+# 25-33 s, e 16 000 linhas `push` 39 s — mortos pelo tempo limite do harness,
+# o push passava (re-revisões da rodada extra: N4, N5). Então, ANTES de ler:
+#   - PUSH_BYTES_TETO: bytes somados dos segmentos que contêm `push`. Um push
+#     legítimo tem menos de 200 B; `git push -u origin feature/x` com 20
+#     refspecs e `&& gh pr create` tem ~250 B. O pior caso abaixo do teto são
+#     tokens de 1 byte (teto/2 tokens) — medido no hook inteiro, C.UTF-8 (C é
+#     ~10% mais rápido): 512 tokens 1,7 s; 1 024 3,3 s; 1 536 5,0 s; 2 048
+#     (4 KB) 6,7 s; 4 096 13,9 s. Com o teto em 4 096 B o pior caso decide em
+#     6,4-6,7 s (1,5x de folga para 10 s, 4x para o tempo limite); 4 096 B
+#     exatos leem, 4 099 barram em 0,2 s. Tokens multibyte (`日`: 1 024 em 4 KB,
+#     3,7 s) e entre aspas custam o mesmo por token e cabem em menos tokens;
+#     opções (`-f`) custam menos (400 em 1,2 KB: 0,3 s).
+#   - PUSH_TETO: número desses segmentos (cada um custa ~2,4 ms mesmo com uma
+#     palavra: 400 linhas `push`, 2 KB, 1,0 s; 4 KB de `push\n` seriam 819
+#     segmentos, ~2 s). 150 pushes completos em 150 linhas (3,9 KB) decidem em
+#     1,0 s; 157 (4 082 B) leem, 158 (4 108 B) barram pelo teto de bytes.
+# As duas medidas são só expansões do bash em LC_ALL=C (índice por byte; a
+# troca `${v//…}` é linear em C e quadrática em UTF-8, e só roda sobre o que já
+# cabe no teto de bytes). Sem utilitário: com `wc -l`, PATH sem `wc` dava
+# contagem 0 em silêncio, o teto sumia e `wc: command not found` vazava (N6).
+PUSH_BYTES_TETO=4096
 PUSH_TETO=500
+# mede_push_segs <segmentos> — PUSH_BYTES recebe o tamanho em bytes; PUSH_N, o
+# número de linhas (segmentos), contado só quando os bytes já cabem no teto.
+mede_push_segs() {
+  local LC_ALL=C nl=$'\n' so
+  PUSH_BYTES=${#1}
+  PUSH_N=0
+  [ "$PUSH_BYTES" -le "$PUSH_BYTES_TETO" ] || return 0
+  if [ -n "$1" ]; then so="${1//[!$nl]/}"; PUSH_N=$(( ${#so} + 1 )); fi
+}
 PUSH_SEGS="$(expx_push_segmentos "$CMD_N")"
-PUSH_N=0
-[ -n "$PUSH_SEGS" ] && PUSH_N=$(( $(printf '%s\n' "$PUSH_SEGS" | wc -l) ))
+mede_push_segs "$PUSH_SEGS"
+if [ "$PUSH_BYTES" -gt "$PUSH_BYTES_TETO" ]; then
+  barra "comando com segmentos de push grandes demais para avaliar" \
+"mergex/git-perigoso — segmentos de push maiores do que o hook avalia
+
+Bytes nos segmentos com push: $PUSH_BYTES (teto: $PUSH_BYTES_TETO)
+
+Este hook lê por token cada segmento que pode ser um push, e o custo é por
+token. Acima deste tamanho a leitura disputaria com o tempo limite do harness,
+e um hook morto pelo tempo limite não bloqueia nada — então ele não avalia:
+barra.
+
+O que fazer:
+  - Divida o comando: um push por chamada, só com remoto e refspec.
+  - Texto que só cita push (documentação, dados) vai para um arquivo, numa
+    chamada sem git."
+  exit 0
+fi
 if [ "$PUSH_N" -gt "$PUSH_TETO" ]; then
   barra "comando com segmentos de push demais para avaliar" \
 "mergex/git-perigoso — comando com mais segmentos de push do que o hook avalia

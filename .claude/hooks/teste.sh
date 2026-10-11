@@ -43,7 +43,8 @@ WTB_T="${HIST_T}--base"     # worktree sem docs/entregas no HEAD
 WTX_T="${HIST_T}--outra"    # worktree com o HEAD noutra branch
 SEMX_T="$(mktemp -d)"       # repositorio sem MergeX
 INT_T="$(mktemp -d)"        # repositorio do merge de integracao da base
-trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T" "$HIST_T" "$WTH_T" "$WTM_T" "$WTB_T" "$WTX_T" "$SEMX_T" "$INT_T"' EXIT
+BINSW_T="$(mktemp -d)"      # PATH sem `wc` (rodada extra 2 da revisao, N6)
+trap 'rm -rf "$RAIZ_T" "$WT_T" "$SEMGIT_T" "$HIST_T" "$WTH_T" "$WTM_T" "$WTB_T" "$WTX_T" "$SEMX_T" "$INT_T" "$BINSW_T"' EXIT
 HOOK_CWD="$RAIZ_T"
 
 cd "$RAIZ_T" || exit 1
@@ -334,6 +335,10 @@ TOKEN128="${TOKEN32}${TOKEN32}${TOKEN32}${TOKEN32}"               # 128 KB
 CAUDA="$(yes 'echo aaaa bbbb' | head -n 8000)"                     # ~120 KB em 8 000 linhas, sem `push`
 LINHAS="$(yes 'git aaaaaaaaaaaa' | head -n 10000)"                 # 10 000 linhas `git …` (160 KB: mais que o buffer do pipe)
 PUSHES16K="$(yes push | head -n 16000)"                            # 16 000 segmentos com `push` (80 KB)
+TOKENS2K="$(yes a | head -n 2047 | tr '\n' ' ')"                   # 2 047 tokens de 1 byte (4 KB) num so segmento
+TOKENS8K="$(yes a | head -n 8191 | tr '\n' ' ')"                   # 8 191 tokens (16 KB)
+# PATH sem `wc`: tudo de /usr/bin e /bin por symlink, menos o wc (rodada extra 2, N6).
+for f in /usr/bin/* /bin/*; do b="${f##*/}"; [ "$b" = wc ] || [ -e "$BINSW_T/$b" ] || ln -s "$f" "$BINSW_T/$b"; done 2>/dev/null
 LOCALES="C"
 LC_ALL=C.UTF-8 bash -c 'x=é; [ "${#x}" = 1 ]' 2>/dev/null && LOCALES="C C.UTF-8"
 for LOC in $LOCALES; do
@@ -342,8 +347,12 @@ for LOC in $LOCALES; do
     "$(json_grande "git push --force origin feature/x; ${TOKEN32}push")" 2
   custo_ok "[$LOC] push forcado; token de 128 KB terminado em push: barra em menos de 2 s" \
     "$(json_grande "git push --force origin feature/x; ${TOKEN128}push")" 2
-  custo_ok "[$LOC] token de 128 KB como programa + git push --force: git e argumento, passa em menos de 2 s" \
-    "$(json_grande "${TOKEN128} git push --force origin feature/x")" 0
+  # Ate a rodada extra 2 este caso lia o segmento inteiro e decidia 0 (git e
+  # argumento do programa desconhecido) em 0,5-0,9 s. Com o teto de bytes dos
+  # segmentos com push (N5), um segmento de 128 KB com `push` nao e lido: barra,
+  # falha fechada, em vez de pagar a leitura por token.
+  custo_ok "[$LOC] token de 128 KB como programa + git push --force: segmento com push acima do teto de bytes, barra em menos de 2 s" \
+    "$(json_grande "${TOKEN128} git push --force origin feature/x")" 2
   custo_ok "[$LOC] push forcado na 1a linha + 120 KB em 8 000 linhas sem push (pre-filtro sob pipefail): barra" \
     "$(json_grande "git push --force origin feature/x"$'\n'"${CAUDA}")" 2
   custo_ok "[$LOC] 10 000 linhas 'git …' (160 KB) + push forcado na ultima (pre-filtro sob pipefail): barra" \
@@ -361,9 +370,38 @@ for LOC in $LOCALES; do
     "$(json_grande "git push origin feature/x"$'\n'"git push origin feature/x"$'\n'"git push origin feature/x")" 0
   caso "[$LOC] push forcado + 400 linhas 'push': abaixo do teto, le e barra" \
     mergex/git-perigoso.sh "$(json_grande "git push --force origin feature/x"$'\n'"$(yes push | head -n 400)")" 2
+  # O custo e por TOKEN (rodada extra 2 da revisao, N5): ~3,5-4 ms por token de um
+  # segmento com `push`, em C.UTF-8. Um push forcado seguido de um push com 2 000
+  # tokens (4 KB) levava 8,5 s e com 8 000 tokens 33 s — abaixo dos tetos de bytes
+  # (512 KB) e de segmentos (500): morto pelo timeout, o push forcado passava.
+  # Teto estrutural: bytes somados dos segmentos com `push`, medidos antes da
+  # leitura por token.
+  custo_ok "[$LOC] push forcado; push com 2 047 tokens (4 KB): barra pelo teto de bytes dos segmentos, em menos de 2 s" \
+    "$(json_grande "git push --force origin feature/x; git push origin feature/x ${TOKENS2K}")" 2
+  custo_ok "[$LOC] push forcado; push com 8 191 tokens (16 KB): barra pelo teto de bytes dos segmentos, em menos de 2 s" \
+    "$(json_grande "git push --force origin feature/x; git push origin feature/x ${TOKENS8K}")" 2
+  custo_ok "[$LOC] push legitimo com 20 refspecs e PR em seguida: passa, em menos de 2 s" \
+    "$(json_grande "git push -u origin feature/x $(yes feature/x | head -n 20 | tr '\n' ' ')&& gh pr create --fill")" 0
   if [ "$LC_ANTES" = "__nao_definida__" ]; then unset LC_ALL; else LC_ALL="$LC_ANTES"; fi
 done
-unset TOKEN32 TOKEN128 CAUDA LINHAS PUSHES16K LOCALES LC_ANTES
+# Sem `wc` no PATH (rodada extra 2 da revisao, N6): a contagem de segmentos por
+# `wc -l` virava 0 em silencio, o teto sumia e `wc: command not found` vazava no
+# stderr. A contagem e a medida sao so com expansoes do bash: sem utilitario, sem
+# ruido, e um push forcado seguido de 16 000 linhas `push` barra rapido.
+PATH="$BINSW_T" custo_ok "[C] sem wc no PATH: push forcado + 16 000 linhas 'push' barra pelo teto, em menos de 2 s" \
+  "$(json_grande "git push --force origin feature/x"$'\n'"$PUSHES16K")" 2
+PATH="$BINSW_T" custo_ok "[C] sem wc no PATH: git push origin feature/x passa" "$(bash_json 'git push origin feature/x')" 0
+if [ "$SEM_JQ" = "0" ]; then
+  SAIDA_SW="$(json_grande "git push --force origin feature/x"$'\n'"$PUSHES16K" | PATH="$BINSW_T" timeout 30 bash "$H/mergex/git-perigoso.sh" 2>&1 >/dev/null)"; RC_SW=$?
+  case "$RC_SW:$SAIDA_SW" in
+    2:*"not found"*|2:*"nao encontrado"*|2:*"não encontrado"*)
+      FALHOU=$((FALHOU+1)); printf '  FALHA sem wc no PATH: barra, mas "command not found" vazou no stderr\n' ;;
+    2:*) OK=$((OK+1)); printf '  ok    sem wc no PATH: barra sem ruido de utilitario ausente no stderr\n' ;;
+    *)   FALHOU=$((FALHOU+1)); printf '  FALHA sem wc no PATH: esperava rc 2 sem ruido, obteve rc %s\n' "$RC_SW" ;;
+  esac
+  unset SAIDA_SW RC_SW
+fi
+unset TOKEN32 TOKEN128 CAUDA LINHAS PUSHES16K TOKENS2K TOKENS8K LOCALES LC_ANTES
 unset GRANDE DENSO TETO
 
 echo
