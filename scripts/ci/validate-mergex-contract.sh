@@ -387,9 +387,9 @@ cmp -s "$atencao_cmd" "$atencao_oc" || fail 'OpenCode mergex-atencao command div
 
 # A ordem dos critérios: a do classificador é a das tabelas do reference e do agente.
 ordem_script="$(bash "$classificador" --ordem)"
-[ "$ordem_script" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ] \
+[ "$ordem_script" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 O10 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ] \
   || fail "classifier order changed: $ordem_script"
-ordem_tabelas() { grep -oE '^\| [OLD][0-9] \|' "$1" | tr -d '| ' | tr '\n' ' ' | sed 's/ $//'; }
+ordem_tabelas() { grep -oE '^\| [OLD][0-9]+ \|' "$1" | tr -d '| ' | tr '\n' ' ' | sed 's/ $//'; }
 for f in "$atencao" "$agente_cl"; do
   [ "$(ordem_tabelas "$f") PADRAO" = "$ordem_script" ] \
     || fail "$f criteria tables are not in the classifier order ($(ordem_tabelas "$f"))"
@@ -839,7 +839,7 @@ grep -Fq '**Leitura não trava nada**' "$commits" \
 # `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
 escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-r1-reconciliacao-base.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$escritores" = "$esperado" ] \
   || fail "unexpected executable writer of ENTREGA.commits: $escritores"
 grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
@@ -1048,7 +1048,7 @@ fi
 # Call sites e provas que nomeiam o classificador formam uma lista fechada.
 own_chamadores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e 'ownership-da-task.sh' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-m4b-arvore-inteira.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./.claude/skills/mergex/scripts/portao-v9.sh ./.claude/skills/mergex/scripts/reconciliacao-base.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-m4b-arvore-inteira.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$own_chamadores" = "$own_esperado" ] \
   || fail "unexpected caller of ownership-da-task.sh: $own_chamadores"
 
@@ -1311,5 +1311,312 @@ grep -Fq 'fechamento final do E8' "$estado" \
 # aqui, fora do círculo, e o M15 morre por esta linha.
 grep -Fq 'cópia da árvore falhou' scripts/ci/mutacao-d07-contrato-de-evento.sh \
   || fail 'D-07: mutation harness copia() no longer aborts on a failed tree copy'
+
+# ---------------------------------------------------------------------------
+# DM-184 / Task 15 — o E0 ativa e o E2 prova o pre-push, nos entrypoints em
+# prosa; o enforcement executável é testado em test-r2-barreira-push.sh
+# (grupos ativacao e entrypoints)
+# ---------------------------------------------------------------------------
+barreira_ref='.claude/skills/mergex/references/12-barreira-de-push.md'
+ativacao_sh='.claude/skills/mergex/scripts/ativacao-pre-push.sh'
+registrar_sh='.claude/skills/mergex/scripts/registrar-portao.sh'
+modelo_pp='.claude/skills/mergex/assets/pre-push-gerenciado.sh'
+
+# E0: a ativação e a parada, nas duas cópias do comando e no reference
+for f in "$abrir_cmd" "$abrir_oc"; do
+  grep -Fq 'ativacao-pre-push.sh --instalar' "$f" || fail "mergex-abrir sem ativacao-pre-push.sh --instalar: $f"
+  grep -Fq 'mergex E0 BLOQUEADO — pre-push' "$f" || fail "mergex-abrir sem a parada mergex E0 BLOQUEADO — pre-push: $f"
+done
+grep -Fq 'ativacao-pre-push.sh --instalar' "$abertura" || fail '00-abertura sem ativacao-pre-push.sh --instalar'
+grep -Fq 'mergex E0 BLOQUEADO — pre-push' "$abertura" || fail '00-abertura sem a parada mergex E0 BLOQUEADO — pre-push'
+grep -Fq -- '- [ ] O `pre-push` efetivo' "$abertura" || fail '00-abertura: o checklist do E0 não tem o item do pre-push ativo'
+cmp -s "$abrir_cmd" "$abrir_oc" || fail 'OpenCode mergex-abrir command diverges from Claude Code'
+
+# E2: a prova antes da primeira menção a V1, e o resultado só pelo gravador
+primeira_linha() { { grep -nF -- "$2" "$1" || true; } | sed -n '1s/:.*//p'; }
+for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao"; do
+  p="$(primeira_linha "$f" 'ativacao-pre-push.sh --provar')"
+  v="$(primeira_linha "$f" 'V1')"
+  [ -n "$p" ] || fail "$f sem ativacao-pre-push.sh --provar"
+  [ -n "$v" ] && [ "$p" -lt "$v" ] || fail "$f cita ativacao-pre-push.sh --provar depois da primeira menção a V1"
+  grep -Fq 'registrar-portao.sh' "$f" || fail "$f não grava o resultado do portão por registrar-portao.sh"
+done
+grep -Eq 'Grave `portao: (pronto|bloqueado)`' "$prontidao" \
+  && fail '02-prontidao ainda manda editar portao diretamente (o resultado é gravado só por registrar-portao.sh)'
+grep -Fq 'só por `registrar-portao.sh`' "$prontidao" || fail '02-prontidao não diz que o resultado é gravado só por registrar-portao.sh'
+
+# Fluxo completo: as duas chamadas nas linhas E0 e E2, nas duas cópias
+for f in "$mergex_cmd" "$mergex_oc"; do
+  grep -F '**E0**' "$f" | grep -Fq 'ativacao-pre-push.sh --instalar' || fail "$f: a linha E0 não chama ativacao-pre-push.sh --instalar"
+  grep -F '**E2**' "$f" | grep -Fq 'ativacao-pre-push.sh --provar' || fail "$f: a linha E2 não chama ativacao-pre-push.sh --provar"
+  grep -F '**E2**' "$f" | grep -Fq 'registrar-portao.sh' || fail "$f: a linha E2 não grava o resultado por registrar-portao.sh"
+done
+cmp -s "$mergex_cmd" "$mergex_oc" || fail 'OpenCode mergex command diverges from Claude Code'
+
+# Reference da barreira e executáveis
+for f in "$barreira_ref" "$ativacao_sh" "$registrar_sh" "$modelo_pp"; do
+  [ -f "$f" ] || fail "DM-184: missing $f"
+done
+for s in '## Ativação' '## Composição com hook de terceiro' '## Prova funcional' '## Reversão'; do
+  grep -Fxq "$s" "$barreira_ref" || fail "12-barreira-de-push sem a seção $s"
+done
+# a instrução de composição é a mesma no reference e na mensagem de erro
+composicao='o `pre-push` existente chama `portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída dele'
+grep -Fq -- "$composicao" "$barreira_ref" || fail '12-barreira-de-push sem a instrução de composição'
+grep -Fq -- "$composicao" "$ativacao_sh" || fail 'ativacao-pre-push.sh: a instrução de composição diverge do reference'
+grep -Fxq '# mergex: pre-push gerenciado' "$modelo_pp" || fail 'o modelo do pre-push gerenciado perdeu o marcador'
+# o E0 nunca escreve core.hooksPath; nenhuma opção de força nos executáveis novos
+codigo "$ativacao_sh" | grep -Eq 'config[^|;&]*core\.hooksPath' && fail 'ativacao-pre-push.sh escreve core.hooksPath'
+for f in "$ativacao_sh" "$registrar_sh"; do
+  codigo "$f" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$f tem opção de força"
+  grep -Fq '# guarda:' "$f" || fail "$f sem linha de guarda"
+done
+grep -Fq 'ativacao-pre-push.sh' "$persiste_sh" || fail 'persistir-metodo.sh não prova o pre-push antes de persistir pronto'
+grep -Fq '# guarda:E2SEMHOOK' "$persiste_sh" || fail 'persistir-metodo.sh sem a guarda E2SEMHOOK'
+
+# ---------------------------------------------------------------------------
+# DM-184 / Task 16 — o contrato e o template de CI; esta branch não ativa CI
+# ---------------------------------------------------------------------------
+ci_sh='.claude/skills/mergex/scripts/portao-ci.sh'
+ci_tpl='.claude/skills/mergex/assets/ci/mergex-portao.yml'
+for f in "$ci_sh" "$ci_tpl"; do
+  [ -f "$f" ] || fail "DM-184: missing $f"
+done
+grep -Fxq '## CI' "$barreira_ref" || fail '12-barreira-de-push sem a seção ## CI'
+codigo "$ci_sh" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$ci_sh tem opção de força"
+# DM-185: o CI seleciona pelo conteúdo (pr_entregas_do_intervalo) e decide
+# cada entrega pela regra compartilhada (pr_decide_entregas); nada nele filtra
+# a seleção pelo nome da branch
+grep -Fq 'pr_entregas_do_intervalo' "$ci_sh" || fail "$ci_sh não seleciona pelo conteúdo (pr_entregas_do_intervalo)"
+grep -Fq 'pr_decide_entregas' "$ci_sh" || fail "$ci_sh não decide pela regra compartilhada (pr_decide_entregas)"
+grep -Fq 'aviso=branch_divergente' "$ci_sh" || fail "$ci_sh não trata --branch como conferência (aviso=branch_divergente)"
+grep -Fq 'fetch-depth: 0' "$ci_tpl" || fail "$ci_tpl sem fetch-depth: 0"
+grep -Fq 'portao-ci.sh --verificar' "$ci_tpl" || fail "$ci_tpl não chama portao-ci.sh --verificar"
+# Nenhum arquivo versionado afirma que o CI do portão está ativo: esta branch só
+# entrega o executável e o template (spec, seção 13, item 8). A frase-alvo é
+# "CI do portão ativo" (sem distinguir maiúsculas nem o acento de "portão"). Ficam
+# de fora só os arquivos que precisam citá-la para testá-la: este validador, as
+# suítes test-*, os mutantes mutacao-* e a fixture em scripts/ci/lib.
+# O grep sai 1 sem achado e 2 em erro: só o erro derruba a varredura.
+ci_ativo="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' ':!scripts/ci/mutacao-*' ':!scripts/ci/lib/*' \
+  | xargs -0 sh -c 'grep -IlEi -- "ci do port.{0,2}o ativo" "$@"; [ "$?" -le 1 ]' _)" \
+  || fail 'DM-184: a varredura de arquivos que afirmam CI ativo falhou'
+[ -z "$ci_ativo" ] || fail "DM-184: arquivo afirma que o CI do portão está ativo (esta branch não ativa CI): $(printf '%s' "$ci_ativo" | tr '\n' ' ')" # guarda:CIATIVO
+
+# ---------------------------------------------------------------------------
+# Task 19 — contrato textual da reconciliação de base pós-E8 e do portão por
+# SHA (spec 2026-10-07, seções 4–20 e "Decisões propostas"; DM-178..DM-184)
+# ---------------------------------------------------------------------------
+SKILL_DIR='.claude/skills/mergex'
+REF="$SKILL_DIR/references"
+reconc_ref="$REF/11-reconciliacao-base.md"
+abertura_pr="$REF/07-abertura-pr.md"
+
+# O enum fechado de checkpoints é o mesmo na prosa e nos três executáveis.
+enum_cp='pre-e2 | reconciliacao-base | pre-e6 | e8'
+for f in "$skill" "$commits" "$registro"; do
+  grep -Fq "$enum_cp" "$f" || fail "$f sem o enum de checkpoints novo"
+done
+[ -f "$reconc_ref" ] || fail "missing required file: $reconc_ref"
+for f in persistir-metodo.sh contrato-de-commit.sh catalogo-de-metodo.sh; do
+  grep -Fq 'pre-e2|reconciliacao-base|pre-e6|e8' "$SKILL_DIR/scripts/$f" \
+    || fail "$SKILL_DIR/scripts/$f sem o enum de checkpoints novo"
+done
+grep -Fq "$enum_cp" "$SKILL_DIR/scripts/catalogo-de-metodo.sh" \
+  || fail 'catalogo-de-metodo.sh: o enum documentado diverge da prosa'
+grep -Fq 'Metodo: pre-e2 | pre-e6 | e8`, sem `Task:`' "$skill" \
+  && fail 'SKILL.md ainda dá o enum antigo como a gramática do commit de método'
+grep -Fq '(`pre-e2`, `pre-e6`' "$hooks_readme" \
+  && fail 'hooks README ainda dá o enum antigo de checkpoints'
+grep -Fq "$enum_cp" "$hooks_readme" || fail 'hooks README sem o enum de checkpoints novo'
+
+# E2: ordem reconciliação → V1..V11 (V9 por script) → gravação com portao_sha
+grep -Fq 'portao-v9.sh' "$prontidao" || fail "02-prontidao não manda rodar portao-v9.sh"
+grep -Fq 'portao_sha' "$prontidao" || fail "02-prontidao não grava portao_sha"
+grep -Fq 'validade-do-portao.sh' "$prontidao" || fail '02-prontidao não cita validade-do-portao.sh'
+for f in "$prontidao" .claude/commands/mergex-check.md .opencode/commands/mergex-check.md; do
+  r="$(primeira_linha "$f" '--checkpoint reconciliacao-base')"
+  v="$(primeira_linha "$f" 'V1')"
+  [ -n "$r" ] || fail "$f sem a barreira --verificar --checkpoint reconciliacao-base"
+  [ -n "$v" ] && [ "$r" -lt "$v" ] || fail "$f cita a barreira reconciliacao-base depois da primeira menção a V1"
+  grep -Fq 'portao-v9.sh --verificar' "$f" || fail "$f: a V9 não roda portao-v9.sh --verificar"
+done
+grep -Fq -- '--persistir' "$prontidao" && fail '02-prontidao manda persistir (o E2 só verifica)'
+
+# E6 e E7: validade como pré-requisito; o pre-push decide; o hook é consultivo
+for f in "$push" "$abertura_pr"; do
+  grep -Fq 'validade-do-portao.sh --verificar' "$f" || fail "$f sem a validade do portão como pré-requisito"
+  grep -Fq '12-barreira-de-push.md' "$f" || fail "$f não aponta para 12-barreira-de-push.md"
+  grep -Fq 'consultivo' "$f" || fail "$f não diz que o hook do Claude é consultivo"
+done
+grep -Fq 'o `pre-push` funcional quando o `ENTREGA.md` tem `portao: pronto`' "$push" \
+  || fail '06-push: a barreira pre-e6 não diz que exige o pre-push funcional com portao: pronto'
+
+# ---------------------------------------------------------------------------
+# DM-186 — ajustes da revisão do PR (spec, seção 13, itens 6 e 9; seção 15)
+# ---------------------------------------------------------------------------
+# E0: o diretório efetivo fora da árvore e do diretório Git comum não recebe o
+# chamador; a regra está no executável, no reference da barreira, no E0 e no
+# comando. Fora de um repositório Git, --instalar sai 0 sem instalar.
+grep -Fq 'hooks_no_repositorio || fora_do_repositorio' "$ativacao_sh" \
+  || fail 'ativacao-pre-push.sh: o braço instalar) não recusa o diretório efetivo fora do repositório (DM-186)'
+grep -Fq 'pwd -P' "$ativacao_sh" || fail 'ativacao-pre-push.sh: a comparação do diretório efetivo não é por caminho canônico (pwd -P)'
+for f in "$barreira_ref" "$abertura" "$abrir_cmd" "$abrir_oc"; do
+  grep -Fq 'fora da árvore de trabalho e do diretório Git comum' "$f" \
+    || fail "$f não diz que o E0 não instala o chamador num diretório de hooks fora da árvore de trabalho e do diretório Git comum (DM-186)"
+done
+# E2: fora de um repositório Git a prova é dispensada — pelo Git real, nunca
+# pelo campo `versionado`; o gravador e a prosa dizem o mesmo
+grep -Fq '[ "$SEM_GIT" = 1 ] ||' "$registrar_sh" || fail 'registrar-portao.sh não dispensa a prova fora de um repositório Git (DM-186)'
+# "sem Git" é só a ausência de repositório (ambiente limpo, nenhum .git nos
+# ancestrais e o Git sem repositório); outra falha do Git é ambiente. A função
+# é a mesma, byte a byte, nos dois executáveis que dispensam.
+fn_sem_git() { awk '/^sem_repositorio_git\(\) \{/,/^}$/' "$1"; }
+[ -n "$(fn_sem_git "$registrar_sh")" ] || fail 'registrar-portao.sh sem sem_repositorio_git() (DM-186, rodada 1)'
+[ -n "$(fn_sem_git "$ativacao_sh")" ] || fail 'ativacao-pre-push.sh sem sem_repositorio_git() (DM-186, rodada 1)'
+[ "$(fn_sem_git "$registrar_sh")" = "$(fn_sem_git "$ativacao_sh")" ] || fail 'sem_repositorio_git() diverge entre registrar-portao.sh e ativacao-pre-push.sh'
+for s in 'GIT_DIR' 'not a git repository' '/.git'; do
+  fn_sem_git "$registrar_sh" | grep -Fq -- "$s" || fail "sem_repositorio_git() não confere: $s"
+done
+grep -Fq 'sem_repositorio_git ||' "$registrar_sh" || fail 'registrar-portao.sh não exige sem_repositorio_git antes de dispensar'
+grep -Fq 'sem_repositorio_git ||' "$ativacao_sh" || fail 'ativacao-pre-push.sh não exige sem_repositorio_git antes de sair 0'
+grep -F '# guarda:E2SEMHOOK' "$registrar_sh" | grep -Fq 'SEM_GIT' || fail 'registrar-portao.sh: a dispensa sem Git não está na linha da guarda E2SEMHOOK'
+codigo "$registrar_sh" | grep -Fq 'versionado' && fail 'registrar-portao.sh decide a dispensa pelo campo versionado (o critério é só o Git real)'
+for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao" "$barreira_ref"; do
+  grep -Fq 'nunca pelo campo `versionado`' "$f" \
+    || fail "$f não diz que fora de um repositório Git a prova é dispensada pelo Git real, nunca pelo campo versionado (DM-186)"
+done
+# E3: a lista de reconciliados só depois de o --verificar aprovar (rc 0 e ok=true)
+grep -Fq -- "--verificar | awk" "$atencao" && fail '03-atencao-humana ainda encadeia o --verificar direto no awk, sem conferir o código de saída (DM-186)'
+grep -Fq "grep -Fxq 'ok=true'" "$atencao" || fail '03-atencao-humana não exige ok=true do --verificar antes de extrair os coberto (DM-186)'
+grep -Fq 'o E3 não classifica' "$atencao" || fail '03-atencao-humana não diz que a reconciliação reprovada impede o E3 de classificar'
+# os arquivos de trabalho do E3 vão para um temporário, nunca para a raiz da árvore
+grep -Fq 'mktemp -d' "$atencao" || fail '03-atencao-humana não manda verificar.out e reconciliados.tsv para um temporário (mktemp -d)'
+grep -Eq '> (verificar\.out|reconciliados\.tsv)' "$atencao" && fail '03-atencao-humana ainda grava verificar.out ou reconciliados.tsv na raiz da árvore'
+# E7: a validade sobre o SHA publicado, que tem de ser o enviado no E6; remoto e
+# ref vêm do upstream da branch, a busca é conferida e a divergência aborta
+grep -Fq -- '--rev "$publicado"' "$abertura_pr" || fail '07-abertura-pr não roda a validade sobre a ponta remota (--rev "$publicado") (DM-186)'
+grep -Fq "'@{u}'" "$abertura_pr" || fail '07-abertura-pr não deriva remoto e ref do upstream da branch (@{u})'
+grep -Fq 'git fetch "$remoto" "$ref_remota" ||' "$abertura_pr" || fail '07-abertura-pr não confere o git fetch (falhou: o E7 não abre nem retoma)'
+grep -Fq 'git fetch origin' "$abertura_pr" && fail '07-abertura-pr ainda fixa origin no E7 (o remoto vem do upstream)'
+grep -Fq '[ "$publicado" = "$enviado" ] ||' "$abertura_pr" || fail '07-abertura-pr não aborta na divergência entre a ponta remota e o SHA enviado'
+for f in "$abertura_pr" .claude/commands/mergex-pr.md .opencode/commands/mergex-pr.md; do
+  grep -Fq 'SHA enviado no E6' "$f" || fail "$f não exige que a ponta remota seja o SHA enviado no E6 (DM-186)"
+  grep -Fq 'não abre nem retoma o PR' "$f" || fail "$f não diz que a divergência impede o E7 de abrir ou retomar o PR (DM-186)"
+done
+
+# E0: base por SHA, nunca reescrita na retomada
+grep -Fq 'base_validada_sha' "$abertura" || fail '00-abertura não grava base_validada_sha'
+grep -Fq 'origem_base: registrada_e0' "$abertura" || fail '00-abertura não grava origem_base: registrada_e0'
+grep -Fq 'nunca acrescenta nem troca `base_validada_sha`' "$abertura" \
+  || fail '00-abertura: a retomada pode acrescentar ou trocar base_validada_sha'
+
+# Schema e template: as chaves novas do kind entrega e o kind novo
+for k in base_validada_sha origem_base reconciliacoes portao_sha; do
+  grep -Fq "\`$k\`" "$schema" || fail "00-schema sem a chave $k"
+  grep -Eq "^$k: " "$template_entrega" || fail "TEMPLATE-ENTREGA sem a chave $k"
+done
+grep -Fq 'kind: reconciliacao_base' "$schema" || fail '00-schema sem o kind reconciliacao_base'
+sem_fm="$(sed -n '/^## Arquivos SEM frontmatter/,/^## /p' "$schema")"
+printf '%s\n' "$sem_fm" | grep -Fq 'RECONCILIACAO-BASE' \
+  && fail '00-schema lista o artefato de reconciliação entre os arquivos sem frontmatter'
+
+# E8: a tabela "Quando o arquivo é escrito" tem a reconciliação; catálogo cumulativo
+quando="$(sed -n '/^## Quando o arquivo é escrito/,/^## /p' "$registro")"
+printf '%s\n' "$quando" | grep -Fq 'reconciliacao-base.sh --registrar' \
+  || fail '08-registro: a tabela "Quando o arquivo é escrito" não tem a reconciliação'
+grep -Fq 'RECONCILIACAO-BASE-NNN.md' "$registro" || fail '08-registro: o catálogo e8 não cita os artefatos de reconciliação'
+
+# Commits: a classe integração
+grep -Fq 'Integra-base:' "$commits" || fail '01-commits sem a classe integração de base'
+
+# 11-reconciliacao-base: as quatro provas, os códigos, os riscos residuais
+for p in '| 1 | `f` nasceu ou mudou na base' '| 2 | A feature não tocou `f`' \
+         '| 3 | `f` não consta das tasks' '| 4 | Existe diferença real entre `B1` e `M`'; do
+  grep -Fq -- "$p" "$reconc_ref" || fail "11-reconciliacao-base sem a prova: $p"
+done
+for c in '| 0 |' '| 1 |' '| 2 |' '| 3 |' '| 4 |' '| 5 |' '| 6 |' '| 64 |'; do
+  sed -n '/^## Códigos de saída/,/^## /p' "$reconc_ref" | grep -Fq -- "$c" \
+    || fail "11-reconciliacao-base: a tabela de códigos de saída não tem $c"
+done
+for r in 'Portão reposicionado por commit de método' 'Entrega legada sem reconciliação' \
+         'B1 lateral' 'Clone raso legítimo falha fechado' 'Isenção por prefixo' \
+         '`core.autocrlf` na barreira' 'Hash do diff com atributos `-diff`/`binary`' \
+         'Escala resolvida pela DM-184'; do
+  sed -n '/^### Riscos residuais conhecidos/,/^## /p' "$reconc_ref" | grep -Fq -- "$r" \
+    || fail "11-reconciliacao-base: falta o risco residual \"$r\""
+done
+grep -Fq 'RECONCILIACAO-BASE-<NNN-1>.md' "$reconc_ref" || fail '11-reconciliacao-base: anterior não é RECONCILIACAO-BASE-<NNN-1>.md'
+grep -Fq 'base integrada e o PR' "$reconc_ref" && fail '11-reconciliacao-base: a prosa do artefato cita PR (o frontmatter não tem PR)'
+grep -Fq '12-barreira-de-push.md' "$reconc_ref" || fail '11-reconciliacao-base não remete os riscos da barreira a 12-barreira-de-push.md'
+grep -Fq 'references/11-reconciliacao-base.md' "$skill" || fail 'SKILL.md não aponta para 11-reconciliacao-base.md'
+
+# Decisões
+for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184 DM-185 DM-186; do
+  grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
+done
+# DM-185: a linha registra a seleção pelo conteúdo, o que ela substitui na
+# DM-184 e os limites (15.1); a DM-184 fica como registro histórico
+dm185="$(grep -F '| DM-185 |' "$SKILL_DIR/DECISOES-DA-SKILL.md")"
+for s in 'pelo **conteúdo**' 'pr_entregas_do_intervalo' 'aviso=branch_divergente' 'cobertura_indeterminada' 'substitui na DM-184' '15.1'; do
+  printf '%s\n' "$dm185" | grep -Fq -- "$s" || fail "DM-185 em DECISOES-DA-SKILL.md sem: $s"
+done
+grep -q '^| DM-184 |' "$SKILL_DIR/DECISOES-DA-SKILL.md" && grep -F '| DM-184 |' "$SKILL_DIR/DECISOES-DA-SKILL.md" | grep -Fq 'Barreira contra contorno deliberado' \
+  || fail 'DM-184 em DECISOES-DA-SKILL.md foi reescrita (é registro histórico; a DM-185 diz o que substitui)'
+
+# Hooks README: validade do portão e a biblioteca da integração
+grep -Fq 'comum/integracao-da-mensagem.sh' "$hooks_readme" || fail 'hooks README não cita comum/integracao-da-mensagem.sh'
+grep -Fq 'validade-do-portao.sh' "$hooks_readme" || fail 'hooks README sem a validade do portão'
+grep -Fq 'Sem nenhuma das três declarações' "$hooks_readme" || fail 'hooks README ainda fala em duas classes de mensagem'
+# O bloqueado também grava portao_sha, sem efeito na validade; a V9 executável exige Git
+for f in "$prontidao" "$schema"; do
+  grep -Fq '`--resultado bloqueado` também grava `portao_sha`' "$f" || fail "$f não diz que o bloqueado também grava portao_sha"
+done
+grep -Fq '`fora de um repositório Git`' "$prontidao" || fail '02-prontidao não diz o que portao-v9.sh faz sem versionador'
+
+# pr-so-com-portao é consultivo: AGENTS.md e SKILL.md o descrevem assim, e a
+# exceção "mesmo em aviso" ganha a ressalva do pre-push (DM-184)
+ressalva='o `pre-push` do Git barra o portão inválido em qualquer modo'
+for f in AGENTS.md "$skill"; do
+  grep -F '`pr-so-com-portao`' "$f" | grep -Fq 'consultivo' || fail "$f não descreve pr-so-com-portao como consultivo"
+  grep -Fq -- "$ressalva" "$f" || fail "$f: a condição que barra mesmo em aviso não tem a ressalva do pre-push"
+done
+grep -Fq 'Regra 6 — sem `PRONTO` no portão, não sobe e não abre PR' "$skill" \
+  && fail 'SKILL.md ainda trata pr-so-com-portao como barreira do push'
+# A task irmã do commit-por-task NÃO é a única condição de hook do Claude que sai
+# 2 em qualquer modo: o pr-so-com-portao também sai 2 no --no-verify reconhecido e
+# no push que prova inválido. Nenhum texto pode voltar a dizer que é a única.
+for f in AGENTS.md "$skill"; do
+  grep -Fq 'única dos hooks do Claude' "$f" && fail "$f diz que a task irmã é a única condição dos hooks do Claude que barra em qualquer modo"
+  grep -Fq 'mesmo em aviso** entre os hooks do Claude' "$f" && fail "$f diz que a task irmã é a única condição dos hooks do Claude que barra em qualquer modo"
+  grep -Fq 'também sai 2 em qualquer modo' "$f" || fail "$f não diz que o pr-so-com-portao também sai 2 em qualquer modo nos dois casos provados"
+done
+# Nenhum texto versionado trata o hook como barreira: numa linha que cita
+# `pr-so-com-portao`, "é barreira" e "barra o push" reprovam sempre (as negações
+# literais "não é barreira", "não barreira" e "nunca é barreira" são retiradas
+# antes); "autoritativ" só passa quando a mesma linha o qualifica como consultivo
+# ou aviso antecipado (é a linha que contrapõe o pre-push autoritativo ao hook).
+# Spec, plano e as suítes (inclusive .claude/hooks/teste.sh, cujos nomes de caso
+# dizem "barra o push") ficam de fora: são o registro da decisão e citam a regra para
+# proibi-la. Como na varredura CIATIVO, o grep sai 1 sem achado e 2 em erro, e só
+# o erro (ou o de git ls-files/xargs) derruba a varredura.
+pr_linhas="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' \
+    ':!scripts/ci/mutacao-*' ':!scripts/ci/lib/*' ':!scripts/ci/fixtures/*' ':!docs/superpowers/*' \
+    ':!.claude/hooks/teste.sh' \
+  | xargs -0 sh -c 'grep -nIF -- "pr-so-com-portao" "$@"; [ "$?" -le 1 ]' _)" \
+  || fail 'DM-184: a varredura de textos que tratam pr-so-com-portao como barreira falhou'
+pr_autoritativo="$(printf '%s\n' "$pr_linhas" | awk '{
+  l = tolower($0)
+  gsub(/não é barreira|não barreira|nunca é barreira|não É barreira/, "", l)
+  if (l ~ /é barreira|É barreira|barra o push/) { print; next }
+  if (l ~ /autoritativ/ && l !~ /consultiv|aviso antecipado/) print
+}')"
+[ -z "$pr_autoritativo" ] || fail "DM-184: texto trata pr-so-com-portao como barreira: $(printf '%s' "$pr_autoritativo" | tr '\n' ' ')"
+
+# Nenhum executável da skill aceita opção de bypass (varredura; sem guarda).
+# Limite: só pega a opção longa escrita literalmente em scripts/*.sh (não lê
+# opção curta, nome montado em variável, variável de ambiente nem os hooks); o
+# que ela não cobre fica com as varreduras por executável acima e com os testes.
+if grep -nE -- '--(force|sem-prova|bypass)' "$SKILL_DIR"/scripts/*.sh; then fail "flag de bypass encontrada"; fi
 
 printf 'contract checks passed\n'

@@ -30,6 +30,9 @@ copia() {
   local d
   d="$(mktemp -d)"; TMPS="$TMPS $d"
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) | ( cd "$d" && tar -xf - )
+  # O validador do contrato varre os arquivos versionados com `git ls-files`
+  # (DM-184): a cópia ganha um Git próprio com a árvore inteira no índice.
+  ( cd "$d" && git init -q && git add -A ) >/dev/null 2>&1 || return 1
   printf '%s\n' "$d"
 }
 

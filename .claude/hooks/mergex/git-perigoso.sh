@@ -42,7 +42,7 @@ ENTRADA="$(cat)"
 # deste hook. Sem jq, o modo em `.expx/hooks.json` também não pode ser lido —
 # nem o "desligado".
 if ! command -v jq >/dev/null 2>&1; then
-  printf '%s' "$ENTRADA" | grep -Eq '(^|[^A-Za-z0-9_./\\-])git([[:space:]]|\\[nrt]|"|$)' || exit 0
+  printf '%s' "$ENTRADA" | grep -E '(^|[^A-Za-z0-9_./\\-])git([[:space:]]|\\[nrt]|"|$)' >/dev/null || exit 0
   printf '%s\n' \
 "mergex/git-perigoso — dependência ausente: jq
 
@@ -62,6 +62,175 @@ fi
 CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 [ -n "$CMD" ] || exit 0
 
+# Sem `git` em nenhuma grafia, este hook não tem assunto — e sai ANTES de
+# normalizar, só com builtins, a custo constante. É o que mantém o custo perto
+# de zero na maioria esmagadora das chamadas: um `cat > arquivo <<EOF` de 10 KB
+# sem git pagava a normalização inteira (re-revisão da rodada 1).
+case "$CMD" in *git*|*GIT*) ;; *) exit 0 ;; esac
+
+# Teto de tamanho, falha FECHADA. A normalização e as regras são lineares, mas
+# têm custo por BYTE, e acima de certo tamanho um comando com `git` passaria a
+# disputar com o tempo limite do harness (30 s) — e hook morto pelo tempo
+# limite NÃO bloqueia: o comando rodaria (re-revisão da rodada 2: 125 KB de
+# `git;` + push forçado, morto aos 30 s, push liberado). Então, acima do teto,
+# o hook não avalia: barra e pede para dividir o comando.
+#
+# O teto é medido em BYTES, não em caracteres: `${#CMD}` conta caracteres na
+# locale do harness (C.UTF-8 no WSL e na maioria dos Linux), e 500 000 × `日`
+# são 500 000 caracteres mas 1,5 MB — passavam do teto por baixo, a
+# normalização levava 21 s e, com `; git push --force` no fim, o hook morria
+# no tempo limite: push liberado (re-revisão da rodada 3, N2). A conta é feita
+# por `tamanho_em_bytes`, em `LC_ALL=C` local, sem processo externo.
+#
+# Medido no hook inteiro, em bytes, nas duas locales — C e C.UTF-8 dão o mesmo
+# (a normalização já roda em C; WSL, bash 5.3): `git ` denso (uma palavra git a
+# cada 4 bytes) 128 KB 1,2 s; 256 KB 2,5 s; 512 KB 4,9-5,3 s; `git;` denso +
+# push forçado em 512 KB 5,1-5,9 s; `é git `, `😀 git ` e `git 日;` densos em
+# 512 KB 4,4-6,0 s; palavra única sem separador de 512 KB (ASCII ou `日`)
+# seguida de `; git push` 2,6-3,3 s; esparso (um `git` por 25 bytes) com push
+# no fim, 1 MB sem teto, 0,9 s. Acima do teto: 0,1-0,4 s, barra (1,5 MB de
+# `日`: 0,4 s). Sem `git`: ~15 ms (saída antecipada acima). O teto fica em
+# 512 KB: a normalização e as regras por regex decidem em até ~6 s nesse
+# tamanho. O que este teto NÃO limita é a leitura por TOKEN dos segmentos com
+# `push`: ela custa por token e por segmento, não por byte do comando, e tem
+# tetos próprios (PUSH_BYTES_TETO e PUSH_TETO, abaixo) — era o pior caso real
+# (80 KB em 16 000 linhas `push`: 39 s; 16 KB de tokens num push: 33 s;
+# re-revisões da rodada extra, N4 e N5).
+#
+# Fora deste teto ficava a leitura por token do segmento com `push`
+# (comum/base.sh), que era quadrática no tamanho de UM token:
+# `${v##*[[:space:]]}` em `expx_sem_descritor`, `${tok##*/}` em `expx_push_le`
+# e, em UTF-8, `${v#[\"\']}` em `expx_sem_aspas` tentavam cada prefixo — uma
+# palavra de 32 KB terminada em `push` custava 14 s (C) a 67 s (C.UTF-8), e um
+# push forçado seguido de `; <32 KB>push` morria no tempo limite, abaixo deste
+# teto (achado N3 da rodada 4). Corrigido na rodada 5: essas leituras são
+# lineares (uma passada por token), e o teste.sh cobre 32 KB e 128 KB em C e
+# C.UTF-8. O mesmo vale para `destino_do_refspec` abaixo.
+GIT_TETO=524288
+# tamanho_em_bytes <texto> — CMD_BYTES recebe o tamanho de <texto> em bytes,
+# qualquer que seja a locale de quem chamou. (A locale é ajustada no `local`;
+# a medida vem na linha seguinte: os argumentos do `local` expandem antes dele.)
+tamanho_em_bytes() {
+  local LC_ALL=C
+  CMD_BYTES=${#1}
+}
+tamanho_em_bytes "$CMD"
+if [ "$CMD_BYTES" -gt "$GIT_TETO" ]; then
+  CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
+  RAIZ="$(expx_raiz "${CWD:-$PWD}")"
+  MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
+  [ "$MODO" = "desligado" ] && exit 0
+  expx_barra "$MODO" "$RAIZ" "$HOOK" "comando com git grande demais para avaliar" \
+"mergex/git-perigoso — comando com git acima do teto de avaliação
+
+Tamanho: $CMD_BYTES bytes (teto: $GIT_TETO bytes; ${#CMD} caracteres)
+
+Este hook lê o comando inteiro antes de decidir. Acima deste tamanho a leitura
+disputaria com o tempo limite do harness, e um hook morto pelo tempo limite não
+bloqueia nada — então ele não avalia: barra.
+
+O que fazer:
+  - Divida o comando em partes menores, e deixe o git numa parte só dele.
+  - Conteúdo grande (heredoc, dados) vai para um arquivo, numa chamada sem git."
+  exit 0
+fi
+
+# A palavra do programa git, normalizada UMA vez para a grafia `git` — antes do
+# pré-filtro, da leitura do push e das regras por regex, que leem CMD_N; as
+# mensagens continuam mostrando CMD como foi escrito. Somem: as aspas pareadas
+# (`"git"`, `'/usr/bin/git'`), o caminho (`/usr/bin/git`, `./git`), a barra que
+# pula alias (`\git`) e o `.exe`. É o mesmo programa; sem isto `"git" push -f`
+# saía no pré-filtro (a aspa de fechamento colada no `git`) e `git.exe commit`
+# passava pelas regras 2-5, que casam só a grafia `git` (CodeAnt 4235529191 e
+# revisão). Um caminho que termina em `git` como ARGUMENTO (`ls ./tools/git`,
+# `git log -- src/git`) também vira `git`, mas não é programa do segmento nem é
+# seguido de subcomando perigoso: nenhuma regra dispara. Não resolve variável,
+# substituição de comando, alias nem caminho com espaço: o hook lê texto, não
+# valor (follow-up declarado).
+#
+# Só expansões do bash: este hook não invoca sed (test-m4a 6.18 — com sed
+# ausente ou BSD a decisão não pode mudar de lado), e um utilitário que falhasse
+# deixaria CMD_N vazio e o hook sairia por 0 antes das regras.
+GIT_SEP='[[:space:];&|`(){}]'
+# normaliza_git <comando> — CMD_N recebe o comando com cada palavra que é o
+# programa git reduzida a `git`; separadores (GIT_SEP, a quebra de linha
+# inclusive) e as demais palavras ficam como estão, byte a byte. Palavra é um
+# trecho máximo sem separador. Linear no tamanho, sem processo externo:
+#   - toda expansão `${s:i:k}` do bash custa O(tamanho de s) — ele recalcula o
+#     comprimento a cada uma, mesmo em LC_ALL=C (medido: 25 mil índices numa
+#     string de 100 KB, 2,6 s) —, então NADA indexa a string inteira: ela é
+#     cortada UMA vez em pedaços de 4 KB (`${s:off:4096}`, uma extração por
+#     pedaço) e todo índice é dentro do pedaço;
+#   - no pedaço, `read -a` com IFS = GIT_SEP dá as palavras de uma vez, em C (um
+#     campo vazio do read — dois separadores não brancos colados — não é
+#     palavra e é pulado); um índice `p` anda pelo pedaço, os separadores antes
+#     de cada palavra são copiados por posição, a palavra é decidida pela regra
+#     abaixo, e os pedaços de saída vão para um array que `printf -v` junta de
+#     uma vez. Nunca se copia o resto da string por ocorrência — era isso
+#     (`${rest:n+3}`) que dava O(ocorrências × tamanho): 125 KB de `git;`
+#     levavam 35 s e estouravam o timeout do harness, que não bloqueia
+#     (re-revisão da rodada 2);
+#   - a última palavra de um pedaço pode continuar no seguinte: quando o pedaço
+#     termina em byte que não é separador, essa palavra (a última que o `read`
+#     devolveu) não é emitida — fica pendente (`pend`) e abre o próximo pedaço,
+#     para ser decidida inteira. Nenhum padrão com `*` toca o pedaço: `${c##*…}`
+#     numa palavra de 70 KB sem separador tentava cada prefixo e era quadrático.
+# LC_ALL=C local: índice por byte; byte de continuação UTF-8 nunca é separador
+# (um caractere partido entre pedaços cai dentro da palavra pendente e volta
+# inteiro). A saída é byte a byte a mesma das versões anteriores (fuzz
+# diferencial, 12 mil entradas, C e C.UTF-8). Medido no hook inteiro: ver o
+# teto acima.
+normaliza_git() {
+  local LC_ALL=C s="$1" off=0 c nc pend="" W P w t p j m k=0 n nw i
+  n=${#s}                          # (fora do `local`: os argumentos dele expandem antes de qualquer atribuição)
+  CMD_N=""
+  P=()
+  while [ "$off" -lt "$n" ] || [ -n "$pend" ]; do
+    if [ "$off" -lt "$n" ]; then c="$pend${s:off:4096}"; off=$((off + 4096)); else c="$pend"; fi
+    pend=""
+    [ -n "$c" ] || continue
+    IFS=$' \t\n\v\f\r;&|`(){}' read -r -d '' -a W <<<"$c"
+    nw=${#W[@]}
+    if [ "$off" -lt "$n" ]; then
+      # o pedaço termina dentro de uma palavra: a última fica pendente
+      case "${c: -1}" in $GIT_SEP) ;; *) nw=$((nw - 1)); pend="${W[nw]}" ;; esac
+    fi
+    nc=${#c}; p=0; i=0
+    # pedaço sem `git` na parte a emitir: copiado inteiro, sem laço por palavra
+    # (num comando grande e esparso, só os pedaços com `git` pagam o laço)
+    case "${c:0:nc-${#pend}}" in
+      *git*) ;;
+      *) P[k]="${c:0:nc-${#pend}}"; k=$((k + 1)); continue ;;
+    esac
+    while [ "$i" -lt "$nw" ]; do
+      w="${W[i]}"; i=$((i + 1))
+      [ -n "$w" ] || continue
+      j=$p                         # pula os separadores antes da palavra
+      while [ "$j" -lt "$nc" ]; do case "${c:j:1}" in $GIT_SEP) j=$((j + 1)) ;; *) break ;; esac; done
+      m=${#w}; t="$w"
+      case "$t" in
+        \"?*\") t="${t#\"}"; t="${t%\"}" ;;
+        \'?*\') t="${t#\'}"; t="${t%\'}" ;;
+      esac
+      t="${t#\\}"
+      # aspa que sobrou sem par (a de abertura de um embrulho ou de um `echo
+      # "..."`) e `=` (atribuição `GIT=/usr/bin/git`, opção `--git-dir=…/git`)
+      # não são programa: a palavra fica como está
+      case "$t" in
+        *[\"\'=]*) ;;
+        git|*/git|git.exe|*/git.exe) w=git ;;
+      esac
+      P[k]="${c:p:j-p}$w"; k=$((k + 1))
+      p=$((j + m))
+    done
+    # os separadores depois da última palavra emitida (até a pendente, se houver)
+    P[k]="${c:p:nc-${#pend}-p}"; k=$((k + 1))
+  done
+  [ "$k" -gt 0 ] || return 0
+  printf -v CMD_N '%s' "${P[@]}"
+}
+normaliza_git "$CMD"
+
 # Saída antecipada: se não invoca git, este hook não tem assunto.
 # É o que mantém o custo perto de zero na maioria esmagadora das chamadas.
 #
@@ -72,7 +241,18 @@ CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null
 # embrulhar o comando desligava o hook inteiro — não só o push. A saída sem jq
 # (acima) sempre enxergou essa forma; era esta lista que estava mais estreita
 # do que a de lá, e a diferença entre as duas era o bypass.
-printf '%s' "$CMD" | grep -Eq '(^|[;&|`(){}'\''"[:space:]])git([[:space:]]|$)' || exit 0
+#
+# A barra e `.exe` continuam na lista para o git por caminho DENTRO de um
+# embrulho (`bash -c "/usr/bin/git push"`), que a normalização acima não reduz
+# (a aspa de abertura não é a do programa); a leitura do push (comum/base.sh,
+# expx_e_git) lê essa forma por token.
+#
+# Sem `-q`, de propósito — aqui e em todo grep sobre CMD_N abaixo: comum/base.sh
+# liga `pipefail`, e um grep que casa na primeira linha e sai dá SIGPIPE ao
+# printf quando o comando passa do buffer do pipe; o pipeline devolvia 141 e
+# este `|| exit 0` liberava um push forçado seguido de milhares de linhas
+# (rodada 5 da revisão). Sem `-q` o grep lê até o fim, e o status é só dele.
+printf '%s' "$CMD_N" | grep -E '(^|[;&|`(){}'\''"[:space:]/\\])git(\.exe)?([[:space:]]|$)' >/dev/null || exit 0
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 RAIZ="$(expx_raiz "${CWD:-$PWD}")"
@@ -137,228 +317,160 @@ PUSH_PRINCIPAL=0    # algum destino nomeado É a principal
 PUSH_SEM_DESTINO=0  # nenhum refspec: o destino é o upstream da branch ativa
 PUSH_OBSCURO=0      # há destino, mas ele não foi classificado
 
-# Uma aspa em cada ponta do token, no máximo, e só. O hook recebe a string como
-# ela foi escrita: sem isto `origin "main"` não era a principal. As pontas são
-# tratadas separadamente porque o par se abre e se fecha em tokens diferentes
-# quando o comando inteiro está entre aspas (`bash -c "git push origin main"`
-# dá os tokens `"git` e `main"`).
-sem_aspas() {
-  local v="$1"
-  v="${v#[\"\']}"
-  v="${v%[\"\']}"
-  printf '%s' "$v"
-}
+# A leitura por token mora em comum/base.sh (expx_push_segmentos e
+# expx_push_le), compartilhada com o pr-so-com-portao. As decisões dela, que
+# continuam valendo aqui:
+#
+#   - aspas: uma em cada ponta do token, e só. Sem isto `origin "main"` não era
+#     a principal; e a aspa sai ANTES de qualquer comparação, porque quando o
+#     comando vem embrulhado a aspa de fechamento cola na última palavra, que
+#     costuma ser uma opção (`bash -c "git push --all"` dá `--all"`);
+#   - executor: `bash -c "git push origin main"` executa o push; `echo "git
+#     push origin main"` só imprime o texto. O `git` só é procurado adiante
+#     quando o programa do segmento RODA o argumento. Um lançador fora da
+#     lista (ex.: `find -exec`) não é lido como execução de push: troca
+#     consciente, para não barrar toda linha que apenas MENCIONA um push;
+#   - descritor: o número que abre um redirecionamento é descritor só quando é
+#     uma palavra inteira de dígitos. `git push origin main2>/tmp/log` empurra
+#     para `main2`, que é outra branch — cortar o dígito transformava `main2`
+#     na principal `main`;
+#   - continuação de linha: o par barra-invertida+quebra é emendado ANTES da
+#     quebra em segmentos (para o shell ele não separa nada), e só quando a
+#     barra NÃO está escapada — a paridade da corrida de barras decide. Sem
+#     emendar, o destino escrito na linha seguinte deixava de ser lido; sem
+#     contar a paridade, `\\` + quebra fundia dois comandos e o push da linha
+#     de baixo sumia. As mensagens seguem mostrando o comando como foi escrito;
+#   - segmentos: `&&`, `||`, `;`, `|`, `&`, subshell, crase e redirecionamento
+#     separam comandos, pela troca do `tr` (o `\n` no lado direito do `sed` é
+#     extensão GNU: no BSD os segmentos grudavam e o push sumia).
 
 # Destino de um refspec: o lado direito do `:` quando ele existe, o próprio
 # refspec quando não existe. `HEAD` e `@` são a branch ativa.
 destino_do_refspec() {
-  local r
-  r="$(sem_aspas "$1")"
+  local r d
+  r="$(expx_sem_aspas "$1")"
   r="${r#+}"
-  case "$r" in *:*) r="${r##*:}" ;; esac
-  r="$(sem_aspas "$r")"
+  # o que vem depois do último `:`, numa passada: `${r%:*}` para no último `:`
+  # (`${r##*:}` tentava cada prefixo — quadrático num refspec longo; rodada 5)
+  case "$r" in *:*) d="${r%:*}"; r="${r:${#d}+1}" ;; esac
+  r="$(expx_sem_aspas "$r")"
   r="${r#refs/heads/}"
   case "$r" in HEAD|@) r="$ATUAL" ;; esac
   printf '%s' "$r"
 }
 
-# Programas que RODAM o que vem no argumento. É esta lista que separa EXECUTAR
-# de CITAR: `bash -c "git push origin main"` executa o push; `echo "git push
-# origin main"` só imprime o texto. Sem a distinção, procurar o `git` em
-# qualquer posição do segmento barrava toda citação — o aviso impresso, a
-# mensagem de commit que fala de push, a busca por push no código. Falso
-# positivo que atrapalha o dia inteiro é o que a regra 1 do desenho proíbe.
-#
-# Compara-se o NOME do programa, não o caminho: `/bin/sh` é o mesmo `sh`.
-#
-# Um lançador fora desta lista não é lido como execução de push. É uma troca
-# consciente e declarada: o hook prefere não enxergar um push escondido em
-# `find -exec` a barrar toda linha que apenas MENCIONA um push.
-executor() {
-  case "$1" in
-    bash|sh|dash|zsh|ksh|ksh93|mksh|ash|busybox) return 0 ;;
-    eval|command|exec|env|sudo|doas|nohup|setsid|nice|time|timeout|stdbuf|xargs) return 0 ;;
-  esac
-  return 1
-}
-
-# O número que ABRE um redirecionamento sobra no fim do segmento depois da
-# quebra: `git push origin main 2>/tmp/log` vira o segmento `git push origin
-# main 2`. Ele é descritor porque é uma palavra INTEIRA, só de dígitos. O
-# dígito colado no fim de outra palavra pertence à palavra: `git push origin
-# main2>/tmp/log` empurra para `main2`, que é outra branch. Cortar o dígito
-# grudado transformava `main2` na principal `main` — barrava um push legítimo —
-# e comia o fim de qualquer destino terminado em número.
-sem_descritor() {
-  local v="$1" t
-  t="${v##*[[:space:]]}"
-  case "$t" in
-    ''|*[!0-9]*) printf '%s' "$v" ;;
-    *)           printf '%s' "${v%"$t"}" ;;
-  esac
-}
-
 # Lê um segmento. Devolve 0 se ele era mesmo um `git ... push`.
 le_push() {
-  local tok d seg remoto_lido=0 n_refspec=0 atribuiu=0
-  seg="$(sem_descritor "$1")"
-  set -f                    # o segmento é texto: nada aqui vira glob
-  # shellcheck disable=SC2086
-  set -- $seg
-  set +f
-
-  # Prefixo de ambiente: `GIT_DIR=/tmp/x git push ...` continua sendo um push.
-  # Valor com espaço (`GIT_SSH_COMMAND="ssh -v" git push`) chega partido em
-  # vários tokens, então, depois da primeira atribuição, os pedaços soltos
-  # também são pulados até o nome do programa.
-  while [ "$#" -gt 0 ]; do
-    case "$(sem_aspas "$1")" in
-      [_[:alpha:]]*=*) atribuiu=1 ;;
-      -*)              [ "$atribuiu" = 1 ] || break ;;
-      *)               break ;;
-    esac
-    shift
-  done
-  [ "$#" -gt 0 ] || return 1
-
-  # O `git` não é necessariamente a primeira palavra do segmento: `bash -c
-  # "git push origin main"`, `sh -c ...` e `eval ...` o colocam dentro de um
-  # argumento, e ele continua sendo o programa que vai rodar. Mas só quem RODA
-  # o argumento pode esconder um push ali dentro — em `echo "git push origin
-  # main"` a mesma palavra é só texto. Por isso o `git` é procurado adiante
-  # apenas quando o programa do segmento é um executor.
-  tok="$(sem_aspas "$1")"
-  if [ "$tok" != git ]; then
-    executor "${tok##*/}" || return 1
-    while [ "$#" -gt 0 ]; do
-      [ "$(sem_aspas "$1")" = git ] && break
-      shift
-    done
-    [ "$#" -gt 0 ] || return 1
-  fi
-  shift
-
-  # Opções globais do git, antes do subcomando. As desta lista levam o valor
-  # numa palavra separada (`git -C <path> push`, `git -c <k>=<v> push`); as
-  # demais (inclusive a forma `--git-dir=<path>`) ocupam uma palavra só.
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      -C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--attr-source|--config-env)
-        [ "$#" -ge 2 ] || return 1
-        shift 2 ;;
-      -*) shift ;;
-      *) break ;;
-    esac
-  done
-  [ "$(sem_aspas "${1:-}")" = push ] || return 1
-  shift
+  local tok d i
+  expx_push_le "$1" || return 1
   PUSH_VISTO=1
 
-  # A aspa sai do token ANTES de qualquer comparação, e não só do remoto e do
-  # refspec: quando o comando vem embrulhado, a aspa de fechamento cola na
-  # última palavra, e ela costuma ser uma opção (`bash -c "git push --all"` dá
-  # `--all"`). Comparar o token cru deixava `--all"`, `--mirror"` e `--force"`
-  # de fora do reconhecimento — fora da principal, onde a branch ativa não
-  # segura nada, o push passava inteiro.
-  while [ "$#" -gt 0 ]; do
-    tok="$(sem_aspas "$1")"; shift
+  i=0
+  while [ "$i" -lt "${#EXPX_PUSH_OPCOES[@]}" ]; do
+    tok="${EXPX_PUSH_OPCOES[$i]}"; i=$((i + 1))
     case "$tok" in
-      --force|--force-*) PUSH_FORCA=1; continue ;;
-      --all|--mirror)    PUSH_AMPLO=1; continue ;;
-      # Opções do push cujo valor vem na palavra seguinte.
-      --repo|--receive-pack|--exec|--push-option|-o) shift; continue ;;
-      --*) continue ;;
+      --force|--force-*) PUSH_FORCA=1 ;;
+      --all|--mirror)    PUSH_AMPLO=1 ;;
+      --*) ;;
       -*) # Aglomerado curto: `-fu` é tão forçado quanto `-f`.
-          case "$tok" in *f*) PUSH_FORCA=1 ;; esac
-          case "$tok" in *o)  shift ;; esac
-          continue ;;
+          case "$tok" in *f*) PUSH_FORCA=1 ;; esac ;;
     esac
+  done
 
-    # Primeiro posicional é o remoto; os seguintes são refspecs.
-    if [ "$remoto_lido" = 0 ]; then
-      remoto_lido=1
-      [ "$tok" = "$PRINCIPAL" ] && PUSH_PRINCIPAL=1
-      continue
-    fi
-    n_refspec=$((n_refspec + 1))
+  # Primeiro posicional é o remoto; os seguintes são refspecs.
+  if [ "$EXPX_PUSH_TEM_REMOTO" = 1 ] && [ "$EXPX_PUSH_REMOTO" = "$PRINCIPAL" ]; then
+    PUSH_PRINCIPAL=1
+  fi
+  i=0
+  while [ "$i" -lt "${#EXPX_PUSH_REFSPECS[@]}" ]; do
+    tok="${EXPX_PUSH_REFSPECS[$i]}"; i=$((i + 1))
     case "$tok" in +*) PUSH_FORCA=1 ;; esac
     d="$(destino_do_refspec "$tok")"
     if [ "$d" = "$PRINCIPAL" ]; then
       PUSH_PRINCIPAL=1
-    elif ! printf '%s' "$d" | grep -Eq '^[A-Za-z0-9@][A-Za-z0-9._/@-]*$'; then
+    elif ! printf '%s' "$d" | grep -E '^[A-Za-z0-9@][A-Za-z0-9._/@-]*$' >/dev/null; then
       PUSH_OBSCURO=1
     fi
   done
 
-  [ "$n_refspec" = 0 ] && PUSH_SEM_DESTINO=1
+  [ "${#EXPX_PUSH_REFSPECS[@]}" = 0 ] && PUSH_SEM_DESTINO=1
   return 0
 }
 
-# A continuação de linha é emendada ANTES da quebra em segmentos, porque para o
-# shell ela não separa nada: barra invertida no fim da linha faz as duas linhas
-# virarem UMA, e só depois é que se decide o que é programa e o que é argumento.
-# Um push com a barra no fim e `origin main` na linha seguinte é um push com
-# destino nomeado. Sem emendar, a segunda linha caía fora do segmento e o
-# destino escrito nela deixava de ser lido: fora da principal, onde a branch
-# ativa não segura nada, o push para a principal passava — e a regra anterior,
-# que varria a linha inteira, já o barrava.
-#
-# Emenda-se SÓ o par barra-invertida+quebra. A quebra de linha solta continua
-# separando comandos, porque é isso que ela faz no shell: juntar tudo faria a
-# palavra de um comando virar argumento do push do comando vizinho.
-#
-# E a barra que continua a linha é a que NÃO está escapada. Barras andam em
-# pares: `\\` é UMA barra literal, e a quebra depois dela segue sendo fim de
-# comando — o push escrito na linha seguinte é um push por si e tem de ser
-# lido. Apagar todo par barra+quebra sem contar a corrida de barras fundia dois
-# comandos que o shell mantém separados: a palavra da linha de cima colava no
-# `git` da linha de baixo, o segmento deixava de começar em `git` e o push
-# sumia — falha ABERTA do mesmo tamanho da que a emenda veio consertar. Quem
-# decide é a paridade: ímpar emenda, par separa.
-#
-# A emenda serve à LEITURA do push. As mensagens seguem mostrando o comando
-# como ele foi escrito ($CMD).
-emenda_continuacao() {
-  local linha saida='' barras
-  while IFS= read -r linha; do
-    barras="${linha##*[!\\]}"          # a corrida de barras no fim da linha
-    if [ $(( ${#barras} % 2 )) = 1 ]; then
-      saida="$saida${linha%?}"         # ímpar: a última barra continua a linha
-    else
-      saida="$saida$linha"$'\n'        # par: a quebra continua separando
-    fi
-  done <<<"$1"
-  printf '%s' "$saida"
+# Todo segmento que pode ser um push é lido — até dois tetos, falha FECHADA. A
+# leitura por token (expx_push_le: um subshell de expx_sem_aspas por token)
+# custa ~3-4 ms por TOKEN em C.UTF-8, mais ~2,4 ms de piso por segmento, e o
+# teto de bytes do comando (512 KB) não limita isso: um push forçado seguido de
+# um push com 2 000 tokens de 1 byte (4 KB) levava 6-8,5 s, com 8 000 tokens
+# 25-33 s, e 16 000 linhas `push` 39 s — mortos pelo tempo limite do harness,
+# o push passava (re-revisões da rodada extra: N4, N5). Então, ANTES de ler:
+#   - PUSH_BYTES_TETO: bytes somados dos segmentos que contêm `push`. Um push
+#     legítimo tem menos de 200 B; `git push -u origin feature/x` com 20
+#     refspecs e `&& gh pr create` tem ~250 B. O pior caso abaixo do teto são
+#     tokens de 1 byte (teto/2 tokens) — medido no hook inteiro, C.UTF-8 (C é
+#     ~10% mais rápido): 512 tokens 1,7 s; 1 024 3,3 s; 1 536 5,0 s; 2 048
+#     (4 KB) 6,7 s; 4 096 13,9 s. Com o teto em 4 096 B o pior caso decide em
+#     6,4-6,7 s (1,5x de folga para 10 s, 4x para o tempo limite); 4 096 B
+#     exatos leem, 4 099 barram em 0,2 s. Tokens multibyte (`日`: 1 024 em 4 KB,
+#     3,7 s) e entre aspas custam o mesmo por token e cabem em menos tokens;
+#     opções (`-f`) custam menos (400 em 1,2 KB: 0,3 s).
+#   - PUSH_TETO: número desses segmentos (cada um custa ~2,4 ms mesmo com uma
+#     palavra: 400 linhas `push`, 2 KB, 1,0 s; 4 KB de `push\n` seriam 819
+#     segmentos, ~2 s). 150 pushes completos em 150 linhas (3,9 KB) decidem em
+#     1,0 s; 157 (4 082 B) leem, 158 (4 108 B) barram pelo teto de bytes.
+# As duas medidas são só expansões do bash em LC_ALL=C (índice por byte; a
+# troca `${v//…}` é linear em C e quadrática em UTF-8, e só roda sobre o que já
+# cabe no teto de bytes). Sem utilitário: com `wc -l`, PATH sem `wc` dava
+# contagem 0 em silêncio, o teto sumia e `wc: command not found` vazava (N6).
+PUSH_BYTES_TETO=4096
+PUSH_TETO=500
+# mede_push_segs <segmentos> — PUSH_BYTES recebe o tamanho em bytes; PUSH_N, o
+# número de linhas (segmentos), contado só quando os bytes já cabem no teto.
+mede_push_segs() {
+  local LC_ALL=C nl=$'\n' so
+  PUSH_BYTES=${#1}
+  PUSH_N=0
+  [ "$PUSH_BYTES" -le "$PUSH_BYTES_TETO" ] || return 0
+  if [ -n "$1" ]; then so="${1//[!$nl]/}"; PUSH_N=$(( ${#so} + 1 )); fi
 }
+PUSH_SEGS="$(expx_push_segmentos "$CMD_N")"
+mede_push_segs "$PUSH_SEGS"
+if [ "$PUSH_BYTES" -gt "$PUSH_BYTES_TETO" ]; then
+  barra "comando com segmentos de push grandes demais para avaliar" \
+"mergex/git-perigoso — segmentos de push maiores do que o hook avalia
 
-# Sem continuação, não há o que emendar — e a esmagadora maioria dos comandos
-# não tem. A pergunta é de expansão de parâmetro, sem processo nenhum.
-case "$CMD" in
-  *\\$'\n'*) CMD_PUSH="$(emenda_continuacao "$CMD")" ;;
-  *)         CMD_PUSH="$CMD" ;;
-esac
+Bytes nos segmentos com push: $PUSH_BYTES (teto: $PUSH_BYTES_TETO)
 
-if printf '%s' "$CMD_PUSH" | grep -Fq push; then
-  # Separadores de segmento: `&&`, `||`, `;`, `|`, `&`, subshell, crase e
-  # redirecionamento. O que vem depois deles é outro comando, ou não é
-  # argumento do push. Cada separador vira uma quebra de linha e o laço lê um
-  # segmento por linha — a quebra que já estava no comando continua separando,
-  # porque é o que ela faz no shell. `&&` e `||` viram duas quebras, e o
-  # segmento vazio do meio não incomoda ninguém.
-  #
-  # A troca é do `tr`, não do `sed`: `s/X/\n/` com QUEBRA DE LINHA no lado
-  # direito é extensão GNU, e o contrato deste repositório é bash 3.2 mais
-  # utilitários POSIX (macOS incluído). No sed do BSD aquele `\n` é a letra
-  # `n`: os segmentos saíam grudados numa linha só, `git status; git push
-  # origin main` virava `git statusngit push origin main`, o push deixava de
-  # ser reconhecido — e o hook falhava ABERTO justamente na cadeia que ele
-  # existe para barrar. Em `tr`, `\n` é quebra de linha em qualquer Unix, e a
-  # troca é byte a byte: um conjunto de destino do mesmo tamanho do de origem,
-  # sem depender do preenchimento automático que o POSIX não garante.
-  while IFS= read -r SEG; do
-    case "$SEG" in *push*) le_push "$SEG" || true ;; esac
-  done <<<"$(printf '%s\n' "$CMD_PUSH" | tr ';|&()`<>' '\n\n\n\n\n\n\n\n')"
+Este hook lê por token cada segmento que pode ser um push, e o custo é por
+token. Acima deste tamanho a leitura disputaria com o tempo limite do harness,
+e um hook morto pelo tempo limite não bloqueia nada — então ele não avalia:
+barra.
+
+O que fazer:
+  - Divida o comando: um push por chamada, só com remoto e refspec.
+  - Texto que só cita push (documentação, dados) vai para um arquivo, numa
+    chamada sem git."
+  exit 0
 fi
+if [ "$PUSH_N" -gt "$PUSH_TETO" ]; then
+  barra "comando com segmentos de push demais para avaliar" \
+"mergex/git-perigoso — comando com mais segmentos de push do que o hook avalia
+
+Segmentos com push: $PUSH_N (teto: $PUSH_TETO)
+
+Este hook lê por token cada segmento que pode ser um push. Acima deste número a
+leitura disputaria com o tempo limite do harness, e um hook morto pelo tempo
+limite não bloqueia nada — então ele não avalia: barra.
+
+O que fazer:
+  - Divida o comando em partes menores, com poucos pushes em cada uma.
+  - Texto que só cita push (documentação, dados) vai para um arquivo, numa
+    chamada sem git."
+  exit 0
+fi
+while IFS= read -r SEG; do
+  le_push "$SEG" || true
+done <<<"$PUSH_SEGS"
 
 # --------------------------------------------------------------------------
 # 1. Push forçado — em qualquer forma
@@ -388,7 +500,7 @@ fi
 # 2. Push ou commit direto na branch principal
 # --------------------------------------------------------------------------
 # commit: barra quando a branch ativa É a principal
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' >/dev/null; then
   if [ -n "$ATUAL" ] && [ "$ATUAL" = "$PRINCIPAL" ]; then
     barra "commit na branch principal" \
 "mergex/git-perigoso — commit direto na branch principal
@@ -494,9 +606,9 @@ fi
 # --------------------------------------------------------------------------
 # 3. Reescrita de histórico já enviado
 # --------------------------------------------------------------------------
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(rebase|filter-branch|filter-repo)([[:space:]]|$)' \
-|| printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit[^|;&]*[[:space:]]--amend([[:space:]]|$)' \
-|| printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+reset[^|;&]*[[:space:]]--hard([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(rebase|filter-branch|filter-repo)([[:space:]]|$)' >/dev/null \
+|| printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit[^|;&]*[[:space:]]--amend([[:space:]]|$)' >/dev/null \
+|| printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+reset[^|;&]*[[:space:]]--hard([[:space:]]|$)' >/dev/null; then
   # Só é perigoso se o que seria reescrito já foi enviado ao remoto.
   # Sem upstream, é histórico local: não barra (precisão, regra 1).
   UP="$(git -C "$RAIZ" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
@@ -530,19 +642,19 @@ fi
 # --------------------------------------------------------------------------
 # git checkout -- <path> / git restore <path> / git stash drop|clear
 DESCARTA=0
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+checkout[^|;&]*[[:space:]]--([[:space:]]|$)'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+checkout[^|;&]*[[:space:]]--([[:space:]]|$)' >/dev/null; then
   DESCARTA=1
-elif printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+rest''ore([[:space:]]|$)'; then
+elif printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+rest''ore([[:space:]]|$)' >/dev/null; then
   # Só desfazer o stage nao toca a arvore de trabalho e nao destroi nada.
   # Barrar isso seria o falso positivo que atrapalha o dia inteiro.
-  if printf '%s' "$CMD" | grep -Eq '[[:space:]]--worktree([[:space:]]|=|$)'; then
+  if printf '%s' "$CMD_N" | grep -E '[[:space:]]--worktree([[:space:]]|=|$)' >/dev/null; then
     DESCARTA=1
-  elif printf '%s' "$CMD" | grep -Eq '[[:space:]]--staged([[:space:]]|=|$)'; then
+  elif printf '%s' "$CMD_N" | grep -E '[[:space:]]--staged([[:space:]]|=|$)' >/dev/null; then
     DESCARTA=0
   else
     DESCARTA=1
   fi
-elif printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+stash[[:space:]]+(drop|clear)([[:space:]]|$)'; then
+elif printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+stash[[:space:]]+(drop|clear)([[:space:]]|$)' >/dev/null; then
   DESCARTA=1
 fi
 if [ "$DESCARTA" = "1" ]; then
@@ -571,8 +683,8 @@ fi
 # --------------------------------------------------------------------------
 # 5. Limpeza destrutiva de arquivo não rastreado
 # --------------------------------------------------------------------------
-if printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+clean([[:space:]]|$)'; then
-  if printf '%s' "$CMD" | grep -Eq '[[:space:]]-[a-zA-Z]*[fdx]'; then
+if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+clean([[:space:]]|$)' >/dev/null; then
+  if printf '%s' "$CMD_N" | grep -E '[[:space:]]-[a-zA-Z]*[fdx]' >/dev/null; then
     ALVOS="$(git -C "$RAIZ" clean -nd 2>/dev/null | head -20)"
     barra "limpeza destrutiva" \
 "mergex/git-perigoso — limpeza destrutiva de arquivos não rastreados

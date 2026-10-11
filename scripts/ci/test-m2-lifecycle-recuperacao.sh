@@ -494,6 +494,7 @@ grupo_catalog() {
   lista_catalogo "$repo" sprintx pre-e2 >/dev/null 2>&1; rc=$?
   [ "$rc" != 0 ] && ok 'HISTORICO global com diff de outro trabalho para' \
     || falha 'HISTORICO global de outro trabalho entrou no catalogo corrente'
+  grupo_catalog_reconc
 }
 
 grupo_lifecycle() {
@@ -606,6 +607,324 @@ grupo_lifecycle() {
   metodo "$repo" --persistir sprintx pre-e2 >/dev/null 2>&1; rc=$?
   [ "$rc" = 2 ] && ok 'checkpoint usa a mesma trava C5 e para quando ocupada' \
     || falha "checkpoint ignorou trava C5 (rc=$rc)"
+  (cd "$repo" && bash "$SCRIPTS/trava-do-e1.sh" --liberar "$token") >/dev/null 2>&1
+  grupo_lifecycle_reconc
+}
+
+# ---------------------------------------------------------------------------
+# Checkpoint reconciliacao-base (Task 10): catalogo e lifecycle
+# ---------------------------------------------------------------------------
+
+SEQUENCIA="$SCRIPTS/sequencia-de-commits.sh"
+HASH_B="$(printf 'b%.0s' $(seq 1 40))"
+
+# ENTREGA com um commit E1 registrado e a lista `reconciliacoes` dada (sem
+# nomes, `reconciliacoes: []`). Reescreve o arquivo do disco.
+entrega_reconc() { # <repo> [nome...]
+  local repo="$1" nomes="" n; shift
+  for n in "$@"; do nomes="$nomes$n"$'\n'; done
+  NOMES="$nomes" awk -v h="$HASH_B" '
+    BEGIN { n = split(ENVIRON["NOMES"], lista, "\n") }
+    /^(reconciliacoes|faixa_atencao):/ { pula = 1; next }
+    pula && /^(---|[A-Za-z_])/ { pula = 0 }
+    pula { next }
+    /^commits: \[\]$/ {
+      print "commits:"; print "  - seq: 1"; print "    task: T-01.01"
+      print "    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; next
+    }
+    /^---$/ && ++cerca == 2 {
+      print "faixa_atencao:"; print "  - arquivo: src/antes.ts"; print "    faixa: alta"
+      if (n > 1) {
+        print "reconciliacoes:"
+        for (i = 1; i < n; i++)
+          printf "  - numero: %d\n    arquivo: %s\n    b1_sha: %s\n    m_sha: %s\n", i, lista[i], h, h
+      } else print "reconciliacoes: []"
+      print "faixa_atencao:"; print "  - arquivo: src/depois.ts"; print "    faixa: media"
+    }
+    { print }
+  ' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/docs/entregas/ft-m2/ENTREGA.tmp" \
+    && mv "$repo/docs/entregas/ft-m2/ENTREGA.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
+}
+
+# Repositorio com reconciliacoes [001] versionada, mais um 002 versionado e
+# fora da lista.
+repo_reconc() { # <dir>
+  local dir="$1" pasta
+  pasta="$(repo_catalogo "$dir" sprintx canonico)" || return 1
+  entrega_reconc "$dir" RECONCILIACAO-BASE-001.md
+  artefato "$dir/docs/entregas/ft-m2/RECONCILIACAO-BASE-001.md" reconciliacao_base ft-m2
+  artefato "$dir/docs/entregas/ft-m2/RECONCILIACAO-BASE-002.md" reconciliacao_base ft-m2
+  git -C "$dir" add -A
+  git -C "$dir" commit -qm 'chore: reconciliacao registrada'
+  printf '%s\n' "$pasta"
+}
+
+# catalogo_metodo direto: a lista na ordem de impressao; o ultimo registro
+# `ERRO(rc): ...` so aparece quando falha. Sai com o rc do catalogo.
+cat_direto() { # <repo> <origem> <checkpoint>
+  (
+    . "$SCRIPTS/catalogo-de-metodo.sh"
+    catalogo_metodo "$1" "$2" ft-m2 docs/sprintx/features/ft-m2 "$3"
+    rc=$?
+    [ "$rc" = 0 ] || printf 'ERRO(%s): %s\n' "$rc" "$CATALOGO_ERRO"
+    exit "$rc"
+  )
+}
+
+grupo_catalog_reconc() {
+  local repo pasta obtido esperado e2 e6 rc nome checkpoint base="docs/entregas/ft-m2"
+  printf '\nCATALOG — checkpoint reconciliacao-base\n'
+
+  repo="$D/catalogo-reconc-vazio"
+  pasta="$(repo_catalogo "$repo" sprintx canonico)"
+  e2="$(printf '%s\n' \
+    "$pasta/00-DECISOES.md" "$pasta/BUILDX-PREMISSAS.md" "$pasta/00-ESTIMATIVA.md" \
+    "$pasta/ORQUESTRADOR.md" "$pasta/00-AUDITORIA.md" "$pasta/FECHAMENTO.md" \
+    "$pasta/00-PLANEJAMENTO.md" "$pasta/00-BLOQUEIOS.md" \
+    "$pasta/sprint-01/tasks.md" "$pasta/sprint-01/sprint.md" "$pasta/sprint-01/fases.md" \
+    "$pasta/base/00-LACUNAS.md" "$pasta/base/00-INDICE.md" "$pasta/base/area com espaco.md" \
+    docs/sprintx/estimativas/HISTORICO.md "$base/ENTREGA.md")"
+  e6="$(printf '%s\n%s\n%s\n%s' "$e2" "$base/ATENCAO.md" "$base/PR.md" "$base/QA-PACOTE.md")"
+  igual 'sem reconciliacoes: pre-e2 sai identico ao de antes, byte a byte' "$(cat_direto "$repo" sprintx pre-e2)" "$e2"
+  igual 'sem a chave reconciliacoes: pre-e6 sai identico ao de antes, byte a byte' "$(cat_direto "$repo" sprintx pre-e6)" "$e6"
+  igual 'sem a chave reconciliacoes: e8 sai identico ao de antes, byte a byte' "$(cat_direto "$repo" sprintx e8)" "$e6"
+  entrega_reconc "$repo"
+  igual 'reconciliacoes vazia: pre-e6 sai identico ao de antes, byte a byte' "$(cat_direto "$repo" sprintx pre-e6)" "$e6"
+  igual 'reconciliacoes vazia: e8 sai identico ao de antes, byte a byte' "$(cat_direto "$repo" sprintx e8)" "$e6"
+  igual 'reconciliacoes vazia: reconciliacao-base e so a ENTREGA' \
+    "$(cat_direto "$repo" sprintx reconciliacao-base)" "$base/ENTREGA.md"
+
+  entrega_reconc "$repo" RECONCILIACAO-BASE-001.md RECONCILIACAO-BASE-002.md
+  esperado="$(printf '%s\n%s\n%s' "$base/ENTREGA.md" "$base/RECONCILIACAO-BASE-001.md" "$base/RECONCILIACAO-BASE-002.md")"
+  igual 'catalogo reconciliacao-base: so ENTREGA e artefatos listados' \
+    "$(cat_direto "$repo" sprintx reconciliacao-base)" "$esperado"
+  igual 'catalogo reconciliacao-base na RunX tem o mesmo conjunto' \
+    "$(cat_direto "$repo" runx reconciliacao-base)" "$esperado"
+  igual 'pre-e2 nao inclui artefatos de reconciliacao' "$(cat_direto "$repo" sprintx pre-e2)" "$e2"
+  igual 'pre-e6 inclui os artefatos listados, alem do que ja incluia' \
+    "$(cat_direto "$repo" sprintx pre-e6)" \
+    "$(printf '%s\n%s\n%s' "$e6" "$base/RECONCILIACAO-BASE-001.md" "$base/RECONCILIACAO-BASE-002.md")"
+  igual 'e8 inclui os artefatos listados, alem do que ja incluia' \
+    "$(cat_direto "$repo" sprintx e8)" \
+    "$(printf '%s\n%s\n%s' "$e6" "$base/RECONCILIACAO-BASE-001.md" "$base/RECONCILIACAO-BASE-002.md")"
+
+  for nome in '../PR.md' 'sub/RECONCILIACAO-BASE-001.md' 'RECONCILIACAO-BASE-*.md' \
+    'RECONCILIACAO-BASE-1.md' 'RECONCILIACAO-BASE-0001.md' 'RECONCILIACAO-BASE-001.md.bak' \
+    'PR.md' '/etc/passwd' 'reconciliacao-base-001.md'; do
+    entrega_reconc "$repo" RECONCILIACAO-BASE-001.md "$nome"
+    for checkpoint in reconciliacao-base pre-e6 e8; do
+      obtido="$(cat_direto "$repo" sprintx "$checkpoint")"; rc=$?
+      if [ "$rc" != 0 ] && printf '%s\n' "$obtido" | grep -Fq "nome inválido: $nome"; then
+        ok "nome invalido '$nome' falha fechado no catalogo $checkpoint"
+      else
+        falha "nome invalido '$nome' no catalogo $checkpoint (rc=$rc; $obtido)"
+      fi
+    done
+  done
+  entrega_reconc "$repo" ''
+  cat_direto "$repo" sprintx reconciliacao-base >/dev/null; rc=$?
+  [ "$rc" != 0 ] && ok 'arquivo vazio na lista falha fechado' || falha 'arquivo vazio na lista foi aceito'
+
+  entrega_reconc "$repo" RECONCILIACAO-BASE-001.md
+  grep -c '^  - arquivo: src/' "$repo/$base/ENTREGA.md" | grep -qx 2 \
+    && ok 'a fixture tem faixa_atencao antes e depois do bloco reconciliacoes' || falha 'fixture sem faixa_atencao dos dois lados'
+  igual 'faixa_atencao fora do bloco nao entra: reconciliacao-base so tem ENTREGA e o artefato' \
+    "$(cat_direto "$repo" sprintx reconciliacao-base)" "$(printf '%s\n%s' "$base/ENTREGA.md" "$base/RECONCILIACAO-BASE-001.md")"
+  igual 'faixa_atencao fora do bloco nao entra: pre-e6 so acrescenta o artefato' \
+    "$(cat_direto "$repo" sprintx pre-e6)" "$(printf '%s\n%s' "$e6" "$base/RECONCILIACAO-BASE-001.md")"
+  igual 'faixa_atencao fora do bloco nao entra: e8 so acrescenta o artefato' \
+    "$(cat_direto "$repo" sprintx e8)" "$(printf '%s\n%s' "$e6" "$base/RECONCILIACAO-BASE-001.md")"
+
+  for nome in '[{numero: 1, arquivo: RECONCILIACAO-BASE-001.md}]' '[RECONCILIACAO-BASE-001.md]' 'null'; do
+    entrega_reconc "$repo"
+    sed -i "s/^reconciliacoes: \[\]\$/reconciliacoes: $nome/" "$repo/$base/ENTREGA.md"
+    for checkpoint in reconciliacao-base pre-e6 e8; do
+      obtido="$(cat_direto "$repo" sprintx "$checkpoint")"; rc=$?
+      if [ "$rc" != 0 ] && printf '%s\n' "$obtido" | grep -Fq "fora do formato de bloco: $nome"; then
+        ok "lista fora do formato de bloco '$nome' falha fechado no catalogo $checkpoint"
+      else
+        falha "lista '$nome' no catalogo $checkpoint (rc=$rc; $obtido)"
+      fi
+    done
+  done
+  entrega_reconc "$repo"
+  cat_direto "$repo" sprintx reconciliacao-base >/dev/null
+  igual 'reconciliacoes: [] continua aceito' "$?" 0
+
+  repo="$D/catalogo-reconc-sujo"
+  pasta="$(repo_reconc "$repo")"
+  printf '\nmudanca\n' >> "$repo/$base/ENTREGA.md"
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-002.md"
+  printf '\nmudanca\n' >> "$repo/$base/PR.md"
+  printf '\nmudanca\n' >> "$repo/$pasta/00-PLANEJAMENTO.md"
+  printf '\nmudanca\n' >> "$repo/src/ORQUESTRADOR.md"
+  igual 'listar reconciliacao-base devolve so ENTREGA e artefato listado sujos' \
+    "$(lista_catalogo "$repo" sprintx reconciliacao-base 2>/dev/null)" \
+    "$(printf '%s\n%s' "$base/ENTREGA.md" "$base/RECONCILIACAO-BASE-001.md")"
+  lista_catalogo "$repo" sprintx reconciliacao-base >/dev/null 2>&1
+  igual 'listar reconciliacao-base: rc 0' "$?" 0
+  igual 'listar pre-e6 inclui o artefato listado e nao o nao listado' \
+    "$(lista_catalogo "$repo" sprintx pre-e6 2>/dev/null)" \
+    "$(printf '%s\n' "$base/ENTREGA.md" "$base/PR.md" "$base/RECONCILIACAO-BASE-001.md" "$pasta/00-PLANEJAMENTO.md" | LC_ALL=C sort)"
+  igual 'listar e8 inclui o artefato listado e nao o nao listado' \
+    "$(lista_catalogo "$repo" sprintx e8 2>/dev/null)" \
+    "$(printf '%s\n' "$base/ENTREGA.md" "$base/PR.md" "$base/RECONCILIACAO-BASE-001.md" "$pasta/00-PLANEJAMENTO.md" | LC_ALL=C sort)"
+}
+
+grupo_lifecycle_reconc() {
+  local repo pasta antes depois saida rc nomes corpo seq_antes seq_depois staged segredo token nome base="docs/entregas/ft-m2"
+  printf '\nLIFECYCLE — checkpoint reconciliacao-base\n'
+
+  repo="$D/lifecycle-reconc"
+  pasta="$(repo_reconc "$repo")"
+  printf '\nregistro\n' >> "$repo/$base/ENTREGA.md"
+  printf '\nregistro\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  printf '\nnao listado\n' >> "$repo/$base/RECONCILIACAO-BASE-002.md"
+  printf '\natencao\n' >> "$repo/$base/ATENCAO.md"
+  printf '\npr\n' >> "$repo/$base/PR.md"
+  printf '\nqa\n' >> "$repo/$base/QA-PACOTE.md"
+  printf '\nplano\n' >> "$repo/$pasta/00-PLANEJAMENTO.md"
+  printf '\nplano\n' >> "$repo/$pasta/sprint-01/tasks.md"
+  printf '\nproduto\n' >> "$repo/src/ORQUESTRADOR.md"
+  acrescenta_historico "$repo/docs/sprintx/estimativas/HISTORICO.md" ft-m2
+  seq_antes="$(cd "$repo" && bash "$SEQUENCIA" --ler "$base/ENTREGA.md")"
+
+  metodo "$repo" --verificar sprintx reconciliacao-base >/dev/null 2>&1; rc=$?
+  [ "$rc" != 0 ] && ok 'reconciliacao-base pendente barra a verificacao' || falha 'verificacao aceitou checkpoint pendente'
+
+  antes="$(git -C "$repo" rev-list --count HEAD)"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>/dev/null)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$saida" | grep -Eq '^commit=[0-9a-f]{40}$' \
+    && ok 'checkpoint reconciliacao-base cria commit de metodo' \
+    || falha "checkpoint reconciliacao-base falhou (rc=$rc; $saida)"
+  depois="$(git -C "$repo" rev-list --count HEAD)"
+  igual 'checkpoint reconciliacao-base cria exatamente um commit' "$depois" "$((antes + 1))"
+  corpo="$(git -C "$repo" show -s --format=%B HEAD)"
+  igual 'mensagem do checkpoint e a canonica' "$corpo" "$(printf '%s\n\n%s\n%s' \
+    'chore(mergex): persiste metodo reconciliacao-base' 'Trabalho: ft-m2' 'Metodo: reconciliacao-base')"
+  (cd "$repo" && bash "$CONTRATO" --validar-metodo --trabalho ft-m2 --checkpoint reconciliacao-base --commit HEAD) >/dev/null 2>&1
+  igual 'commit passa no contrato --validar-metodo --checkpoint reconciliacao-base' "$?" 0
+  nomes="$(git -C "$repo" show --format= --name-only HEAD | sed '/^$/d' | LC_ALL=C sort)"
+  igual 'commit leva so ENTREGA e artefato listado (sem produto, plano, E3-E5, HISTORICO, nao listado)' "$nomes" \
+    "$(printf '%s\n%s' "$base/ENTREGA.md" "$base/RECONCILIACAO-BASE-001.md")"
+  for nome in src/ORQUESTRADOR.md "$base/RECONCILIACAO-BASE-002.md" "$base/ATENCAO.md" "$base/PR.md" \
+    "$base/QA-PACOTE.md" "$pasta/00-PLANEJAMENTO.md" "$pasta/sprint-01/tasks.md" docs/sprintx/estimativas/HISTORICO.md; do
+    [ -n "$(git -C "$repo" status --porcelain -- "$nome")" ] \
+      && ok "fica fora do commit: $nome" || falha "foi absorvido pelo checkpoint: $nome"
+  done
+  seq_depois="$(cd "$repo" && bash "$SEQUENCIA" --ler "$base/ENTREGA.md")"
+  igual 'sequencia-de-commits --ler fica igual: nao consome seq nem entra em commits' "$seq_depois" "$seq_antes"
+  [ -n "$seq_antes" ] && ok 'a fixture tem um item em ENTREGA.commits' || falha 'fixture sem item em commits'
+  metodo "$repo" --verificar sprintx reconciliacao-base >/dev/null 2>&1
+  igual 'apos o checkpoint a verificacao encontra o catalogo limpo' "$?" 0
+
+  antes="$(git -C "$repo" rev-list --count HEAD)"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>/dev/null)"; rc=$?
+  depois="$(git -C "$repo" rev-list --count HEAD)"
+  [ "$rc" = 0 ] && [ "$saida" = 'noop=true' ] && [ "$antes" = "$depois" ] \
+    && ok 'sem nada sujo no catalogo nao gera commit vazio' \
+    || falha "reconciliacao-base idempotente falhou (rc=$rc; $saida)"
+
+  repo="$D/lifecycle-reconc-so-produto"
+  pasta="$(repo_reconc "$repo")"
+  printf '\nproduto\n' >> "$repo/src/ORQUESTRADOR.md"
+  printf '\nnao listado\n' >> "$repo/$base/RECONCILIACAO-BASE-002.md"
+  printf '\nplano\n' >> "$repo/$pasta/00-PLANEJAMENTO.md"
+  antes="$(git -C "$repo" rev-list --count HEAD)"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>/dev/null)"; rc=$?
+  depois="$(git -C "$repo" rev-list --count HEAD)"
+  [ "$rc" = 0 ] && [ "$saida" = 'noop=true' ] && [ "$antes" = "$depois" ] \
+    && ok 'so produto e artefato nao listado sujos: noop sem commit' \
+    || falha "produto sujo gerou commit ou erro (rc=$rc; $saida)"
+
+  repo="$D/lifecycle-reconc-symlink"
+  pasta="$(repo_reconc "$repo")"
+  rm -f "$repo/$base/RECONCILIACAO-BASE-001.md"
+  ln -s ../../../src/ORQUESTRADOR.md "$repo/$base/RECONCILIACAO-BASE-001.md"
+  printf '\nregistro\n' >> "$repo/$base/ENTREGA.md"
+  printf '\nproduto\n' >> "$repo/src/ORQUESTRADOR.md"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>/dev/null)"; rc=$?
+  nomes="$(git -C "$repo" show --format= --name-only HEAD | sed '/^$/d')"
+  [ "$rc" = 0 ] && [ "$nomes" = "$base/ENTREGA.md" ] \
+    && [ -n "$(git -C "$repo" status --porcelain -- src/ORQUESTRADOR.md)" ] \
+    && ok 'artefato listado que e symlink para produto nao entra no commit' \
+    || falha "symlink entrou ou o checkpoint falhou (rc=$rc; $saida; $nomes)"
+
+  repo="$D/lifecycle-reconc-historico-alheio"
+  pasta="$(repo_reconc "$repo")"
+  acrescenta_historico "$repo/docs/sprintx/estimativas/HISTORICO.md" outro
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>/dev/null)"; rc=$?
+  nomes="$(git -C "$repo" show --format= --name-only HEAD | sed '/^$/d')"
+  [ "$rc" = 0 ] && [ "$nomes" = "$base/RECONCILIACAO-BASE-001.md" ] \
+    && [ -n "$(git -C "$repo" status --porcelain -- docs/sprintx/estimativas/HISTORICO.md)" ] \
+    && ok 'HISTORICO global sujo nao entra nem barra o checkpoint reconciliacao-base' \
+    || falha "HISTORICO global interferiu no checkpoint (rc=$rc; $saida; $nomes)"
+
+  repo="$D/lifecycle-reconc-duas-pastas"
+  pasta="$(repo_reconc "$repo")"
+  mkdir -p "$repo/docs/ft-m2"
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  antes="$(git -C "$repo" rev-list --count HEAD)"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>&1)"; rc=$?
+  depois="$(git -C "$repo" rev-list --count HEAD)"
+  [ "$rc" = 1 ] && [ "$antes" = "$depois" ] && printf '%s\n' "$saida" | grep -Fxq 'persistir-metodo: há duas pastas SprintX para ft-m2' \
+    && ok 'duas pastas SprintX: mesma mensagem e rc 1 de sempre' \
+    || falha "duas pastas SprintX (rc=$rc; $saida)"
+
+  repo="$D/lifecycle-reconc-sem-pasta"
+  pasta="$(repo_reconc "$repo")"
+  rm -rf "$repo/$pasta"
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>&1)"; rc=$?
+  [ "$rc" = 1 ] && printf '%s\n' "$saida" | grep -Fxq 'persistir-metodo: pasta SprintX do trabalho não existe' \
+    && ok 'pasta SprintX ausente: mesma mensagem e rc 1 de sempre' \
+    || falha "pasta SprintX ausente (rc=$rc; $saida)"
+
+  repo="$D/lifecycle-reconc-nome-invalido"
+  pasta="$(repo_reconc "$repo")"
+  entrega_reconc "$repo" RECONCILIACAO-BASE-001.md ../PR.md
+  printf '\nmudanca\n' >> "$repo/$base/PR.md"
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  antes="$(git -C "$repo" rev-list --count HEAD)"
+  saida="$(metodo "$repo" --persistir sprintx reconciliacao-base 2>&1)"; rc=$?
+  depois="$(git -C "$repo" rev-list --count HEAD)"
+  [ "$rc" != 0 ] && [ "$antes" = "$depois" ] && [ -z "$(git -C "$repo" diff --cached --name-only)" ] \
+    && printf '%s\n' "$saida" | grep -Fq 'nome inválido: ../PR.md' \
+    && ok 'nome invalido em reconciliacoes: falha fechado, com motivo, sem commit nem stage' \
+    || falha "nome invalido nao falhou fechado (rc=$rc; $saida)"
+
+  repo="$D/lifecycle-reconc-stage"
+  pasta="$(repo_reconc "$repo")"
+  printf '\nproduto staged\n' >> "$repo/src/ORQUESTRADOR.md"
+  git -C "$repo" add -- src/ORQUESTRADOR.md
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  staged="$(git -C "$repo" diff --cached --name-only)"
+  metodo "$repo" --persistir sprintx reconciliacao-base >/dev/null 2>&1; rc=$?
+  [ "$rc" != 0 ] && [ "$(git -C "$repo" diff --cached --name-only)" = "$staged" ] \
+    && ok 'stage preexistente para o checkpoint sem limpar ou adotar' \
+    || falha 'checkpoint reconciliacao-base aceitou ou alterou stage preexistente'
+
+  repo="$D/lifecycle-reconc-segredo"
+  pasta="$(repo_reconc "$repo")"
+  segredo="$(printf 'sk-%s' 'abcdef1234567890QRS')"
+  printf '\ntoken: %s\n' "$segredo" >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  antes="$(git -C "$repo" rev-list --count HEAD)"
+  metodo "$repo" --persistir sprintx reconciliacao-base >/dev/null 2>&1; rc=$?
+  depois="$(git -C "$repo" rev-list --count HEAD)"
+  [ "$rc" != 0 ] && [ "$antes" = "$depois" ] \
+    && ok 'segredo no artefato barra o checkpoint antes do commit' \
+    || falha 'checkpoint reconciliacao-base ignorou o gate de segredo'
+
+  repo="$D/lifecycle-reconc-lock"
+  pasta="$(repo_reconc "$repo")"
+  printf '\nmudanca\n' >> "$repo/$base/RECONCILIACAO-BASE-001.md"
+  saida="$(cd "$repo" && bash "$SCRIPTS/trava-do-e1.sh" --adquirir T-LOCK)"
+  token="$(printf '%s\n' "$saida" | awk -F= '$1 == "token" {print $2}')"
+  metodo "$repo" --persistir sprintx reconciliacao-base >/dev/null 2>&1; rc=$?
+  [ "$rc" = 2 ] && ok 'checkpoint reconciliacao-base usa a trava C5 e para quando ocupada' \
+    || falha "checkpoint reconciliacao-base ignorou a trava C5 (rc=$rc)"
   (cd "$repo" && bash "$SCRIPTS/trava-do-e1.sh" --liberar "$token") >/dev/null 2>&1
 }
 

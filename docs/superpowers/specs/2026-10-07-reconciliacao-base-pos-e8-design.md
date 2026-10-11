@@ -1,0 +1,1066 @@
+# MergeX — Reconciliação de base pós-E8
+
+## Objetivo
+
+Dar à MergeX um caminho contratual, verificável e fechado para integrar uma base que avançou
+**depois** do E8, quando a resolução semântica dessa integração exige ajustar arquivos que nasceram
+ou mudaram na base nova e que nenhuma task do plano declara. Hoje esse caso não tem saída: a V9
+reprova os arquivos, a SprintX (corretamente) não deixa acrescentá-los a tasks concluídas e não
+existe etapa depois do E8.
+
+A correção é da MergeX. O plano continua sendo a fonte do que a feature fez; o que a integração da
+base exigiu passa a ter registro próprio, com prova mecânica de origem, revisão humana obrigatória,
+gate completo e novo portão.
+
+## Estado de partida
+
+- Branch: `p0.2/mergex-historico-yaml-escalar`.
+- HEAD: `bd4c1c58c2ec36635aa365a3e79b3acbc7b7357d` (merge do PR #5 sobre o merge do PR #4).
+- `e06a6eecf6d95a5645df7ba95737f5ec15cd622c` é ancestral; é o commit instalado no produto onde o
+  defeito apareceu.
+- `DM-177` é a última decisão.
+- Os checkpoints de método são o enum fechado `pre-e2 | pre-e6 | e8` (DM-162/163).
+- A V9 não tem implementação executável: é aplicada pela prosa de
+  `.claude/skills/mergex/references/02-prontidao.md` ("V9"), e nenhum teste calcula o diff
+  `<branch-base>...HEAD`.
+
+## 1. O defeito real (PR #192 de Conselhos Municipais)
+
+Trabalho da SprintX `mp2-7a-travas-de-acao`, 25 tasks concluídas (`seq` 1..25), E2 `PRONTO`, E3–E8
+concluídos, PR aberto em rascunho. Depois do E8, a `main` do produto avançou de `0f030f9` para
+`5610b10` (migração de componentes para a biblioteca de UI do projeto, PRs #183–#191 do produto). O
+PR passou a `CONFLICTING`.
+
+A integração por merge normal resolveu três conflitos de produção (todos declarados nas tasks) e
+exigiu ajustar testes que divergiam semanticamente da interface fundida. Dois deles **nasceram na
+base nova** e não pertencem a task nenhuma:
+
+- `tests/ui/compliance-ksmv-primitives.test.tsx` — esperava um botão que a feature dividiu em duas
+  etapas;
+- `tests/ui/attendance-ksmv-primitives.test.tsx` — montava o modal com um perfil que a feature
+  deixou sem as ações do bloco testado.
+
+A resolução passou em testes focados, em duas revisões independentes e no gate completo do
+repositório. Mesmo assim a V9, aplicada ao resultado do merge contra a base nova, reprova os dois
+arquivos: estão no diff e fora da união dos `arquivos` das tasks. A SprintX recusa acrescentá-los a
+T-02.02 e T-02.11 (tasks congeladas) e não abre replanejamento sem task bloqueada e sem fronteira
+limpa. O merge ficou preservado, sem commit, à espera desta correção.
+
+Defeitos da mesma família encontrados na investigação, tratados aqui porque a correção depende
+deles:
+
+1. **Portão sem vínculo com commit.** O hook `pr-so-com-portao` lê `portao` do `ENTREGA.md` mais
+   recente por data de modificação, não do trabalho da branch, e nenhum commit posterior invalida um
+   `portao: pronto`. Um merge da base depois do E8 seria publicado sem novo E2.
+2. **Base por nome de ref.** `branch_base` grava um nome (`origin/main`, `main`). A V9, o E3 e o E4
+   usam `<ref>...HEAD`; o resultado depende de a ref local ter avançado ou não. Com a ref parada e
+   o merge feito de outra, o diff passa a conter tudo o que a base trouxe.
+
+## 2. Propriedade
+
+| Componente | Papel nesta correção |
+|---|---|
+| **MergeX** | Dona. V9, ciclo de vida da entrega, validade do portão, artefato de reconciliação, checkpoint de método, hooks de commit, `pre-push` do Git, aviso antecipado de push e o template de integração com o CI (DM-184). |
+| **SprintX** | Sem mudança. O congelamento de tasks concluídas (DS-143) e o retorno da F6 só sobre escopo não concluído (`03-plano.md`, "Retorno da F6") estão corretos: a base que avança não é defeito de plano. |
+| **ExpxDev** | Sem mudança de código nesta branch. Atualiza o pin/lock da MergeX e os candidatos de certificação. O empacotamento do `pre-push` e do template de CI, se exigir mudança no ExpxDev, é handoff posterior e separado (DM-184). |
+| **BuildX** | Sem mudança de código. Integra só por fast-forward e não deixa a base avançar durante uma feature; a falha de V9 continua com a mesma causa (`arquivo_fora_do_plano`), então o mapeamento de recursão não muda. |
+
+Por que a SprintX fica intacta: o plano registra o que a feature **decidiu** fazer. Um ajuste
+exigido pela base que andou não é decisão da feature, é consequência de um evento posterior ao
+plano. Gravá-lo no plano reescreveria a história de tasks já entregues; gravá-lo na entrega, com
+proveniência, registra o evento onde ele aconteceu.
+
+## 3. Alternativas
+
+### A — Reconciliação de base na MergeX (escolhida)
+
+Um registro próprio da entrega, criado depois de integrar a base nova, que declara os arquivos
+ajustados pela integração e prova mecanicamente que cada um vem da base. A V9 aceita esses
+arquivos somente quando o registro verifica; o E3 os põe em olho obrigatório; o portão volta a
+`null` e o E2 roda de novo.
+
+Preserva congelamento, um-commit-por-task, `seq` e V11; o custo é uma etapa nova depois do E8 e a
+regra de validade do portão, que de qualquer modo era necessária (defeito 1).
+
+### B — Task especial de integração na SprintX (rejeitada)
+
+Criar, depois do planejamento, uma task só de compatibilidade.
+
+Rejeitada porque:
+
+1. O ajuste mora no próprio merge commit: o merge tem de estar verde, e só fica verde com os testes
+   ajustados. A task ficaria sem commit próprio, e o E1 não aceita merge commit
+   (`fechamento-do-e1.sh --registrar-existente` recusa, coberto em `test-m2-lifecycle-recuperacao.sh`).
+   A alternativa seria um merge commit vermelho seguido do commit da task, o que quebra o gate.
+2. Consumiria `seq` novo e exigiria F3, F4 e F5 completos para um ajuste mecânico, reabrindo uma
+   entrega já certificada.
+3. Exigiria um tipo de task inexistente (o contrato da task tem campos fixos) e a regra de
+   "trabalho novo depois do fechamento", que a SprintX não tem e não deve ganhar por causa da base.
+4. A proteção contra expansão de escopo seria só a auditoria F5: uma task declara o que quiser.
+
+### C — Extensão append-only de tasks concluídas (rejeitada)
+
+Permitir acrescentar só `arquivos` a uma task concluída.
+
+Rejeitada porque:
+
+1. Quebra a DS-143: a assinatura das congeladas cobre o item inteiro; dividi-la em núcleo e
+   extensões cria exatamente a porta que o congelamento existe para fechar.
+2. Faz o histórico mentir: declararia que a T-02.02 alterou um arquivo que o commit dela nunca
+   tocou; a relação task ↔ commit, que a V11 e o ownership do E1 pressupõem, deixa de ser verdade.
+3. É o pior risco de escopo escondido: qualquer arquivo poderia ser pendurado em qualquer task
+   concluída, sem prova de origem.
+
+## 4. Invariantes
+
+1. **Tasks concluídas permanecem congeladas.** Nada nesta correção grava ou propõe gravar
+   `tasks.md`, `sprint.md`, `fases.md` ou `00-PLANEJAMENTO.md`; o plano só é lido, para compor a
+   união da V9 e para a prova 3. A reconciliação nunca altera `arquivos` de task nenhuma.
+2. **Um commit por task continua verdadeiro.** O merge commit não é E1, não tem `Task:` e não
+   entra em `ENTREGA.commits`; o commit de método da reconciliação também não.
+3. **Nenhum `seq` novo.** `sequencia-de-commits.sh` não é chamado pela reconciliação; a lista
+   `commits` e a V11 ficam idênticas.
+4. **Reconciliação não esconde expansão de escopo.** Só é elegível o arquivo que a base nova criou
+   ou alterou, que a feature não tocou antes do merge, que nenhuma task declara e que o merge de
+   fato mudou em relação à base nova; todo arquivo reconciliado é olho obrigatório no E3; qualquer
+   commit de produto posterior invalida o portão.
+5. **Falha fechada.** Toda prova que não pode ser calculada reprova. Não existe flag, variável de
+   ambiente nem modo de hook **da MergeX** que pule a reconciliação, a V9 executável ou a validade
+   do portão. Isso não torna incontornável um mecanismo exclusivamente local: o Git permite ignorar
+   o `pre-push` deliberadamente (`git push --no-verify`). A barreira contra esse contorno, e contra
+   o contorno pelo nome da branch, é o CI com proteção de merge (seção 13, item 8), dentro dos
+   limites da seção 15.1 (itens 1 e 12); a local é contra erro normal (DM-184, DM-185).
+
+## 5. Modelo Git
+
+| Símbolo | O que é | Como é obtido |
+|---|---|---|
+| `B0` | Última base validada da entrega | `base_validada_sha` do `ENTREGA.md` (E0, ou a `B1` da reconciliação anterior) |
+| `P1` | A feature imediatamente antes do merge | primeiro pai de `M` |
+| `B1` | A base nova integrada | segundo pai de `M` |
+| `M` | O merge reconciliado | o commit de integração, com exatamente dois pais |
+
+Condições estruturais, todas obrigatórias:
+
+- `M` tem exatamente dois pais; `P1 = M^1`, `B1 = M^2`.
+- `B0` é ancestral de `B1` (`git merge-base --is-ancestor B0 B1`).
+- `B0` é ancestral de `P1`.
+- `M` está na linha de primeiro pai de `HEAD` (o merge pertence à branch do trabalho, não a um
+  ramo lateral).
+- `B1` é ancestral da ponta atual da ref de base (`branch_base`) no momento do registro.
+- A mensagem de `M` tem exatamente um `Trabalho: <trabalho_id>` igual ao da `ENTREGA.md`, um
+  `Integra-base:` seguido do SHA completo de `B1`, e nenhum `Task:` nem `Metodo:`.
+
+`M` não é criado pela MergeX: é o merge que a pessoa (ou o agente, sob autorização) concluiu. A
+MergeX valida e registra.
+
+## 6. As quatro provas de elegibilidade
+
+Para cada caminho `f` declarado na reconciliação, com renomeação desligada (`--no-renames`):
+
+| # | Prova | Comando de referência | Reprova quando |
+|---|---|---|---|
+| 1 | `f` nasceu ou mudou na base entre `B0` e `B1` | `git diff --no-renames --name-status B0 B1 -- f` | vazio; ou status `D` (a base removeu `f`); ou mudança de tipo (`T`), que também reprova |
+| 2 | A feature não tocou `f` antes do merge | `git rev-list --first-parent P1 ^<início> -- f` | não vazio, salvo merges de reconciliações anteriores que já listam `f` |
+| 3 | `f` não consta das tasks | união de `arquivos.cria` + `arquivos.altera` do plano corrente, e catálogo de método | `f` está na união ou é artefato de método |
+| 4 | Existe diferença real entre `B1` e `M` | `git diff --quiet --no-renames B1 M -- f` | sem diferença; ou `f` ausente em `M` (a integração removeu `f`) |
+
+`<início>` da prova 2 é `B0` na primeira reconciliação e o `M` da reconciliação anterior nas
+seguintes.
+
+Consequências deliberadas:
+
+- Renomeação na base vale como remoção mais criação: só o caminho novo pode ser elegível.
+- Arquivo removido pela base e mantido pela integração é ressurreição, não ajuste: reprova.
+- Arquivo da base removido pela integração é perda de cobertura: reprova.
+- Arquivo que já está nas tasks não precisa de reconciliação: o registro o recusa, para que nada
+  seja coberto por dois caminhos.
+
+## 7. Artefato
+
+`docs/entregas/<trabalho_id>/RECONCILIACAO-BASE-NNN.md`, com `NNN` de três dígitos, a partir de
+`001`, contínuo e sem lacunas. Um arquivo por merge de base integrado. É artefato de método da
+MergeX: entra no catálogo, nunca no commit de uma task.
+
+### 7.1 Frontmatter
+
+| Chave | Tipo | Regra |
+|---|---|---|
+| `expx_schema` | inteiro | `1` |
+| `expx_tool` | enum | origem do trabalho, igual ao `ENTREGA.md`: `sprintx` \| `runx` |
+| `kind` | enum | `reconciliacao_base` |
+| `trabalho_id` | texto | igual ao `ENTREGA.md` |
+| `numero` | inteiro | `1`, `2`, ... igual ao `NNN` do nome do arquivo |
+| `anterior` | texto ou nulo | nome do artefato anterior; `null` só no `001` |
+| `branch` | texto | igual a `ENTREGA.branch` |
+| `branch_base` | texto | nome da ref de base, só informativo; as provas usam os SHAs |
+| `origem_base` | enum | `registrada_e0` \| `inferida_legado` \| `reconciliacao_anterior` |
+| `b0_sha` | SHA-1, 40 hex | `B0` |
+| `p1_sha` | SHA-1, 40 hex | `P1` |
+| `b1_sha` | SHA-1, 40 hex | `B1` |
+| `m_sha` | SHA-1, 40 hex | `M` |
+| `estado` | enum | `ativa` \| `superada` |
+| `arquivos` | lista | um item por caminho reconciliado; `[]` quando a integração não exigiu ajuste |
+| `arquivos[].caminho` | texto | caminho relativo à raiz, exatamente como no Git |
+| `arquivos[].status_base` | enum | `A` (nasceu entre `B0` e `B1`) \| `M` (mudou entre `B0` e `B1`) |
+| `arquivos[].blob_b1` | SHA-1, 40 hex | `git rev-parse B1:<caminho>` |
+| `arquivos[].blob_m` | SHA-1, 40 hex | `git rev-parse M:<caminho>` |
+| `arquivos[].diff_b1_m_sha256` | sha256, 64 hex | ver abaixo |
+| `arquivos[].motivo` | texto | uma linha: o que da feature tornou o ajuste necessário |
+| `registrado_em` | data ISO | data do sistema no registro |
+| `assinatura` | sha256, 64 hex | ver abaixo |
+
+Regras:
+
+- Todas as chaves sempre presentes; lista vazia é `[]`. Um merge de base sem arquivo a reconciliar
+  gera o artefato com `arquivos: []`: é ele que avança a base validada.
+- SHAs sempre completos (40 hex), nunca nome de ref.
+- `motivo` é texto de uma linha, não vazio, sem marcador de template; é para o revisor, não entra
+  em prova.
+- `diff_b1_m_sha256` é o sha256 da saída de
+  `git -c core.quotepath=false -c diff.noprefix=false -c diff.mnemonicPrefix=false -c diff.suppressBlankEmpty=false -c diff.relative=false diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames --no-relative --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0 --diff-algorithm=myers --indent-heuristic B1 M -- <caminho>`,
+  rodado da raiz do repositório, com pathspec literal. As flags explícitas tornam o valor
+  independente da configuração local e do clone (a linha `index` sai com SHA completo). Limitação
+  conhecida: os atributos `-diff`/`binary` (de `.gitattributes`, `info/attributes` ou
+  `core.attributesFile`) não têm flag que os desligue e ainda alteram a saída, trocando o patch
+  textual por `GIT binary patch`. Isso muda o hash entre clones com atributos diferentes, e o
+  efeito só pode ser falhar fechado no `--verificar`.
+- `assinatura` é o sha256 das linhas canônicas, em ordem de byte:
+  `numero`, `anterior`, `trabalho_id`, `b0_sha`, `p1_sha`, `b1_sha`, `m_sha`, e uma linha por
+  arquivo `caminho\tstatus_base\tblob_b1\tblob_m\tdiff_b1_m_sha256`. Editar o artefato à mão quebra
+  a assinatura.
+
+### 7.2 Estados
+
+| Estado | Significado | Quem grava |
+|---|---|---|
+| `ativa` | Última reconciliação da cadeia, ou anterior ainda necessária | `--registrar` |
+| `superada` | Uma reconciliação seguinte da mesma entrega já a encadeou | `--registrar` da seguinte |
+
+Não existe estado editável à mão nem estado "aceita com ressalva". `superada` não remove cobertura:
+os arquivos de uma reconciliação superada continuam cobertos enquanto o conteúdo em `HEAD` for o
+`blob_m` registrado (seção 9).
+
+### 7.3 Prosa
+
+Abaixo do frontmatter: um parágrafo com a base integrada e o PR, e uma tabela por arquivo
+(caminho, status na base, motivo). Sem frontmatter extra, sem cópia de diff.
+
+## 8. Comandos
+
+Novo executável `scripts/reconciliacao-base.sh`.
+
+### `--registrar`
+
+```bash
+bash .claude/skills/mergex/scripts/reconciliacao-base.sh --registrar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> \
+  [--merge <sha>] -- <caminho-1> <caminho-2> ...
+```
+
+- Sem `--merge`, `M` é `HEAD`. Com `--merge <sha>`, registra um merge anterior ainda não publicado
+  (`M` na linha de primeiro pai de `HEAD`, entre a base validada e `HEAD`), para encadear merges
+  concluídos antes de a MergeX nova estar instalada.
+- Exige: stage vazio; nenhum merge em andamento (`MERGE_HEAD` ausente); branch ativa igual a
+  `ENTREGA.branch`; contexto explícito igual a `ENTREGA.trabalho_id`/`expx_tool`; a trava C5 do
+  índice adquirida.
+- Calcula as condições estruturais (seção 5) e as quatro provas (seção 6) para cada caminho dado.
+- **Inventário completo**: calcula também o conjunto `git diff --name-only --no-renames B1 M` e
+  exige que todo caminho desse conjunto esteja na união das tasks, no catálogo de método ou na
+  lista dada. Um caminho alterado pelo merge e não declarado reprova o registro inteiro: não existe
+  registro parcial.
+- Grava o artefato `NNN` seguinte, marca o anterior como `superada` e atualiza o `ENTREGA.md`
+  (seção 11). Não faz commit: quem persiste é o checkpoint `reconciliacao-base`.
+- Sem `--force`, sem `--sem-prova`, sem variável de ambiente que relaxe prova.
+
+### `--verificar`
+
+```bash
+bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id>
+```
+
+Só leitura. Para toda a cadeia `001..NNN`:
+
+- numeração contínua, `anterior` encadeado, `b0_sha` de cada uma igual ao `b1_sha` da anterior, e o
+  `b0_sha` do `001` igual ao `base_validada_sha` original da entrega;
+- assinatura recalculada igual à gravada;
+- condições estruturais e as quatro provas recalculadas sobre o histórico atual;
+- para cada caminho coberto: o conteúdo em `HEAD` é o `blob_m` da reconciliação mais recente que o
+  lista. Arquivo reconciliado alterado depois de `M` deixa de estar coberto, e a verificação
+  reprova.
+
+Saída: `ok=true` e uma linha `coberto\t<caminho>\t<NNN>` por arquivo; ou `ok=false` e uma linha
+`motivo\t<código>\t<detalhe>` por falha.
+
+### `--verificar --checkpoint reconciliacao-base` (barreira do E2)
+
+```bash
+bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
+  --checkpoint reconciliacao-base --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id>
+```
+
+Faz tudo o que `--verificar` faz e exige ainda que a reconciliação esteja **persistida**:
+
+- o `ENTREGA.md` e cada artefato listado em `reconciliacoes` estão rastreados, e o conteúdo do disco
+  de cada um é igual ao de `HEAD`. A comparação é por conteúdo
+  (`git rev-parse HEAD:<f>` contra `git hash-object --no-filters <f>`), não pelo que o índice
+  informa, para que `assume-unchanged` e `skip-worktree` não a enganem;
+- o conjunto de `RECONCILIACAO-BASE-NNN.md` em `HEAD`, o do disco e o listado no `ENTREGA.md` de
+  `HEAD` são o mesmo.
+
+Falha de persistência: `ok=false` com `motivo\tpersistencia\t<arquivo>`, código 5. Outro valor de
+`--checkpoint`, ou `--checkpoint` no `--registrar`: código 64. Limite conhecido: com
+`core.autocrlf` convertendo o checkout, a comparação sem filtros reprova mesmo com o `git status`
+limpo. É falha fechada, e usar os filtros reabriria o contorno que `--no-filters` fecha.
+
+### Códigos de saída (os dois modos)
+
+| Código | Significado |
+|---|---|
+| 0 | registrado / verificado |
+| 2 | trava C5 ocupada |
+| 3 | stage não vazio ou merge em andamento |
+| 4 | prova reprovada (estrutura, uma das quatro provas, inventário incompleto); também histórico que não prova: repositório raso (`estrutura[raso]`) ou objeto Git ausente, antes de qualquer prova e sem gravar nada |
+| 5 | contrato do artefato ou do `ENTREGA.md` inválido (numeração, encadeamento, assinatura); persistência (barreira) |
+| 6 | base validada indeterminável (legado ambíguo) |
+| 64 | uso incorreto |
+
+## 9. Checkpoint de método `reconciliacao-base`
+
+O enum de `persistir-metodo.sh`, `contrato-de-commit.sh` e `catalogo-de-metodo.sh` passa a
+`pre-e2 | reconciliacao-base | pre-e6 | e8`.
+
+- Catálogo do checkpoint: `docs/entregas/<trabalho_id>/ENTREGA.md` e os
+  `RECONCILIACAO-BASE-NNN.md` sujos. Nada de produto, de teste ou de plano.
+- Mensagem:
+
+  ```
+  chore(mergex): persiste metodo reconciliacao-base
+
+  Trabalho: <trabalho_id>
+  Metodo: reconciliacao-base
+  ```
+
+- Mesma trava, mesma varredura de segredo, mesmo stage vazio na entrada, sem commit vazio.
+- Não entra em `ENTREGA.commits`, não consome `seq`, não satisfaz V11.
+- `--verificar --checkpoint reconciliacao-base` (seção 8) é a barreira que o E2 exige quando a
+  entrega tem reconciliação (`reconciliacoes` não vazia): artefatos e `ENTREGA.md` persistidos e a
+  verificação com `ok=true`. Sem essa barreira aprovada, o E2 não emite `PRONTO`.
+
+## 10. V9 executável
+
+Novo executável `scripts/portao-v9.sh --verificar --entrega <ENTREGA.md> --origem <...> --trabalho <...>`.
+A prosa de `02-prontidao.md` passa a mandar rodá-lo; o resultado dele é a V9.
+
+1. **Base do diff por SHA, não por nome.** `B` é o `b1_sha` da última reconciliação ativa, ou o
+   `base_validada_sha` da entrega quando não há reconciliação. O conjunto é
+   `git diff --name-only --no-renames B...HEAD`. Isso fecha o defeito 2: mover a ref local não muda
+   o resultado.
+2. **Conjunto aceito**, composto nesta ordem:
+   - união de `arquivos.cria` + `arquivos.altera` de todas as tasks do plano corrente (a V9
+     continua usando a união; DM-152 vale);
+   - artefatos de método do trabalho (pasta do trabalho, `docs/entregas/<trabalho_id>/`,
+     `docs/sprintx/estimativas/HISTORICO.md` só na SprintX) — isenções existentes, inalteradas;
+   - caminhos com `coberto` na saída de `reconciliacao-base.sh --verificar`, e só se ela devolver
+     `ok=true`.
+3. **Resultado:** cada caminho do diff fora do conjunto aceito é uma linha
+   `fora_do_plano\t<caminho>`; qualquer linha é `FALHA` em V9. `--verificar` da reconciliação com
+   `ok=false` é `FALHA` registrada como `v9_sem_prova`.
+4. A V9 do hook `arquivo-fora-do-plano` (sobre `git diff --cached`) não muda de semântica; ganha
+   apenas o reconhecimento do commit de integração da base (seção 12).
+5. **Histórico que não prova.** Repositório raso, ou objeto Git ausente, é `v9_sem_prova` antes de
+   qualquer cálculo, com diagnóstico explícito (`git fetch --unshallow` no raso). A história cortada
+   esconde versões do `ENTREGA.md` e commits da base.
+6. **Códigos:** 0 ok; 1 `v9` (há `fora_do_plano`); 3 `v9_sem_prova`; 64 uso. Nenhuma opção de força.
+
+## 11. ENTREGA.md
+
+Chaves novas, sempre presentes:
+
+| Chave | Valor |
+|---|---|
+| `base_validada_sha` | SHA de 40 hex da base em que o trabalho foi validado; gravado no E0; atualizado pelo `--registrar` para o `b1_sha` registrado |
+| `origem_base` | `registrada_e0` \| `inferida_legado` |
+| `reconciliacoes` | lista `{numero, arquivo, b1_sha, m_sha}`, na ordem; `[]` sem reconciliação |
+| `portao_sha` | SHA de 40 hex do `HEAD` que o E2 avaliou; `null` antes do E2 e depois de um `--registrar` |
+
+`--registrar` também reabre a entrega como a retomada do E0 já faz: `estado: aberto`,
+`portao: null`, `portao_sha: null`, `falhas_portao: []`, `causa: null`, `push_feito: false`,
+`entregue_em: null`; preserva `commits`, `criado_em`, `pr_url`, `pr_estado`, `desvios`.
+`causa-do-portao.sh --validar` não muda: a combinação `aberto`/`null` já é válida.
+
+## 12. E3 e commits
+
+- **E3:** novo critério `O10 — arquivo reconciliado da base`, avaliado antes de L e D. Todo caminho
+  `coberto` é olho obrigatório, e a justificativa cita `RECONCILIACAO-BASE-NNN.md` e o `motivo`. O
+  `classificar-atencao.sh` recebe a lista coberta e não aceita rebaixar um reconciliado. O E3 roda
+  só sobre o delta desde o último `ATENCAO.md` e regrava o arquivo inteiro.
+- **Commit de integração da base:** `contrato-de-commit.sh` ganha a classe "integração de base"
+  (dois pais, `Trabalho:` e `Integra-base:`, sem `Task:` e sem `Metodo:`). O hook `commit-por-task`
+  a reconhece e não a trata como mistura de tasks; o hook `arquivo-fora-do-plano`, num commit dessa
+  classe, avalia só os caminhos que diferem do segundo pai (o que a integração mudou), não tudo o
+  que veio da base.
+
+## 13. Validade do portão
+
+1. O E2 grava `portao_sha` = `HEAD` avaliado, junto com `portao`.
+2. O portão vale para um `HEAD` posterior somente se **todo** commit em `portao_sha..HEAD`:
+   - é commit de método válido de `pre-e6` ou `e8`, pela gramática de `contrato-de-commit.sh`
+     (`reconciliacao-base` não entra: o registro já devolve o portão a `null`); e
+   - toca apenas caminhos do catálogo daquele checkpoint; e
+   - tem um único pai.
+3. Qualquer commit de produto, de teste, de plano, ou merge (inclusive de base nova) em
+   `portao_sha..HEAD` invalida o portão. `portao_sha` ausente, não ancestral de `HEAD` ou `null`
+   com `portao: pronto` também invalida.
+4. Novo `scripts/validade-do-portao.sh --verificar --entrega <ENTREGA.md> [--rev <commit>]`
+   implementa 1–3. É só leitura: não grava no repositório nem adquire trava.
+   - **Revisão avaliada:** `--rev` (padrão `HEAD`). `portao`, `portao_sha` e `trabalho_id` vêm de
+     `<rev>:<ENTREGA>`, nunca do disco. Divergência com o disco gera só uma linha `aviso=`.
+   - **Saída:** `ok=true` e `primeiro_commit=-`, código 0. Ou `ok=false`, `motivo=<motivo>` e
+     `primeiro_commit=<sha40|->`, código 1. Uso incorreto: código 64.
+   - **Motivos de invalidação** (enum fechado): `portao_nao_pronto`, `portao_sha_ausente`,
+     `portao_sha_nao_ancestral`, `commit_de_produto`, `commit_merge`, `metodo_fora_do_catalogo`,
+     `historia_incompleta`, `erro_ambiente`.
+   - **`historia_incompleta`:** as provas do Git não bastam, porque a história está cortada.
+     Abrange repositório raso (`--is-shallow-repository`, ou arquivo `shallow` no diretório Git ou
+     no comum; o `GIT_SHALLOW_FILE` do ambiente é descartado) e objeto Git necessário ausente. O
+     diagnóstico indica completar a história (`git fetch --unshallow`, ou buscar os objetos que
+     faltam).
+   - **`erro_ambiente`:** o ambiente impediu a avaliação. Abrange dependência ausente, execução fora
+     de um repositório Git, temporário que não se cria, e revisão que não é commit por motivo que
+     não seja objeto ausente. O diagnóstico descreve a falha.
+   - **Os dois motivos falham fechado:** `ok=false` e código 1, nunca aprovação. Qualquer consumidor
+     (E6, E7, `pre-push`, CI) trata os dois como bloqueio, em qualquer modo, e mostra diagnósticos
+     diferentes.
+   - Um merge no intervalo é `commit_merge` no merge mais antigo, avaliado antes dos demais commits:
+     o merge é a causa, não o que ele trouxe. Commit de método que toca o plano (`tasks.md`,
+     `sprint.md`, `fases.md`, `00-PLANEJAMENTO.md`) é `metodo_fora_do_catalogo`, mesmo estando no
+     catálogo do checkpoint.
+5. **Barreira de push** (DM-184). A validade é exigida no push por três camadas, cada uma com papel
+   próprio:
+   - o `pre-push` do Git é a barreira **local autoritativa contra erro normal** (itens 6 e 7);
+   - o hook do Claude `pr-so-com-portao` é só **aviso antecipado**, não fronteira de segurança
+     (item 8);
+   - o CI com proteção de merge é a barreira **contra contorno deliberado** (item 8), nos limites
+     da DM-185: contra o `--no-verify` e o contorno pelo nome da branch, não contra todo contorno
+     deliberado (seção 15.1, itens 1 e 12).
+
+   As três camadas chamam o mesmo `validade-do-portao.sh --rev`; nenhuma tem regra própria de
+   validade. A **seleção** das entregas avaliadas pode diferir por desenho (DM-185): o CI seleciona
+   pelo conteúdo do PR e é a autoridade sobre ele; o `pre-push` seleciona por um superconjunto
+   local (item 7); o hook do Claude continua pelo nome, consultivo (item 8). Mesma validade, mesma
+   leitura do modo de `portao: null` e mesma falha fechada por entrega selecionada são obrigatórias
+   nas três.
+
+   **Seleção pelo conteúdo** (`pr_entregas_do_intervalo <raiz> <base> <sha>`, em
+   `portao-regras.sh`). `MB` é o merge-base de `<base>` e `<sha>` (`git merge-base --all`). A
+   seleção é a união de:
+   - (a) os `docs/entregas/<id>/ENTREGA.md` com qualquer status em
+     `git diff-tree -r --no-renames -z MB <sha>`; e
+   - (b) os `docs/entregas/<id>/ENTREGA.md` tocados por algum commit não-merge de
+     `git log --full-history --no-merges --no-renames -z MB..<sha>`.
+
+   Só o caminho canônico `docs/entregas/<id>/ENTREGA.md` conta; a leitura é NUL-safe; caminho
+   com caractere de controle sob `docs/entregas/` barra (`caminho_com_controle`). Merges ficam fora
+   da parcela (b) para que o merge de integração da base (seção 12) não selecione entregas de
+   outros trabalhos; uma alteração feita pelo próprio merge aparece na parcela (a). Mais de um
+   merge-base barra (`base_ambigua`). Sem merge-base: em clone completo a base é a árvore vazia do
+   formato de hash do repositório (`git hash-object -t tree /dev/null`), o que seleciona toda a
+   história de `<sha>`; em clone raso, `historia_incompleta`. O custo é constante em processos Git.
+   O nome da branch nunca seleciona nem isenta.
+
+   **Decisão por entrega.** Cada entrega selecionada é validada com
+   `validade-do-portao.sh --rev <sha>` e decidida como no item 7 (mesmo modo de `portao: null`).
+   Entrega selecionada ausente no `<sha>` (removida) barra (`portao_nao_pronto`). Agregação:
+   qualquer `barra` vence; depois `avisa`; depois `passa`. Seleção vazia: `passa`,
+   `ref_nao_aplicavel`.
+
+   **Ordem de avaliação.** Cada etapa só começa com a anterior aprovada:
+   1. **Reconciliação verificada** (no E2, quando há reconciliação): a barreira
+      `reconciliacao-base.sh --verificar --checkpoint reconciliacao-base` com `ok=true`, e a V9
+      executável consumindo os `coberto`.
+   2. **Validade do portão:** o E2 aprovado grava `portao: pronto` e `portao_sha`. Depois disso,
+      `validade-do-portao.sh --rev <SHA>` prova que nada fora do permitido mudou entre `portao_sha`
+      e o SHA avaliado.
+   3. **Autorização do push:** o `pre-push` autoriza cada ref aplicável só com a validade `ok=true`
+      sobre o SHA enviado. O CI repete a validade sobre o SHA da cabeça do PR.
+
+   O push não reexecuta a verificação da reconciliação. Ela foi provada no E2, e a validade garante
+   que nenhum commit de produto, teste, plano ou merge entrou depois.
+6. **Instalação e ativação local do `pre-push`** (E0).
+   - **Diretório efetivo:** o E0 resolve o diretório de hooks efetivo pelo próprio Git
+     (`git rev-parse --git-path hooks`), o que já respeita um `core.hooksPath` existente e o
+     diretório comum de worktrees vinculadas. **O E0 nunca altera `core.hooksPath`.**
+   - **Sem `pre-push` nesse diretório:** o E0 instala o chamador gerenciado pela MergeX, um
+     `pre-push` mínimo, identificado por um marcador próprio, que só chama o validador de push da
+     skill e propaga o código de saída dele.
+   - **Diretório efetivo fora do repositório** (DM-186): quando o diretório de hooks efetivo não
+     está dentro da árvore de trabalho do repositório nem do diretório Git comum dele (por
+     exemplo, um `core.hooksPath` global, compartilhado por vários repositórios), o E0 **não
+     instala** o chamador gerenciado: falha fechado como pré-requisito ausente e mostra a
+     instrução de composição deliberada, para quem mantém aquele diretório. Instalar ali tornaria
+     a MergeX o `pre-push` de todos os repositórios da máquina, preso ao validador deste checkout.
+     Um `pre-push` já presente nesse diretório segue a regra do hook de terceiro: só é aceito pela
+     prova funcional.
+   - **Já é o chamador gerenciado:** a ativação é idempotente e não muda nada. O marcador serve só
+     para a idempotência e para a reversão: a aceitação de qualquer `pre-push`, gerenciado ou de
+     terceiro, sempre passa pela prova funcional.
+   - **Existe um `pre-push` de terceiro:** o E0 nunca o sobrescreve, renomeia ou edita. O que
+     acontece depende da prova funcional, pela sequência abaixo.
+   - **Composição deliberada:** feita à mão por quem mantém o hook existente. Esse hook passa a
+     chamar o validador de push da MergeX, repassando a entrada padrão, e propaga exatamente o
+     código de saída dele.
+   - **Recuperação com hook de terceiro (sequência normativa):**
+     1. Na primeira execução, se o `pre-push` de terceiro ainda não invoca a MergeX, a prova
+        funcional falha. O E0 não altera o arquivo, falha fechado como pré-requisito ausente e
+        mostra a instrução de composição.
+     2. O usuário compõe o hook existente à mão, como descrito acima.
+     3. Na execução seguinte, o E0 não reprova só porque falta o marcador do chamador gerenciado.
+        Ele executa a prova funcional controlada.
+     4. Se o hook composto bloquear a ref inválida da prova e propagar o resultado esperado, o E0 o
+        reconhece como **integração externa válida** e prossegue.
+     5. Se a prova falhar, terminar inesperadamente, liberar a ref inválida ou não propagar o código
+        de saída, o E0 continua falhando fechado.
+     6. A reversão da MergeX não modifica o hook composto. Só informa que a integração externa
+        precisa ser removida pelo responsável dela.
+
+     O reconhecimento é **por comportamento comprovado**, nunca por busca textual dentro do hook.
+     A prova controlada confirma que o validador da MergeX foi de fato executado por um sinal que
+     só ele produz durante a prova, e confirma que a ref inválida foi bloqueada pelo código de saída
+     do hook.
+   - **O E2 prova a ativação funcionalmente,** com a mesma prova do E0, sem confiar no caminho nem
+     na existência do arquivo. Vale tanto para o chamador gerenciado quanto para a integração
+     externa.
+     Executa o `pre-push` efetivo numa prova controlada, alimentando-o com uma ref aplicável
+     sabidamente inválida, sem contato com nenhum remoto. Exige que ele chame a MergeX e bloqueie
+     com código diferente de zero. Sem essa prova o E2 não emite `PRONTO`.
+   - **Repositório sem Git** (DM-186): fora de um repositório Git (o próprio Git não resolve a
+     raiz) não há push a proteger; o E0 não instala e o E2 dispensa a prova, sem erro e sem
+     bloqueio. O critério é só o Git real, nunca o campo `versionado` do `ENTREGA.md`: dentro de
+     um repositório Git a prova é sempre exigida.
+   - **Reversão:** remove apenas o chamador gerenciado pela MergeX, reconhecido pelo marcador.
+     Nunca toca num hook de terceiro, composto ou não. Diante de uma integração externa, só informa
+     que ela precisa ser removida pelo responsável.
+7. **Regras do `pre-push`.** Decide só com o que o Git entrega na entrada padrão (uma linha por ref:
+   ref local, SHA local, ref remota, SHA remoto). Nunca analisa texto de comando de shell.
+   - **Exclusão de branch** (SHA local nulo) passa. **Tag** (`refs/tags/*`) passa.
+   - As entregas de uma ref `refs/heads/<b>` são a **união** de três parcelas, que só acrescentam e
+     nunca isentam (DM-185):
+     - (a) a seleção pelo conteúdo (item 5) com `<base>` = `refs/remotes/<remoto>/HEAD`, quando
+       resolve para commit (`<remoto>` é o primeiro argumento do `pre-push`; push para URL não tem).
+       Sem ela, a parcela não existe; nunca se adivinha `main` ou `master`;
+     - (b) a regra legada pelo nome: o `ENTREGA.md` que declara `branch: <b>` em pelo menos um
+       destes: a árvore do SHA enviado, a árvore do SHA remoto anterior, ou a ponta local de
+       `refs/heads/<b>`;
+     - (c) o trailer `Trabalho: <id>` do commit enviado, que seleciona
+       `docs/entregas/<id>/ENTREGA.md`.
+
+     A ref é **aplicável** quando a união não é vazia; cada entrega dela é decidida pelas regras
+     abaixo e agregada como no item 5. Sem a parcela (a) e com (b) e (c) vazias, se a árvore do SHA
+     enviado tem algum `ENTREGA.md` canônico, a ref **avisa** com `cobertura_indeterminada` (não
+     barra: a aplicabilidade não está provada); senão passa.
+   - Para cada ref aplicável, a validade roda sobre o **SHA enviado** (`--rev <SHA local>`), nunca
+     sobre o `HEAD` do checkout.
+     - `portao: null` segue o modo configurado para `pr-so-com-portao` em `.expx/hooks.json`, sem
+       chave nova de configuração. `bloqueio` barra, `aviso` avisa e deixa passar, `desligado`
+       deixa passar. O `pre-push`, o aviso do Claude e o CI interpretam esse mesmo modo da mesma
+       maneira, e **divergência entre os três consumidores na validade ou no modo é defeito de
+       contrato** (a seleção das entregas pode diferir, item 5). O modo nunca
+       se aplica a `portao: pronto` vencido, ausente, inconsistente ou ilegível, nem a
+       `historia_incompleta` ou `erro_ambiente`: esses barram sempre.
+     - `portao: pronto` com validade `ok=true` passa.
+     - Portão **vencido, ausente, inconsistente ou ilegível** barra. Isso inclui o `ENTREGA.md`
+       ausente no SHA enviado de uma ref aplicável e o `portao: pronto` sem `portao_sha` válido.
+   - Num push com várias refs, **qualquer ref aplicável inválida barra o push inteiro**.
+   - Clone raso ou objeto Git ausente: a validade devolve `historia_incompleta` e o push é barrado,
+     com diagnóstico explícito (`git fetch --unshallow`, ou buscar os objetos que faltam). Falha do
+     ambiente (`erro_ambiente`, inclusive o validador ausente) também barra, com diagnóstico
+     próprio.
+   - O custo é proporcional às refs efetivamente enviadas, não à quantidade de branches ou entregas
+     existentes no repositório.
+8. **Hook do Claude e CI.**
+   - **Hook do Claude `pr-so-com-portao` — aviso antecipado.** Continua resolvendo o `ENTREGA.md`
+     pela branch, nunca por data de modificação, e chama a mesma validade. **Bloqueia só quando
+     consegue provar** que o push é inválido (o destino, a origem e o repositório resolvem sem
+     ambiguidade e a validade dá `ok=false`) ou quando identifica com certeza um `--no-verify`. Em
+     caminho UNC, `dubious ownership`, comando complexo ou diretório que não determina, **emite
+     aviso e deixa o Git prosseguir até o `pre-push`**. Não é tratado como fronteira de segurança:
+     o que ele não consegue determinar vira aviso, nunca bloqueio.
+   - **CI — proteção de merge.** O CI seleciona as entregas **só pelo conteúdo do PR** (item 5, com
+     `<base>` = `pull_request.base.sha` e `<sha>` = `pull_request.head.sha`) e roda o mesmo
+     `validade-do-portao.sh` sobre o SHA real da cabeça do PR para cada uma; reprova se a validação
+     estiver ausente, desativada, vencida, `historia_incompleta` ou `erro_ambiente`. Com
+     `portao: null`, segue o modo de `pr-so-com-portao`, como o `pre-push`. O clone do CI precisa da
+     história completa; clone raso é `historia_incompleta`.
+     - `--branch` (o nome da branch de origem do PR) continua obrigatório, mas é **só conferência**:
+       se não é o `branch:` de alguma entrega selecionada, a saída traz `aviso=branch_divergente` e a
+       decisão não muda. Fork e renomeação legítimos passam quando o portão é válido.
+     - **Saída:** por entrega selecionada, `entrega[<i>]=`, `decisao[<i>]=` e `motivo[<i>]=`
+       (`<i>` a partir de 1); cada aviso numa linha `aviso=<branch_divergente|...>`; e, uma única
+       vez no fim, o resumo `decisao=`, `motivo=` (o da primeira entrega que barra, senão o da que
+       decide) e `entrega=` (`-` com mais de uma), mais `quantidade_entregas=<n>`. O código de
+       saída segue só o resumo.
+     - Com mais de uma entrega selecionada, o diagnóstico lista todas e diz que, se alguma veio da
+       base, o evento tem base defasada: gerar novo evento (push na branch do PR) com a base atual.
+     - Com a proteção de merge do repositório exigindo esse check, é a barreira contra o
+       `--no-verify` e contra o contorno pelo nome da branch, nos limites da seção 15.1 (itens 1 e
+       12). É defesa adicional e não substitui o `pre-push`.
+   - **Escopo desta branch.** Ela entrega o validador executável compartilhado, o `pre-push`, o
+     template ou ponto de integração do workflow, os testes e a documentação do contrato de
+     instalação. **Não afirma que o CI está ativo** em nenhum produto: a ativação no produto e o
+     empacotamento pelo ExpxDev são handoffs posteriores e separados (seção 18).
+9. **E6 e E7** exigem a mesma validade como pré-requisito, além do `pre-e6`. O E7 avalia o SHA
+   publicado (`--rev` com a ponta da ref remota da branch, depois de buscá-la) e exige que ele
+   seja o que o E6 enviou; se a ref remota avançou, o E7 não abre nem retoma o PR (DM-186).
+
+## 14. Compatibilidade e base legada
+
+- **Execução nova:** o E0 grava `base_validada_sha = git merge-base HEAD <branch_base>` e
+  `origem_base: registrada_e0`.
+- **Entrega anterior a esta versão** (sem `base_validada_sha`): na primeira reconciliação, e só
+  nela, o `--registrar` infere `B0 = git merge-base P1 B1` e grava `origem_base: inferida_legado`
+  no `ENTREGA.md` e no artefato `001`. A inferência falha fechada (código 6) quando:
+  - há mais de um merge-base (`git merge-base --all` com mais de um resultado);
+  - a linha de primeiro pai de `P1` desde o merge-base já contém algum merge commit;
+  - o merge-base não é ancestral de `B1`.
+- Depois de gravada, a base nunca é inferida de novo: as seguintes vêm da cadeia.
+- **Múltiplas reconciliações:** cada merge de base gera o `NNN` seguinte; `b0_sha` do novo é o
+  `b1_sha` do anterior; o anterior vira `superada`. Merges concluídos antes da instalação podem ser
+  registrados em ordem com `--merge <sha>`, um por vez, do mais antigo para o mais novo.
+- **Entrega sem reconciliação:** comportamento idêntico ao atual, com a base fixada por SHA.
+
+## 15. Falhas fechadas
+
+| Situação | Resultado |
+|---|---|
+| Merge em andamento ao registrar ou persistir | Código 3; nada gravado |
+| `M` com número de pais diferente de 2, pais trocados, ou fora da linha de primeiro pai | Código 4 |
+| Qualquer uma das quatro provas reprovada | Código 4; nenhum artefato |
+| Caminho alterado pelo merge e não declarado (inventário) | Código 4; nenhum artefato |
+| Artefato editado à mão (assinatura) ou cadeia quebrada | `--verificar` código 5; V9 `v9_sem_prova` |
+| Arquivo reconciliado alterado depois de `M` | Deixa de estar coberto; V9 `FALHA` |
+| Base legada ambígua | Código 6; nada gravado |
+| Portão vencido, ausente, inconsistente ou ilegível no push de uma ref aplicável | `pre-push` barra o push inteiro, em qualquer modo; o CI, quando ativo no produto, reprova o PR |
+| Entrega selecionada pelo conteúdo (PR ou push) vencida, ausente ou removida, qualquer que seja o nome da branch | O CI reprova o PR; o `pre-push` barra o push inteiro (DM-185) |
+| Mais de um merge-base entre a base e o SHA | `base_ambigua`; CI e `pre-push` (parcela do conteúdo) barram |
+| Sem merge-base num clone raso | `historia_incompleta`; barra |
+| `pre-push` sem base conhecida, sem entrega pelo nome nem pelo trailer, e com `ENTREGA.md` canônico na árvore enviada | Avisa (`cobertura_indeterminada`); não barra |
+| Diretório de hooks efetivo fora da árvore e do diretório Git comum do repositório (`core.hooksPath` global) | E0 não instala o chamador; falha fechado com a instrução de composição |
+| E7 com a ref remota da branch diferente do SHA enviado no E6 | E7 não abre nem retoma o PR |
+| Chamador gerenciado sem o validador no checkout | Barra (código 1) com instrução: reinstalar a skill ou reverter o chamador |
+| Repositório raso ou objeto Git ausente | Validade `historia_incompleta`; V9 `v9_sem_prova`; reconciliação código 4 (`estrutura[raso]`); `pre-push` e CI barram, com diagnóstico de história incompleta |
+| Ambiente impede a avaliação (dependência ausente, fora de repositório, temporário, validador ausente) | Validade `erro_ambiente`; `pre-push` e CI barram, com diagnóstico de ambiente |
+| `pre-push` efetivo que não chama a MergeX, não propaga o código de saída ou não bloqueia a ref inválida da prova controlada | E2 não emite `PRONTO` |
+| `pre-push` de terceiro que não passa na prova funcional (ainda não composto, ou composto sem propagar o código de saída) | E0 falha fechado, sem sobrescrever, renomear ou editar; mostra a instrução de composição |
+| `pre-push` de terceiro composto que passa na prova funcional | Integração externa válida; E0 prossegue |
+| Reconciliação registrada e não persistida, ou persistência adulterada | Barreira código 5 (`persistencia`); E2 não emite `PRONTO` |
+| Os três consumidores aplicam validade diferente ou interpretam o modo de `portao: null` de formas diferentes | Defeito de contrato (a seleção pode diferir por desenho, seção 13, item 5) |
+| Push com `--no-verify` | Hook do Claude bloqueia quando identifica com certeza; o CI, quando ativo no produto, reprova o PR |
+| Hook do Claude incapaz de determinar o push | Avisa; a decisão fica com o `pre-push` |
+| Ferramenta ausente (`git`, `jq`) | Reprova; nunca degrada para aprovado |
+
+Não existe flag de bypass em nenhum dos executáveis. O validador de contrato procura e reprova
+qualquer opção de força nesses scripts.
+
+### 15.1 Riscos residuais conhecidos
+
+Limites de desenho que o Git local não distingue, encontrados durante a implementação e aceitos.
+A implementação mantém, para cada item que pode ser montado em fixture, um teste que fixa o
+comportamento atual, e documenta os demais no cabeçalho do executável afetado:
+
+1. **Portão reposicionado por commit de método.** O `ENTREGA.md` está no catálogo de `pre-e6` e
+   `e8`. Um commit classificado como método pode regravar `portao_sha` para um commit posterior,
+   até um de produto, e o portão volta a valer. Pelos dados atuais, isso é indistinguível do fluxo
+   legítimo em que o E2 avalia esse commit e o `pre-e6` persiste o resultado: mesmo grafo e mesmo
+   conteúdo. A validade prova que nada mudou depois de `portao_sha`, não que um E2 rodou nele.
+2. **Entrega legada sem reconciliação.** Uma ref de base movida para um commit sem nenhuma marca do
+   trabalho é aceita, porque a V9 lê a ref nesse caso. Também não é detectada uma âncora
+   originalmente incorreta: o `ENTREGA.md` que já nasce com `base_validada_sha` num commit só de
+   produto, inclusive o renomeado para o caminho canônico num ramo montado do zero.
+3. **B1 lateral.** Com reconciliação, a cadeia não reconfere `b1_sha` contra a base real. Um `B1`
+   forjado, que descende de `B0` e traz produto, com a ref movida no registro, desloca a base.
+4. **Clone raso legítimo falha fechado.** CI ou máquina com `--depth` recebe `historia_incompleta`
+   ou `v9_sem_prova` e precisa de `git fetch --unshallow` antes do E2 e do push.
+5. **Isenção por prefixo.** A V9 isenta `docs/entregas/<id>/` por prefixo, como a regra existente,
+   então um arquivo de produto colocado ali não é apontado pela V9. A validade do portão continua
+   barrando esse arquivo depois do portão (`metodo_fora_do_catalogo`).
+6. **`core.autocrlf` na barreira.** A comparação sem filtros reprova com o `git status` limpo
+   (seção 8). Falha fechado.
+7. **Hash do diff com atributos `-diff`/`binary`** (seção 7.1). Pode divergir entre clones, e o
+   `--verificar` falha fechado.
+8. **Escala resolvida pela DM-184.** A primeira implementação da barreira de push varria todas as
+   branches entregues do repositório a cada comando, e com dezenas delas estourava o prazo. O
+   `pre-push` avalia só as refs do push: o custo deixou de depender das branches existentes.
+9. **PR sem `ENTREGA.md`** (DM-185). Código enviado num PR que não carrega nenhum `ENTREGA.md`
+   (cherry-pick sem a entrega, trailers apagados) não está sob o portão: a seleção é vazia e o CI
+   passa com `ref_nao_aplicavel`.
+10. **Várias entregas ativas no mesmo PR.** Um PR empilhado sobre a base principal que traz uma
+    entrega ainda não integrada além da sua seleciona as duas; a anterior fica vencida pelos commits
+    da seguinte e o PR barra. Não é suportado: encadeie os PRs pela base ou entregue a anterior
+    antes. Remover, ou tocar e restaurar, um `ENTREGA.md` existente também barra, sem exceção por
+    `estado: entregue` (o método nunca remove entrega).
+11. **Base do evento defasada.** Se `pull_request.base.sha` é mais antigo que a base que a cabeça
+    do PR já integrou, o merge-base recua e as entregas trazidas pela base entram na seleção: o PR
+    barra (falso bloqueio, nunca aprovação). O diagnóstico manda gerar novo evento com a base atual.
+    O mesmo vale para a base do `pre-push` (parcela (a) do item 7 da seção 13): se
+    `refs/remotes/<remoto>/HEAD` está defasado, ou não é a base de integração da branch (branch
+    empilhada, `develop`), as entregas trazidas pela base entram na seleção e o push de um SHA
+    válido é barrado (falso bloqueio, nunca aprovação; a decisão não muda). O diagnóstico cita a
+    base usada (`refs/remotes/<remoto>/HEAD` e o SHA dela), diz que entregas trazidas pela base
+    podem ter sido selecionadas e manda `git fetch <remoto>` e `git remote set-head <remoto> -a`
+    antes de rodar o E2 de novo. Limite do outro lado: sem `refs/remotes/<remoto>/HEAD` e sem
+    outra parcela que alcance a árvore enviada, o `pre-push` avisa `cobertura_indeterminada` e
+    não barra.
+12. **Limite do CI frente ao autor do PR.** A DM-185 fecha o contorno pelo nome da branch. Com
+    `on: pull_request`, o autor do PR controla os scripts, o workflow e `.expx/hooks.json` da cabeça
+    do PR (CODEOWNERS e revisão obrigatória para `.expx/**`, `.claude/**` e `.github/**` no
+    handoff), e o item 1 continua: o CI não é barreira contra todo contorno deliberado.
+
+## 16. Fluxo completo depois de uma reconciliação
+
+1. Merge normal da base nova, resolução semântica, testes focados e revisão da resolução.
+2. Commit de integração `M` (seção 12).
+3. Gate completo do repositório (o do `ORQUESTRADOR.md`; no PR #192, o D-44) sobre `HEAD`.
+4. `reconciliacao-base.sh --registrar` com os caminhos ajustados.
+5. Checkpoint `reconciliacao-base`.
+6. E2 completo: barreira `reconciliacao-base` + V1–V11 com a V9 executável + `pre-push` da MergeX
+   comprovadamente ativo; grava `portao` e `portao_sha`. `BLOQUEADO` encerra como hoje (E8
+   bloqueado, sem push).
+7. E3 sobre o delta, com O10 para os reconciliados.
+8. E4 e E5 regravados (lista de arquivos, testes, colaterais).
+9. Checkpoint `pre-e6`.
+10. E6: push, exigindo portão válido (seção 13); quem decide é o `pre-push`, sobre o SHA enviado.
+11. E7: retomada do PR existente (nunca um segundo PR).
+12. E8 e checkpoint `e8`; push final do registro.
+
+## 17. Retomada do PR #192
+
+Estado preservado: merge em andamento sobre `e16410e9626efea7e3b0764f90ee735f3b5e4918`, com
+`MERGE_HEAD = 5610b10afb5b27dacf1dee02aa1418a9ce69e6f0`, resolução completa no índice (três
+arquivos de produção e dez arquivos de teste ajustados), gate completo verde sobre essa árvore
+(117 arquivos, 1378 testes), duas revisões independentes sem defeito aberto.
+
+1. **Não abortar e não refazer a resolução.** Ela é o insumo do primeiro `M`.
+2. Com autorização explícita do responsável, concluir o merge **localmente**, sem publicar, com a
+   resolução exatamente como está no índice: `M1`, mensagem com `Trabalho: mp2-7a-travas-de-acao`
+   e `Integra-base: 5610b10afb5b27dacf1dee02aa1418a9ce69e6f0`. Nenhum push até o passo 7.
+3. A MergeX nova chega à `main` de Conselhos por um PR de instalação separado, com base `B2`.
+   Instalar na própria feature tornaria `.claude/**` e `.expx/**` arquivos fora do plano.
+4. Integrar `B2` na feature: `M2`. Os arquivos de framework vêm da base e não entram no diff contra
+   `B2`. Se `B2` trouxer novos conflitos de produto, eles seguem o passo 1 do fluxo.
+5. Gate completo sobre o `HEAD` resultante.
+6. Registrar em ordem: `--registrar --merge M1 -- tests/ui/compliance-ksmv-primitives.test.tsx
+   tests/ui/attendance-ksmv-primitives.test.tsx` (legado: `origem_base: inferida_legado`,
+   `B0 = 0f030f9d83101cdaa8c52f457be6163b81eb2072`); depois `--registrar` para `M2` (com
+   `arquivos: []` se nada mais for ajustado). Checkpoint `reconciliacao-base`.
+7. Fluxo da seção 16 a partir do E2; push só com portão válido. O PR #192 continua em rascunho até
+   o QA aprovar **e** até estarem comprovados no produto: a instalação da MergeX nova com o
+   `pre-push` ativo, o check de CI correspondente com a proteção de merge, e os gates (DM-184).
+
+Dos dez arquivos de teste ajustados no merge, oito estão declarados em tasks (os `mp2-7a-*`,
+`conferencias-mp2-7a` e os dois `checklists-*`) e passam pela V9 normalmente; só os dois nascidos
+na base precisam de reconciliação.
+
+## 18. Implantação
+
+1. **PR da MergeX** sobre `p0.2/mergex-historico-yaml-escalar`, a partir desta branch: executáveis
+   novos, `pre-push` e sua ativação no E0, template ou ponto de integração do CI, prosa de
+   E0/E2/E3/E6/E7/E8, schema, hooks, testes e decisões. O PR não declara CI ativo em produto nenhum.
+2. **Recertificação** da MergeX: todas as suítes `scripts/ci/test-*.sh`, todos os mutantes,
+   `validate-mergex-contract.sh` e `.claude/hooks/teste.sh`.
+3. **ExpxDev:** atualizar o pin da MergeX e os candidatos de certificação
+   (`src/teste/candidatos.ts` e `fixtures/candidatos/`) e rodar a certificação P0.2. Sem mudança
+   de código: o checkpoint e o artefato novos são da skill; o enum de modos de hook e as chaves de
+   `.expx/hooks.json` não mudam. Se o empacotamento do `pre-push` ou do template de CI exigir
+   mudança no ExpxDev, ela é handoff posterior e separado (DM-184).
+4. **Conselhos Municipais:** PR separado de instalação na `main` (`.claude/**`, `.expx/**`), com
+   o lock novo e `doctor` limpo. Nada da feature entra nesse PR. A ativação do `pre-push` no
+   repositório do produto e a do check de CI com proteção de merge são handoffs próprios desse
+   passo, comprovados antes de o PR #192 sair de rascunho.
+5. **Retomada do PR #192** pela seção 17.
+
+## 19. Reversão
+
+- Reverter a MergeX é voltar o pin para o commit anterior e reinstalar. Não há migração de dados:
+  as chaves novas do `ENTREGA.md` e os artefatos ficam como documentação.
+- Uma entrega que dependia de reconciliação volta a reprovar na V9 da versão antiga — falha
+  fechada, nunca aprovação indevida.
+- O hook de push antigo volta a ler o portão por data; a reversão reabre o defeito 1, e isso deve
+  constar do PR de reversão.
+- O `pre-push` ativado pelo E0 continua chamando o executável da MergeX. A reversão remove apenas o
+  chamador gerenciado pela MergeX, reconhecido pelo marcador, e nunca toca num hook de terceiro.
+  Quem compôs um hook próprio com a MergeX desfaz a composição por conta própria, e o PR de reversão
+  explica o passo.
+
+## 20. Fora de escopo
+
+- Qualquer mudança na SprintX, inclusive a brecha observada de `defeito_de_plano` com `task: null`
+  abrir rodada sem task bloqueada (`planejamento.sh`), que fica registrada para a SprintX tratar.
+- Qualquer mudança de código no BuildX ou no ExpxDev.
+- Suporte do painel ao `kind: reconciliacao_base`.
+- Rebase, cherry-pick ou squash da base; reconciliação de renomeação como tal; ressurreição ou
+  remoção de arquivos da base.
+- Merge automático da base pela MergeX: a integração continua humana.
+- Publicação automática: nada desta correção faz push fora do E6/E8.
+- Ativação do CI e da proteção de merge em qualquer produto, e o empacotamento do `pre-push` e do
+  template de CI pelo ExpxDev: handoffs posteriores e separados (DM-184).
+- Interpretar texto de comando de shell como fronteira de segurança do push (rejeitado pela DM-184).
+
+## 21. Plano de testes
+
+Fixtures em repositórios Git reais e temporários, montadas pelos helpers de `scripts/ci/lib/` e por
+`scripts/ci/fixtures/e2e-p0-2/` (base, head, `base-sha.txt`).
+
+### Suíte nova `scripts/ci/test-r1-reconciliacao-base.sh`
+
+Fixture-base: plano com tasks concluídas, `ENTREGA.md` entregue com portão `pronto` e
+`portao_sha`; a base avança criando dois arquivos de teste e alterando um arquivo de produção que a
+feature também altera; merge com conflito resolvido e os dois testes ajustados.
+
+Positivos:
+
+1. Reprodução exata do PR #192: os caminhos `tests/ui/compliance-ksmv-primitives.test.tsx` e
+   `tests/ui/attendance-ksmv-primitives.test.tsx` nascem na base (status `A`), são ajustados no
+   merge; V9 reprova antes do registro e aprova depois.
+2. `--merge <sha>` registra `M1` com `HEAD` já em `M2`; a cadeia `001 → 002` verifica.
+3. Merge de base sem ajuste gera `arquivos: []` e avança a base validada.
+4. Legado sem `base_validada_sha`: inferência única, `origem_base: inferida_legado`.
+5. Arquivo com `status_base: M` (mudou na base) e ajustado: elegível.
+6. Commit só de método depois do portão: portão continua válido; push aceito.
+
+Negativos (um caso por regra):
+
+7. Arquivo que a base não tocou.
+8. Arquivo tocado pela feature antes do merge.
+9. Arquivo declarado em task.
+10. Arquivo sem diferença entre `B1` e `M`.
+11. Arquivo removido pela base e mantido.
+12. Arquivo da base removido pela integração.
+13. Renomeação na base: caminho antigo recusado.
+14. Caminho alterado pelo merge e não declarado (inventário).
+15. `M` com um pai, com pais trocados, ou fora da linha de primeiro pai.
+16. Mensagem de `M` sem `Integra-base:`, com `Task:` ou com `Metodo:`.
+17. Merge em andamento e stage preenchido.
+18. Artefato editado (assinatura), numeração com lacuna, `anterior` errado.
+19. Arquivo reconciliado alterado depois de `M`.
+20. Legado ambíguo: dois merge-bases; merge prévio na linha de primeiro pai.
+21. Portão vencido: commit de produto depois de `portao_sha`; merge de base depois de
+    `portao_sha`; commit `Metodo:` que toca caminho fora do catálogo; `portao_sha` não ancestral.
+22. Barreira de push (DM-184), com **pushes reais contra um remoto bare local**:
+    - push direto; `cd` com `&&` e com `||`; `bash -c`; caminho por link simbólico; várias refs num
+      push; exclusão de branch; tag; ref fora da branch do trabalho;
+    - portão válido, vencido, ausente e ilegível; SHA enviado diferente do `HEAD` do checkout;
+    - `portao: null` nos três modos, com o mesmo resultado no `pre-push`, no aviso do Claude e no
+      executável do CI;
+    - clone raso e objeto ausente (`historia_incompleta`); ambiente que impede a avaliação
+      (`erro_ambiente`), com diagnósticos distintos;
+    - Git no Linux e Git for Windows sobre `\\wsl.localhost\...`, este quando o ambiente de teste o
+      tiver (sem ele, o caso é registrado como não executado, nunca como aprovado);
+    - custo proporcional às refs enviadas: o tempo não cresce com o número de branches entregues;
+    - E0 resolvendo o diretório efetivo, inclusive com `core.hooksPath` já configurado, sem alterá-lo;
+      E0 idempotente; E0 recusando um `pre-push` de terceiro ainda não composto, sem sobrescrever,
+      renomear ou editar; sequência de recuperação: o mesmo hook, depois de composto à mão, aceito
+      pela prova funcional; hook composto que não propaga o código de saída, que libera a ref
+      inválida ou que termina inesperadamente, recusado; um hook que só cita a MergeX em texto, sem
+      executá-la, recusado;
+    - prova funcional do E2: sem `PRONTO` quando o `pre-push` efetivo não chama a MergeX ou não
+      bloqueia a ref inválida da prova controlada;
+    - reversão removendo só o chamador gerenciado e preservando o hook de terceiro;
+    - hook do Claude como aviso: bloqueia o push provadamente inválido e o `--no-verify` reconhecido;
+      em UNC, `dubious ownership` ou comando indeterminado, avisa e não bloqueia;
+    - seleção pelo conteúdo (DM-185), no CI: os dez cenários da auditoria de segurança final como
+      regressão — passam o nome esperado com portão válido, o mesmo SHA válido com outro nome e a
+      branch renomeada válida (estes dois com a validade executada e `aviso=branch_divergente`) e o
+      PR que não toca `ENTREGA.md`; barram, com a validade executada, o portão vencido ou ausente
+      com outro nome, a renomeada vencida, o fork `patch-1`, o nome qualquer, as duas entregas com
+      qualquer nome e o `--branch` forjado (inclusive com o nome de outra entrega); e as bordas:
+      merge que restaura o `ENTREGA.md` de um pai (só `--full-history` vê), criss-cross
+      (`base_ambigua`), merge que altera o `ENTREGA.md` contra os dois pais, merge que apaga um
+      `ENTREGA.md` da base, cria-e-apaga no PR, renomeação do diretório da entrega, órfã em clone
+      completo (com e sem entrega) e em clone raso, base defasada (barra com o diagnóstico), saída
+      indexada com uma e com duas entregas;
+    - seleção no `pre-push`: cada parcela sozinha (conteúdo com `<remoto>/HEAD`, nome, trailer
+      `Trabalho:`) seleciona e barra a entrega vencida; `cobertura_indeterminada` avisa; a prova
+      funcional do E0/E2 continua com os dois lados (barra a ref inválida, passa o controle);
+    - chamador gerenciado sem o validador: código 1 com a mensagem da MergeX.
+23. Nenhuma opção de força aceita em nenhum dos executáveis novos.
+24. Nenhum `tasks.md`, `sprint.md`, `fases.md` ou `00-PLANEJAMENTO.md` alterado por qualquer
+    comando da suíte (hash antes e depois).
+25. `ENTREGA.commits` e o próximo `seq` idênticos antes e depois.
+
+### Suítes existentes ampliadas
+
+- `test-portao-v11.sh`: portão completo com V9 executável e base por SHA.
+- `test-m2-lifecycle-recuperacao.sh`: checkpoint `reconciliacao-base` (enum, catálogo, stage, noop,
+  não entra em `commits`); `--registrar-existente` continua recusando merge commit.
+- `.claude/hooks/teste.sh`: `commit-por-task` e `arquivo-fora-do-plano` no commit de integração;
+  `pr-so-com-portao` como aviso antecipado: portão válido, vencido provado, `--no-verify` e
+  `ENTREGA.md` de outro trabalho mais recente (bloqueia ou libera por prova); casos indetermináveis
+  só avisam.
+- `test-causa-portao.sh`: reabertura `entregue → aberto` pelo registro.
+- `test-atencao-metodo.sh`: O10 e recusa de rebaixar reconciliado.
+- `test-integracao-c7a.sh`, `test-m1-ownership-contextual.sh`, `test-m4b-arvore-inteira.sh`,
+  `test-ownership-task.sh`: a união continua a mesma; arquivo nascido na base sem reconciliação
+  continua `desvio` no E1.
+- `validate-mergex-contract.sh`: prosa de E0, E2, E3, E6, E7, E8, schema e checkpoint; ausência de
+  flag de força.
+
+### Mutantes (`scripts/ci/mutacao-r1-reconciliacao-base.sh`)
+
+Cada um tem de reprovar ao menos um caso:
+
+1. Prova 1 desligada.
+2. Prova 1 aceitando status `D`.
+3. Prova 2 sem `--first-parent`.
+4. Prova 3 desligada.
+5. Prova 4 desligada.
+6. Inventário do merge desligado.
+7. Assinatura não conferida.
+8. Encadeamento `b0 = b1 anterior` não conferido.
+9. Cobertura sem conferir `blob_m` em `HEAD`.
+10. V9 com base por nome de ref em vez de SHA.
+11. Portão aceitando commit de produto depois de `portao_sha`.
+12. Portão aceitando merge depois de `portao_sha`.
+13. `pre-push` validando o `HEAD` do checkout em vez do SHA enviado (ou lendo o `ENTREGA.md` do
+    disco).
+14. `pre-push` respeitando modo `aviso` para portão `pronto` vencido.
+15. Inferência legada aceitando dois merge-bases.
+16. Registro gravando `seq` ou tocando `tasks.md`.
+17. O10 permitindo faixa média para reconciliado.
+
+A matriz também mantém os oito mutantes da barreira de push da DM-184 e acrescenta os da DM-185:
+
+18. `CINOME` — seleção do CI filtrando por `branch:` igual ao `--branch`.
+19. `CIDIFF` — seleção sem a parcela do diff de árvores.
+20. `CIHIST` — seleção sem a parcela dos commits não-merge.
+21. `CIFULL2` — parcela dos commits sem `--full-history`.
+22. `CIMBALL` — merge-base sem `--all` (um só, arbitrário).
+23. `CIDEL` — parcela do diff de árvores sem o status `D`.
+24. `CIAGREG` — agregação devolvendo a decisão da primeira entrega.
+25. `BRDIV` — `branch_divergente` barrando em vez de avisar.
+26. `PPBASE` — `pre-push` sem a parcela do conteúdo.
+27. `PPLEG` — `pre-push` sem a parcela legada pelo nome.
+28. `PPTRL` — `pre-push` sem a parcela do trailer `Trabalho:`.
+29. `PPCOB` — `pre-push` sem o aviso `cobertura_indeterminada`.
+30. `M3CHAM` — chamador gerenciado sem conferir o validador.
+
+## 22. Critérios de sucesso
+
+1. Todas as suítes `scripts/ci/test-*.sh` e `.claude/hooks/teste.sh` verdes; os mutantes da seção
+   21 (os 17 originais, os 8 da DM-184 e os 13 da DM-185) e todos os existentes mortos;
+   `validate-mergex-contract.sh` verde.
+2. A reprodução do PR #192 (caso 1) reprova na V9 antes do registro e aprova depois, sem nenhuma
+   alteração em arquivo de plano.
+3. Nenhum arquivo da SprintX, do BuildX ou do código do ExpxDev muda; no ExpxDev mudam só pin e
+   candidatos, e a certificação P0.2 passa.
+4. Em Conselhos, depois da seção 17: `persistir-metodo --verificar` limpo em todos os checkpoints;
+   E2 `PRONTO` com V9 OK e `pre-push` ativo; sequência `1..25` e V11 OK; `portao_sha` igual ao
+   `HEAD` avaliado; push aceito pelo `pre-push`; check de CI do portão verde com proteção de merge
+   ativa; PR #192 sem conflito e com os checks do repositório verdes; nada integrado em `main` pela
+   MergeX.
+5. Nesta branch, o critério 4 não é afirmado: ele depende dos handoffs de instalação no produto e
+   de ativação do CI (seção 18).
+
+## Decisões propostas
+
+- `DM-178`: base que avança depois do E8 é evento da entrega, não defeito de plano; o registro é da
+  MergeX (reconciliação de base) e nunca altera task.
+- `DM-179`: arquivo reconciliado só com as quatro provas e inventário completo do merge; sem
+  registro parcial e sem bypass.
+- `DM-180`: a V9 é executável e usa a base validada por SHA; a união das tasks continua sendo o
+  conjunto do plano (DM-152 mantida).
+- `DM-181`: o portão vale para um SHA; só commits de método de um pai e dentro do catálogo mantêm a
+  validade; portão vencido é barrado no push em qualquer modo. A estratégia de enforcement no push
+  é a da DM-184, que substitui a da redação original desta decisão.
+- `DM-182`: arquivo reconciliado é olho obrigatório (O10).
+- `DM-183`: base legada é inferida uma única vez, com `origem_base: inferida_legado`, e a
+  inferência ambígua falha fechada.
+- `DM-184`: a barreira de push se apoia no Git, não na leitura do shell.
+  - **Barreira local autoritativa contra erro normal:** o `pre-push` do Git, que recebe as refs
+    realmente enviadas e valida o SHA enviado pelas regras da seção 13, item 7.
+  - **Barreira contra contorno deliberado:** o CI com proteção de merge, porque `--no-verify` ignora
+    o `pre-push`. Nenhum mecanismo exclusivamente local é prometido como incontornável.
+  - **Hook do Claude `pr-so-com-portao`:** passa a ser aviso antecipado. Bloqueia só o que prova
+    inválido e o `--no-verify` reconhecido; no indeterminado, avisa.
+  - **Instalação:** o E0 usa o diretório de hooks efetivo do Git, sem nunca alterar
+    `core.hooksPath`, e instala o chamador gerenciado de forma idempotente. Nunca sobrescreve,
+    renomeia ou edita um `pre-push` de terceiro. Se ele ainda não passa na prova funcional, o E0
+    falha fechado com a instrução de composição deliberada: chamar o validador e propagar o código
+    de saída. Depois de composto à mão, o hook que passa na prova é reconhecido como integração
+    externa válida, por comportamento e nunca por busca textual. O E2 só emite `PRONTO` depois da
+    mesma prova funcional. A reversão remove só o chamador gerenciado e só informa sobre a
+    integração externa.
+  - **Modo:** `portao: null` usa o modo existente de `pr-so-com-portao`, sem chave nova. Os três
+    consumidores o interpretam igual, e divergência entre eles é defeito de contrato.
+  - **Diagnósticos:** `historia_incompleta` (raso, objeto ausente) e `erro_ambiente` barram sempre,
+    com diagnósticos distintos.
+  - **Escopo:** esta branch entrega o validador, o `pre-push`, o template de CI, os testes e a
+    documentação. A ativação no produto e o empacotamento pelo ExpxDev são handoffs separados.
+  - **Motivo:** a primeira implementação da Task 14, um hook do Claude que interpretava o texto do
+    comando, foi rejeitada pelos testes reais. Em cinco rodadas de revisão, cada correção fechava
+    os contornos apontados e a revisão seguinte achava outros (`cd` encadeado, `bash -c`, `xargs`,
+    opções de `cd`, `git-push`, link simbólico, `core.worktree`). No Git for Windows sobre
+    `\\wsl.localhost\...`, o hook bloqueava pushes legítimos por `dubious ownership`.
+  - **Histórico e plano:** o commit `78fbb10` permanece no histórico, sem reescrita, como
+    implementação rejeitada e superada da antiga Task 14. Ele não conta como aprovação de nenhuma
+    das novas tasks. A antiga Task 14 é substituída por quatro:
+    - **14:** validador por revisão (`--rev`) e protocolo do `pre-push`: refs reais, várias refs,
+      exclusão, tags, SHA enviado, modos e remoto bare de teste;
+    - **15:** ativação no E0 e prova no E2: diretório efetivo, instalação idempotente, conflito com
+      hook de terceiro, prova funcional e reversão segura;
+    - **16:** contrato de CI: executável compartilhado, template ou ponto de integração,
+      comportamento no SHA real do PR, e a documentação de que esta branch não ativa o CI no
+      produto;
+    - **17:** hook do Claude só consultivo: bloqueio antecipado só com prova, tratamento explícito
+      de `--no-verify`, aviso no indeterminado, e nenhuma leitura de shell tratada como fronteira de
+      segurança.
+
+    As antigas Tasks 15–19, ainda não iniciadas, passam a 18–22. As Tasks 1–13 continuam aprovadas,
+    e as Tasks 18–22 aguardam a aprovação das novas 14–17.
+- `DM-185`: a entrega governada pelo portão é identificada pelo **conteúdo** do que é enviado,
+  nunca pelo nome da branch.
+  - **Motivo:** a auditoria de segurança final (2026-10-09) provou que a aplicabilidade por
+    igualdade entre o nome da ref e o `branch:` do `ENTREGA.md` deixava passar, com código 0 e sem
+    executar a validade, portão vencido ou ausente num PR de branch com outro nome, num fork
+    (`patch-1`), numa renomeação ou com `--branch` forjado, no CI e no `pre-push`; com várias
+    entregas, o nome escolhia qual governava. O ruling I2 da Task 16, que registrava isso como risco
+    residual, é revogado.
+  - **Seleção pelo conteúdo** (seção 13, item 5): diff de árvores entre o merge-base e o SHA, mais
+    os `ENTREGA.md` tocados por commits não-merge do intervalo (`--full-history`, `--no-renames`);
+    só o caminho canônico; vários merge-bases barram; sem merge-base, árvore vazia em clone
+    completo e `historia_incompleta` em clone raso. Cada entrega selecionada passa pela mesma
+    validade e pelo mesmo modo; qualquer `barra` vence.
+  - **CI:** só a seleção pelo conteúdo, com a base do PR. `--branch` é conferência
+    (`aviso=branch_divergente`), nunca bloqueio nem isenção. Saída indexada por entrega, com um
+    resumo único no fim.
+  - **`pre-push`:** união do conteúdo (base `refs/remotes/<remoto>/HEAD`, sem adivinhação), da
+    regra legada pelo nome e do trailer `Trabalho:` do commit enviado; nenhuma isenta. Sem base e
+    sem seleção, com entrega na árvore: aviso `cobertura_indeterminada`.
+  - **Hook do Claude:** continua pelo nome e consultivo.
+  - **Contrato entre consumidores:** substitui, na DM-184, "divergência entre eles é defeito de
+    contrato" por: mesma validade, mesmo modo e mesma falha fechada por entrega selecionada; a
+    seleção pode diferir por desenho (o CI é a autoridade sobre o conteúdo do PR).
+  - **Chamador gerenciado:** confere o validador antes de chamá-lo e, sem ele, barra com instrução
+    (minor M3 da revisão final).
+  - **Limites:** seção 15.1, itens 9 a 12. A DM-185 fecha o contorno pelo nome; não torna o CI
+    barreira contra todo contorno deliberado.
+  - **Plano:** Task 23 (seleção pelo conteúdo no CI e no `pre-push`, chamador, template e
+    references) e Task 24 (13 mutantes novos, matriz de 25 para 38). As Tasks 1–22 continuam
+    aprovadas.
+- `DM-186`: ajustes da revisão automática do PR da MergeX (aprovados pelo usuário em 2026-10-09).
+  - **Diretório efetivo fora do repositório:** o E0 não instala o chamador gerenciado num
+    diretório de hooks fora da árvore e do diretório Git comum do repositório (por exemplo,
+    `core.hooksPath` global); falha fechado com a instrução de composição (seção 13, item 6).
+    Motivo: instalado ali, o chamador vira o `pre-push` de todos os repositórios da máquina, preso
+    ao validador de um checkout; removido esse checkout, todo push da máquina é barrado.
+  - **Repositório sem Git:** o E0 não instala e o E2 dispensa a prova do `pre-push`, pelo Git real,
+    nunca pelo campo `versionado`. Motivo: a prova exige Git e impedia o E2 de emitir `PRONTO` no
+    fluxo sem versionador.
+  - **E7 pelo SHA publicado:** a validade do E7 roda sobre a ponta da ref remota e exige que ela
+    seja o SHA enviado no E6.
+  - **E3:** o comando que monta a lista de reconciliados confere o código de saída do
+    `reconciliacao-base.sh --verificar` antes de extrair os `coberto`.

@@ -37,8 +37,12 @@ trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
 copia() {
   local d
   d="$(mktemp -d)"; TMPS="$TMPS $d"
-  # Rastreados e novos ainda não commitados; nada ignorado, nada de .git.
+  # Rastreados e novos ainda não commitados; nada ignorado. O .git do
+  # repositório não vem: a cópia ganha um Git próprio com a árvore inteira no
+  # índice, porque o validador do contrato varre os arquivos versionados com
+  # `git ls-files` (DM-184).
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) | ( cd "$d" && tar -xf - )
+  ( cd "$d" && git init -q && git add -A ) >/dev/null 2>&1 || return 1
   printf '%s\n' "$d"
 }
 

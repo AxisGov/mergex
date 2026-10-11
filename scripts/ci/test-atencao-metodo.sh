@@ -96,8 +96,8 @@ espera() {
 # ---------------------------------------------------------------------------
 echo "Ordem declarada pelo classificador"
 # ---------------------------------------------------------------------------
-if [ "$(bash "$CLASSIFICADOR" --ordem)" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ]; then
-  OK=$((OK+1)); echo '  ok    O1..O9, L1..L4, D1..D4, padrão'
+if [ "$(bash "$CLASSIFICADOR" --ordem)" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 O10 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ]; then
+  OK=$((OK+1)); echo '  ok    O1..O10, L1..L4, D1..D4, padrão'
 else
   FALHOU=$((FALHOU+1)); echo '  FALHA ordem dos critérios alterada'
 fi
@@ -466,6 +466,140 @@ for ft in contador-sequencial codigo-sequencial; do
   fi
   printf '%s\n' "$SAIDA" | cut -f2 | sort | uniq -c | sed 's/^/        /'
 done
+
+# ---------------------------------------------------------------------------
+echo
+echo "O10 — arquivo reconciliado da base (--reconciliados)"
+# ---------------------------------------------------------------------------
+O10TXT='O10: arquivo reconciliado da base'
+D="$(mktemp -d)"; TMPS="$TMPS $D"
+ESPECIAL="docs/Relatório d'água final.md"
+
+roda_o10() { # <lista> — entrada padrão passa para o classificador
+  SAIDA="$(bash "$CLASSIFICADOR" --base main --reconciliados "$1" 2>"$D/err")"; RC=$?
+}
+linha_de() { printf '%s\n' "$SAIDA" | awk -F'\t' -v c="$1" '$1 == c { print; exit }'; }
+confere() { # <descrição> <condição: 0 verdadeira>
+  if [ "$2" = 0 ]; then OK=$((OK+1)); printf '  ok    %s\n' "$1"
+  else FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; fi
+}
+
+# reconciliado com evidência D1 não desce de faixa
+printf 'tests/ui/novo.test.tsx\n' > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}D1: teste novo
+EOF
+case "$SAIDA" in
+  *"OLHO OBRIGATÓRIO"*"$O10TXT"*) confere "reconciliado com D1 fica em OLHO OBRIGATÓRIO com O10" 0 ;;
+  *) confere "reconciliado com D1 fica em OLHO OBRIGATÓRIO com O10 ($SAIDA)" 1 ;;
+esac
+case "$SAIDA" in *D1*) confere "O10 vence: D1 não aparece na justificativa" 1 ;; *) confere "O10 vence: D1 não aparece na justificativa" 0 ;; esac
+
+# L1 também não desce
+printf 'tests/ui/novo.test.tsx\n' > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}L1: lógica
+EOF
+espera tests/ui/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "reconciliado com L1 sobe para OLHO"
+
+# já tinha O anterior: múltiplos O são juntados, O10 por último
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}O5: contrato público${T}D1: x
+EOF
+espera tests/ui/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O5: contrato público; O10:' "$O10TXT" "O anterior mantido, O10 acrescentado"
+
+# correspondência exata: nada de substring
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}D1: a
+tests/ui/novo.test.tsx.snap${T}D1: snapshot
+tests/ui/novo.test${T}D1: prefixo
+xtests/ui/novo.test.tsx${T}D1: sufixo
+EOF
+espera tests/ui/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "exato: o caminho listado"
+espera tests/ui/novo.test.tsx.snap 'DISPENSÁVEL' 'D1:' 'snapshot' "exato: .snap não é marcado"
+espera tests/ui/novo.test 'DISPENSÁVEL' 'D1:' 'prefixo' "exato: prefixo não é marcado"
+espera xtests/ui/novo.test.tsx 'DISPENSÁVEL' 'D1:' 'sufixo' "exato: sufixo não é marcado"
+
+# caminho especial e linhas vazias na lista
+printf '\n%s\n\n' "$ESPECIAL" > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+${ESPECIAL}${T}D1: texto
+docs/outro.md${T}D1: texto
+EOF
+espera "$ESPECIAL" 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "caminho com espaço, acento e apóstrofo"
+espera docs/outro.md 'DISPENSÁVEL' 'D1:' 'texto' "linha vazia da lista não marca nada"
+n="$(printf '%s\n' "$SAIDA" | grep -c .)"
+confere "lista com linhas vazias não gera linha vazia na saída ($n linhas)" "$([ "$n" = 2 ] && echo 0 || echo 1)"
+
+# caminho da lista ausente da entrada: o classificador emite a linha dele
+printf 'a/so-na-lista.ts\n%s\n' "$ESPECIAL" > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+docs/outro.md${T}D1: texto
+EOF
+espera a/so-na-lista.ts 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "ausente da entrada: ainda sai em OLHO"
+espera "$ESPECIAL" 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "ausente da entrada, caminho especial"
+espera docs/outro.md 'DISPENSÁVEL' 'D1:' 'texto' "ausente da entrada: o resto segue igual"
+# sem nenhuma entrada, só a lista
+SAIDA="$(bash "$CLASSIFICADOR" --base main --reconciliados "$D/reconc.txt" </dev/null 2>/dev/null)"
+espera a/so-na-lista.ts 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "entrada vazia: a lista ainda é emitida"
+# caminho já presente na entrada não é emitido duas vezes
+printf 'dup.ts\ndup.ts\n' > "$D/dup.txt"
+roda_o10 "$D/dup.txt" <<EOF
+dup.ts${T}D1: x
+EOF
+n="$(printf '%s\n' "$SAIDA" | grep -c '^dup.ts')"
+confere "caminho na entrada e duplicado na lista sai uma vez ($n)" "$([ "$n" = 1 ] && echo 0 || echo 1)"
+
+# lista inválida falha fechado
+SAIDA="$(printf 'x.ts\n' | bash "$CLASSIFICADOR" --base main --reconciliados "$D/nao-existe.txt" 2>"$D/err")"; RC=$?
+confere "lista ausente: rc != 0 ($RC)" "$([ "$RC" != 0 ] && echo 0 || echo 1)"
+confere "lista ausente: motivo no stderr" "$(grep -q reconciliados "$D/err" && ! grep -q desconhecida "$D/err" && echo 0 || echo 1)"
+confere "lista ausente: nenhuma classificação na saída" "$([ -z "$SAIDA" ] && echo 0 || echo 1)"
+mkdir -p "$D/dir"
+SAIDA="$(printf 'x.ts\n' | bash "$CLASSIFICADOR" --base main --reconciliados "$D/dir" 2>"$D/err")"; RC=$?
+confere "lista ilegível (diretório): rc != 0 ($RC)" "$([ "$RC" != 0 ] && echo 0 || echo 1)"
+SAIDA="$(printf 'x.ts\n' | bash "$CLASSIFICADOR" --base main --reconciliados 2>"$D/err")"; RC=$?
+confere "--reconciliados sem argumento: rc != 0 ($RC)" "$([ "$RC" != 0 ] && echo 0 || echo 1)"
+
+# lista com NNN: a justificativa cita o artefato
+printf 'tests/ui/novo.test.tsx\t007\nsem-nnn.ts\n%s\t012\n' "$ESPECIAL" > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}O5: contrato
+sem-nnn.ts${T}D1: x
+EOF
+espera tests/ui/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O5: contrato; O10:' 'O10: arquivo reconciliado da base (RECONCILIACAO-BASE-007.md)' "NNN: cita o artefato"
+espera sem-nnn.ts 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "sem NNN: texto sem artefato"
+l="$(linha_de sem-nnn.ts)"
+case "$l" in *RECONCILIACAO-BASE*) confere "sem NNN: não cita artefato" 1 ;; *) confere "sem NNN: não cita artefato" 0 ;; esac
+espera "$ESPECIAL" 'OLHO OBRIGATÓRIO' 'O10:' 'RECONCILIACAO-BASE-012.md)' "NNN: ausente da entrada, caminho especial"
+
+# NNN inválido falha fechado
+for ruim in '07' '0007' 'abc' '' '007	x'; do
+  printf 'a.ts\t%s\n' "$ruim" > "$D/ruim.txt"
+  SAIDA="$(printf 'a.ts\n' | bash "$CLASSIFICADOR" --base main --reconciliados "$D/ruim.txt" 2>"$D/err")"; RC=$?
+  confere "NNN inválido '$ruim': rc 66 sem saída ($RC)" "$([ "$RC" = 66 ] && [ -z "$SAIDA" ] && grep -q NNN "$D/err" && echo 0 || echo 1)"
+done
+
+# maiúscula e minúscula são caminhos diferentes
+printf 'Tests/UI/novo.test.tsx\n' > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}D1: minúsculo
+EOF
+espera tests/ui/novo.test.tsx 'DISPENSÁVEL' 'D1:' 'minúsculo' "caixa: Tests/UI não casa tests/ui"
+espera Tests/UI/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "caixa: o caminho da lista sai à parte"
+
+# lista com CRLF casa normalmente
+printf 'tests/ui/novo.test.tsx\t007\r\nsem-nnn.ts\r\n' > "$D/reconc.txt"
+roda_o10 "$D/reconc.txt" <<EOF
+tests/ui/novo.test.tsx${T}D1: a
+sem-nnn.ts${T}D1: b
+EOF
+espera tests/ui/novo.test.tsx 'OLHO OBRIGATÓRIO' 'O10:' 'RECONCILIACAO-BASE-007.md)' "CRLF: casa com NNN"
+espera sem-nnn.ts 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "CRLF: casa sem NNN"
+
+# sem --reconciliados nada muda
+SAIDA="$(printf 'tests/ui/novo.test.tsx\tD1: x\n' | bash "$CLASSIFICADOR" --base main)"
+espera tests/ui/novo.test.tsx 'DISPENSÁVEL' 'D1:' 'x' "sem a opção, o O10 não existe"
 
 echo
 echo "---------------------------------------------"

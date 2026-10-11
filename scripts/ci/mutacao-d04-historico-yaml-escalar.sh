@@ -21,6 +21,9 @@ copia() {
   d="$(mktemp -d)"; TMPS="$TMPS $d"
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
+  # O validador do contrato varre os arquivos versionados com `git ls-files`
+  # (DM-184): a cópia ganha um Git próprio com a árvore inteira no índice.
+  ( cd "$d" && git init -q && git add -A ) >/dev/null 2>&1 || return 1
   printf '%s\n' "$d"
 }
 
@@ -101,9 +104,10 @@ M12() { # FIRST regride: a primeira criação lê sem decodificar
   troca "$PERSISTE" "$MIOLO" "$MIOLO_CRU" \
     && troca_n "$PERSISTE" "$FINAL" '  export MUTANTE_CRU=1; ler_historico "$RAIZ/$caminho" > "$TMP_HIST/final" \' 1
 }
-M13() { # e8 regride: o checkpoint e8 pula a prova do HISTORICO
-  troca "$PERSISTE" '[ "$ORIGEM" = sprintx ] && confere_historico_corrente' \
-    '[ "$ORIGEM" = sprintx ] && [ "$CHECKPOINT" != e8 ] && confere_historico_corrente'
+M13() { # e8 regride: o checkpoint e8 pula a prova do HISTORICO (a âncora é a
+        # linha atual, que já isenta reconciliacao-base — DM-178, Task 10)
+  troca "$PERSISTE" '[ "$ORIGEM" = sprintx ] && [ "$CHECKPOINT" != reconciliacao-base ] && confere_historico_corrente' \
+    '[ "$ORIGEM" = sprintx ] && [ "$CHECKPOINT" != reconciliacao-base ] && [ "$CHECKPOINT" != e8 ] && confere_historico_corrente'
 }
 M14() { # escape inválido aceito literalmente
   troca "$PERSISTE" "$INVALIDO" '        else r = r "\\" c'
