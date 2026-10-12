@@ -679,7 +679,7 @@ grupo_catalog_reconc() {
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
   e2="$(printf '%s\n' \
     "$pasta/00-DECISOES.md" "$pasta/BUILDX-PREMISSAS.md" "$pasta/00-ESTIMATIVA.md" \
-    "$pasta/ORQUESTRADOR.md" "$pasta/00-AUDITORIA.md" "$pasta/FECHAMENTO.md" \
+    "$pasta/PREFLIGHT.md" "$pasta/ORQUESTRADOR.md" "$pasta/00-AUDITORIA.md" "$pasta/FECHAMENTO.md" \
     "$pasta/00-PLANEJAMENTO.md" "$pasta/00-BLOQUEIOS.md" \
     "$pasta/sprint-01/tasks.md" "$pasta/sprint-01/sprint.md" "$pasta/sprint-01/fases.md" \
     "$pasta/base/00-LACUNAS.md" "$pasta/base/00-INDICE.md" "$pasta/base/area com espaco.md" \

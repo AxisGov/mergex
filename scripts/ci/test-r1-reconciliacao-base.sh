@@ -614,6 +614,27 @@ grupo_provas() {
   [ "$(_foto)" = "$antes" ] && ok "fixture intacta depois dos casos de reprovação" || falha "fixture alterada"
   cd "$REPO" || return
 
+  # Artefato legítimo da SprintX criado antes da reconciliação: integrações de
+  # base pós-E8 não podem confundi-lo com produto fora do plano. O catálogo
+  # continua fechado: um nome arbitrário na mesma pasta segue reprovado.
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_VARIANTE=preflight_metodo fx_cenario "$d" || { falha "cenário com PREFLIGHT.md não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  antes="$(_foto)"
+  registra_ok "PREFLIGHT.md da SprintX é método no inventário pós-E8" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  [ "$(_foto)" = "$antes" ] && ok "PREFLIGHT.md: árvore volta ao estado anterior" || falha "PREFLIGHT.md: árvore não voltou"
+  cd "$REPO" || return
+
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_VARIANTE=preflight_e_arbitrario fx_cenario "$d" || { falha "cenário com arquivo arbitrário não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  reprova "arquivo arbitrário ao lado de PREFLIGHT.md continua fora do catálogo" 4 \
+    "inventário: docs/sprintx/features/ft-rec/RASCUNHO.md" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
   local rce
   for variante in base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados \
     fora_primeiro_pai m_sem_integra_base m_com_metodo substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 \
