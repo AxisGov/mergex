@@ -13,6 +13,8 @@ PERSISTE="${PERSISTE:-$S/persistir-metodo.sh}"
 CONTRATO="${CONTRATO:-$S/contrato-de-commit.sh}"
 SEQ="${SEQ:-$S/sequencia-de-commits.sh}"
 RETOMA="${RETOMA:-$S/retomar-v9-predecessores.sh}"
+SPRINTX_PRODUTOR="$REPO/scripts/ci/fixtures/sprintx-predecessores.sh"
+SPRINTX_PRODUTOR_SHA='ee74dd1fee0fe84e7f8fa2901f2a555a70fd2509b86fa124470c8496ba956108'
 
 OK=0; FALHOU=0
 TMPS=()
@@ -25,6 +27,16 @@ rc_igual() {
   local desc="$1" esperado="$2" rc; shift 2
   "$@" >/dev/null 2>&1; rc=$?
   if [ "$rc" = "$esperado" ]; then ok "$desc"; else falha "$desc — rc=$rc, esperava $esperado"; fi
+}
+
+sha256_arquivo() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
 }
 
 fixture() {
@@ -44,6 +56,18 @@ grava_manifesto() { # usa a fixture corrente e cria um commit simples do manifes
   git add -- "$FX_PRE_MANIFESTO" || return 1
   git commit -q -m 'chore(mergex): registra predecessores da fixture' \
     -m 'Trabalho: ft-pre' -m 'Metodo: predecessores'
+}
+
+v9_com_produtor() { # <produtor substituto>; usa a fixture corrente
+  local produtor="$1" copia scripts
+  copia="$(mktemp -d)" || return 1
+  TMPS+=("$copia")
+  cp -R "$REPO/.claude" "$copia/" || return 1
+  scripts="$copia/.claude/skills/mergex/scripts"
+  cp "$produtor" "$scripts/predecessores-sprintx.sh" || return 1
+  chmod +x "$scripts/predecessores-sprintx.sh" || return 1
+  bash "$scripts/portao-v9.sh" --verificar --entrega "$FX_PRE_ENTREGA" \
+    --origem sprintx --trabalho ft-pre
 }
 
 grupo_verificador() {
@@ -101,7 +125,7 @@ grupo_verificador() {
   fixture || { falha 'fixture para SHA humano não montou'; return; }
   cd "$FIXTURE_DIR" || return
   grava_manifesto || { falha 'manifesto do caso SHA humano não foi commitado'; cd "$REPO" || return; return; }
-  curto="$(printf '%s' "$FX_PRE_SPEC" | cut -c1-8)"
+  curto="$(sed -n 's/^    commit_sha: //p' "$FX_PRE_MANIFESTO" | sed -n '1p' | cut -c1-8)"
   sed "0,/^    commit_sha: /s/^    commit_sha: .*$/    commit_sha: $curto/" "$FX_PRE_MANIFESTO" > "$FX_PRE_MANIFESTO.tmp" \
     && mv "$FX_PRE_MANIFESTO.tmp" "$FX_PRE_MANIFESTO"
   git add -- "$FX_PRE_MANIFESTO" && git commit -q -m 'test: predecessor usa SHA abreviado humano'
@@ -129,7 +153,11 @@ grupo_verificador() {
 }
 
 grupo_protocolo() {
-  local d out rc
+  local d out rc hash
+  hash="$(sha256_arquivo "$SPRINTX_PRODUTOR" 2>/dev/null)"
+  [ "$hash" = "$SPRINTX_PRODUTOR_SHA" ] \
+    && ok 'fixture usa o produtor SprintX certificado byte a byte' \
+    || falha "fixture não usa o produtor SprintX certificado — sha=${hash:-ausente}"
   fixture || { falha 'fixture MP2.7b não montou'; return; }
   d="$FIXTURE_DIR"
   cd "$d" || return
@@ -149,6 +177,15 @@ grupo_protocolo() {
     && ! printf '%s\n' "$out" | grep -q $'^predecessor\t' \
     && ok 'schema inconclusivo falha fechado sem aceitação parcial' \
     || falha "v9_sem_prova fora do protocolo — rc=$rc, saída=$out"
+  cd "$REPO" || return
+
+  fixture || { falha 'fixture para chave de topo desconhecida não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'manifesto do caso de chave desconhecida não foi commitado'; cd "$REPO" || return; return; }
+  sed '/^kind: predecessores$/a\chave_desconhecida: valor' "$FX_PRE_MANIFESTO" > "$FX_PRE_MANIFESTO.tmp" \
+    && mv "$FX_PRE_MANIFESTO.tmp" "$FX_PRE_MANIFESTO"
+  git add -- "$FX_PRE_MANIFESTO" && git commit -q -m 'test: chave de topo desconhecida'
+  rc_igual 'parser fechado recusa chave de topo desconhecida' 3 bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre
   cd "$REPO" || return
 }
 
@@ -173,8 +210,59 @@ grupo_v9() {
     && ok 'prefixo docs/superpowers não cria isenção' || falha "prefixo indevidamente aceito — rc=$rc, saída=$out"
   cd "$REPO" || return
 }
+
+grupo_consumidor() {
+  local wrapper out rc sha39 sha41
+  fixture || { falha 'fixture do consumidor V9 não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  if [ -n "${R3_PREDS_CONSUMIDOR:-}" ]; then
+    grava_manifesto || { falha 'manifesto real do consumidor não foi commitado'; cd "$REPO" || return; return; }
+    out="$(v9_com_produtor "$R3_PREDS_CONSUMIDOR" 2>&1)"; rc=$?
+    [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' \
+      && ok 'V9 só aceita o protocolo completo do produtor real' \
+      || falha "V9 aceitou produtor mutante ou perdeu a prova — rc=$rc, saída=$out"
+    cd "$REPO" || return
+    return
+  fi
+  wrapper="$FIXTURE_DIR/produtor-substituto.sh"
+  sha39="$(printf '%s' "$FX_PRE_SPEC" | cut -c1-39)"
+  sha41="${FX_PRE_PLANO}a"
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
+    printf "printf 'predecessor\tdocs/superpowers/specs/exemplo-design.md\t%s\t%s\n'\n" "$sha39" "$sha41"
+    printf "printf 'predecessor\tdocs/superpowers/plans/exemplo.md\t%s\t%s\n'\n" "$FX_PRE_PLANO" "$FX_PRE_PLANO"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+    && ok 'consumidor V9 recusa SHA 39+41 que soma 80 hex' \
+    || falha "consumidor V9 aceitou larguras combinadas — rc=$rc, saída=$out"
+
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
+    printf "printf 'predecessor\tdocs/superpowers/specs/../plans/exemplo.md\t%s\t%s\n'\n" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+    printf "printf 'predecessor\tdocs/superpowers/specs/exemplo-design.md\t%s\t%s\n'\n" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+    printf "printf 'predecessor\tdocs/superpowers/plans/exemplo.md\t%s\t%s\n'\n" "$FX_PRE_PLANO" "$FX_PRE_PLANO"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+    && ok 'consumidor V9 recusa caminho não canônico' \
+    || falha "consumidor V9 aceitou caminho não canônico — rc=$rc, saída=$out"
+
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
+    printf "printf 'predecessor\tdocs/superpowers/specs/exemplo-design.md\t%s\t%s\n'\n" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+    printf "printf 'predecessor\tdocs/superpowers/specs/exemplo-design.md\t%s\t%s\n'\n" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+    printf "printf 'predecessor\tdocs/superpowers/plans/exemplo.md\t%s\t%s\n'\n" "$FX_PRE_PLANO" "$FX_PRE_PLANO"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+    && ok 'consumidor V9 recusa predecessor duplicado' \
+    || falha "consumidor V9 aceitou predecessor duplicado — rc=$rc, saída=$out"
+  cd "$REPO" || return
+}
+
 grupo_checkpoint() {
-  local d out rc antes depois paths msg stage_antes stage_depois
+  local d out rc rcv rcp antes depois paths msg stage_antes stage_depois
   fixture || { falha 'fixture MP2.7b não montou'; return; }
   d="$FIXTURE_DIR"; cd "$d" || return
 
@@ -201,11 +289,26 @@ EOF
   printf 'x\n\nTask: T-01.01\nTrabalho: ft-pre\nMetodo: predecessores\n' > "$d/metodo.msg"
   rc_igual 'checkpoint de método recusa Task' 2 bash "$CONTRATO" --validar-metodo \
     --trabalho ft-pre --checkpoint predecessores --arquivo "$d/metodo.msg"
+  rm -f "$d/metodo.msg"
+
+  bash "$PERSISTE" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rcv=$?
+  bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rcp=$?
+  [ "$rcv" != 0 ] && [ "$rcp" != 0 ] && ! git diff --cached --name-only | grep -q . \
+    && ok 'checkpoint predecessores recusa manifesto ainda ausente' \
+    || falha "checkpoint aceitou manifesto ausente — verificar=$rcv, persistir=$rcp"
 
   escreve_manifesto || { falha 'manifesto não foi escrito'; cd "$REPO" || return; return; }
   out="$(bash "$PERSISTE" --listar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores)"; rc=$?
   [ "$rc" = 0 ] && [ "$out" = "$FX_PRE_MANIFESTO" ] \
     && ok 'catálogo predecessores contém somente o manifesto' || falha "catálogo predecessores divergente — rc=$rc, saída=$out"
+  printf '\narvore alheia\n' >> README.md
+  out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores 2>&1)"; rc=$?
+  [ "$rc" != 0 ] && ! git diff --cached --name-only | grep -q . \
+    && ok 'árvore suja fora do manifesto recusa sem preparar stage' \
+    || falha "checkpoint aceitou árvore suja fora do manifesto — rc=$rc, saída=$out"
+  git restore --worktree -- README.md
   antes="$(bash "$SEQ" --ler "$FX_PRE_ENTREGA" 2>/dev/null)"
   out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores 2>&1)"; rc=$?
   if [ "$rc" = 0 ]; then ok 'checkpoint predecessores foi persistido'; else falha "checkpoint predecessores falhou — rc=$rc, saída=$out"; fi
@@ -215,6 +318,28 @@ EOF
     --trabalho ft-pre --checkpoint predecessores --commit HEAD
   depois="$(bash "$SEQ" --ler "$FX_PRE_ENTREGA" 2>/dev/null)"
   [ "$antes" = "$depois" ] && ok 'checkpoint predecessores não consome seq nem ENTREGA.commits' || falha 'checkpoint predecessores alterou a sequência E1'
+
+  rm -f "$FX_PRE_MANIFESTO"
+  bash "$PERSISTE" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rcv=$?
+  bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rcp=$?
+  [ "$rcv" != 0 ] && [ "$rcp" != 0 ] && ! git diff --cached --name-only | grep -q . \
+    && ok 'checkpoint predecessores recusa remoção do manifesto persistido' \
+    || falha "checkpoint aceitou manifesto removido — verificar=$rcv, persistir=$rcp"
+  git restore --worktree -- "$FX_PRE_MANIFESTO"
+
+  rm -f "$FX_PRE_MANIFESTO"
+  ln -s 00-PLANEJAMENTO.md "$FX_PRE_MANIFESTO"
+  bash "$PERSISTE" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rcv=$?
+  bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rcp=$?
+  [ "$rcv" != 0 ] && [ "$rcp" != 0 ] && ! git diff --cached --name-only | grep -q . \
+    && ok 'checkpoint predecessores recusa manifesto substituído por symlink' \
+    || falha "checkpoint aceitou manifesto symlink — verificar=$rcv, persistir=$rcp"
+  rm -f "$FX_PRE_MANIFESTO"
+  git restore --worktree -- "$FX_PRE_MANIFESTO"
 
   sed 's/^atualizado_em: .*/atualizado_em: 2026-10-14/' "$FX_PRE_ENTREGA" > "$FX_PRE_ENTREGA.tmp" \
     && mv "$FX_PRE_ENTREGA.tmp" "$FX_PRE_ENTREGA"
@@ -359,6 +484,11 @@ grupo_contrato() {
       && ok "$f publica fonte, falha fechada e retomada" \
       || falha "$f não publica o contrato completo de predecessores"
   done
+  for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md; do
+    grep -Fq 'todas as V1–V11' "$REPO/$f" \
+      && ok "$f exige o E2 completo depois da retomada" \
+      || falha "$f reduz a retomada a uma verificação parcial"
+  done
   cmp -s "$REPO/.claude/commands/mergex.md" "$REPO/.opencode/commands/mergex.md" \
     && ok 'entrypoint mergex é idêntico nos dois harnesses' || falha 'entrypoint mergex diverge entre harnesses'
   cmp -s "$REPO/.claude/commands/mergex-check.md" "$REPO/.opencode/commands/mergex-check.md" \
@@ -465,6 +595,7 @@ roda_grupo() {
     verificador) grupo_verificador ;;
     protocolo) grupo_protocolo ;;
     v9) grupo_v9 ;;
+    consumidor) grupo_consumidor ;;
     checkpoint) grupo_checkpoint ;;
     retomada) grupo_retomada ;;
     contrato) grupo_contrato ;;
@@ -474,7 +605,7 @@ roda_grupo() {
 }
 
 if [ "$#" -eq 0 ]; then set -- todos; fi
-if [ "$1" = todos ]; then set -- verificador protocolo v9 checkpoint retomada contrato mp27b; fi
+if [ "$1" = todos ]; then set -- verificador protocolo v9 consumidor checkpoint retomada contrato mp27b; fi
 for grupo in "$@"; do
   printf '\n%s\n' "== $grupo =="
   roda_grupo "$grupo"

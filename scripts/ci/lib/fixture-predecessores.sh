@@ -8,6 +8,7 @@
 #   FX_PRE_E8 FX_PRE_ENTREGA FX_PRE_MANIFESTO FX_PRE_SPEC_PATH FX_PRE_PLAN_PATH
 
 _FX_PRE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_FX_PRE_PRODUTOR="$_FX_PRE_LIB/../fixtures/sprintx-predecessores.sh"
 # shellcheck source=fixture-git.sh
 . "$_FX_PRE_LIB/fixture-git.sh"
 
@@ -161,24 +162,26 @@ fx_predecessores_cenario() { # <diretorio>
   export FX_PRE_ENTREGA FX_PRE_MANIFESTO FX_PRE_SPEC_PATH FX_PRE_PLAN_PATH
 }
 
-# Cópia mínima do contrato de saída do registrador da SprintX. A fixture da
-# MergeX não importa o repositório irmão: deriva commit e blob pelo Git real e
-# produz exatamente o manifesto que o consumidor recebe.
+# Cópia certificada do produtor SprintX. Ela é instalada dentro da fixture e
+# executada duas vezes contra o Git real; não há um segundo produtor manual na
+# MergeX capaz de divergir silenciosamente do contrato publicado pela SprintX.
 fx_predecessores_registra_sprintx() {
-  local spec_commit plan_commit spec_blob plan_blob destino
+  local destino copia rc
   destino="${1:-$FX_PRE_MANIFESTO}"
-  spec_commit="$(git log -1 --format=%H -- "$FX_PRE_SPEC_PATH")" || return 1
-  plan_commit="$(git log -1 --format=%H -- "$FX_PRE_PLAN_PATH")" || return 1
-  spec_blob="$(git rev-parse "$spec_commit:$FX_PRE_SPEC_PATH")" || return 1
-  plan_blob="$(git rev-parse "$plan_commit:$FX_PRE_PLAN_PATH")" || return 1
-  {
-    printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: predecessores' \
-      'trabalho_id: ft-pre' 'predecessores:'
-    printf '  - caminho: %s\n    origem: superpowers\n    papel: especificacao\n    commit_sha: %s\n    blob_oid: %s\n' \
-      "$FX_PRE_SPEC_PATH" "$spec_commit" "$spec_blob"
-    printf '  - caminho: %s\n    origem: superpowers\n    papel: plano\n    commit_sha: %s\n    blob_oid: %s\n' \
-      "$FX_PRE_PLAN_PATH" "$plan_commit" "$plan_blob"
-    printf '%s\n' 'criado_em: 2026-10-13' 'atualizado_em: 2026-10-13' '---' '' \
-      '# Predecessores' '' '- especificacao e plano consumidos antes da SprintX.'
-  } > "$destino"
+  [ -r "$_FX_PRE_PRODUTOR" ] || return 1
+  copia="$PWD/.fx-sprintx-predecessores.sh"
+  cp "$_FX_PRE_PRODUTOR" "$copia" && chmod +x "$copia" || return 1
+  SPRINTX_RAIZ="$PWD" bash "$copia" --registrar ft-pre --origem superpowers \
+    --papel especificacao --caminho "$FX_PRE_SPEC_PATH" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" = 0 ]; then
+    SPRINTX_RAIZ="$PWD" bash "$copia" --registrar ft-pre --origem superpowers \
+      --papel plano --caminho "$FX_PRE_PLAN_PATH" >/dev/null 2>&1
+    rc=$?
+  fi
+  rm -f "$copia"
+  [ "$rc" = 0 ] || return "$rc"
+  if [ "$destino" != "$FX_PRE_MANIFESTO" ]; then
+    mv "$FX_PRE_MANIFESTO" "$destino" || return 1
+  fi
 }

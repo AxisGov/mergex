@@ -450,15 +450,6 @@ Avisos: <lista, ou "nenhum">
 | Situação | O que fazer |
 |---|---|
 | Portão barrou (E2) | `estado: bloqueado`, `portao: bloqueado`, `falhas_portao` preservado e `causa` derivada dele; o que falta na prosa; o resto fica `null`/`false` |
-
-## Reabertura por predecessores SprintX
-
-O E8 bloqueado não é reaberto por edição manual. A exceção estreita de
-`references/13-predecessores-sprintx.md` exige que `[v9]` seja a única falha,
-que não exista publicação nem PR e que cada desvio seja um predecessor
-historicamente provado. `retomar-v9-predecessores.sh --aplicar` altera somente
-as seis chaves da retomada, persiste `Metodo: retomar-v9-predecessores` e
-informa `proxima=E2`. O registro de tasks e a sequência E1 permanecem intactos.
 | Causa não provada (a primeira falha na ordem é `_sem_prova`) | `causa: indeterminada` — nunca `null`, nunca uma causa escolhida |
 | Sem versionador | `versionado: false`, `branch`/`branch_base`/`pr_url` `null`, `commits: []`; `estado: entregue` mesmo assim |
 | PR não aberto | `pr_url: null`, `pr_estado: null`, aviso na prosa; `estado` continua `entregue` |
@@ -474,3 +465,12 @@ informa `proxima=E2`. O registro de tasks e a sequência E1 permanecem intactos.
 | Remoto à frente na publicação final | Não publica, não reconcilia, não força; relata literal; branch local guarda o registro final |
 | Push final rejeitado (permissão, hook, proteção) | Erro literal no relatório; sem novo push automático; `push_feito: false` por commit corretivo quando ele estava `true` |
 | Sem remoto | Commit final local, `push_feito: false`; não é erro |
+
+## Reabertura por predecessores SprintX
+
+O E8 bloqueado não é reaberto por edição manual. A exceção estreita de
+`references/13-predecessores-sprintx.md` exige que `[v9]` seja a única falha,
+que não exista publicação nem PR e que cada desvio seja um predecessor
+historicamente provado. `retomar-v9-predecessores.sh --aplicar` altera somente
+as seis chaves da retomada, persiste `Metodo: retomar-v9-predecessores` e
+informa `proxima=E2`. O registro de tasks e a sequência E1 permanecem intactos.

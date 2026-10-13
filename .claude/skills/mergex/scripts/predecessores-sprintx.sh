@@ -82,7 +82,9 @@ awk -v out="$TMP_DIR/itens" '
   /^predecessores:$/ { if (lista || depois) erro("lista repetida"); lista=1; topo["predecessores"]=1; next }
   /^[a-z_][a-z_0-9]*: / {
     fecha(); if (lista) { lista=0; depois=1 }
-    l=$0; k=l; sub(/:.*/,"",k); if (k in topo) erro("chave repetida"); topo[k]=1; sub(/^[^:]*: /,"",l); val[k]=l; next
+    l=$0; k=l; sub(/:.*/,"",k)
+    if (k!="expx_schema" && k!="expx_tool" && k!="kind" && k!="trabalho_id" && k!="criado_em" && k!="atualizado_em") erro("chave de topo desconhecida")
+    if (k in topo) erro("chave repetida"); topo[k]=1; sub(/^[^:]*: /,"",l); val[k]=l; next
   }
   { erro("linha malformada") }
   END {

@@ -339,6 +339,7 @@ bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 
 # A ausência preserva a V9 histórica; RunX não tem este artefato.
 # ---------------------------------------------------------------------------
 : > "$TMP_DIR/predecessores-aceitos"
+: > "$TMP_DIR/predecessores-vistos"
 : > "$TMP_DIR/predecessores-fora"
 if [ "$ORIGEM" = sprintx ]; then
   bash "$PREDECESSORES_SH" --verificar --rev "$HEAD_SHA" --trabalho "$TRABALHO" \
@@ -352,8 +353,14 @@ if [ "$ORIGEM" = sprintx ]; then
     case "$tipo" in
       resultado=*) [ -z "$a$b$c$extra" ] || INVALIDA=1 ;;
       predecessor)
-        case "$a" in ''|*"$TAB"*|*$'\n'*) INVALIDA=1 ;; esac
-        printf '%s' "$b$c" | grep -Eq '^[0-9a-f]{80}$' || INVALIDA=1
+        case "$a" in
+          ''|/*|[A-Za-z]:/*|./*|*/./*|*/.|../*|*/../*|*/..|*//*|*\\*|*\**|*\?*|*\[*|*\]*) INVALIDA=1 ;;
+          docs/sprintx/features/"$TRABALHO"/*|docs/entregas/"$TRABALHO"/*) INVALIDA=1 ;;
+        esac
+        grep -Fqx "$a" "$TMP_DIR/predecessores-vistos" && INVALIDA=1
+        printf '%s\n' "$a" >> "$TMP_DIR/predecessores-vistos"
+        printf '%s' "$b" | grep -Eq '^[0-9a-f]{40}$' || INVALIDA=1
+        printf '%s' "$c" | grep -Eq '^[0-9a-f]{40}$' || INVALIDA=1
         [ -z "$extra" ] || INVALIDA=1
         PRE_N=$((PRE_N + 1)); printf '%s\n' "$a" >> "$TMP_DIR/predecessores-aceitos" ;;
       fora_do_plano)
