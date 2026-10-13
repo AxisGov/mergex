@@ -298,6 +298,43 @@ grupo_retomada() {
     --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
   cd "$REPO" || return
 }
+grupo_contrato() {
+  local f enum
+  enum='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8'
+  for f in .claude/commands/mergex.md .claude/commands/mergex-check.md \
+           .opencode/commands/mergex.md .opencode/commands/mergex-check.md; do
+    grep -Fq 'predecessores-sprintx.sh' "$REPO/$f" \
+      && grep -Fq 'resultado=v9_sem_prova' "$REPO/$f" \
+      && grep -Fq 'retomar-v9-predecessores.sh' "$REPO/$f" \
+      && grep -Fq 'references/13-predecessores-sprintx.md' "$REPO/$f" \
+      && ok "$f publica fonte, falha fechada e retomada" \
+      || falha "$f não publica o contrato completo de predecessores"
+  done
+  cmp -s "$REPO/.claude/commands/mergex.md" "$REPO/.opencode/commands/mergex.md" \
+    && ok 'entrypoint mergex é idêntico nos dois harnesses' || falha 'entrypoint mergex diverge entre harnesses'
+  cmp -s "$REPO/.claude/commands/mergex-check.md" "$REPO/.opencode/commands/mergex-check.md" \
+    && ok 'entrypoint mergex-check é idêntico nos dois harnesses' || falha 'entrypoint mergex-check diverge entre harnesses'
+  for f in .claude/skills/mergex/SKILL.md .claude/skills/mergex/references/01-commits.md \
+           .claude/skills/mergex/references/08-registro.md .claude/skills/mergex/references/11-reconciliacao-base.md \
+           .claude/hooks/README.md; do
+    grep -Fq "$enum" "$REPO/$f" && ok "$f publica o enum de seis checkpoints" \
+      || falha "$f diverge do enum de checkpoints"
+  done
+  for dm in DM-187 DM-188 DM-189 DM-190; do
+    grep -q "^| $dm |" "$REPO/.claude/skills/mergex/DECISOES-DA-SKILL.md" \
+      && ok "$dm está no registro append-only" || falha "$dm ausente"
+  done
+  grep -Fq 'registrar → validar → checkpoint predecessores → verificar retomada →' \
+      "$REPO/.claude/skills/mergex/references/integracao/sprintx.md" \
+    && grep -Fq 'aplicar/checkpoint retomada → pre-e2 → E2 completo' \
+      "$REPO/.claude/skills/mergex/references/integracao/sprintx.md" \
+    && ok 'integração SprintX publica a ordem operacional completa' \
+    || falha 'ordem operacional de predecessores ausente'
+  grep -Fq 'MergeX anterior não entende o manifesto' "$REPO/README.md" \
+    && grep -Fq 'PRs de SprintX e MergeX' "$REPO/README.md" \
+    && ok 'README registra a compatibilidade coordenada' || falha 'README omite a compatibilidade coordenada'
+}
+
 grupo_mp27b()     { falha 'grupo mp27b ainda não implementado'; }
 
 roda_grupo() {
@@ -307,13 +344,14 @@ roda_grupo() {
     v9) grupo_v9 ;;
     checkpoint) grupo_checkpoint ;;
     retomada) grupo_retomada ;;
+    contrato) grupo_contrato ;;
     mp27b) grupo_mp27b ;;
     *) printf 'grupo desconhecido: %s\n' "$1" >&2; exit 64 ;;
   esac
 }
 
 if [ "$#" -eq 0 ]; then set -- todos; fi
-if [ "$1" = todos ]; then set -- verificador protocolo v9 checkpoint retomada mp27b; fi
+if [ "$1" = todos ]; then set -- verificador protocolo v9 checkpoint retomada contrato mp27b; fi
 for grupo in "$@"; do
   printf '\n%s\n' "== $grupo =="
   roda_grupo "$grupo"
