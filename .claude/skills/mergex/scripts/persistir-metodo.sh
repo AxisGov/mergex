@@ -38,7 +38,7 @@ CHECKPOINT=""
 
 uso() {
   printf '%s\n' \
-    'uso: persistir-metodo.sh --listar|--persistir|--verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> --checkpoint <pre-e2|reconciliacao-base|pre-e6|e8>' >&2
+    'uso: persistir-metodo.sh --listar|--persistir|--verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <id> --checkpoint <pre-e2|reconciliacao-base|predecessores|retomar-v9-predecessores|pre-e6|e8>' >&2
   exit 64
 }
 
@@ -57,7 +57,7 @@ done
 
 case "$MODO" in listar|persistir|verificar) ;; *) uso ;; esac
 case "$ORIGEM" in sprintx|runx) ;; *) uso ;; esac
-case "$CHECKPOINT" in pre-e2|reconciliacao-base|pre-e6|e8) ;; *) uso ;; esac
+case "$CHECKPOINT" in pre-e2|reconciliacao-base|predecessores|retomar-v9-predecessores|pre-e6|e8) ;; *) uso ;; esac
 case "$TRABALHO" in
   ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto) uso ;;
 esac
@@ -686,8 +686,10 @@ confere_historico_corrente() {
 # existe, é arquivo regular e está dirty.
 TMP_CATALOGO="$(mktemp "${TMPDIR:-/tmp}/mergex-catalogo.XXXXXX")" || para 'não foi possível criar catálogo temporário'
 catalogo_metodo "$RAIZ" "$ORIGEM" "$TRABALHO" "$PASTA" "$CHECKPOINT" > "$TMP_CATALOGO" || para "$CATALOGO_ERRO"
-# O checkpoint reconciliacao-base nunca leva o HISTORICO global.
-[ "$ORIGEM" = sprintx ] && [ "$CHECKPOINT" != reconciliacao-base ] && confere_historico_corrente
+# Os checkpoints estreitos de recuperação nunca levam o HISTORICO global.
+case "$ORIGEM:$CHECKPOINT" in
+  sprintx:pre-e2|sprintx:pre-e6|sprintx:e8) confere_historico_corrente ;;
+esac
 while IFS= read -r caminho; do
   [ -n "$caminho" ] || continue
   adiciona "$caminho"

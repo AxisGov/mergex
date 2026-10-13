@@ -9,6 +9,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S="${S:-$REPO/.claude/skills/mergex/scripts}"
 PREDS="${PREDS:-$S/predecessores-sprintx.sh}"
 V9="${V9:-$S/portao-v9.sh}"
+PERSISTE="${PERSISTE:-$S/persistir-metodo.sh}"
+CONTRATO="${CONTRATO:-$S/contrato-de-commit.sh}"
+SEQ="${SEQ:-$S/sequencia-de-commits.sh}"
 
 OK=0; FALHOU=0
 TMPS=()
@@ -31,7 +34,7 @@ fixture() {
   fx_predecessores_cenario "$FIXTURE_DIR" || return 1
 }
 
-grava_manifesto() { # usa a fixture corrente e cria o checkpoint de manifesto
+escreve_manifesto() { # usa a fixture corrente; não faz commit
   local bs bp
   bs="$(git rev-parse "$FX_PRE_SPEC:$FX_PRE_SPEC_PATH")" || return 1
   bp="$(git rev-parse "$FX_PRE_PLANO:$FX_PRE_PLAN_PATH")" || return 1
@@ -45,6 +48,10 @@ grava_manifesto() { # usa a fixture corrente e cria o checkpoint de manifesto
     printf '%s\n' 'criado_em: 2026-10-13' 'atualizado_em: 2026-10-13' '---' '' \
       '# Predecessores' '' '- especificacao e plano consumidos antes da SprintX.'
   } > "$FX_PRE_MANIFESTO"
+}
+
+grava_manifesto() { # usa a fixture corrente e cria um commit simples do manifesto
+  escreve_manifesto || return 1
   git add -- "$FX_PRE_MANIFESTO" || return 1
   git commit -q -m 'chore(mergex): registra predecessores da fixture' \
     -m 'Trabalho: ft-pre' -m 'Metodo: predecessores'
@@ -116,7 +123,74 @@ grupo_v9() {
     && ok 'V9 aceita somente os predecessores comprovados' || falha "V9 não integrou predecessores — rc=$rc, saída=$out"
   cd "$REPO" || return
 }
-grupo_checkpoint(){ falha 'grupo checkpoint ainda não implementado'; }
+grupo_checkpoint() {
+  local d out rc antes depois paths msg stage_antes stage_depois
+  fixture || { falha 'fixture MP2.7b não montou'; return; }
+  d="$FIXTURE_DIR"; cd "$d" || return
+
+  # O executor exige o orquestrador do trabalho, mas o catálogo estreito não o adota.
+  cat > docs/sprintx/features/ft-pre/ORQUESTRADOR.md <<'EOF'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: orquestrador
+trabalho_id: ft-pre
+---
+
+# Orquestrador
+EOF
+  git add -- docs/sprintx/features/ft-pre/ORQUESTRADOR.md
+  git commit -q -m 'docs: acrescenta orquestrador da fixture'
+
+  printf 'x\n\nTrabalho: ft-pre\nMetodo: predecessores\n' > "$d/metodo.msg"
+  rc_igual 'contrato aceita Metodo: predecessores' 0 bash "$CONTRATO" --validar-metodo \
+    --trabalho ft-pre --checkpoint predecessores --arquivo "$d/metodo.msg"
+  printf 'x\n\nTrabalho: ft-pre\nMetodo: retomar-v9-predecessores\n' > "$d/metodo.msg"
+  rc_igual 'contrato aceita Metodo: retomar-v9-predecessores' 0 bash "$CONTRATO" --validar-metodo \
+    --trabalho ft-pre --checkpoint retomar-v9-predecessores --arquivo "$d/metodo.msg"
+  printf 'x\n\nTask: T-01.01\nTrabalho: ft-pre\nMetodo: predecessores\n' > "$d/metodo.msg"
+  rc_igual 'checkpoint de método recusa Task' 2 bash "$CONTRATO" --validar-metodo \
+    --trabalho ft-pre --checkpoint predecessores --arquivo "$d/metodo.msg"
+
+  escreve_manifesto || { falha 'manifesto não foi escrito'; cd "$REPO" || return; return; }
+  out="$(bash "$PERSISTE" --listar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores)"; rc=$?
+  [ "$rc" = 0 ] && [ "$out" = "$FX_PRE_MANIFESTO" ] \
+    && ok 'catálogo predecessores contém somente o manifesto' || falha "catálogo predecessores divergente — rc=$rc, saída=$out"
+  antes="$(bash "$SEQ" --ler "$FX_PRE_ENTREGA" 2>/dev/null)"
+  out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores 2>&1)"; rc=$?
+  if [ "$rc" = 0 ]; then ok 'checkpoint predecessores foi persistido'; else falha "checkpoint predecessores falhou — rc=$rc, saída=$out"; fi
+  paths="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+  [ "$paths" = "$FX_PRE_MANIFESTO" ] && ok 'commit predecessores toca somente o manifesto' || falha "commit predecessores tocou: $paths"
+  rc_igual 'commit predecessores satisfaz o contrato' 0 bash "$CONTRATO" --validar-metodo \
+    --trabalho ft-pre --checkpoint predecessores --commit HEAD
+  depois="$(bash "$SEQ" --ler "$FX_PRE_ENTREGA" 2>/dev/null)"
+  [ "$antes" = "$depois" ] && ok 'checkpoint predecessores não consome seq nem ENTREGA.commits' || falha 'checkpoint predecessores alterou a sequência E1'
+
+  sed 's/^atualizado_em: .*/atualizado_em: 2026-10-14/' "$FX_PRE_ENTREGA" > "$FX_PRE_ENTREGA.tmp" \
+    && mv "$FX_PRE_ENTREGA.tmp" "$FX_PRE_ENTREGA"
+  out="$(bash "$PERSISTE" --listar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint retomar-v9-predecessores)"; rc=$?
+  [ "$rc" = 0 ] && [ "$out" = "$FX_PRE_ENTREGA" ] \
+    && ok 'catálogo retomar-v9-predecessores contém somente ENTREGA.md' || falha "catálogo da retomada divergente — rc=$rc, saída=$out"
+  out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint retomar-v9-predecessores 2>&1)"; rc=$?
+  if [ "$rc" = 0 ]; then ok 'checkpoint retomar-v9-predecessores foi persistido'; else falha "checkpoint retomada falhou — rc=$rc, saída=$out"; fi
+  paths="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+  [ "$paths" = "$FX_PRE_ENTREGA" ] && ok 'commit de retomada toca somente ENTREGA.md' || falha "commit de retomada tocou: $paths"
+  rc_igual 'commit de retomada satisfaz o contrato' 0 bash "$CONTRATO" --validar-metodo \
+    --trabalho ft-pre --checkpoint retomar-v9-predecessores --commit HEAD
+
+  # Stage preexistente: falha antes de adotar o manifesto e preserva bytes/paths.
+  printf '\nstage alheio\n' >> README.md
+  git add -- README.md
+  stage_antes="$(git diff --cached --binary)"
+  printf '\nmanifesto dirty\n' >> "$FX_PRE_MANIFESTO"
+  bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rc=$?
+  stage_depois="$(git diff --cached --binary)"
+  [ "$rc" != 0 ] && [ "$stage_antes" = "$stage_depois" ] \
+    && ! git diff --cached --name-only | grep -Fxq "$FX_PRE_MANIFESTO" \
+    && ok 'stage preexistente recusa sem limpar nem adotar path extra' \
+    || falha 'checkpoint alterou ou adotou stage preexistente'
+  cd "$REPO" || return
+}
 grupo_retomada()  { falha 'grupo retomada ainda não implementado'; }
 grupo_mp27b()     { falha 'grupo mp27b ainda não implementado'; }
 
