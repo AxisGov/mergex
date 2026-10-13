@@ -137,6 +137,7 @@ _fx_pre_corpo() { # <diretorio> <arquivo-de-shas>
   _fx_pre_msg "$msg" 'chore(mergex): persiste metodo e8 bloqueado' 'Trabalho: ft-pre' 'Metodo: e8'
   _fx_pre_commit "$msg" docs/entregas/ft-pre/ENTREGA.md
   FX_PRE_E8="$(git rev-parse HEAD)"
+  rm -f "$msg"
 
   {
     printf 'FX_PRE_BASE=%s\nFX_PRE_SPEC=%s\nFX_PRE_PLANO=%s\n' "$FX_PRE_BASE" "$FX_PRE_SPEC" "$FX_PRE_PLANO"

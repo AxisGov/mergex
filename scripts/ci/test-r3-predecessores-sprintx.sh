@@ -12,6 +12,7 @@ V9="${V9:-$S/portao-v9.sh}"
 PERSISTE="${PERSISTE:-$S/persistir-metodo.sh}"
 CONTRATO="${CONTRATO:-$S/contrato-de-commit.sh}"
 SEQ="${SEQ:-$S/sequencia-de-commits.sh}"
+RETOMA="${RETOMA:-$S/retomar-v9-predecessores.sh}"
 
 OK=0; FALHOU=0
 TMPS=()
@@ -191,7 +192,112 @@ EOF
     || falha 'checkpoint alterou ou adotou stage preexistente'
   cd "$REPO" || return
 }
-grupo_retomada()  { falha 'grupo retomada ainda não implementado'; }
+
+prepara_retomada() {
+  fixture || return 1
+  CENARIO_DIR="$FIXTURE_DIR"
+  cd "$CENARIO_DIR" || return 1
+  cat > docs/sprintx/features/ft-pre/ORQUESTRADOR.md <<'EOF'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: orquestrador
+trabalho_id: ft-pre
+---
+
+# Orquestrador
+EOF
+  git add -- docs/sprintx/features/ft-pre/ORQUESTRADOR.md
+  git commit -q -m 'docs: acrescenta orquestrador da fixture'
+  escreve_manifesto || return 1
+  bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1 || return 1
+  [ -z "$(git status --porcelain=v1 --untracked-files=all)" ]
+}
+
+muda_entrega() { # <expressão sed> — altera e commita a entrega da fixture
+  sed "$1" "$FX_PRE_ENTREGA" > "$FX_PRE_ENTREGA.tmp" && mv "$FX_PRE_ENTREGA.tmp" "$FX_PRE_ENTREGA" || return 1
+  git add -- "$FX_PRE_ENTREGA" && git commit -q -m 'test: varia estado terminal da entrega'
+}
+
+espera_recusa() { # <descrição> <expressão sed>
+  local desc="$1" expr="$2" rc
+  prepara_retomada || { falha "$desc: cenário não montou"; return; }
+  muda_entrega "$expr" || { falha "$desc: variante não commitou"; cd "$REPO" || return; return; }
+  bash "$RETOMA" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre >/dev/null 2>&1; rc=$?
+  [ "$rc" != 0 ] && ok "$desc" || falha "$desc: retomada aceitou estado proibido"
+  cd "$REPO" || return
+}
+
+grupo_retomada() {
+  local d out rc antes depois paths
+  prepara_retomada || { falha 'cenário pronto para retomada não montou'; return; }
+  d="$CENARIO_DIR"
+  antes="$(git status --porcelain=v1 --untracked-files=all)$(git rev-parse HEAD)"
+  out="$(bash "$RETOMA" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  depois="$(git status --porcelain=v1 --untracked-files=all)$(git rev-parse HEAD)"
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'ok=true' && printf '%s\n' "$out" | grep -Fxq 'proxima=E2' \
+    && [ "$antes" = "$depois" ] && ok '--verificar aprova sem escrever' || falha "--verificar divergente — rc=$rc, saída=$out"
+  out="$(bash "$RETOMA" --aplicar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'proxima=E2' \
+    && ok '--aplicar reabre e manda ao E2' || falha "--aplicar falhou — rc=$rc, saída=$out"
+  [ "$(sed -n 's/^estado:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = aberto ] \
+    && [ "$(sed -n 's/^portao:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = null ] \
+    && [ "$(sed -n 's/^portao_sha:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = null ] \
+    && [ "$(sed -n 's/^falhas_portao:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = '[]' ] \
+    && [ "$(sed -n 's/^causa:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = null ] \
+    && [ "$(sed -n 's/^desvios:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = '[]' ] \
+    && ok 'somente o estado terminal é limpo para a reexecução' || falha 'campos da reabertura divergentes'
+  paths="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+  [ "$paths" = "$FX_PRE_ENTREGA" ] && ok 'checkpoint da retomada toca somente ENTREGA.md' || falha "retomada tocou: $paths"
+  rc_igual 'commit da retomada satisfaz o contrato' 0 bash "$CONTRATO" --validar-metodo \
+    --trabalho ft-pre --checkpoint retomar-v9-predecessores --commit HEAD
+  rc_igual 'repetição depois de reaberto é recusada' 3 bash "$RETOMA" --verificar \
+    --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
+  cd "$REPO" || return
+
+  espera_recusa 'estado diferente de bloqueado é recusado' 's/^estado: bloqueado$/estado: entregue/'
+  espera_recusa 'portão diferente de bloqueado é recusado' 's/^portao: bloqueado$/portao: pronto/'
+  espera_recusa 'falhas diferentes de [v9] são recusadas' 's/^falhas_portao: \[v9\]$/falhas_portao: [v1, v9]/'
+  espera_recusa 'causa diferente é recusada' 's/^causa: arquivo_fora_do_plano$/causa: bloqueio_aberto/'
+  espera_recusa 'push já feito é recusado' 's/^push_feito: false$/push_feito: true/'
+  espera_recusa 'PR presente é recusado' 's/^pr_url: null$/pr_url: https:\/\/example.invalid\/1/'
+  espera_recusa 'reconciliação pendente é recusada' 's/^reconciliacoes: \[\]$/reconciliacoes: [RECONCILIACAO-BASE-001.md]/'
+
+  prepara_retomada || { falha 'cenário para desvio adicional não montou'; return; }
+  sed '/^  - docs\/superpowers\/plans\/exemplo.md$/a\  - docs/superpowers/specs/nao-declarado.md' "$FX_PRE_ENTREGA" > "$FX_PRE_ENTREGA.tmp" \
+    && mv "$FX_PRE_ENTREGA.tmp" "$FX_PRE_ENTREGA"
+  git add -- "$FX_PRE_ENTREGA" && git commit -q -m 'test: acrescenta desvio não coberto'
+  rc_igual 'desvio não coberto pelo manifesto é recusado' 3 bash "$RETOMA" --verificar \
+    --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
+  cd "$REPO" || return
+
+  fixture || { falha 'cenário sem manifesto não montou'; return; }
+  d="$FIXTURE_DIR"; cd "$d" || return
+  rc_igual 'V9 ainda vermelha é recusada' 3 bash "$RETOMA" --verificar \
+    --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
+  cd "$REPO" || return
+
+  fixture || { falha 'cenário inconclusivo não montou'; return; }
+  d="$FIXTURE_DIR"; cd "$d" || return
+  printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: quebrado' '---' > "$FX_PRE_MANIFESTO"
+  git add -- "$FX_PRE_MANIFESTO" && git commit -q -m 'test: manifesto inconclusivo'
+  rc_igual 'V9 sem prova é recusada' 3 bash "$RETOMA" --verificar \
+    --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
+  cd "$REPO" || return
+
+  prepara_retomada || { falha 'cenário para disco sujo não montou'; return; }
+  printf '\ndivergencia de disco\n' >> "$FX_PRE_ENTREGA"
+  rc_igual 'ENTREGA.md do disco diferente de HEAD é recusado' 3 bash "$RETOMA" --verificar \
+    --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
+  cd "$REPO" || return
+
+  prepara_retomada || { falha 'cenário para stage sujo não montou'; return; }
+  printf '\nstage sujo\n' >> README.md; git add -- README.md
+  rc_igual 'stage ou árvore sujos são recusados' 3 bash "$RETOMA" --verificar \
+    --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
+  cd "$REPO" || return
+}
 grupo_mp27b()     { falha 'grupo mp27b ainda não implementado'; }
 
 roda_grupo() {
