@@ -49,14 +49,14 @@ _fx_pre_tasks() {
 
 _fx_pre_entrega() { # <base_sha> <e8:0|1> <sha1> ... <sha6>
   local base="$1" fechada="$2"; shift 2
-  local estado=aberto portao=bloqueado causa=arquivo_fora_do_plano i=1 c
-  [ "$fechada" = 1 ] && estado=bloqueado
+  local estado=aberto portao=bloqueado portao_sha=null causa=arquivo_fora_do_plano i=1 c
+  if [ "$fechada" = 1 ]; then estado=bloqueado; portao_sha="$base"; fi
   mkdir -p docs/entregas/ft-pre || return 1
   {
     printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: entrega' \
       'trabalho_id: ft-pre' 'entregue_por: mergex'
     printf 'estado: %s\nversionado: true\nbranch: feature/ft-pre\nbranch_base: main\n' "$estado"
-    printf 'base_validada_sha: %s\norigem_base: registrada_e0\nreconciliacoes: []\nportao_sha: null\n' "$base"
+    printf 'base_validada_sha: %s\norigem_base: registrada_e0\nreconciliacoes: []\nportao_sha: %s\n' "$base" "$portao_sha"
     printf 'commits:\n'
     for c in "$@"; do
       printf '  - seq: %d\n    task: T-01.%02d\n    commit: %s\n' "$i" "$i" "$c"
@@ -159,4 +159,26 @@ fx_predecessores_cenario() { # <diretorio>
   FX_PRE_PLAN_PATH=docs/superpowers/plans/exemplo.md
   export FX_PRE_BASE FX_PRE_SPEC FX_PRE_PLANO FX_PRE_NASCIMENTO FX_PRE_PRE_E2 FX_PRE_E8
   export FX_PRE_ENTREGA FX_PRE_MANIFESTO FX_PRE_SPEC_PATH FX_PRE_PLAN_PATH
+}
+
+# Cópia mínima do contrato de saída do registrador da SprintX. A fixture da
+# MergeX não importa o repositório irmão: deriva commit e blob pelo Git real e
+# produz exatamente o manifesto que o consumidor recebe.
+fx_predecessores_registra_sprintx() {
+  local spec_commit plan_commit spec_blob plan_blob destino
+  destino="${1:-$FX_PRE_MANIFESTO}"
+  spec_commit="$(git log -1 --format=%H -- "$FX_PRE_SPEC_PATH")" || return 1
+  plan_commit="$(git log -1 --format=%H -- "$FX_PRE_PLAN_PATH")" || return 1
+  spec_blob="$(git rev-parse "$spec_commit:$FX_PRE_SPEC_PATH")" || return 1
+  plan_blob="$(git rev-parse "$plan_commit:$FX_PRE_PLAN_PATH")" || return 1
+  {
+    printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: predecessores' \
+      'trabalho_id: ft-pre' 'predecessores:'
+    printf '  - caminho: %s\n    origem: superpowers\n    papel: especificacao\n    commit_sha: %s\n    blob_oid: %s\n' \
+      "$FX_PRE_SPEC_PATH" "$spec_commit" "$spec_blob"
+    printf '  - caminho: %s\n    origem: superpowers\n    papel: plano\n    commit_sha: %s\n    blob_oid: %s\n' \
+      "$FX_PRE_PLAN_PATH" "$plan_commit" "$plan_blob"
+    printf '%s\n' 'criado_em: 2026-10-13' 'atualizado_em: 2026-10-13' '---' '' \
+      '# Predecessores' '' '- especificacao e plano consumidos antes da SprintX.'
+  } > "$destino"
 }

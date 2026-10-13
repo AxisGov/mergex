@@ -841,7 +841,7 @@ grep -Fq '**Leitura não trava nada**' "$commits" \
 # `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
 escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-r1-reconciliacao-base.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-r1-reconciliacao-base.sh ./scripts/ci/mutacao-r3-predecessores-sprintx.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$escritores" = "$esperado" ] \
   || fail "unexpected executable writer of ENTREGA.commits: $escritores"
 grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
@@ -1646,6 +1646,10 @@ grep -Fq 'MergeX anterior não entende o manifesto' README.md \
   || fail 'README não registra a compatibilidade coordenada'
 grep -Fq 'references/13-predecessores-sprintx.md' "$skill" \
   || fail 'SKILL.md não aponta para 13-predecessores-sprintx.md'
+if grep -REn -- 'evento:[[:space:]]*"?(predecessor_registrado|predecessores_validados|retomada_predecessores)"?' \
+    "$pred_ref" "$pred_sh" "$retoma_pred_sh"; then
+  fail 'predecessores SprintX inventam evento fora do vocabulário ExpxDev'
+fi
 
 # Nenhum executável da skill aceita opção de bypass (varredura; sem guarda).
 # Limite: só pega a opção longa escrita literalmente em scripts/*.sh (não lê

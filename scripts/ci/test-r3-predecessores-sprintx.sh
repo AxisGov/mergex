@@ -36,19 +36,7 @@ fixture() {
 }
 
 escreve_manifesto() { # usa a fixture corrente; não faz commit
-  local bs bp
-  bs="$(git rev-parse "$FX_PRE_SPEC:$FX_PRE_SPEC_PATH")" || return 1
-  bp="$(git rev-parse "$FX_PRE_PLANO:$FX_PRE_PLAN_PATH")" || return 1
-  {
-    printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: predecessores' \
-      'trabalho_id: ft-pre' 'predecessores:'
-    printf '  - caminho: %s\n    origem: superpowers\n    papel: especificacao\n    commit_sha: %s\n    blob_oid: %s\n' \
-      "$FX_PRE_SPEC_PATH" "$FX_PRE_SPEC" "$bs"
-    printf '  - caminho: %s\n    origem: superpowers\n    papel: plano\n    commit_sha: %s\n    blob_oid: %s\n' \
-      "$FX_PRE_PLAN_PATH" "$FX_PRE_PLANO" "$bp"
-    printf '%s\n' 'criado_em: 2026-10-13' 'atualizado_em: 2026-10-13' '---' '' \
-      '# Predecessores' '' '- especificacao e plano consumidos antes da SprintX.'
-  } > "$FX_PRE_MANIFESTO"
+  fx_predecessores_registra_sprintx "$FX_PRE_MANIFESTO"
 }
 
 grava_manifesto() { # usa a fixture corrente e cria um commit simples do manifesto
@@ -76,12 +64,67 @@ grupo_verificador() {
     && ok 'dois predecessores imutáveis e anteriores são aprovados' \
     || falha "predecessores válidos reprovados — rc=$rc, saída=$out"
 
+  awk 'BEGIN{n=0} /^---$/ {n++; if(n==2) print "kind: quebrado"} {print}' \
+    "$FX_PRE_MANIFESTO" > "$FX_PRE_MANIFESTO.tmp" && mv "$FX_PRE_MANIFESTO.tmp" "$FX_PRE_MANIFESTO"
+  out="$(bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n '1p')" = resultado=ok ] \
+    && ok 'verificador lê o manifesto de HEAD, nunca o disco' || falha "manifesto do disco contaminou a prova — rc=$rc, saída=$out"
+  git restore --worktree -- "$FX_PRE_MANIFESTO"
+
   printf '\nMudanca posterior.\n' >> "$FX_PRE_SPEC_PATH"
   git add -- "$FX_PRE_SPEC_PATH" && git commit -q -m 'docs: altera predecessor depois do manifesto'
   out="$(bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre)"; rc=$?
   [ "$rc" = 1 ] && [ "$(printf '%s\n' "$out" | sed -n '1p')" = resultado=v9 ] \
     && printf '%s\n' "$out" | grep -Fq $'fora_do_plano\tdocs/superpowers/specs/exemplo-design.md\tblob_divergente' \
     && ok 'blob atual divergente é v9 conhecido' || falha "divergência não virou v9 — rc=$rc, saída=$out"
+  cd "$REPO" || return
+
+  fixture || { falha 'fixture para predecessor no nascimento não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'manifesto do caso nascimento não foi commitado'; cd "$REPO" || return; return; }
+  sed "0,/^    commit_sha: /s/^    commit_sha: .*$/    commit_sha: $FX_PRE_NASCIMENTO/" "$FX_PRE_MANIFESTO" > "$FX_PRE_MANIFESTO.tmp" \
+    && mv "$FX_PRE_MANIFESTO.tmp" "$FX_PRE_MANIFESTO"
+  git add -- "$FX_PRE_MANIFESTO" && git commit -q -m 'test: predecessor igual ao nascimento'
+  rc_igual 'commit igual ao nascimento falha fechado' 3 bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre
+  cd "$REPO" || return
+
+  fixture || { falha 'fixture para predecessor posterior não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'manifesto do caso posterior não foi commitado'; cd "$REPO" || return; return; }
+  posterior="$(git rev-parse HEAD)"
+  sed "0,/^    commit_sha: /s/^    commit_sha: .*$/    commit_sha: $posterior/" "$FX_PRE_MANIFESTO" > "$FX_PRE_MANIFESTO.tmp" \
+    && mv "$FX_PRE_MANIFESTO.tmp" "$FX_PRE_MANIFESTO"
+  git add -- "$FX_PRE_MANIFESTO" && git commit -q -m 'test: predecessor posterior ao nascimento'
+  rc_igual 'commit posterior ao nascimento falha fechado' 3 bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre
+  cd "$REPO" || return
+
+  fixture || { falha 'fixture para SHA humano não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'manifesto do caso SHA humano não foi commitado'; cd "$REPO" || return; return; }
+  curto="$(printf '%s' "$FX_PRE_SPEC" | cut -c1-8)"
+  sed "0,/^    commit_sha: /s/^    commit_sha: .*$/    commit_sha: $curto/" "$FX_PRE_MANIFESTO" > "$FX_PRE_MANIFESTO.tmp" \
+    && mv "$FX_PRE_MANIFESTO.tmp" "$FX_PRE_MANIFESTO"
+  git add -- "$FX_PRE_MANIFESTO" && git commit -q -m 'test: predecessor usa SHA abreviado humano'
+  rc_igual 'SHA abreviado humano falha fechado' 3 bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre
+  cd "$REPO" || return
+
+  fixture || { falha 'fixture para entrada inválida não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'manifesto do caso inválido não foi commitado'; cd "$REPO" || return; return; }
+  awk 'BEGIN{n=0} /^    origem: superpowers$/ {n++; if(n==2){print "    origem: desconhecida"; next}} {print}' \
+    "$FX_PRE_MANIFESTO" > "$FX_PRE_MANIFESTO.tmp" && mv "$FX_PRE_MANIFESTO.tmp" "$FX_PRE_MANIFESTO"
+  git add -- "$FX_PRE_MANIFESTO" && git commit -q -m 'test: uma entrada inválida entre duas'
+  rc_igual 'uma entrada inválida reprova o conjunto inteiro' 3 bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre
+  cd "$REPO" || return
+
+  fixture || { falha 'fixture para symlink não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'manifesto do caso symlink não foi commitado'; cd "$REPO" || return; return; }
+  rm -f "$FX_PRE_SPEC_PATH" && ln -s exemplo.md "$FX_PRE_SPEC_PATH"
+  git add -- "$FX_PRE_SPEC_PATH" && git commit -q -m 'test: predecessor vira symlink'
+  out="$(bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 1 ] && printf '%s\n' "$out" | grep -Fq $'fora_do_plano\tdocs/superpowers/specs/exemplo-design.md\tblob_divergente' \
+    && ok 'symlink no predecessor é recusado' || falha "symlink não foi recusado — rc=$rc, saída=$out"
   cd "$REPO" || return
 }
 
@@ -122,6 +165,12 @@ grupo_v9() {
   out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
   [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' \
     && ok 'V9 aceita somente os predecessores comprovados' || falha "V9 não integrou predecessores — rc=$rc, saída=$out"
+  mkdir -p docs/superpowers/outros
+  printf 'nao declarado\n' > docs/superpowers/outros/nao-declarado.md
+  git add -- docs/superpowers/outros/nao-declarado.md && git commit -q -m 'test: acrescenta superpowers não declarado'
+  out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 1 ] && printf '%s\n' "$out" | grep -Fq $'fora_do_plano\tdocs/superpowers/outros/nao-declarado.md' \
+    && ok 'prefixo docs/superpowers não cria isenção' || falha "prefixo indevidamente aceito — rc=$rc, saída=$out"
   cd "$REPO" || return
 }
 grupo_checkpoint() {
@@ -335,7 +384,81 @@ grupo_contrato() {
     && ok 'README registra a compatibilidade coordenada' || falha 'README omite a compatibilidade coordenada'
 }
 
-grupo_mp27b()     { falha 'grupo mp27b ainda não implementado'; }
+e2_fixture_completo() {
+  local tasks="docs/sprintx/features/ft-pre/sprint-01/tasks.md" out rc
+  [ "$(grep -c '^[[:space:]]*- id: T-' "$tasks")" = 6 ] \
+    && [ "$(grep -c '^[[:space:]]*status: concluida$' "$tasks")" = 6 ] || return 1
+  printf 'V1=OK\n'
+  [ "$(grep -c '^[[:space:]]*suite: verde$' "$tasks")" = 6 ] || return 1
+  printf 'V2=OK\n'
+  [ "$(grep -c '^[[:space:]]*teste_integracao:' "$tasks")" = 6 ] \
+    && [ "$(grep -c '^[[:space:]]*teste_funcional:' "$tasks")" = 6 ] || return 1
+  printf 'V3=OK\nV4=n/a\nV5=n/a\nV6=n/a\nV7=OK\nV8=n/a\n'
+  out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' || return 1
+  printf 'V9=OK\n'
+  ! git diff "$FX_PRE_BASE...HEAD" | grep -Eqi '(BEGIN [A-Z ]*PRIVATE KEY|password[[:space:]]*=|token[[:space:]]*=)' || return 1
+  printf 'V10=OK\n'
+  out="$(bash "$S/prova-de-commit.sh" --verificar "$FX_PRE_ENTREGA" "$tasks")"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'V11=OK' || return 1
+  printf 'V11=OK\n'
+}
+
+grupo_mp27b() {
+  local out rc tasks_antes commits_antes base_antes rec_antes seq_antes remoto_antes paths
+  fixture || { falha 'fixture MP2.7b não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  tasks_antes="$(git rev-parse "HEAD:docs/sprintx/features/ft-pre/sprint-01/tasks.md")"
+  commits_antes="$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n '/^commits:/,/^[A-Za-z_][A-Za-z0-9_]*:/p')"
+  base_antes="$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n 's/^base_validada_sha:[[:space:]]*//p')"
+  rec_antes="$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n 's/^reconciliacoes:[[:space:]]*//p')"
+  seq_antes="$(bash "$SEQ" --ler "$FX_PRE_ENTREGA")"
+  remoto_antes="$(git remote)"
+  [ "$(git rev-parse HEAD)" = "$FX_PRE_E8" ] && ok 'MP2.7b parte do E8 bloqueado' || falha 'MP2.7b não parte do E8 bloqueado'
+
+  printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: orquestrador' \
+    'trabalho_id: ft-pre' '---' '' '# Orquestrador' > docs/sprintx/features/ft-pre/ORQUESTRADOR.md
+  git add -- docs/sprintx/features/ft-pre/ORQUESTRADOR.md \
+    && git commit -q -m 'docs: materializa orquestrador da fixture' \
+    || { falha 'orquestrador da fixture não foi commitado'; cd "$REPO" || return; return; }
+  escreve_manifesto || { falha 'registrador SprintX da fixture falhou'; cd "$REPO" || return; return; }
+  [ "$(grep -c '^  - caminho:' "$FX_PRE_MANIFESTO")" = 2 ] \
+    && ok 'registrador SprintX produz os dois predecessores' || falha 'registrador SprintX produziu manifesto divergente'
+  bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rc=$?
+  [ "$rc" = 0 ] && ok 'checkpoint predecessores fecha o registro' || falha "checkpoint predecessores falhou — rc=$rc"
+  out="$(bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' \
+    && ok 'manifesto persistido valida por conteúdo e história' || falha "manifesto não validou — rc=$rc, saída=$out"
+  out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' \
+    && ok 'V9 fica verde com predecessores exatos' || falha "V9 não ficou verde — rc=$rc, saída=$out"
+  out="$(bash "$RETOMA" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'proxima=E2' \
+    && ok 'retomada é verificada antes da escrita' || falha "verificação da retomada falhou — rc=$rc, saída=$out"
+  out="$(bash "$RETOMA" --aplicar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'proxima=E2' \
+    && ok 'retomada aplica o checkpoint e exige E2' || falha "aplicação da retomada falhou — rc=$rc, saída=$out"
+  paths="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+  [ "$paths" = "$FX_PRE_ENTREGA" ] && ok 'checkpoint da retomada toca somente ENTREGA.md' \
+    || falha "checkpoint da retomada tocou: $paths"
+  out="$(e2_fixture_completo)"; rc=$?
+  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | grep -c '^V\([1-9]\|10\|11\)=')" = 11 ] \
+    && printf '%s\n' "$out" | grep -Fxq 'V9=OK' \
+    && ok 'E2 completo V1–V11 roda novamente' || falha "E2 pós-retomada incompleto — rc=$rc, saída=$out"
+  [ "$(git rev-parse "HEAD:docs/sprintx/features/ft-pre/sprint-01/tasks.md")" = "$tasks_antes" ] \
+    && [ "$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n '/^commits:/,/^[A-Za-z_][A-Za-z0-9_]*:/p')" = "$commits_antes" ] \
+    && [ "$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n 's/^base_validada_sha:[[:space:]]*//p')" = "$base_antes" ] \
+    && [ "$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n 's/^reconciliacoes:[[:space:]]*//p')" = "$rec_antes" ] \
+    && [ "$(bash "$SEQ" --ler "$FX_PRE_ENTREGA")" = "$seq_antes" ] \
+    && ok 'tasks, commits E1, seq, base e reconciliações permanecem imutáveis' \
+    || falha 'retomada alterou uma invariante congelada'
+  [ "$(git remote)" = "$remoto_antes" ] && [ -z "$remoto_antes" ] \
+    && ok 'fluxo não cria remoto, push nem PR' || falha 'fluxo tocou configuração remota'
+  [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] \
+    && ok 'fluxo termina com árvore e stage limpos' || falha 'fluxo deixou escrita fora dos dois checkpoints'
+  cd "$REPO" || return
+}
 
 roda_grupo() {
   case "$1" in
