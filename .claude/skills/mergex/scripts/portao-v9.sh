@@ -88,6 +88,7 @@ OWNERSHIP_SH="$AQUI/ownership-da-task.sh"
 ARTEFATO_SH="$AQUI/reconciliacao-artefato.sh"
 RB_SH="$AQUI/reconciliacao-base.sh"
 ARVORE_SH="$AQUI/reconciliacao-arvore.sh"
+PREDECESSORES_SH="$AQUI/predecessores-sprintx.sh"
 g() { git -c core.quotepath=false "$@"; }
 
 NL='
@@ -136,7 +137,7 @@ esac
 case "$ENTREGA" in ./*) ENTREGA="${ENTREGA#./}" ;; esac
 [ "$ENTREGA" = "docs/entregas/$TRABALHO/ENTREGA.md" ] || uso "--entrega deve ser docs/entregas/$TRABALHO/ENTREGA.md"
 
-for dependencia in "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH" "$RB_SH" "$ARVORE_SH"; do
+for dependencia in "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH" "$RB_SH" "$ARVORE_SH" "$PREDECESSORES_SH"; do
   [ -r "$dependencia" ] || sem_prova "dependência indisponível: $dependencia"
 done
 # shellcheck source=catalogo-de-metodo.sh
@@ -334,6 +335,50 @@ bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 
   || sem_prova "união das tasks de HEAD não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")" # guarda:V9UNIAO
 
 # ---------------------------------------------------------------------------
+# Predecessores SprintX: protocolo fechado, validado por conteúdo E por rc.
+# A ausência preserva a V9 histórica; RunX não tem este artefato.
+# ---------------------------------------------------------------------------
+: > "$TMP_DIR/predecessores-aceitos"
+: > "$TMP_DIR/predecessores-fora"
+if [ "$ORIGEM" = sprintx ]; then
+  bash "$PREDECESSORES_SH" --verificar --rev "$HEAD_SHA" --trabalho "$TRABALHO" \
+    > "$TMP_DIR/predecessores.out" 2> "$TMP_DIR/predecessores.err"
+  RC_PRE=$?
+  RESULTADOS="$(grep -c '^resultado=' "$TMP_DIR/predecessores.out" 2>/dev/null)"
+  RESULTADO="$(sed -n 's/^resultado=//p' "$TMP_DIR/predecessores.out")"
+  PRE_N=0; FORA_N=0; MOTIVO_N=0; INVALIDA=0
+  [ "$RESULTADOS" = 1 ] || INVALIDA=1
+  while IFS="$TAB" read -r tipo a b c extra; do
+    case "$tipo" in
+      resultado=*) [ -z "$a$b$c$extra" ] || INVALIDA=1 ;;
+      predecessor)
+        case "$a" in ''|*"$TAB"*|*$'\n'*) INVALIDA=1 ;; esac
+        printf '%s' "$b$c" | grep -Eq '^[0-9a-f]{80}$' || INVALIDA=1
+        [ -z "$extra" ] || INVALIDA=1
+        PRE_N=$((PRE_N + 1)); printf '%s\n' "$a" >> "$TMP_DIR/predecessores-aceitos" ;;
+      fora_do_plano)
+        [ -n "$a" ] && [ "$b" = blob_divergente ] && [ -z "$c$extra" ] || INVALIDA=1
+        FORA_N=$((FORA_N + 1)); printf 'fora_do_plano\t%s\tblob_divergente\n' "$a" >> "$TMP_DIR/predecessores-fora" ;;
+      motivo)
+        [ -n "$a" ] && [ -z "$b$c$extra" ] || INVALIDA=1
+        MOTIVO_N=$((MOTIVO_N + 1)) ;;
+      '') [ -z "$a$b$c$extra" ] || INVALIDA=1 ;;
+      *) INVALIDA=1 ;;
+    esac
+  done < "$TMP_DIR/predecessores.out"
+  case "$RESULTADO:$RC_PRE" in
+    ausente:0) [ "$PRE_N:$FORA_N:$MOTIVO_N" = 0:0:0 ] || INVALIDA=1 ;;
+    ok:0) [ "$PRE_N" -ge 1 ] && [ "$FORA_N:$MOTIVO_N" = 0:0 ] || INVALIDA=1 ;;
+    v9:1) [ "$FORA_N" -ge 1 ] && [ "$MOTIVO_N" = 0 ] || INVALIDA=1 ;;
+    v9_sem_prova:3) [ "$MOTIVO_N" -ge 1 ] && [ "$PRE_N:$FORA_N" = 0:0 ] || INVALIDA=1 ;;
+    *) INVALIDA=1 ;;
+  esac
+  [ "$INVALIDA" = 0 ] || sem_prova 'predecessores-sprintx: saida_inconclusiva'
+  [ "$RESULTADO" != v9_sem_prova ] || sem_prova 'predecessores-sprintx: v9_sem_prova'
+  cat "$TMP_DIR/predecessores-aceitos" >> "$TMP_DIR/uniao"
+fi
+
+# ---------------------------------------------------------------------------
 # O diff e o conjunto aceito.
 # ---------------------------------------------------------------------------
 # --raw: os mesmos caminhos de --name-only, um registro `:<modo> <modo> <sha>
@@ -342,11 +387,14 @@ g diff --raw -z --no-abbrev --no-renames --ignore-submodules=none "$BASE...$HEAD
   || sem_prova "diff $BASE...HEAD não calculável" # guarda:SUB
 contem() { grep -Fxq -e "$2" "$1"; }
 : > "$TMP_DIR/fora"
+cat "$TMP_DIR/predecessores-fora" >> "$TMP_DIR/fora"
 while IFS= read -r -d '' cab <&3 && IFS= read -r -d '' p <&3; do
   case "$p" in
     *"$NL"*|*"$TAB"*) printf 'fora_do_plano\t%s\n' "$(printf '%s' "$p" | tr '\t\n' '??')" >> "$TMP_DIR/fora"; continue ;;
   esac
   contem "$TMP_DIR/uniao" "$p" && continue
+  contem "$TMP_DIR/predecessores-aceitos" "$p" && continue
+  if awk -F'\t' -v p="$p" '$1 == "fora_do_plano" && $2 == p { achou=1 } END { exit !achou }' "$TMP_DIR/predecessores-fora"; then continue; fi
   # submódulo (gitlink) fora da união: nunca isento nem coberto
   case "$cab" in ':160000 '*|':'*' 160000 '*) printf 'fora_do_plano\t%s\n' "$p" >> "$TMP_DIR/fora"; continue ;; esac # guarda:SUB
   case "$p" in "$PASTA"/*|"$DIR_E"/*) continue ;; esac
@@ -359,7 +407,7 @@ printf 'base=%s\norigem_base=%s\n' "$BASE" "$ORIGEM_BASE"
 cat "$AVISOS"
 if [ -s "$TMP_DIR/fora" ]; then
   printf 'resultado=v9\n'
-  LC_ALL=C sort "$TMP_DIR/fora"
+  LC_ALL=C sort -u "$TMP_DIR/fora"
   exit 1
 fi
 printf 'resultado=ok\n'
