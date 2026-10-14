@@ -745,7 +745,11 @@ grupo_contrato() {
       && ok "$f publica a invocação completa da retomada" \
       || falha "$f omite argumento obrigatório da retomada"
   done
-  local invocacao_pre_e2='persistir-metodo.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho> --checkpoint pre-e2'
+  local invocacao_retomada='bash .claude/skills/mergex/scripts/retomar-v9-predecessores.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho>'
+  grep -Fq "$invocacao_retomada" "$REPO/.claude/skills/mergex/references/13-predecessores-sprintx.md" \
+    && ok 'referência 13 publica comando executável completo da retomada' \
+    || falha 'referência 13 publica retomada sem caminho executável a partir da raiz'
+  local invocacao_pre_e2='bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho> --checkpoint pre-e2'
   for f in .claude/skills/mergex/references/02-prontidao.md \
            .claude/skills/mergex/references/13-predecessores-sprintx.md; do
     grep -Fq "$invocacao_pre_e2" "$REPO/$f" \

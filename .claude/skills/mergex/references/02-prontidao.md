@@ -345,7 +345,7 @@ Quando o único bloqueio é V9 e os caminhos são predecessores SprintX consumid
 antes do planejamento, a única retomada admitida é a de
 `references/13-predecessores-sprintx.md`. Depois dos checkpoints
 `predecessores` e `retomar-v9-predecessores`, recomece pela barreira
-`persistir-metodo.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho> --checkpoint pre-e2`
+`bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho> --checkpoint pre-e2`
 e rode **todas** as V1–V11.
 A retomada nunca reutiliza o resultado anterior e nunca salta diretamente para E3.
 
