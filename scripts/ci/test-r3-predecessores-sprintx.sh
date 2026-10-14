@@ -231,6 +231,16 @@ grupo_v9() {
     && ! printf '%s\n' "$out" | grep -q $'^fora_do_plano\t[^\t]*\t' \
     && ok 'V9 publica fora_do_plano com exatamente duas colunas' \
     || falha "V9 expôs detalhe interno na saída pública — rc=$rc, saída=$out"
+  sed "0,/altera: \[\]/{s|altera: \[\]|altera: [$FX_PRE_SPEC_PATH]|}" \
+    docs/sprintx/features/ft-pre/sprint-01/tasks.md > docs/sprintx/features/ft-pre/sprint-01/tasks.md.tmp \
+    && mv docs/sprintx/features/ft-pre/sprint-01/tasks.md.tmp docs/sprintx/features/ft-pre/sprint-01/tasks.md
+  git add -- docs/sprintx/features/ft-pre/sprint-01/tasks.md \
+    && git commit -q -m 'test: task passa a declarar predecessor divergente'
+  out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' \
+    && ! printf '%s\n' "$out" | grep -Fq $'fora_do_plano\t' \
+    && ok 'predecessor divergente declarado na união das tasks não fica fora do plano' \
+    || falha "V9 ignorou a declaração explícita da task — rc=$rc, saída=$out"
   mkdir -p docs/superpowers/outros
   printf 'nao declarado\n' > docs/superpowers/outros/nao-declarado.md
   git add -- docs/superpowers/outros/nao-declarado.md && git commit -q -m 'test: acrescenta superpowers não declarado'
@@ -527,6 +537,45 @@ EOF
     && ok 'stage preexistente recusa sem limpar nem adotar path extra' \
     || falha 'checkpoint alterou ou adotou stage preexistente'
   cd "$REPO" || return
+
+  fixture_sha256 || { falha 'fixture SHA-256 para checkpoint não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  cat > docs/sprintx/features/ft-pre/ORQUESTRADOR.md <<'EOF'
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: orquestrador
+trabalho_id: ft-pre
+---
+
+# Orquestrador
+EOF
+  git add -- docs/sprintx/features/ft-pre/ORQUESTRADOR.md
+  git commit -q -m 'docs: acrescenta orquestrador da fixture SHA-256'
+  escreve_manifesto || { falha 'manifesto SHA-256 não foi escrito'; cd "$REPO" || return; return; }
+  out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx \
+    --trabalho ft-pre --checkpoint predecessores 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && [ "$(git rev-parse --show-object-format)" = sha256 ] \
+    && [ "$(git rev-parse HEAD | wc -c | tr -d ' ')" = 65 ] \
+    && [ -z "$(git status --porcelain=v1 --untracked-files=all)" ] \
+    && ok 'checkpoint conclui com SHA-256 completo' \
+    || falha "checkpoint SHA-256 falhou depois do commit — rc=$rc, saída=$out"
+  cd "$REPO" || return
+
+  fixture || { falha 'fixture para falha do diagnóstico da trava não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  local trava_path
+  trava_path="$(bash "$TRAVA" --caminho)"
+  bash -c '
+    . "$1" || exit 1
+    mkdir() { command mkdir "$@" || return; chmod a-w "$1"; }
+    adquirir teste-diagnostico
+  ' _ "$TRAVA" >/dev/null 2>&1; rc=$?
+  [ "$rc" != 0 ] && [ ! -e "$trava_path" ] \
+    && ok 'falha ao gravar dono remove somente a trava recém-criada' \
+    || falha 'falha ao gravar dono deixou trava órfã'
+  [ ! -e "$trava_path" ] || { chmod u+w "$trava_path" 2>/dev/null || true; rmdir "$trava_path" 2>/dev/null || true; }
+  cd "$REPO" || return
 }
 
 prepara_retomada() {
@@ -578,6 +627,20 @@ grupo_retomada() {
   depois="$(git status --porcelain=v1 --untracked-files=all)$(git rev-parse HEAD)"
   [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'ok=true' && printf '%s\n' "$out" | grep -Fxq 'proxima=E2' \
     && [ "$antes" = "$depois" ] && ok '--verificar aprova sem escrever' || falha "--verificar divergente — rc=$rc, saída=$out"
+
+  prepara_retomada || { falha 'cenário para branch divergente não montou'; return; }
+  git switch -q -c feature/ft-pre-divergente \
+    || { falha 'branch divergente não foi criada'; cd "$REPO" || return; return; }
+  antes="$(git status --porcelain=v1 --untracked-files=all)$(git rev-parse HEAD)"
+  out="$(bash "$RETOMA" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre 2>&1)"; rc=$?
+  depois="$(git status --porcelain=v1 --untracked-files=all)$(git rev-parse HEAD)"
+  [ "$rc" != 0 ] && printf '%s\n' "$out" | grep -Fq 'branch ativa diverge da entrega' \
+    && [ "$antes" = "$depois" ] \
+    && ok 'retomada recusa branch diferente da ENTREGA sem escrever' \
+    || falha "retomada aceitou branch divergente — rc=$rc, saída=$out"
+  cd "$REPO" || return
+
+  prepara_retomada || { falha 'cenário pronto para aplicar não montou'; return; }
   out="$(bash "$RETOMA" --aplicar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre 2>&1)"; rc=$?
   [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'proxima=E2' \
     && ok '--aplicar reabre e manda ao E2' || falha "--aplicar falhou — rc=$rc, saída=$out"
@@ -681,6 +744,13 @@ grupo_contrato() {
       && grep -Fq -- '--trabalho <trabalho>' "$REPO/$f" \
       && ok "$f publica a invocação completa da retomada" \
       || falha "$f omite argumento obrigatório da retomada"
+  done
+  local invocacao_pre_e2='persistir-metodo.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho> --checkpoint pre-e2'
+  for f in .claude/skills/mergex/references/02-prontidao.md \
+           .claude/skills/mergex/references/13-predecessores-sprintx.md; do
+    grep -Fq "$invocacao_pre_e2" "$REPO/$f" \
+      && ok "$f publica todos os argumentos da barreira pre-e2 após a retomada" \
+      || falha "$f abrevia a barreira pre-e2 e omite argumentos obrigatórios"
   done
   cmp -s "$REPO/.claude/commands/mergex.md" "$REPO/.opencode/commands/mergex.md" \
     && ok 'entrypoint mergex é idêntico nos dois harnesses' || falha 'entrypoint mergex diverge entre harnesses'
