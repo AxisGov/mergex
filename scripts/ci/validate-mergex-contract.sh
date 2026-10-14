@@ -27,11 +27,13 @@ abrir_cmd='.claude/commands/mergex-abrir.md'
 abrir_oc='.opencode/commands/mergex-abrir.md'
 mergex_cmd='.claude/commands/mergex.md'
 mergex_oc='.opencode/commands/mergex.md'
+mergex_check='.claude/commands/mergex-check.md'
+mergex_check_oc='.opencode/commands/mergex-check.md'
 persiste_sh='.claude/skills/mergex/scripts/persistir-metodo.sh'
 
 for f in "$skill" "$abertura" "$commits" "$prontidao" "$integ_sprintx" \
          "$patch_sprintx" "$base_sh" "$hook_escopo" "$abrir_cmd" "$abrir_oc" \
-         "$mergex_cmd" "$mergex_oc" "$persiste_sh"; do
+         "$mergex_cmd" "$mergex_oc" "$mergex_check" "$mergex_check_oc" "$persiste_sh"; do
   [ -f "$f" ] || fail "missing required file: $f"
 done
 
@@ -839,7 +841,7 @@ grep -Fq '**Leitura não trava nada**' "$commits" \
 # `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
 escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
   | LC_ALL=C sort | tr '\n' ' ')"
-esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-r1-reconciliacao-base.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-r1-reconciliacao-base.sh ./scripts/ci/mutacao-r3-predecessores-sprintx.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
 [ "$escritores" = "$esperado" ] \
   || fail "unexpected executable writer of ENTREGA.commits: $escritores"
 grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
@@ -1413,17 +1415,19 @@ reconc_ref="$REF/11-reconciliacao-base.md"
 abertura_pr="$REF/07-abertura-pr.md"
 
 # O enum fechado de checkpoints é o mesmo na prosa e nos três executáveis.
-enum_cp='pre-e2 | reconciliacao-base | pre-e6 | e8'
+enum_cp='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8'
 for f in "$skill" "$commits" "$registro"; do
   grep -Fq "$enum_cp" "$f" || fail "$f sem o enum de checkpoints novo"
 done
 [ -f "$reconc_ref" ] || fail "missing required file: $reconc_ref"
 for f in persistir-metodo.sh contrato-de-commit.sh catalogo-de-metodo.sh; do
-  grep -Fq 'pre-e2|reconciliacao-base|pre-e6|e8' "$SKILL_DIR/scripts/$f" \
+  grep -Fq 'pre-e2|reconciliacao-base|predecessores|retomar-v9-predecessores|pre-e6|e8' "$SKILL_DIR/scripts/$f" \
     || fail "$SKILL_DIR/scripts/$f sem o enum de checkpoints novo"
 done
-grep -Fq "$enum_cp" "$SKILL_DIR/scripts/catalogo-de-metodo.sh" \
-  || fail 'catalogo-de-metodo.sh: o enum documentado diverge da prosa'
+for checkpoint in pre-e2 reconciliacao-base predecessores retomar-v9-predecessores pre-e6 e8; do
+  sed -n '1,35p' "$SKILL_DIR/scripts/catalogo-de-metodo.sh" | grep -Fq "$checkpoint" \
+    || fail "catalogo-de-metodo.sh: o enum documentado não cita $checkpoint"
+done
 grep -Fq 'Metodo: pre-e2 | pre-e6 | e8`, sem `Task:`' "$skill" \
   && fail 'SKILL.md ainda dá o enum antigo como a gramática do commit de método'
 grep -Fq '(`pre-e2`, `pre-e6`' "$hooks_readme" \
@@ -1552,7 +1556,7 @@ grep -Fq '12-barreira-de-push.md' "$reconc_ref" || fail '11-reconciliacao-base n
 grep -Fq 'references/11-reconciliacao-base.md' "$skill" || fail 'SKILL.md não aponta para 11-reconciliacao-base.md'
 
 # Decisões
-for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184 DM-185 DM-186; do
+for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184 DM-185 DM-186 DM-187 DM-188 DM-189 DM-190; do
   grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
 done
 # DM-185: a linha registra a seleção pelo conteúdo, o que ela substitui na
@@ -1612,6 +1616,40 @@ pr_autoritativo="$(printf '%s\n' "$pr_linhas" | awk '{
   if (l ~ /autoritativ/ && l !~ /consultiv|aviso antecipado/) print
 }')"
 [ -z "$pr_autoritativo" ] || fail "DM-184: texto trata pr-so-com-portao como barreira: $(printf '%s' "$pr_autoritativo" | tr '\n' ' ')"
+
+# ---------------------------------------------------------------------------
+# DM-187..DM-190 / Task 9 — predecessores SprintX verificáveis
+# ---------------------------------------------------------------------------
+pred_ref="$SKILL_DIR/references/13-predecessores-sprintx.md"
+pred_sh="$SKILL_DIR/scripts/predecessores-sprintx.sh"
+retoma_pred_sh="$SKILL_DIR/scripts/retomar-v9-predecessores.sh"
+for f in "$pred_ref" "$pred_sh" "$retoma_pred_sh" "$mergex_cmd" "$mergex_oc" "$mergex_check" "$mergex_check_oc"; do
+  [ -f "$f" ] || fail "predecessores SprintX: missing $f"
+done
+for f in "$mergex_cmd" "$mergex_oc" "$mergex_check" "$mergex_check_oc"; do
+  grep -Fq 'predecessores-sprintx.sh' "$f" || fail "$f não publica a fonte adicional da V9"
+  grep -Fq 'resultado=v9_sem_prova' "$f" || fail "$f não explicita a falha fechada"
+  grep -Fq 'retomar-v9-predecessores.sh' "$f" || fail "$f não publica a retomada explícita"
+  grep -Fq 'references/13-predecessores-sprintx.md' "$f" || fail "$f não aponta para o contrato único"
+done
+cmp -s "$mergex_cmd" "$mergex_oc" || fail 'mergex.md diverge entre Claude Code e OpenCode'
+cmp -s "$mergex_check" "$mergex_check_oc" || fail 'mergex-check.md diverge entre Claude Code e OpenCode'
+grep -Fq 'registrar → validar → checkpoint predecessores → verificar retomada →' "$integ_sprintx" \
+  || fail 'integração SprintX sem a primeira metade da ordem operacional'
+grep -Fq 'aplicar/checkpoint retomada → pre-e2 → E2 completo' "$integ_sprintx" \
+  || fail 'integração SprintX sem a segunda metade da ordem operacional'
+grep -Fq 'Versões anteriores da MergeX não entendem esse manifesto' "$integ_sprintx" \
+  || fail 'integração SprintX não registra a incompatibilidade anterior'
+grep -Fq 'ExpxDev só pode instalar a combinação depois de os PRs correspondentes' "$integ_sprintx" \
+  || fail 'integração SprintX não fecha o handoff coordenado ao ExpxDev'
+grep -Fq 'MergeX anterior não entende o manifesto' README.md \
+  || fail 'README não registra a compatibilidade coordenada'
+grep -Fq 'references/13-predecessores-sprintx.md' "$skill" \
+  || fail 'SKILL.md não aponta para 13-predecessores-sprintx.md'
+if grep -REn -- 'evento:[[:space:]]*"?(predecessor_registrado|predecessores_validados|retomada_predecessores)"?' \
+    "$pred_ref" "$pred_sh" "$retoma_pred_sh"; then
+  fail 'predecessores SprintX inventam evento fora do vocabulário ExpxDev'
+fi
 
 # Nenhum executável da skill aceita opção de bypass (varredura; sem guarda).
 # Limite: só pega a opção longa escrita literalmente em scripts/*.sh (não lê

@@ -680,7 +680,7 @@ grupo_catalog_reconc() {
   e2="$(printf '%s\n' \
     "$pasta/00-DECISOES.md" "$pasta/BUILDX-PREMISSAS.md" "$pasta/00-ESTIMATIVA.md" \
     "$pasta/PREFLIGHT.md" "$pasta/ORQUESTRADOR.md" "$pasta/00-AUDITORIA.md" "$pasta/FECHAMENTO.md" \
-    "$pasta/00-PLANEJAMENTO.md" "$pasta/00-BLOQUEIOS.md" \
+    "$pasta/00-PLANEJAMENTO.md" "$pasta/00-BLOQUEIOS.md" "$pasta/00-PREDECESSORES.md" \
     "$pasta/sprint-01/tasks.md" "$pasta/sprint-01/sprint.md" "$pasta/sprint-01/fases.md" \
     "$pasta/base/00-LACUNAS.md" "$pasta/base/00-INDICE.md" "$pasta/base/area com espaco.md" \
     docs/sprintx/estimativas/HISTORICO.md "$base/ENTREGA.md")"
@@ -945,7 +945,7 @@ grupo_integration() {
 
   grep -Fq 'persistir-metodo.sh' "$skill" \
     && ok 'SKILL torna o lifecycle executavel' || falha 'SKILL nao aponta ao executor de metodo'
-  grep -Fq 'Metodo: pre-e2 | pre-e6 | e8' "$commits" \
+  grep -Fq 'Metodo: pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8' "$commits" \
     && ok 'E1 documenta commit de metodo como classe propria' || falha 'E1 ainda nao define a classe metodo'
   ! grep -Fq 'Isto **não é uma etapa nova**: é o E1' "$commits" \
     && ok 'commit de metodo nao e descrito como E1 tardio' || falha 'reference ainda mistura metodo com E1'
