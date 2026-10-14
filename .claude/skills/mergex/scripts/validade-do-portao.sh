@@ -24,7 +24,8 @@
 # O portão vale somente se:
 #   - HEAD:<ENTREGA> existe, é arquivo regular, `kind: entrega`, `trabalho_id`
 #     igual ao <id> do caminho, `expx_tool` sprintx|runx e `portao: pronto`;
-#   - `portao_sha` é um SHA de 40 hex minúsculo, existe e é ancestral de HEAD;
+#   - `portao_sha` é um OID completo de 40 ou 64 hex minúsculos, conforme o
+#     formato do repositório, existe e é ancestral de HEAD;
 #   - nenhum merge no intervalo: `git rev-list --merges --topo-order --reverse
 #     <portao_sha>..HEAD` vazio. Havendo, commit_merge no merge mais antigo,
 #     antes de avaliar qualquer commit (o merge é a causa, não o que ele trouxe);
@@ -76,7 +77,7 @@
 #   motivo=<portao_nao_pronto|portao_sha_ausente|portao_sha_nao_ancestral|
 #           commit_de_produto|commit_merge|metodo_fora_do_catalogo|
 #           historia_incompleta|erro_ambiente>
-#   primeiro_commit=<sha40 do commit que invalidou|->
+#   primeiro_commit=<oid completo do commit que invalidou|->
 #   aviso=<texto>                  (zero ou mais)
 # Motivos:
 #   portao_nao_pronto       ENTREGA ausente ou ilegível em HEAD, portao

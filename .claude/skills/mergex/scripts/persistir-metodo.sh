@@ -758,7 +758,7 @@ predecessores|retomar-v9-predecessores)
   TMP_STATUS="$(mktemp "${TMPDIR:-/tmp}/mergex-status.XXXXXX")" \
     || para 'não foi possível preparar a prova da árvore'
   GIT_INDEX_FILE="$TMP_INDEX" git -C "$RAIZ" status --porcelain=v1 -z \
-    --untracked-files=all --no-renames > "$TMP_STATUS" 2>/dev/null \
+    --untracked-files=all --no-renames --ignore-submodules=none > "$TMP_STATUS" 2>/dev/null \
     || para "não foi possível provar a árvore do checkpoint $CHECKPOINT"
   ARTEFATO_VISTO=0
   while IFS= read -r -d '' registro; do

@@ -353,7 +353,7 @@ grupo_consumidor() {
 }
 
 grupo_checkpoint() {
-  local d out rc rcv rcp antes depois paths msg stage_antes stage_depois
+  local d out rc rcv rcp antes depois paths msg stage_antes stage_depois sub_origem index_antes index_depois
   fixture || { falha 'fixture MP2.7b não montou'; return; }
   d="$FIXTURE_DIR"; cd "$d" || return
 
@@ -430,6 +430,30 @@ EOF
     || falha "checkpoint ignorou árvore alheia skip-worktree — rc=$rc, saída=$out"
   git update-index --no-skip-worktree -- README.md
   git restore --worktree -- README.md "$FX_PRE_MANIFESTO"
+
+  sub_origem="$(mktemp -d)" || { falha 'origem temporária do submódulo indisponível'; cd "$REPO" || return; return; }
+  TMPS+=("$sub_origem")
+  git -c init.defaultBranch=main init -q "$sub_origem"
+  git -C "$sub_origem" config user.name Teste
+  git -C "$sub_origem" config user.email teste@fixture.invalid
+  printf 'base\n' > "$sub_origem/conteudo.txt"
+  git -C "$sub_origem" add -- conteudo.txt
+  git -C "$sub_origem" commit -q -m 'test: base do submódulo'
+  git -c protocol.file.allow=always submodule add -q "$sub_origem" submodulo-ignorado
+  git add -- .gitmodules submodulo-ignorado
+  git commit -q -m 'test: acrescenta submódulo ignorado'
+  git config submodule.submodulo-ignorado.ignore all
+  printf 'dirty\n' >> submodulo-ignorado/conteudo.txt
+  printf '\nmanifesto dirty com submódulo\n' >> "$FX_PRE_MANIFESTO"
+  index_antes="$(cksum < "$(git rev-parse --git-path index)")"
+  out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores 2>&1)"; rc=$?
+  index_depois="$(cksum < "$(git rev-parse --git-path index)")"
+  [ "$rc" != 0 ] && printf '%s\n' "$out" | grep -Fq 'árvore suja fora do artefato esperado: submodulo-ignorado' \
+    && [ "$index_antes" = "$index_depois" ] \
+    && ok 'checkpoint enxerga submódulo dirty mesmo com ignore=all e preserva o índice real' \
+    || falha "checkpoint ignorou submódulo dirty — rc=$rc, saída=$out"
+  git -C submodulo-ignorado restore --worktree -- conteudo.txt
+  git restore --worktree -- "$FX_PRE_MANIFESTO"
 
   rm -f "$FX_PRE_MANIFESTO"
   bash "$PERSISTE" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx \
@@ -683,12 +707,12 @@ grupo_contrato() {
   grep -Fq 'MergeX anterior não entende o manifesto' "$REPO/README.md" \
     && grep -Fq 'PRs de SprintX e MergeX' "$REPO/README.md" \
     && ok 'README registra a compatibilidade coordenada' || falha 'README omite a compatibilidade coordenada'
-  grep -Fq 'Em repositório Git, prova antes o `pre-push` funcional' \
+  grep -Fq 'Em repositório Git, o resultado `PRONTO` exige prova prévia do `pre-push` funcional; registrar `BLOQUEADO` não depende dessa prova' \
       "$REPO/.claude/skills/mergex/SKILL.md" \
-    && grep -Fq 'Fora de um repositório Git, a prova é dispensada' \
+    && grep -Fq 'Fora de um repositório Git, a prova para `PRONTO` é dispensada' \
       "$REPO/.claude/skills/mergex/SKILL.md" \
-    && ok 'resumo do E2 preserva a exceção normativa sem Git' \
-    || falha 'SKILL resume a prova do pre-push como incondicional'
+    && ok 'resumo do E2 distingue PRONTO, BLOQUEADO e a exceção normativa sem Git' \
+    || falha 'SKILL diverge do contrato de prova do pre-push no E2'
   grep -Fq -- '--trava-token "$TOKEN"' "$RETOMA" \
     && ok 'retomada transfere a mesma trava ao checkpoint' \
     || falha 'retomada ainda libera a trava antes do checkpoint'
