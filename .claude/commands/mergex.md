@@ -28,7 +28,7 @@ O fluxo do fim, com checkpoints explícitos:
 6. **E7** — abertura do pull request.
 7. **E8** — grava o terminal e chama `persistir-metodo.sh --persistir ... --checkpoint e8`; só depois publica o commit final no caminho entregue.
 
-Se um E8 sem publicação foi bloqueado exclusivamente por `[v9]`/`arquivo_fora_do_plano` e o manifesto de predecessores tornou a V9 verde, a única retomada é explícita: siga `references/13-predecessores-sprintx.md`, rode `retomar-v9-predecessores.sh` e reexecute o E2 completo. Nunca edite task concluída, fabrique `seq` ou reabra a entrega à mão.
+Se um E8 sem publicação foi bloqueado exclusivamente por `[v9]`/`arquivo_fora_do_plano` e o manifesto de predecessores tornou a V9 verde, a única retomada é explícita: siga `references/13-predecessores-sprintx.md` e rode `retomar-v9-predecessores.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho>`; só com `ok=true`, repita todos os argumentos com `--aplicar` e reexecute o E2 completo. Nunca edite task concluída, fabrique `seq` ou reabra a entrega à mão.
 
 Leia o reference da etapa atual antes de agir, e somente o dela.
 

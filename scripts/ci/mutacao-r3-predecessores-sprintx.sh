@@ -2,7 +2,7 @@
 # Certificação por mutação do contrato de predecessores SprintX / MergeX.
 # Cada mutante vive numa cópia Git temporária; o repositório corrente nunca é
 # alterado. Os 15 primeiros correspondem à seção 14 da spec; 16–23 fecham o
-# protocolo e o fluxo exigidos pela Task 10.
+# protocolo e o fluxo exigidos pela Task 10; o 24 cobre SHA-256 no V9.
 
 set -uo pipefail
 
@@ -36,7 +36,8 @@ MATRIZ='1|PREFIXALL|v9|aceita todo docs/superpowers
 20|EVENTO|validate|inventa evento fora do enum
 21|TASKARTIFICIAL2|mp27b|segunda forma de task artificial
 22|SEQ|mp27b|checkpoint entra em ENTREGA.commits
-23|E2PARCIAL|contrato|pula V1-V8 V10 e V11'
+23|E2PARCIAL|contrato|pula V1-V8 V10 e V11
+24|V9SHA256|v9|V9 fixa OID em 40 caracteres'
 
 copia() { # <id>
   local d="$TMP/$1"
@@ -116,8 +117,11 @@ aplica() { # <dir> <id>; imprime override PREDS, se houver
       troca_bloco2 "$pre" '[ "$commit" != "$NASCIMENTO" ] && git merge-base --is-ancestor' \
         '  git merge-base --is-ancestor "$commit" "$NASCIMENTO" >/dev/null 2>&1 || sem_prova "predecessor posterior ao planejamento: $caminho"' ;;
     HUMAN)
-      troca_linha "$pre" 'printf '\''%s'\'' "$commit" | grep -Eq '\''^[0-9a-f]{40}$'\''' \
+      troca_linha "$pre" 'oid_valido "$commit" || sem_prova "commit_sha invalido: $caminho"' \
         '  commit="$(git rev-parse --verify "$commit^{commit}" 2>/dev/null)" || sem_prova "commit_sha invalido: $caminho"' ;;
+    V9SHA256)
+      troca_linha "$v9" 'case "$FORMATO_OBJETOS" in sha1) OID_LEN=40 ;; sha256) OID_LEN=64 ;;' \
+        'case "$FORMATO_OBJETOS" in sha1) OID_LEN=40 ;; sha256) OID_LEN=40 ;; *) sem_prova "formato de objetos Git não suportado: $FORMATO_OBJETOS" ;; esac # mutante V9SHA256' ;;
     IGNORA)
       troca_linha "$pre" '[ "$origem" = superpowers ] || sem_prova' '  : # origem não conferida' ;;
     INVALIDAUSENTE|RC1VAZIO|RCDIVERGE|TRUNCADO|DUPRESULT)

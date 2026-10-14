@@ -80,7 +80,11 @@ _fx_pre_corpo() { # <diretorio> <arquivo-de-shas>
   local commits="" FX_PRE_BASE FX_PRE_SPEC FX_PRE_PLANO FX_PRE_NASCIMENTO FX_PRE_PRE_E2 FX_PRE_E8
   msg="$dir/.msg"
   cd "$dir" || exit 1
-  git init -q -b main
+  if [ "${FX_PRE_OBJECT_FORMAT:-sha1}" = sha256 ]; then
+    git init -q --object-format=sha256 -b main
+  else
+    git init -q -b main
+  fi
   git config user.email teste@expx.local
   git config user.name 'Teste Expx'
   git config core.autocrlf false

@@ -44,6 +44,9 @@ export GIT_OPTIONAL_LOCKS=0
 
 RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || sem_prova 'fora de um repositorio Git'
 cd "$RAIZ" || sem_prova 'raiz Git inacessivel'
+FORMATO_OBJETOS="$(git rev-parse --show-object-format 2>/dev/null)" || sem_prova 'formato de objetos Git ilegivel'
+case "$FORMATO_OBJETOS" in sha1) OID_LEN=40 ;; sha256) OID_LEN=64 ;; *) sem_prova "formato de objetos Git nao suportado: $FORMATO_OBJETOS" ;; esac
+oid_valido() { [ "${#1}" -eq "$OID_LEN" ] && case "$1" in *[!0-9a-f]*) return 1 ;; *) return 0 ;; esac; }
 arvore_recusa_raso || sem_prova "$ARVORE_ERRO"
 REV_SHA="$(git rev-parse --verify -q "$REV^{commit}" 2>/dev/null)" || sem_prova 'revisao ausente ou nao e commit'
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-predecessores.XXXXXX")" || { TMP_DIR=""; sem_prova 'temporario indisponivel'; }
@@ -105,13 +108,17 @@ trab_manifesto="$(sed -n 's/^trabalho_id:[[:space:]]*//p' "$TMP_DIR/manifesto" |
 while IFS="$TAB" read -r caminho origem papel commit blob; do
   [ -n "$caminho" ] || continue
   case "$caminho" in ""|/*|[A-Za-z]:/*|./*|*/./*|*/.|../*|*/../*|*/..|*//*|*\\*|*\**|*\?*|*\[*|*\]*) sem_prova "caminho nao canonico: $caminho" ;; esac
+  case "$caminho" in docs/superpowers/*) ;; *) sem_prova "predecessor fora de docs/superpowers: $caminho" ;; esac
+  case "$caminho" in *': '*|*:|*' #'*|*$'\t'*|*$'\n'*|*$'\r'*) sem_prova "caminho inseguro para scalar YAML: $caminho" ;; esac
+  LC_ALL=C
+  case "$caminho" in *[!\ -~]*|*' ') sem_prova "caminho fora do subconjunto YAML seguro: $caminho" ;; esac
   case "$caminho" in docs/sprintx/features/"$TRABALHO"/*|docs/entregas/"$TRABALHO"/*) sem_prova "predecessor dentro do trabalho: $caminho" ;; esac
   grep -Fqx "$caminho" "$TMP_DIR/vistos" && sem_prova "caminho duplicado: $caminho"
   printf '%s\n' "$caminho" >> "$TMP_DIR/vistos"
   [ "$origem" = superpowers ] || sem_prova "origem fora do enum: $origem"
   case "$papel" in especificacao|plano) ;; *) sem_prova "papel fora do enum: $papel" ;; esac
-  printf '%s' "$commit" | grep -Eq '^[0-9a-f]{40}$' || sem_prova "commit_sha invalido: $caminho"
-  printf '%s' "$blob" | grep -Eq '^[0-9a-f]{40}$' || sem_prova "blob_oid invalido: $caminho"
+  oid_valido "$commit" || sem_prova "commit_sha invalido: $caminho"
+  oid_valido "$blob" || sem_prova "blob_oid invalido: $caminho"
   git cat-file -e "$commit^{commit}" 2>/dev/null || sem_prova "commit predecessor ausente: $commit"
   git merge-base --is-ancestor "$commit" "$REV_SHA" >/dev/null 2>&1 || sem_prova "commit predecessor nao alcancavel: $caminho"
   [ "$commit" != "$NASCIMENTO" ] && git merge-base --is-ancestor "$commit" "$NASCIMENTO" >/dev/null 2>&1 \

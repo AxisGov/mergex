@@ -472,5 +472,6 @@ O E8 bloqueado não é reaberto por edição manual. A exceção estreita de
 `references/13-predecessores-sprintx.md` exige que `[v9]` seja a única falha,
 que não exista publicação nem PR e que cada desvio seja um predecessor
 historicamente provado. `retomar-v9-predecessores.sh --aplicar` altera somente
-as seis chaves da retomada, persiste `Metodo: retomar-v9-predecessores` e
+as sete chaves da retomada — incluindo a atualização obrigatória de `atualizado_em` —,
+persiste `Metodo: retomar-v9-predecessores` e
 informa `proxima=E2`. O registro de tasks e a sequência E1 permanecem intactos.

@@ -138,6 +138,9 @@ Antes do E2, a sprintx entrega explicitamente id/origem/`ENTREGA.md` à ação `
 ### Predecessores verificáveis e retomada estreita da V9
 
 Quando a SprintX publica `00-PREDECESSORES.md`, ele é uma fonte adicional e exata da V9. A MergeX valida o manifesto com `predecessores-sprintx.sh`: conteúdo e código de saída formam um protocolo único. Código zero sem `resultado=`, resultado duplicado, saída truncada ou divergência entre texto e código é `v9_sem_prova`; nunca é aprovação por código de saída isolado.
+Os caminhos aceitos ficam sob `docs/superpowers/`, usam scalar YAML seguro (ASCII imprimível,
+sem espaço final) e carregam OIDs
+completos conforme o formato Git do repositório (SHA-1 ou SHA-256).
 
 A ordem operacional é fechada:
 

@@ -147,8 +147,10 @@ entrega_define "$TMP_DIR/novo" estado aberto \
   && entrega_define "$TMP_DIR/novo" falhas_portao '[]' \
   && entrega_define "$TMP_DIR/novo" causa null \
   && entrega_define "$TMP_DIR/novo" desvios '[]' \
+  && entrega_define "$TMP_DIR/novo" atualizado_em "$(date +%Y-%m-%d)" \
   || recusa "ENTREGA.md nao pode ser reaberto: $ENTREGA_ERRO"
-TMP_ARQ="$ENTREGA.retomar.$$"
+TMP_ARQ="$(mktemp "$(dirname "$ENTREGA")/.ENTREGA.md.retomar.XXXXXX")" \
+  || { TMP_ARQ=""; recusa 'temporario atomico indisponivel' 1; }
 { cp -p "$ENTREGA" "$TMP_ARQ" && cat "$TMP_DIR/novo" > "$TMP_ARQ" && mv "$TMP_ARQ" "$ENTREGA"; } \
   || { rm -f "$TMP_ARQ"; TMP_ARQ=""; recusa 'gravacao atomica falhou' 1; }
 TMP_ARQ=""

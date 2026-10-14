@@ -14,7 +14,7 @@ CONTRATO="${CONTRATO:-$S/contrato-de-commit.sh}"
 SEQ="${SEQ:-$S/sequencia-de-commits.sh}"
 RETOMA="${RETOMA:-$S/retomar-v9-predecessores.sh}"
 SPRINTX_PRODUTOR="$REPO/scripts/ci/fixtures/sprintx-predecessores.sh"
-SPRINTX_PRODUTOR_SHA='ee74dd1fee0fe84e7f8fa2901f2a555a70fd2509b86fa124470c8496ba956108'
+SPRINTX_PRODUTOR_SHA='a8150485bfa8f53a2971fc6c66d299257ab6f6d7295e269e7f65ce2137bc0cec'
 
 OK=0; FALHOU=0
 TMPS=()
@@ -45,6 +45,14 @@ fixture() {
   # shellcheck source=lib/fixture-predecessores.sh
   . "$REPO/scripts/ci/lib/fixture-predecessores.sh" || return 1
   fx_predecessores_cenario "$FIXTURE_DIR" || return 1
+}
+
+fixture_sha256() {
+  FIXTURE_DIR="$(mktemp -d)" || return 1
+  TMPS+=("$FIXTURE_DIR")
+  # shellcheck source=lib/fixture-predecessores.sh
+  . "$REPO/scripts/ci/lib/fixture-predecessores.sh" || return 1
+  FX_PRE_OBJECT_FORMAT=sha256 fx_predecessores_cenario "$FIXTURE_DIR" || return 1
 }
 
 escreve_manifesto() { # usa a fixture corrente; não faz commit
@@ -132,6 +140,17 @@ grupo_verificador() {
   rc_igual 'SHA abreviado humano falha fechado' 3 bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre
   cd "$REPO" || return
 
+  fixture_sha256 || { falha 'fixture SHA-256 não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'produtor não registrou manifesto SHA-256'; cd "$REPO" || return; return; }
+  out="$(bash "$PREDS" --verificar --rev HEAD --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n '1p')" = resultado=ok ] \
+    && [ "$(git rev-parse --show-object-format)" = sha256 ] \
+    && [ "$(sed -n 's/^    commit_sha: //p' "$FX_PRE_MANIFESTO" | sed -n '1p' | wc -c | tr -d ' ')" = 65 ] \
+    && ok 'verificador aceita protocolo completo em repositório SHA-256' \
+    || falha "protocolo SHA-256 foi recusado — rc=$rc, saída=$out"
+  cd "$REPO" || return
+
   fixture || { falha 'fixture para entrada inválida não montou'; return; }
   cd "$FIXTURE_DIR" || return
   grava_manifesto || { falha 'manifesto do caso inválido não foi commitado'; cd "$REPO" || return; return; }
@@ -209,10 +228,20 @@ grupo_v9() {
   [ "$rc" = 1 ] && printf '%s\n' "$out" | grep -Fq $'fora_do_plano\tdocs/superpowers/outros/nao-declarado.md' \
     && ok 'prefixo docs/superpowers não cria isenção' || falha "prefixo indevidamente aceito — rc=$rc, saída=$out"
   cd "$REPO" || return
+
+  fixture_sha256 || { falha 'fixture SHA-256 da V9 não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  grava_manifesto || { falha 'manifesto SHA-256 da V9 não foi commitado'; cd "$REPO" || return; return; }
+  out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' \
+    && [ "$(git rev-parse --show-object-format)" = sha256 ] \
+    && ok 'V9 aceita protocolo completo em repositório SHA-256' \
+    || falha "V9 recusou protocolo SHA-256 — rc=$rc, saída=$out"
+  cd "$REPO" || return
 }
 
 grupo_consumidor() {
-  local wrapper out rc sha39 sha41
+  local wrapper out rc sha39 sha41 controle
   fixture || { falha 'fixture do consumidor V9 não montou'; return; }
   cd "$FIXTURE_DIR" || return
   if [ -n "${R3_PREDS_CONSUMIDOR:-}" ]; then
@@ -247,6 +276,43 @@ grupo_consumidor() {
   [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
     && ok 'consumidor V9 recusa caminho não canônico' \
     || falha "consumidor V9 aceitou caminho não canônico — rc=$rc, saída=$out"
+
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
+    printf "printf 'predecessor\tsrc/x.py\t%s\t%s\n'\n" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+    && ok 'consumidor V9 recusa predecessor fora de docs/superpowers' \
+    || falha "consumidor V9 aceitou predecessor fora da origem — rc=$rc, saída=$out"
+
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
+    printf "printf 'predecessor\tdocs/superpowers/specs/a: b.md\t%s\t%s\n'\n" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+    && ok 'consumidor V9 recusa caminho inseguro como scalar YAML' \
+    || falha "consumidor V9 aceitou scalar YAML inseguro — rc=$rc, saída=$out"
+
+  controle="$(printf '\001')"
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
+    printf "printf 'predecessor\tdocs/superpowers/specs/controle%s.md\t%s\t%s\n'\n" "$controle" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+    && ok 'consumidor V9 recusa byte de controle no caminho' \
+    || falha "consumidor V9 aceitou controle em scalar YAML — rc=$rc, saída=$out"
+
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
+    printf "printf 'predecessor\tdocs/superpowers/specs/trailing \t%s\t%s\n'\n" "$FX_PRE_SPEC" "$FX_PRE_SPEC"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9_sem_prova' \
+    && ok 'consumidor V9 recusa espaço final no caminho' \
+    || falha "consumidor V9 aceitou espaço final normalizado por YAML — rc=$rc, saída=$out"
 
   {
     printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' '\''resultado=ok'\'''
@@ -404,9 +470,13 @@ espera_recusa() { # <descrição> <expressão sed>
 }
 
 grupo_retomada() {
-  local d out rc antes depois paths
+  local d out rc antes depois paths hoje alvo conteudo_antes conteudo_depois
   prepara_retomada || { falha 'cenário pronto para retomada não montou'; return; }
   d="$CENARIO_DIR"
+  sed 's/^atualizado_em: .*/atualizado_em: 2000-01-01/' "$FX_PRE_ENTREGA" > "$FX_PRE_ENTREGA.tmp" \
+    && mv "$FX_PRE_ENTREGA.tmp" "$FX_PRE_ENTREGA" \
+    && git add -- "$FX_PRE_ENTREGA" && git commit -q -m 'test: deixa timestamp terminal antigo' \
+    || { falha 'cenário com timestamp antigo não foi commitado'; cd "$REPO" || return; return; }
   antes="$(git status --porcelain=v1 --untracked-files=all)$(git rev-parse HEAD)"
   out="$(bash "$RETOMA" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
   depois="$(git status --porcelain=v1 --untracked-files=all)$(git rev-parse HEAD)"
@@ -422,12 +492,32 @@ grupo_retomada() {
     && [ "$(sed -n 's/^causa:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = null ] \
     && [ "$(sed -n 's/^desvios:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = '[]' ] \
     && ok 'somente o estado terminal é limpo para a reexecução' || falha 'campos da reabertura divergentes'
+  hoje="$(date +%Y-%m-%d)"
+  [ "$(sed -n 's/^atualizado_em:[[:space:]]*//p' "$FX_PRE_ENTREGA")" = "$hoje" ] \
+    && ok 'retomada atualiza atualizado_em em toda gravação' || falha 'retomada preservou timestamp antigo'
   paths="$(git diff-tree --no-commit-id --name-only -r HEAD)"
   [ "$paths" = "$FX_PRE_ENTREGA" ] && ok 'checkpoint da retomada toca somente ENTREGA.md' || falha "retomada tocou: $paths"
   rc_igual 'commit da retomada satisfaz o contrato' 0 bash "$CONTRATO" --validar-metodo \
     --trabalho ft-pre --checkpoint retomar-v9-predecessores --commit HEAD
   rc_igual 'repetição depois de reaberto é recusada' 3 bash "$RETOMA" --verificar \
     --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre
+  cd "$REPO" || return
+
+  prepara_retomada || { falha 'cenário para temporário previsível não montou'; return; }
+  d="$CENARIO_DIR"; cd "$d" || return
+  alvo="$(mktemp)" || { falha 'alvo externo temporário indisponível'; cd "$REPO" || return; return; }
+  TMPS+=("$alvo")
+  printf 'sentinela externa\n' > "$alvo"
+  conteudo_antes="$(cksum < "$alvo")"
+  printf '%s\n' 'ENTREGA.md.retomar.*' '.ENTREGA.md.retomar.*' >> .git/info/exclude
+  out="$(ALVO="$alvo" ENTREGA="$FX_PRE_ENTREGA" RETOMA="$RETOMA" bash -c '
+    ln -s "$ALVO" "$ENTREGA.retomar.$$"
+    exec bash "$RETOMA" --aplicar --entrega "$ENTREGA" --origem sprintx --trabalho ft-pre
+  ' 2>&1)"; rc=$?
+  conteudo_depois="$(cksum < "$alvo")"
+  [ "$rc" = 0 ] && [ "$conteudo_antes" = "$conteudo_depois" ] \
+    && ok 'temporário imprevisível não segue symlink pré-posicionado' \
+    || falha "temporário previsível tocou alvo externo — rc=$rc, saída=$out"
   cd "$REPO" || return
 
   espera_recusa 'estado diferente de bloqueado é recusado' 's/^estado: bloqueado$/estado: entregue/'
@@ -489,10 +579,19 @@ grupo_contrato() {
       && ok "$f exige o E2 completo depois da retomada" \
       || falha "$f reduz a retomada a uma verificação parcial"
   done
+  for f in .claude/commands/mergex-retomar-v9.md .opencode/commands/mergex-retomar-v9.md; do
+    grep -Fq -- '--entrega docs/entregas/<trabalho>/ENTREGA.md' "$REPO/$f" \
+      && grep -Fq -- '--origem sprintx' "$REPO/$f" \
+      && grep -Fq -- '--trabalho <trabalho>' "$REPO/$f" \
+      && ok "$f publica a invocação completa da retomada" \
+      || falha "$f omite argumento obrigatório da retomada"
+  done
   cmp -s "$REPO/.claude/commands/mergex.md" "$REPO/.opencode/commands/mergex.md" \
     && ok 'entrypoint mergex é idêntico nos dois harnesses' || falha 'entrypoint mergex diverge entre harnesses'
   cmp -s "$REPO/.claude/commands/mergex-check.md" "$REPO/.opencode/commands/mergex-check.md" \
     && ok 'entrypoint mergex-check é idêntico nos dois harnesses' || falha 'entrypoint mergex-check diverge entre harnesses'
+  cmp -s "$REPO/.claude/commands/mergex-retomar-v9.md" "$REPO/.opencode/commands/mergex-retomar-v9.md" \
+    && ok 'entrypoint de retomada é idêntico nos dois harnesses' || falha 'entrypoint de retomada diverge entre harnesses'
   for f in .claude/skills/mergex/SKILL.md .claude/skills/mergex/references/01-commits.md \
            .claude/skills/mergex/references/08-registro.md .claude/skills/mergex/references/11-reconciliacao-base.md \
            .claude/hooks/README.md; do
