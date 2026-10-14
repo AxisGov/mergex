@@ -9,10 +9,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S="${S:-$REPO/.claude/skills/mergex/scripts}"
 PREDS="${PREDS:-$S/predecessores-sprintx.sh}"
 V9="${V9:-$S/portao-v9.sh}"
+VALIDADE="${VALIDADE:-$S/validade-do-portao.sh}"
 PERSISTE="${PERSISTE:-$S/persistir-metodo.sh}"
 CONTRATO="${CONTRATO:-$S/contrato-de-commit.sh}"
 SEQ="${SEQ:-$S/sequencia-de-commits.sh}"
 RETOMA="${RETOMA:-$S/retomar-v9-predecessores.sh}"
+TRAVA="${TRAVA:-$S/trava-do-e1.sh}"
 SPRINTX_PRODUTOR="$REPO/scripts/ci/fixtures/sprintx-predecessores.sh"
 SPRINTX_PRODUTOR_SHA='a8150485bfa8f53a2971fc6c66d299257ab6f6d7295e269e7f65ce2137bc0cec'
 
@@ -221,6 +223,14 @@ grupo_v9() {
   out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
   [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=ok' \
     && ok 'V9 aceita somente os predecessores comprovados' || falha "V9 não integrou predecessores — rc=$rc, saída=$out"
+  printf '\nMudanca posterior.\n' >> "$FX_PRE_SPEC_PATH"
+  git add -- "$FX_PRE_SPEC_PATH" && git commit -q -m 'test: diverge predecessor depois do manifesto'
+  out="$(bash "$V9" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre)"; rc=$?
+  [ "$rc" = 1 ] \
+    && printf '%s\n' "$out" | grep -Fxq $'fora_do_plano\tdocs/superpowers/specs/exemplo-design.md' \
+    && ! printf '%s\n' "$out" | grep -q $'^fora_do_plano\t[^\t]*\t' \
+    && ok 'V9 publica fora_do_plano com exatamente duas colunas' \
+    || falha "V9 expôs detalhe interno na saída pública — rc=$rc, saída=$out"
   mkdir -p docs/superpowers/outros
   printf 'nao declarado\n' > docs/superpowers/outros/nao-declarado.md
   git add -- docs/superpowers/outros/nao-declarado.md && git commit -q -m 'test: acrescenta superpowers não declarado'
@@ -237,6 +247,21 @@ grupo_v9() {
     && [ "$(git rev-parse --show-object-format)" = sha256 ] \
     && ok 'V9 aceita protocolo completo em repositório SHA-256' \
     || falha "V9 recusou protocolo SHA-256 — rc=$rc, saída=$out"
+
+  local portao_sha
+  portao_sha="$(git rev-parse HEAD)"
+  sed -e 's/^portao: .*/portao: pronto/' \
+    -e "s/^portao_sha: .*/portao_sha: $portao_sha/" \
+    -e 's/^falhas_portao: .*/falhas_portao: []/' \
+    -e 's/^causa: .*/causa: null/' \
+    "$FX_PRE_ENTREGA" > "$FX_PRE_ENTREGA.tmp" && mv "$FX_PRE_ENTREGA.tmp" "$FX_PRE_ENTREGA"
+  git add -- "$FX_PRE_ENTREGA" \
+    && git commit -q -m 'chore(mergex): persiste metodo pre-e6' \
+      -m $'Trabalho: ft-pre\nMetodo: pre-e6'
+  out="$(bash "$VALIDADE" --verificar --entrega "$FX_PRE_ENTREGA" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'ok=true' \
+    && ok 'validade do portao aceita portao_sha SHA-256 completo' \
+    || falha "validade recusou portao_sha SHA-256 — rc=$rc, saída=$out"
   cd "$REPO" || return
 }
 
@@ -385,6 +410,27 @@ EOF
   depois="$(bash "$SEQ" --ler "$FX_PRE_ENTREGA" 2>/dev/null)"
   [ "$antes" = "$depois" ] && ok 'checkpoint predecessores não consome seq nem ENTREGA.commits' || falha 'checkpoint predecessores alterou a sequência E1'
 
+  git update-index --assume-unchanged -- "$FX_PRE_MANIFESTO"
+  printf '\nbytes ocultos pelo indice\n' >> "$FX_PRE_MANIFESTO"
+  out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores 2>&1)"; rc=$?
+  [ "$rc" != 0 ] && printf '%s\n' "$out" | grep -Fq 'mudança oculta por bits do índice' \
+    && ! git diff --cached --name-only | grep -q . \
+    && ok 'checkpoint predecessores falha fechado em manifesto oculto pelo índice' \
+    || falha "checkpoint silenciou manifesto assume-unchanged — rc=$rc, saída=$out"
+  git update-index --no-assume-unchanged -- "$FX_PRE_MANIFESTO"
+  git restore --worktree -- "$FX_PRE_MANIFESTO"
+
+  git update-index --skip-worktree -- README.md
+  printf '\narvore alheia oculta\n' >> README.md
+  printf '\nmanifesto dirty normal\n' >> "$FX_PRE_MANIFESTO"
+  out="$(bash "$PERSISTE" --persistir --entrega "$FX_PRE_ENTREGA" --origem sprintx --trabalho ft-pre --checkpoint predecessores 2>&1)"; rc=$?
+  [ "$rc" != 0 ] && printf '%s\n' "$out" | grep -Fq 'árvore suja fora do artefato esperado: README.md' \
+    && ! git diff --cached --name-only | grep -q . \
+    && ok 'checkpoint predecessores enxerga path alheio com skip-worktree' \
+    || falha "checkpoint ignorou árvore alheia skip-worktree — rc=$rc, saída=$out"
+  git update-index --no-skip-worktree -- README.md
+  git restore --worktree -- README.md "$FX_PRE_MANIFESTO"
+
   rm -f "$FX_PRE_MANIFESTO"
   bash "$PERSISTE" --verificar --entrega "$FX_PRE_ENTREGA" --origem sprintx \
     --trabalho ft-pre --checkpoint predecessores >/dev/null 2>&1; rcv=$?
@@ -418,6 +464,32 @@ EOF
   [ "$paths" = "$FX_PRE_ENTREGA" ] && ok 'commit de retomada toca somente ENTREGA.md' || falha "commit de retomada tocou: $paths"
   rc_igual 'commit de retomada satisfaz o contrato' 0 bash "$CONTRATO" --validar-metodo \
     --trabalho ft-pre --checkpoint retomar-v9-predecessores --commit HEAD
+
+  sed 's/^atualizado_em: .*/atualizado_em: 2026-10-15/' "$FX_PRE_ENTREGA" > "$FX_PRE_ENTREGA.tmp" \
+    && mv "$FX_PRE_ENTREGA.tmp" "$FX_PRE_ENTREGA"
+  local trava_out token
+  trava_out="$(bash "$TRAVA" --adquirir 'metodo:retomar-v9-predecessores')"; rc=$?
+  token="$(printf '%s\n' "$trava_out" | sed -n 's/^token=//p')"
+  git update-index --skip-worktree README.md
+  printf '\ncaminho oculto durante retomada\n' >> README.md
+  out_sujo="$(bash "$PERSISTE" --persistir --trava-token "$token" --entrega "$FX_PRE_ENTREGA" \
+    --origem sprintx --trabalho ft-pre --checkpoint retomar-v9-predecessores 2>&1)"; rc_sujo=$?
+  bash "$TRAVA" --conferir "$token" >/dev/null 2>&1; rc_trava_suja=$?
+  git update-index --no-skip-worktree README.md
+  git restore --worktree -- README.md
+  [ "$rc_sujo" != 0 ] && [ "$rc_trava_suja" = 0 ] \
+    && printf '%s\n' "$out_sujo" | grep -Fq 'árvore suja fora do artefato esperado: README.md' \
+    && ok 'trava herdada recusa caminho oculto sem liberar a exclusão' \
+    || falha "trava herdada aceitou caminho oculto — persistir=$rc_sujo conferir=$rc_trava_suja saída=$out_sujo"
+  out="$(bash "$PERSISTE" --persistir --trava-token "$token" --entrega "$FX_PRE_ENTREGA" \
+    --origem sprintx --trabalho ft-pre --checkpoint retomar-v9-predecessores 2>&1)"; rcp=$?
+  bash "$TRAVA" --conferir "$token" >/dev/null 2>&1; rcv=$?
+  if [ "$rc" = 0 ] && [ "$rcp" = 0 ] && [ "$rcv" = 0 ]; then
+    ok 'checkpoint da retomada adota a trava do chamador sem janela'
+  else
+    falha "checkpoint não adotou trava válida — adquirir=$rc persistir=$rcp conferir=$rcv saída=$out"
+  fi
+  bash "$TRAVA" --liberar "$token" >/dev/null 2>&1
 
   # Stage preexistente: falha antes de adotar o manifesto e preserva bytes/paths.
   printf '\nstage alheio\n' >> README.md
@@ -611,6 +683,15 @@ grupo_contrato() {
   grep -Fq 'MergeX anterior não entende o manifesto' "$REPO/README.md" \
     && grep -Fq 'PRs de SprintX e MergeX' "$REPO/README.md" \
     && ok 'README registra a compatibilidade coordenada' || falha 'README omite a compatibilidade coordenada'
+  grep -Fq 'Em repositório Git, prova antes o `pre-push` funcional' \
+      "$REPO/.claude/skills/mergex/SKILL.md" \
+    && grep -Fq 'Fora de um repositório Git, a prova é dispensada' \
+      "$REPO/.claude/skills/mergex/SKILL.md" \
+    && ok 'resumo do E2 preserva a exceção normativa sem Git' \
+    || falha 'SKILL resume a prova do pre-push como incondicional'
+  grep -Fq -- '--trava-token "$TOKEN"' "$RETOMA" \
+    && ok 'retomada transfere a mesma trava ao checkpoint' \
+    || falha 'retomada ainda libera a trava antes do checkpoint'
 }
 
 e2_fixture_completo() {

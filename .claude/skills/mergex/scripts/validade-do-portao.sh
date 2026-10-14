@@ -88,7 +88,8 @@
 #                           motivo que não seja objeto ausente, ou rev-list
 #                           que falha com a história inteira; com um
 #                           `aviso=` que descreve a falha;
-#   portao_sha_ausente      portao_sha ausente, vazio, null ou fora de 40 hex;
+#   portao_sha_ausente      portao_sha ausente, vazio, null ou fora do OID
+#                           completo do formato de objetos do repositório;
 #   portao_sha_nao_ancestral  portao_sha inexistente ou não ancestral de HEAD;
 #   historia_incompleta     a história está cortada: repositório raso (rode
 #                           `git fetch --unshallow`) ou objeto Git necessário
@@ -210,6 +211,13 @@ export GIT_OPTIONAL_LOCKS=0
 
 RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || ambiente 'fora de um repositório Git'
 cd "$RAIZ" || ambiente "raiz inacessível: $RAIZ"
+FORMATO_OBJETOS="$(g rev-parse --show-object-format 2>/dev/null)" \
+  || ambiente 'formato de objetos Git indisponível'
+case "$FORMATO_OBJETOS" in
+  sha1) OID_LEN=40 ;;
+  sha256) OID_LEN=64 ;;
+  *) ambiente "formato de objetos Git não suportado: ${FORMATO_OBJETOS:-ausente}" ;;
+esac
 case "$ENTREGA" in
   ./*) ENTREGA="${ENTREGA#./}" ;;
   "$RAIZ"/*) ENTREGA="${ENTREGA#"$RAIZ"/}" ;;
@@ -270,7 +278,8 @@ else
 fi
 
 [ "$PORTAO" = pronto ] || invalido portao_nao_pronto # guarda:PTPRONTO
-printf '%s' "$PS" | grep -Eq '^[0-9a-f]{40}$' || invalido portao_sha_ausente # guarda:PTSHA
+[ "${#PS}" -eq "$OID_LEN" ] 2>/dev/null || invalido portao_sha_ausente # guarda:PTSHA
+case "$PS" in *[!0-9a-f]*) invalido portao_sha_ausente ;; esac # guarda:PTSHA
 # portao_sha sem objeto ou fora da ancestralidade: antes de concluir, a
 # história de <rev> se percorre? Senão, o que falta é objeto (VALOBJ).
 { g cat-file -e "$PS^{commit}" && g merge-base --is-ancestor "$PS" "$REV_SHA"; } 2>/dev/null || historia_integra || objeto_ausente "a história de $REV não se percorre" # guarda:VALOBJ
