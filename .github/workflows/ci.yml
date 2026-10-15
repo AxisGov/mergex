@@ -13,6 +13,7 @@ jobs:
   hooks:
     name: ${{ matrix.os }} / hooks
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
