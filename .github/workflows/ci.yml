@@ -14,14 +14,15 @@ jobs:
     name: ${{ matrix.os }} / hooks
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    # Windows e melhor esforco (DM-228): no Git Bash a suite passa de 20 min e o
-    # orcamento interno de 8 s do pr-so-com-portao nao fecha. O resultado fica
-    # visivel, mas so o Linux e portao do merge.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    # So Linux (DM-228). No Git Bash a suite passa de 20 min e e cancelada sem
+    # resultado: o job nao dava sinal nenhum, gastava runner e deixava um X que
+    # todo mundo aprende a ignorar. O Windows e conferido localmente (`teste.sh`
+    # ja se adapta ao MSYS); um job Windows de fumaca, curto, e trabalho proprio.
+    # O nome `ubuntu-latest / hooks` fica: e o check exigido pelo ruleset do main.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
 
     steps:
       - name: Checkout
