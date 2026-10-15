@@ -67,13 +67,14 @@ mesmo remoto do upstream** (`$remoto`, dos pré-requisitos), buscada agora e con
 local antiga, ou de outro remoto (fork), mediria o PR contra a base errada. A exceção é a
 `branch_base` que já nomeia o remoto (`upstream/main`, `refs/remotes/upstream/main`, como a base
 informada pelo chamador no E0 pode vir): aí vale o remoto dela, e só o nome da branch vai para o
-fetch:
+fetch. A base medida é o `FETCH_HEAD`, o que acabou de chegar, e não a ref de rastreio: um
+`origin/HEAD` buscado não atualiza a ref simbólica local, que mediria contra o alvo antigo:
 
 ```bash
 rb="$remoto"; bb="<branch_base>"; bb="${bb#refs/remotes/}"; bb="${bb#refs/heads/}"
 if [ "${bb%%/*}" != "$bb" ] && git remote | grep -qxF "${bb%%/*}"; then rb="${bb%%/*}"; bb="${bb#*/}"; fi
 git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 1; }
-base="$(git rev-parse --verify "refs/remotes/$rb/$bb^{commit}")" || exit 1
+base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
 FATIA_IGNORAR="${FATIA_IGNORAR:-(^|/)package-lock\.json$}" \
   bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 ```
