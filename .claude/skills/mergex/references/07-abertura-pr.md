@@ -64,11 +64,16 @@ Serviço sem ferramenta conhecida (Bitbucket, Azure DevOps, Gitea, servidor inte
 Antes de abrir — pelo passo 2 **ou** pelo passo 3, que manda abrir à mão —, meça o PR contra F2,
 F3 e F4 do contrato `expx-fatiamento` do ExpxDev. A base é a `branch_base` do `ENTREGA.md` **no
 mesmo remoto do upstream** (`$remoto`, dos pré-requisitos), buscada agora e conferida; uma ref
-local antiga, ou de outro remoto (fork), mediria o PR contra a base errada:
+local antiga, ou de outro remoto (fork), mediria o PR contra a base errada. A exceção é a
+`branch_base` que já nomeia o remoto (`upstream/main`, `refs/remotes/upstream/main`, como a base
+informada pelo chamador no E0 pode vir): aí vale o remoto dela, e só o nome da branch vai para o
+fetch:
 
 ```bash
-git fetch "$remoto" "<branch_base>" || { echo "busca de <branch_base> em $remoto falhou: o E7 não mede nem abre o PR"; exit 1; }
-base="$(git rev-parse --verify "refs/remotes/$remoto/<branch_base>^{commit}")" || exit 1
+rb="$remoto"; bb="<branch_base>"; bb="${bb#refs/remotes/}"; bb="${bb#refs/heads/}"
+if [ "${bb%%/*}" != "$bb" ] && git remote | grep -qxF "${bb%%/*}"; then rb="${bb%%/*}"; bb="${bb#*/}"; fi
+git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 1; }
+base="$(git rev-parse --verify "refs/remotes/$rb/$bb^{commit}")" || exit 1
 bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 ```
 

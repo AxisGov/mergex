@@ -34,7 +34,8 @@ grep -Fq 'fatiamento-da-pr.sh "$base" "$publicado"' "$e7" \
 grep -Fq 'o E7 **não abre o PR**' "$e7" \
   && passa 'violacao impede a abertura' \
   || quebra 'o E7 nao diz que a violacao impede a abertura'
-grep -Fq 'git fetch "$remoto" "<branch_base>"' "$e7" && grep -Fq 'refs/remotes/$remoto/<branch_base>' "$e7" \
+grep -Fq 'rb="$remoto"; bb="<branch_base>"' "$e7" && grep -Fq 'git fetch "$rb" "$bb"' "$e7" \
+  && grep -Fq 'refs/remotes/$rb/$bb' "$e7" \
   && passa 'a base vem do remoto do upstream, buscada agora' \
   || quebra 'a base nao e buscada no remoto do upstream (ref antiga ou fork mediria errado)'
 grep -Fq 'o passo 1.5 roda do mesmo jeito, e só depois dele vá para o passo 3' "$e7" \
@@ -61,6 +62,22 @@ g switch -q -c arquivo-grande main
 printf 'a\n%.0s' $(seq 1 4100) > "$tmp/longo.txt"; g add -A; g commit -q -m "arquivo longo"
 saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=9000 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main arquivo-grande 2>&1)" && quebra 'arquivo de 4.100 linhas passou' \
   || { case "$saida" in *"F4:"*) passa 'arquivo de 4.100 linhas reprova (F4)' ;; *) quebra "reprovou, mas nao por F4: $saida" ;; esac; }
+
+# o trecho do E7 que resolve a base, rodado de verdade: branch_base com e sem o
+# remoto no nome (a base informada pelo chamador no E0 pode vir `upstream/main`)
+mkdir -p "$tmp/clone"; git -C "$tmp/clone" init -q
+git -C "$tmp/clone" remote add origin https://exemplo.invalid/fork.git
+git -C "$tmp/clone" remote add upstream https://exemplo.invalid/principal.git
+resolve_base() { # <branch_base> — imprime "<remoto> <branch>" como o E7 resolve
+  sed -n '/^rb="\$remoto"/,/^if \[/p' "$e7" | sed "s|<branch_base>|$1|" > "$tmp/resolve.sh"
+  (cd "$tmp/clone" && remoto=origin && . "$tmp/resolve.sh" && printf '%s %s' "$rb" "$bb")
+}
+for par in 'main|origin main' 'upstream/main|upstream main' \
+           'refs/remotes/upstream/main|upstream main' 'feature/x|origin feature/x'; do
+  r="$(resolve_base "${par%%|*}")"
+  [ "$r" = "${par#*|}" ] && passa "branch_base ${par%%|*} busca em ${par#*|}" \
+    || quebra "branch_base ${par%%|*} resolveu '$r', esperado '${par#*|}'"
+done
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
