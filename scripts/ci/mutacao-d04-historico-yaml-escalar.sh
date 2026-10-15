@@ -104,10 +104,10 @@ M12() { # FIRST regride: a primeira criação lê sem decodificar
   troca "$PERSISTE" "$MIOLO" "$MIOLO_CRU" \
     && troca_n "$PERSISTE" "$FINAL" '  export MUTANTE_CRU=1; ler_historico "$RAIZ/$caminho" > "$TMP_HIST/final" \' 1
 }
-M13() { # e8 regride: o checkpoint e8 pula a prova do HISTORICO (a âncora é a
-        # linha atual, que já isenta reconciliacao-base — DM-178, Task 10)
-  troca "$PERSISTE" '[ "$ORIGEM" = sprintx ] && [ "$CHECKPOINT" != reconciliacao-base ] && confere_historico_corrente' \
-    '[ "$ORIGEM" = sprintx ] && [ "$CHECKPOINT" != reconciliacao-base ] && [ "$CHECKPOINT" != e8 ] && confere_historico_corrente'
+M13() { # e8 regride: o checkpoint e8 pula a prova do HISTORICO (a âncora é o
+        # `case` atual de origem:checkpoint, que já deixa reconciliacao-base de fora)
+  troca "$PERSISTE" '  sprintx:pre-e2|sprintx:pre-e6|sprintx:e8) confere_historico_corrente ;;' \
+    '  sprintx:pre-e2|sprintx:pre-e6) confere_historico_corrente ;;'
 }
 M14() { # escape inválido aceito literalmente
   troca "$PERSISTE" "$INVALIDO" '        else r = r "\\" c'
