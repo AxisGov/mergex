@@ -28,6 +28,9 @@ if [ -n "$l15" ] && [ -n "$l2" ] && [ "$l15" -lt "$l2" ]; then
 else
   quebra 'o Passo 1.5 nao existe ou nao vem antes da abertura'
 fi
+ign_e7="$(sed -n 's/^FATIA_IGNORAR="\${FATIA_IGNORAR:-\(.*\)}" \\$/\1/p' "$e7")"
+[ -n "$ign_e7" ] && passa 'o E7 declara o FATIA_IGNORAR do projeto' \
+  || quebra 'o E7 herda o FATIA_IGNORAR do ExpxDev (fixtures/candidatos fora da conta)'
 grep -Fq 'fatiamento-da-pr.sh "$base" "$publicado"' "$e7" \
   && passa 'o E7 mede o SHA publicado contra a base' \
   || quebra 'o E7 nao chama o script sobre o SHA publicado'
@@ -62,6 +65,13 @@ g switch -q -c arquivo-grande main
 printf 'a\n%.0s' $(seq 1 4100) > "$tmp/longo.txt"; g add -A; g commit -q -m "arquivo longo"
 saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=9000 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main arquivo-grande 2>&1)" && quebra 'arquivo de 4.100 linhas passou' \
   || { case "$saida" in *"F4:"*) passa 'arquivo de 4.100 linhas reprova (F4)' ;; *) quebra "reprovou, mas nao por F4: $saida" ;; esac; }
+# no projeto do desenvolvedor, fixtures/candidatos/ e codigo como outro qualquer
+g switch -q -c candidatos main
+mkdir -p "$tmp/fixtures/candidatos"
+printf 'linha\n%.0s' $(seq 1 450) > "$tmp/fixtures/candidatos/x.md"; g add -A; g commit -q -m candidatos
+saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main candidatos 2>&1)" \
+  && quebra 'com o FATIA_IGNORAR do E7, 450 linhas em fixtures/candidatos passaram' \
+  || { case "$saida" in *"F2:"*) passa 'com o FATIA_IGNORAR do E7, fixtures/candidatos conta (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
 
 # o trecho do E7 que resolve a base, rodado de verdade: branch_base com e sem o
 # remoto no nome (a base informada pelo chamador no E0 pode vir `upstream/main`)

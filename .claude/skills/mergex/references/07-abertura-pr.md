@@ -74,8 +74,14 @@ rb="$remoto"; bb="<branch_base>"; bb="${bb#refs/remotes/}"; bb="${bb#refs/heads/
 if [ "${bb%%/*}" != "$bb" ] && git remote | grep -qxF "${bb%%/*}"; then rb="${bb%%/*}"; bb="${bb#*/}"; fi
 git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 1; }
 base="$(git rev-parse --verify "refs/remotes/$rb/$bb^{commit}")" || exit 1
-bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
+FATIA_IGNORAR="${FATIA_IGNORAR:-(^|/)package-lock\.json$}" \
+  bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 ```
+
+O `FATIA_IGNORAR` vai explícito porque o padrão do script é o do ExpxDev, que também tira
+`fixtures/candidatos/` da conta; no projeto do desenvolvedor esse caminho pode ser código
+revisado. Gerado que o projeto exclui da revisão automática entra aqui só se o desenvolvedor
+declarar o padrão.
 
 Saída `0`: siga para o passo 2 (ou 3, sem ferramenta); avisos (arquivo perto do limite) vão para a seção de atenção do
 `PR.md`, sem impedir. Saída `1`: o E7 **não abre o PR**. Um PR acima do limite não recebe
