@@ -1289,9 +1289,17 @@ for f in "$commits" '.claude/skills/mergex/references/07-abertura-pr.md'; do
 done
 grep -Fq 'agente:"principal"' "$base_sh" \
   || fail 'D-07: the hook trace writer no longer records agente:"principal"'
-# O vocabulário não foi ampliado, e a ocorrência sem evento é silenciosa.
-grep -Fq 'LACUNA REGISTRADA' "$estado" \
-  || fail 'D-07: the estado.json gap is no longer registered for the contract owner'
+# A falha de gravação é rastreada (DM-227, que supera a lacuna da DM-177), sem
+# interromper a etapa nem parecer sucesso.
+grep -Fq '| DM-227 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-227'
+grep -Fq 'Falha de gravação é rastreada' "$estado" \
+  || fail 'D-07: the reference no longer declares the estado.json write failure as traced'
+grep -Fq 'artefato_gravado' "$estado" \
+  || fail 'D-07: the reference dropped the artefato_gravado event for the write failure'
+if grep -Fq 'LACUNA REGISTRADA' "$estado"; then
+  fail 'D-07: the superseded estado.json gap is still registered as open'
+fi
 grep -Fq 'nunca interrompe' "$estado" \
   || fail 'D-07: the reference dropped the rule that a write failure never interrupts'
 for f in scripts/ci/test-d07-contrato-de-evento.sh scripts/ci/mutacao-d07-contrato-de-evento.sh; do
@@ -1301,10 +1309,10 @@ done
 # commit que o leva ao histórico é o fechamento final do E8. A justificativa da
 # passagem silenciosa não pode prometer esse commit.
 if grep -Fq 'foi gravado e commitado de todo modo' "$estado"; then
-  fail 'D-07: the silent-pass rationale claims a ENTREGA.md commit that E0 and E7 do not make'
+  fail 'D-07: the text claims a ENTREGA.md commit that E0 and E7 do not make'
 fi
 grep -Fq 'fechamento final do E8' "$estado" \
-  || fail 'D-07: the rationale no longer names the E8 closing as what carries ENTREGA.md to history'
+  || fail 'D-07: the text no longer names the E8 closing as what carries ENTREGA.md to history'
 # Comentário #2 do CodeAnt: a bancada de mutação é o que sustenta a regressão
 # D-07, e ela só vale se cada cópia estiver inteira. Sem este guarda, `copia()`
 # devolve diretório utilizável depois de um pipeline que falhou, e o relatório

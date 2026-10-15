@@ -83,29 +83,26 @@ M2() { # o exemplo do E7 volta a agente:null
 M3() { # um agente fora do enum passa a valer
   troca_trecho "$COMMITS" '"agente":"principal"' '"agente":"implementador"'
 }
-M4() { # o evento inventado volta, dentro de um exemplo normativo
-  troca_trecho "$ESTADO" 'o `ENTREGA.md` já tem' \
-    'o rastro leva {"ts":"<ISO>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"artefato_gravado","fase":"e0","task":null,"agente":"principal","resultado":"falha","detalhe":"x","arquivos":[]} e o `ENTREGA.md` já tem'
+M4() { # um evento inventado (que não é o declarado) volta num exemplo normativo
+  troca_trecho "$ESTADO" 'A barra nunca barra trabalho'     'o rastro leva {"ts":"<ISO>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"artefato_nao_gravado","fase":"e0","task":null,"agente":"principal","resultado":"falha","detalhe":"x","arquivos":[]} e A barra nunca barra trabalho'
 }
 M5() { # a ocorrência passa a usar um evento existente com semântica falsa
-  troca_trecho "$ESTADO" 'o `ENTREGA.md` já tem' \
-    'o rastro leva {"ts":"<ISO>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"commit_criado","fase":"e0","task":null,"agente":"principal","resultado":"falha","detalhe":"x","arquivos":[]} e o `ENTREGA.md` já tem'
+  troca_trecho "$ESTADO" 'A barra nunca barra trabalho'     'o rastro leva {"ts":"<ISO>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"commit_criado","fase":"e0","task":null,"agente":"principal","resultado":"falha","detalhe":"x","arquivos":[]} e A barra nunca barra trabalho'
 }
-M6() { # a bancada afrouxa o vocabulário, acrescentando o evento à própria cópia
-  troca_trecho "$BANCADA" 'bloqueio_resolvido suite_executada' 'artefato_gravado bloqueio_resolvido suite_executada'
+M6() { # a bancada afrouxa o vocabulário, acrescentando outro evento à lista declarada
+  troca_trecho "$BANCADA" "EVENTOS_DECLARADOS='artefato_gravado'" "EVENTOS_DECLARADOS='artefato_gravado artefato_nao_gravado'"
 }
 M7() { # a bancada afrouxa o enum de agente, aceitando null pela porta de trás
   troca_trecho "$BANCADA" "AGENTES='principal" "AGENTES='null principal"
 }
-M8() { # a lacuna deixa de ser registrada para o dono do contrato
-  troca_trecho "$ESTADO" 'LACUNA REGISTRADA para o dono do contrato' 'Nota interna'
+M8() { # a falha de gravação deixa de ser declarada rastreada
+  troca_trecho "$ESTADO" 'Falha de gravação é rastreada' 'Nota interna'
 }
 M9() { # a regra de que a falha não interrompe o fluxo é perdida
   troca_trecho "$ESTADO" '**A barra nunca é motivo de interrupção de trabalho.**' 'A barra interrompe o trabalho.'
 }
-M10() { # uma etapa volta a mandar a falha para o rastro
-  troca_trecho "$ABERTURA" 'Falha de\ngravação é **silenciosa**' 'Registra no rastro e segue' \
-    || troca_trecho "$ABERTURA" 'gravação é **silenciosa**' 'gravação vai para o rastro'
+M10() { # uma etapa volta a declarar a falha silenciosa, sem rastro
+  troca_trecho "$ABERTURA" 'Segue, registrando `artefato_gravado` com `resultado: falha` (`10-estado.md`)'     'Segue **em silêncio**, sem rastro (`10-estado.md`, "A lacuna")'
 }
 M11() { # a decisão sai do registro
   remove_linha "$DECISOES" '| DM-177 |'
@@ -116,9 +113,8 @@ M12() { # o escritor em disco dos hooks volta a agente null
 M13() { # a bancada deixa de enxergar os exemplos (varredura vazia passa calada)
   troca_trecho "$BANCADA" "grep -n '\"expx_eventos\":1'" "grep -n 'ZZZ_NAO_EXISTE'"
 }
-M14() { # a justificativa volta a afirmar o commit que o E0 e o E7 não fizeram
-  troca_trecho "$ESTADO" 'histórico pelo fechamento final do E8' \
-    'histórico, e foi gravado e commitado de todo modo'
+M14() { # o texto volta a afirmar o commit do ENTREGA.md que o E0 e o E7 não fizeram
+  troca_trecho "$ESTADO" 'A barra nunca barra trabalho'     'A barra nunca barra trabalho, e o ENTREGA.md foi gravado e commitado de todo modo'
 }
 M15() { # a âncora do aborto da cópia sai do arranjo, e o aborto fica sem diagnóstico
   # Este mutante apaga as duas linhas de diagnóstico de `copia()` — e só elas.
@@ -132,21 +128,30 @@ M15() { # a âncora do aborto da cópia sai do arranjo, e o aborto fica sem diag
   remove_linha "$MUTACAO" 'cópia da árvore falh''ou'
 }
 
+M16() { # a DM-227 sai do registro de decisões
+  remove_linha "$DECISOES" '| DM-227 |'
+}
+M17() { # o E0 deixa de mandar registrar a falha com o evento declarado
+  troca_trecho "$ABERTURA" '`artefato_gravado` com `resultado: falha` (`10-estado.md`, "Falha'     'um registro (`10-estado.md`, "Falha'     && troca_trecho "$ABERTURA" 'Segue, registrando `artefato_gravado` com' 'Segue, registrando um evento com'
+}
+
 LISTA='M1|exemplo do E1 volta a agente:null
 M2|exemplo do E7 volta a agente:null
 M3|agente fora do enum Agente
-M4|evento inventado volta num exemplo normativo
+M4|evento inventado, além do declarado, volta num exemplo normativo
 M5|evento existente com semântica falsa
-M6|bancada amplia o vocabulário de evento
+M6|bancada amplia a lista de eventos declarados
 M7|bancada amplia o enum de agente para aceitar null
-M8|lacuna deixa de ser registrada para o dono do contrato
+M8|a falha de gravação deixa de ser declarada rastreada
 M9|regra de que a falha não interrompe é perdida
-M10|uma etapa volta a mandar a falha para o rastro
+M10|uma etapa volta a declarar a falha silenciosa
 M11|DM-177 sai do registro de decisões
 M12|escritor dos hooks volta a agente null
 M13|a varredura da bancada deixa de ver os exemplos
-M14|a justificativa volta a afirmar commit do ENTREGA.md
-M15|a âncora do aborto da cópia sai do arranjo da mutação'
+M14|o texto volta a afirmar commit do ENTREGA.md
+M15|a âncora do aborto da cópia sai do arranjo da mutação
+M16|DM-227 sai do registro de decisões
+M17|o E0 deixa de mandar registrar a falha com o evento declarado'
 
 verifica() { # <dir> — 0 só se a bancada D-07 e o contrato passam
   # MERGEX_D07_EM_COPIA avisa a bancada de que ela está rodando dentro de uma

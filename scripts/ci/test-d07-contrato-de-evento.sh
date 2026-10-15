@@ -15,18 +15,19 @@
 #      ausência;
 #   3. `evento` está no vocabulário fechado — nenhum nome inventado.
 #
-# E confere a política da lacuna (DM-43, estendida pela DM-177): quando o
-# vocabulário não nomeia a ocorrência, a passagem é SILENCIOSA e a lacuna fica
-# escrita para o dono do contrato. Nada de evento novo, nada de evento existente
-# com semântica falsa.
+# E confere a política da falha de gravação (DM-177, superada pela DM-227): a falha
+# do `estado.json` é RASTREADA com `artefato_gravado` e `resultado: falha`, sem
+# interromper a etapa e sem parecer sucesso. Nada de evento existente com
+# semântica falsa.
 #
 # A fonte do contrato é a ExpxDev (`docs/contrato/CONTRATO-expx-eventos.md` e
 # `src/parser/esquema/evento.ts`, enums `EventoNome` e `Agente`), que não é
 # alcançável deste repositório. As duas listas abaixo são a cópia conferida
 # contra o `780cc5cc` daquele repositório — o commit em que o enum foi
-# reconciliado com o catálogo congelado da sprintx, e que mantém
-# `artefato_gravado` reprovando. Ampliar qualquer uma destas listas aqui
-# afrouxaria o contrato de um lado só: o enum mora lá.
+# reconciliado com o catálogo congelado da sprintx. O único evento que a mergex
+# declara além dele é `artefato_gravado` (DM-227), listado à parte e pendente no
+# enum. Ampliar qualquer uma destas listas aqui afrouxaria o contrato de um lado
+# só: o enum mora lá.
 #
 # Sem rede, sem jq. Nada fora deste repositório é lido ou tocado.
 #
@@ -48,14 +49,17 @@ CHAVES='ts expx_eventos trabalho_id ferramenta origem evento fase task agente re
 # O enum `Agente`. `principal` é o valor quando não há subagente.
 AGENTES='principal auditor-plano revisor-testes qa investigador cartografo revisor-diff analista-de-conflito avaliador-de-raio'
 
-# O enum `EventoNome`. `artefato_gravado` NÃO está aqui, e é isso que esta
-# bancada defende: a mergex não tem evento para "gravou artefato".
+# O enum `EventoNome`, na cópia conferida. `artefato_gravado` NÃO está aqui: ele é
+# declarado pela mergex (DM-227) e está pendente no enum do ExpxDev.
 EVENTOS='fase_iniciada fase_concluida task_iniciada task_concluida task_bloqueada
 task_reaberta checkpoint_planejamento replanejamento_execucao_iniciado
 replanejamento_execucao_retomado replanejamento_execucao_aprovado
 replanejamento_execucao_esgotado replanejamento_execucao_recusado
 bloqueio_resolvido suite_executada arquivo_alterado regra_violada acao_bloqueada
 agente_iniciado agente_concluido veredito_emitido commit_criado pr_aberto'
+
+# Os eventos que a mergex declara além do enum, pendentes no `EventoNome`.
+EVENTOS_DECLARADOS='artefato_gravado'
 
 # Os arquivos de instrução da skill e dos hooks. Fixture não entra: ela é dado
 # de teste de outra bancada, não instrução que alguém copia.
@@ -142,10 +146,10 @@ while IFS= read -r achado; do
   ev="$(valor_de evento "$linha")"
   case "$ev" in
     '"'*'"')
-      if em_lista "${ev//\"/}" "$EVENTOS"; then
+      if em_lista "${ev//\"/}" "$EVENTOS $EVENTOS_DECLARADOS"; then
         ok "$onde — evento=$ev está no vocabulário"
       else
-        falha "$onde — evento=$ev fora do vocabulário fechado (nenhum nome inventado)"
+        falha "$onde — evento=$ev fora do vocabulário (enum canônico + o declarado na DM-227)"
       fi ;;
     *) falha "$onde — evento=${ev:-<ausente>} não é um nome do vocabulário" ;;
   esac
@@ -182,16 +186,10 @@ for padrao in '"agente":null' '"agente": null' 'agente:null' 'agente: null'; do
 done
 
 # ---------------------------------------------------------------------------
-# 3. O vocabulário não foi ampliado: `artefato_gravado` não existe na mergex
+# 3. O vocabulário: o enum canônico intacto, e UM evento declarado pela mergex
 # ---------------------------------------------------------------------------
 echo
-echo 'Regressão: nenhum evento inventado'
-
-if em_lista artefato_gravado "$EVENTOS"; then
-  falha 'a própria lista desta bancada foi ampliada com artefato_gravado'
-else
-  ok 'artefato_gravado continua fora do vocabulário desta bancada'
-fi
+echo 'Regressão: nenhum evento inventado além do declarado (DM-227)'
 
 # A cópia dos enums é conferida contra o tamanho canônico do `780cc5cc`: 22
 # eventos e 9 agentes. Ampliar a cópia aqui afrouxaria o contrato de um lado só,
@@ -199,8 +197,8 @@ fi
 # valor de enum em lugar nenhum.
 n_ev="$(printf '%s\n' $EVENTOS | grep -c .)"
 [ "$n_ev" = 22 ] \
-  && ok "o vocabulário desta bancada tem os 22 eventos canônicos" \
-  || falha "o vocabulário desta bancada tem $n_ev eventos, não os 22 canônicos"
+  && ok "o vocabulário canônico desta bancada tem os 22 eventos" \
+  || falha "o vocabulário canônico desta bancada tem $n_ev eventos, não os 22"
 n_ag="$(printf '%s\n' $AGENTES | grep -c .)"
 [ "$n_ag" = 9 ] \
   && ok "o enum de agente desta bancada tem os 9 valores canônicos" \
@@ -211,69 +209,92 @@ else
   ok 'null continua fora do enum de agente desta bancada'
 fi
 
-if achou="$(instrucoes_sem_citacao | grep -F -- 'artefato_gravado' 2>/dev/null)" && [ -n "$achou" ]; then
-  falha 'artefato_gravado é gravado ou mandado gravar em instrução:'
-  printf '        %s\n' "$achou"
+# `artefato_gravado` é o único evento que a mergex declara além do enum, e não
+# entra na lista canônica: ele está pendente no `EventoNome` do ExpxDev.
+if em_lista artefato_gravado "$EVENTOS"; then
+  falha 'artefato_gravado entrou na lista canônica: ele é declarado pela mergex, não está no enum'
 else
-  ok 'nenhuma instrução manda gravar artefato_gravado'
+  ok 'artefato_gravado não foi misturado à lista canônica'
 fi
+[ "$EVENTOS_DECLARADOS" = 'artefato_gravado' ] \
+  && ok 'a mergex declara exatamente um evento além do enum: artefato_gravado' \
+  || falha "a lista de eventos declarados é '$EVENTOS_DECLARADOS', não só artefato_gravado"
 
-# E não foi substituído por um evento existente com semântica falsa: a falha de
-# gravação do estado.json não é commit, não é PR e não é veredito.
+# Nenhuma instrução, fora de citação, grava evento que não seja o canônico ou o
+# declarado: os nomes de evento que a falha de gravação poderia emprestar.
 estado='.claude/skills/mergex/references/10-estado.md'
 tolerancia="$(awk '/^## Tolerância a falha/ { f = 1; next } /^## / { f = 0 } f' "$estado")"
-if printf '%s\n' "$tolerancia" | grep -Eq '"evento":"[a-z_]+"'; then
-  falha "$estado — a tolerância a falha voltou a mandar gravar um evento"
+if printf '%s\n' "$tolerancia" | grep -Eq '"evento":"commit_criado"|"evento":"pr_aberto"|"evento":"veredito_emitido"'; then
+  falha "$estado — a falha de gravação voltou a emprestar um evento existente com semântica falsa"
 else
-  ok "$estado — a tolerância a falha não grava evento nenhum"
+  ok "$estado — a falha de gravação não empresta commit_criado, pr_aberto nem veredito_emitido"
+fi
+
+# O exemplo normativo da falha: o evento declarado, resultado falha, agente principal.
+exemplo="$(printf '%s\n' "$tolerancia" | grep -F '"evento":"artefato_gravado"' | head -1)"
+if [ -z "$exemplo" ]; then
+  falha "$estado — a tolerância a falha não traz o exemplo da linha artefato_gravado"
+else
+  ok "$estado — a tolerância a falha traz o exemplo da linha artefato_gravado"
+  case "$exemplo" in *'"resultado":"falha"'*) ok "$estado — o exemplo grava resultado:falha" ;; *) falha "$estado — o exemplo não grava resultado:falha" ;; esac
+  case "$exemplo" in *'"agente":"principal"'*) ok "$estado — o exemplo grava agente:principal" ;; *) falha "$estado — o exemplo não grava agente:principal" ;; esac
 fi
 
 # ---------------------------------------------------------------------------
-# 4. A política da lacuna (DM-43, estendida pela DM-177)
+# 4. A política: falha de gravação é rastreada (DM-177 superada pela DM-227)
 # ---------------------------------------------------------------------------
 echo
-echo 'Política da lacuna: passagem silenciosa e lacuna registrada'
+echo 'Política: a falha de gravação é rastreada, sem interromper nem parecer sucesso'
 
 decisoes='.claude/skills/mergex/DECISOES-DA-SKILL.md'
 grep -Fq '| DM-43 |' "$decisoes" \
   && ok 'DM-43 continua no registro de decisões' \
   || falha 'DM-43 saiu do registro de decisões'
 grep -Fq '| DM-177 |' "$decisoes" \
-  && ok 'DM-177 registra a extensão da política para o estado.json' \
+  && ok 'DM-177 continua registrada (a lacuna e a sua superação)' \
   || falha 'DM-177 não está no registro de decisões'
+dm227="$(grep -F '| DM-227 |' "$decisoes")"
+[ -n "$dm227" ] \
+  && ok 'DM-227 registra a decisão de rastrear a falha' \
+  || falha 'DM-227 não está no registro de decisões'
+printf '%s\n' "$dm227" | grep -Fq 'complementa DM-91 a DM-93' \
+  && ok 'DM-227 declara que complementa DM-91 a DM-93' \
+  || falha 'DM-227 não diz que complementa DM-91 a DM-93'
+printf '%s\n' "$dm227" | grep -Fq 'não muda o estado final da entrega' \
+  && ok 'DM-227 declara que não muda o estado final da entrega' \
+  || falha 'DM-227 não diz que o estado final da entrega não muda'
 
-# A lacuna fica escrita onde a ocorrência acontece, e nomeia o dono.
-grep -Fq 'LACUNA REGISTRADA' "$estado" \
-  && ok "$estado — a lacuna está registrada no texto" \
-  || falha "$estado — a lacuna não está registrada"
-grep -Fq 'dono do contrato' "$estado" \
-  && ok "$estado — a lacuna nomeia o dono do contrato" \
-  || falha "$estado — a lacuna não diz de quem é a decisão"
-grep -Fq 'silenciosa' "$estado" \
-  && ok "$estado — a passagem é declarada silenciosa" \
-  || falha "$estado — o texto não declara a passagem silenciosa"
-
-# A justificativa da passagem silenciosa não pode afirmar o que o fluxo não
-# garante no instante da falha. O `estado.json` é gravado no E0, no E7, no E8 e
-# no E9; nos dois primeiros o `ENTREGA.md` está **só na árvore de trabalho** —
-# quem o leva ao histórico é o fechamento final do E8 (`07-abertura-pr.md`:
-# "O E7 não commita e não faz push"; `08-registro.md`, passo 2). Dizer ali que
-# ele "já foi commitado" troca a razão verdadeira — derivado nunca é entrada de
-# decisão nenhuma — por uma garantia que o E0 e o E7 não dão.
-if grep -Fq 'foi gravado e commitado de todo modo' "$estado"; then
-  falha "$estado — a justificativa afirma commit do ENTREGA.md que o E0 e o E7 não fizeram"
+grep -Fq 'Falha de gravação é rastreada' "$estado" \
+  && ok "$estado — a falha de gravação é declarada rastreada" \
+  || falha "$estado — o texto não declara a falha de gravação rastreada"
+grep -Fq 'sem-trabalho.jsonl' "$estado" \
+  && ok "$estado — o E9 sem trabalho atual tem destino (sem-trabalho.jsonl)" \
+  || falha "$estado — o texto perdeu o destino sem-trabalho.jsonl"
+if grep -Fq 'LACUNA REGISTRADA' "$estado"; then
+  falha "$estado — ainda há lacuna registrada para a falha de gravação, que a DM-227 superou"
 else
-  ok "$estado — a justificativa não inventa commit do ENTREGA.md no E0 nem no E7"
+  ok "$estado — a lacuna da falha de gravação saiu do texto"
+fi
+
+# A justificativa não pode afirmar o que o fluxo não garante no instante da
+# falha. O `estado.json` é gravado no E0, no E7, no E8 e no E9; nos dois
+# primeiros o `ENTREGA.md` está **só na árvore de trabalho** — quem o leva ao
+# histórico é o fechamento final do E8 (`07-abertura-pr.md`: "O E7 não commita
+# e não faz push"; `08-registro.md`, passo 2).
+if grep -Fq 'foi gravado e commitado de todo modo' "$estado"; then
+  falha "$estado — o texto afirma commit do ENTREGA.md que o E0 e o E7 não fizeram"
+else
+  ok "$estado — o texto não inventa commit do ENTREGA.md no E0 nem no E7"
 fi
 grep -Fq 'fechamento final do E8' "$estado" \
-  && ok "$estado — a justificativa nomeia quem leva o ENTREGA.md ao histórico" \
-  || falha "$estado — a justificativa não nomeia o fechamento final do E8"
-# E a razão que sustenta a passagem silenciosa continua sendo a do derivado.
+  && ok "$estado — o texto nomeia quem leva o ENTREGA.md ao histórico" \
+  || falha "$estado — o texto não nomeia o fechamento final do E8"
 grep -Fq 'saída derivada' "$estado" \
-  && ok "$estado — a razão da passagem silenciosa continua sendo o derivado" \
+  && ok "$estado — o texto mantém que o estado.json é saída derivada" \
   || falha "$estado — o texto perdeu a razão de que o estado.json é saída derivada"
 
-# A lacuna do hook (DM-43) não foi apagada nem reaproveitada.
+# A lacuna do hook (DM-43) não foi apagada nem reaproveitada: a DM-227 trata do
+# `estado.json`, não da passagem limpa dos hooks.
 grep -Fq 'LACUNA REGISTRADA' '.claude/hooks/comum/base.sh' \
   && ok 'base.sh — a lacuna da passagem limpa do hook continua registrada' \
   || falha 'base.sh — a lacuna da DM-43 foi apagada'
@@ -282,13 +303,11 @@ grep -Fq 'Lacuna registrada no contrato' '.claude/hooks/README.md' \
   || falha 'hooks/README.md — a seção da lacuna da DM-43 desapareceu'
 
 # ---------------------------------------------------------------------------
-# 5. A falha de gravação continua não interrompendo o fluxo
+# 5. A falha de gravação não interrompe o fluxo, e cada etapa a registra
 # ---------------------------------------------------------------------------
 echo
-echo 'Regressão: a falha de gravação do estado.json não interrompe nada'
+echo 'Regressão: a falha de gravação do estado.json não interrompe nada e é registrada'
 
-# Todo lugar que fala da falha de gravação do estado.json: nenhum pode mandar
-# gravar rastro, e todos têm que continuar dizendo que o fluxo segue.
 R='.claude/skills/mergex/references'
 for par in \
   "$R/00-abertura.md|o E0 continua OK" \
@@ -304,13 +323,20 @@ do
     || falha "$arq — perdeu a regra de que a falha não interrompe (\"$frase\")"
 done
 
-# A frase que mandava gravar a falha no rastro não sobreviveu em lugar nenhum:
-# ela é a instrução que produzia a linha fora do contrato.
-if achou="$(grep -rn -i -e 'gravação vai para o rastro' -e 'gravação vai\s*$' -e 'Registra no rastro e segue' "$R" 2>/dev/null)" && [ -n "$achou" ]; then
-  falha 'ainda há instrução mandando gravar a falha do estado.json no rastro:'
+# Cada etapa que grava o estado.json manda registrar a falha com o evento
+# declarado: sem isto a falha voltaria a ser silenciosa nessa etapa.
+for arq in "$R/00-abertura.md" "$R/07-abertura-pr.md" "$R/08-registro.md" "$R/09-revisao.md" "$estado"; do
+  grep -Fq 'artefato_gravado' "$arq" \
+    && ok "$arq — manda registrar a falha com artefato_gravado" \
+    || falha "$arq — não manda registrar a falha de gravação com artefato_gravado"
+done
+
+# E nenhuma etapa declara a falha silenciosa nem aponta para a lacuna antiga.
+if achou="$(grep -rn -e '"A lacuna"' -e 'sem rastro (`10-estado.md`' -e 'Segue \*\*em silêncio\*\*, sem rastro' "$R" 2>/dev/null)" && [ -n "$achou" ]; then
+  falha 'ainda há instrução declarando a falha do estado.json silenciosa ou apontando para "A lacuna":'
   printf '        %s\n' "$achou"
 else
-  ok 'nenhuma instrução manda a falha do estado.json para o rastro'
+  ok 'nenhuma instrução declara a falha do estado.json silenciosa'
 fi
 
 # ---------------------------------------------------------------------------
