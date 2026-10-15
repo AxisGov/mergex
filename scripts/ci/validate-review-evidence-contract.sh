@@ -72,4 +72,10 @@ grep -Fq 'Reação genérica ou ambígua não satisfaz R6' "$review" \
 grep -Fq '(resposta explícita, aprovação, ou reação positiva verificável conforme "Reação positiva' "$review" \
   || fail 'FÁBRICA-resolved branch must accept a prior verifiable positive reaction as external confirmation'
 
+# R1: resultado de CI ausente nao e CI ausente. Pipeline que ainda nao anexou ao HEAD
+# (head_pipeline nulo, rollup vazio) com CI configurado e NAO VERIFICAVEL, nunca n/a.
+grep -Fq 'Resultado ausente **não** é CI ausente' "$review" \
+  && grep -Fq 'R1 é `NÃO VERIFICÁVEL`, nunca `n/a`' "$review" \
+  || fail 'R1 treats a CI result not yet attached as "no CI configured" (n/a)'
+
 printf 'contract checks passed\n'
