@@ -59,6 +59,24 @@ As **duas** verificações precisam passar. Ferramenta instalada mas não autent
 
 Serviço sem ferramenta conhecida (Bitbucket, Azure DevOps, Gitea, servidor interno): trate como ausente e vá para o passo 3.
 
+## Passo 1.5 — O PR cabe numa revisão (`expx-fatiamento`)
+
+Antes de abrir, meça o PR contra F2, F3 e F4 do contrato `expx-fatiamento` do ExpxDev, com a
+`branch_base` do `ENTREGA.md` (a remota, se existir):
+
+```bash
+base="$(git rev-parse --verify --quiet "origin/<branch_base>" || echo "<branch_base>")"
+bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
+```
+
+Saída `0`: siga para o passo 2; avisos (arquivo perto do limite) vão para a seção de atenção do
+`PR.md`, sem impedir. Saída `1`: o E7 **não abre o PR**. Um PR acima do limite não recebe
+revisão automática (o CodeAnt pula PR com mais de 100 arquivos e documenta 5.000 linhas por
+arquivo), e PR sem revisão que parece revisado é pior que PR não aberto. Registre o motivo com a
+lista de violações, deixe `pr_estado` em `null` e diga ao desenvolvedor como dividir: por
+assunto (F1), um PR por fatia, na ordem das tasks. A exceção de movimento mecânico (F6) só vale
+quando **o desenvolvedor** a declara (`FATIA_EXCECAO=<motivo>`), nunca por decisão do E7.
+
 ## Passo 2 — Abrir o PR
 
 ### Rascunho ou pronto para revisão
@@ -179,6 +197,7 @@ Siga para o E8.
 | Ferramenta não instalada | Passo 3. Não é erro |
 | Ferramenta não autenticada | Passo 3. **Nunca** rode `gh auth login` nem equivalente |
 | Serviço não suportado | Passo 3 |
+| `fatiamento-da-pr.sh` saiu `1` (PR acima de F2, F3 ou F4) | O E7 **não abre o PR**: registra as violações, `pr_estado` fica `null`, e o desenvolvedor recebe como dividir |
 | Comando falhou por permissão | Passo 3, com o erro literal registrado |
 | PR já existe | Recupere a URL e registre; é retomada |
 | Sem push | O E7 não roda; siga para o E8 |
