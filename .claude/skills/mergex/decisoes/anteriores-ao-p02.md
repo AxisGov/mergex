@@ -188,4 +188,3 @@ possível de corrida); um `ENTREGA.md` legado precisar ser reordenado por uma ra
 prefixo legado deixa de bastar e a migração vira decisão própria, nunca efeito colateral de uma
 gravação); ou uma verificação futura do portão passar a cobrar integridade do registro — que é o
 oposto do DM-130 e precisaria de contrato próprio.
-
