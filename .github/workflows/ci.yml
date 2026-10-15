@@ -93,3 +93,7 @@ jobs:
       - name: Test the CI guard
         shell: bash
         run: bash scripts/ci/test-ci-guard.sh
+
+      - name: Test E7 fatiamento
+        shell: bash
+        run: bash scripts/ci/test-fatiamento-e7.sh
