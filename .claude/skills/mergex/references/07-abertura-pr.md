@@ -57,24 +57,28 @@ git remote get-url origin
 
 As **duas** verificações precisam passar. Ferramenta instalada mas não autenticada conta como ausente: seguir daria erro ou prompt de credencial.
 
-Serviço sem ferramenta conhecida (Bitbucket, Azure DevOps, Gitea, servidor interno): trate como ausente e vá para o passo 3.
+Serviço sem ferramenta conhecida (Bitbucket, Azure DevOps, Gitea, servidor interno): trate como ausente — o passo 1.5 roda do mesmo jeito, e só depois dele vá para o passo 3.
 
 ## Passo 1.5 — O PR cabe numa revisão (`expx-fatiamento`)
 
-Antes de abrir, meça o PR contra F2, F3 e F4 do contrato `expx-fatiamento` do ExpxDev, com a
-`branch_base` do `ENTREGA.md` (a remota, se existir):
+Antes de abrir — pelo passo 2 **ou** pelo passo 3, que manda abrir à mão —, meça o PR contra F2,
+F3 e F4 do contrato `expx-fatiamento` do ExpxDev. A base é a `branch_base` do `ENTREGA.md` **no
+mesmo remoto do upstream** (`$remoto`, dos pré-requisitos), buscada agora e conferida; uma ref
+local antiga, ou de outro remoto (fork), mediria o PR contra a base errada:
 
 ```bash
-base="$(git rev-parse --verify --quiet "origin/<branch_base>" || echo "<branch_base>")"
+git fetch "$remoto" "<branch_base>" || { echo "busca de <branch_base> em $remoto falhou: o E7 não mede nem abre o PR"; exit 1; }
+base="$(git rev-parse --verify "refs/remotes/$remoto/<branch_base>^{commit}")" || exit 1
 bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 ```
 
-Saída `0`: siga para o passo 2; avisos (arquivo perto do limite) vão para a seção de atenção do
+Saída `0`: siga para o passo 2 (ou 3, sem ferramenta); avisos (arquivo perto do limite) vão para a seção de atenção do
 `PR.md`, sem impedir. Saída `1`: o E7 **não abre o PR**. Um PR acima do limite não recebe
 revisão automática (o CodeAnt pula PR com mais de 100 arquivos e documenta 5.000 linhas por
 arquivo), e PR sem revisão que parece revisado é pior que PR não aberto. Registre o motivo com a
 lista de violações, deixe `pr_estado` em `null` e diga ao desenvolvedor como dividir: por
-assunto (F1), um PR por fatia, na ordem das tasks. A exceção de movimento mecânico (F6) só vale
+assunto (F1), um PR por fatia, na ordem das tasks. No passo 3 vale igual: o `PR.md` não manda
+abrir à mão um PR que reprovou aqui. A exceção de movimento mecânico (F6) só vale
 quando **o desenvolvedor** a declara (`FATIA_EXCECAO=<motivo>`), nunca por decisão do E7.
 
 ## Passo 2 — Abrir o PR

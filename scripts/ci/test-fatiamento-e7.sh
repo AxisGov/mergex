@@ -34,6 +34,12 @@ grep -Fq 'fatiamento-da-pr.sh "$base" "$publicado"' "$e7" \
 grep -Fq 'o E7 **não abre o PR**' "$e7" \
   && passa 'violacao impede a abertura' \
   || quebra 'o E7 nao diz que a violacao impede a abertura'
+grep -Fq 'git fetch "$remoto" "<branch_base>"' "$e7" && grep -Fq 'refs/remotes/$remoto/<branch_base>' "$e7" \
+  && passa 'a base vem do remoto do upstream, buscada agora' \
+  || quebra 'a base nao e buscada no remoto do upstream (ref antiga ou fork mediria errado)'
+grep -Fq 'o passo 1.5 roda do mesmo jeito, e só depois dele vá para o passo 3' "$e7" \
+  && passa 'servico sem ferramenta tambem passa pela medicao' \
+  || quebra 'o caminho manual (passo 3) contorna a medicao'
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 g() { git -C "$tmp" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
@@ -45,6 +51,16 @@ if (cd "$tmp" && bash "$script" main pequeno >/dev/null 2>&1); then passa 'PR pe
 g switch -q -c grande main
 for i in 1 2 3; do printf 'linha\n%.0s' $(seq 1 200) > "$tmp/g$i.md"; g add -A; g commit -q -m "parte $i"; done
 if (cd "$tmp" && bash "$script" main grande >/dev/null 2>&1); then quebra 'PR de 600 linhas passou'; else passa 'PR de 600 linhas reprova (F2)'; fi
+# F3: um commit so de 350 linhas, num PR que cabe em F2
+g switch -q -c commit-grande main
+printf 'linha\n%.0s' $(seq 1 350) > "$tmp/c.md"; g add -A; g commit -q -m "commit grande"
+saida="$(cd "$tmp" && bash "$script" main commit-grande 2>&1)" && quebra 'commit de 350 linhas passou' \
+  || { case "$saida" in *"F3:"*) passa 'commit de 350 linhas reprova (F3)' ;; *) quebra "reprovou, mas nao por F3: $saida" ;; esac; }
+# F4: arquivo novo acima de 4.000 linhas, com F2 e F3 folgados
+g switch -q -c arquivo-grande main
+printf 'a\n%.0s' $(seq 1 4100) > "$tmp/longo.txt"; g add -A; g commit -q -m "arquivo longo"
+saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=9000 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main arquivo-grande 2>&1)" && quebra 'arquivo de 4.100 linhas passou' \
+  || { case "$saida" in *"F4:"*) passa 'arquivo de 4.100 linhas reprova (F4)' ;; *) quebra "reprovou, mas nao por F4: $saida" ;; esac; }
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
