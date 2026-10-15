@@ -1222,16 +1222,18 @@ done
 HOOK_CWD="$HIST_T"
 
 # dubious ownership: o Git recusa o repositorio do cwd (dono diferente, sem
-# safe.directory). Config global VAZIA e temporaria, so no processo do hook.
+# safe.directory). Config global VAZIA e temporaria, e a de SISTEMA desligada:
+# com safe.directory=* na config de sistema (o runner do GitHub falhou aqui por
+# isso) o Git aceita o repositorio e o caso nao mede nada. So no processo do hook.
 GLOBAL_VAZIA_T="$SEMGIT_T/global-vazia"
 : > "$GLOBAL_VAZIA_T"
 caso_aviso "dubious ownership avisa e sai 0" "$(bash_json "$PUSH_FT")" \
-  GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+  GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1
 case "$SAIDA_H" in
   *safe.directory*) OK=$((OK+1)); printf '  ok    %s\n' "dubious ownership: o aviso cita safe.directory na config global" ;;
   *) FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "dubious ownership: o aviso nao cita safe.directory" ;;
 esac
-GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$HIST_T" rev-parse --show-toplevel >/dev/null 2>&1 \
+GIT_CONFIG_GLOBAL="$GLOBAL_VAZIA_T" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$HIST_T" rev-parse --show-toplevel >/dev/null 2>&1 \
   && { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "controle: o Git aceitou o repositorio com dono diferente"; } \
   || { OK=$((OK+1)); printf '  ok    %s\n' "controle: o Git recusa o repositorio (dubious ownership)"; }
 
