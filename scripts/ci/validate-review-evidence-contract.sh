@@ -77,5 +77,14 @@ grep -Fq '(resposta explícita, aprovação, ou reação positiva verificável c
 grep -Fq 'Resultado ausente **não** é CI ausente' "$review" \
   && grep -Fq 'R1 é `NÃO VERIFICÁVEL`, nunca `n/a`' "$review" \
   || fail 'R1 treats a CI result not yet attached as "no CI configured" (n/a)'
+# A definicao NORMATIVA (a linha | R1 | da tabela) tem que dizer o mesmo: o texto
+# explicativo sozinho nao basta, e uma linha R1 contraditoria passaria.
+r1="$(grep -F '| R1 |' "$review")"
+printf '%s\n' "$r1" | grep -Fq '`n/a` (sem CI configurado: nenhuma configuração de CI no HEAD)' \
+  && printf '%s\n' "$r1" | grep -Fq 'inclusive o pipeline que ainda não anexou ao HEAD' \
+  || fail 'the normative R1 row does not define n/a as no CI config in HEAD and a not-yet-attached pipeline as NAO VERIFICAVEL'
+# GitHub aceita as duas extensoes de workflow
+grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
+  || fail 'CI detection omits .github/workflows/*.yaml'
 
 printf 'contract checks passed\n'
