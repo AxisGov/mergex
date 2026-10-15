@@ -23,11 +23,11 @@
 # A fonte do contrato é a ExpxDev (`docs/contrato/CONTRATO-expx-eventos.md` e
 # `src/parser/esquema/evento.ts`, enums `EventoNome` e `Agente`), que não é
 # alcançável deste repositório. As duas listas abaixo são a cópia conferida
-# contra o `780cc5cc` daquele repositório — o commit em que o enum foi
-# reconciliado com o catálogo congelado da sprintx. O único evento que a mergex
-# declara além dele é `artefato_gravado` (DM-227), listado à parte e pendente no
-# enum. Ampliar qualquer uma destas listas aqui afrouxaria o contrato de um lado
-# só: o enum mora lá.
+# contra o enum do ExpxDev depois de `artefato_gravado` entrar nele
+# (AxisGov/expxdev#18, DM-227): os 22 eventos do `780cc5cc`, o commit em que o
+# enum foi reconciliado com o catálogo congelado da sprintx, mais esse. Ampliar
+# qualquer uma destas listas aqui afrouxaria o contrato de um lado só: o enum
+# mora lá.
 #
 # Sem rede, sem jq. Nada fora deste repositório é lido ou tocado.
 #
@@ -49,17 +49,15 @@ CHAVES='ts expx_eventos trabalho_id ferramenta origem evento fase task agente re
 # O enum `Agente`. `principal` é o valor quando não há subagente.
 AGENTES='principal auditor-plano revisor-testes qa investigador cartografo revisor-diff analista-de-conflito avaliador-de-raio'
 
-# O enum `EventoNome`, na cópia conferida. `artefato_gravado` NÃO está aqui: ele é
-# declarado pela mergex (DM-227) e está pendente no enum do ExpxDev.
+# O enum `EventoNome`, na cópia conferida. `artefato_gravado` é o da mergex
+# (DM-227): a gravação de um artefato derivado falhou.
 EVENTOS='fase_iniciada fase_concluida task_iniciada task_concluida task_bloqueada
 task_reaberta checkpoint_planejamento replanejamento_execucao_iniciado
 replanejamento_execucao_retomado replanejamento_execucao_aprovado
 replanejamento_execucao_esgotado replanejamento_execucao_recusado
 bloqueio_resolvido suite_executada arquivo_alterado regra_violada acao_bloqueada
-agente_iniciado agente_concluido veredito_emitido commit_criado pr_aberto'
-
-# Os eventos que a mergex declara além do enum, pendentes no `EventoNome`.
-EVENTOS_DECLARADOS='artefato_gravado'
+agente_iniciado agente_concluido veredito_emitido commit_criado pr_aberto
+artefato_gravado'
 
 # Os arquivos de instrução da skill e dos hooks. Fixture não entra: ela é dado
 # de teste de outra bancada, não instrução que alguém copia.
@@ -146,10 +144,10 @@ while IFS= read -r achado; do
   ev="$(valor_de evento "$linha")"
   case "$ev" in
     '"'*'"')
-      if em_lista "${ev//\"/}" "$EVENTOS $EVENTOS_DECLARADOS"; then
+      if em_lista "${ev//\"/}" "$EVENTOS"; then
         ok "$onde — evento=$ev está no vocabulário"
       else
-        falha "$onde — evento=$ev fora do vocabulário (enum canônico + o declarado na DM-227)"
+        falha "$onde — evento=$ev fora do vocabulário fechado (nenhum nome inventado)"
       fi ;;
     *) falha "$onde — evento=${ev:-<ausente>} não é um nome do vocabulário" ;;
   esac
@@ -186,19 +184,19 @@ for padrao in '"agente":null' '"agente": null' 'agente:null' 'agente: null'; do
 done
 
 # ---------------------------------------------------------------------------
-# 3. O vocabulário: o enum canônico intacto, e UM evento declarado pela mergex
+# 3. O vocabulário: a cópia do enum canônico, sem nome inventado
 # ---------------------------------------------------------------------------
 echo
-echo 'Regressão: nenhum evento inventado além do declarado (DM-227)'
+echo 'Regressão: nenhum evento inventado além do enum (DM-227)'
 
-# A cópia dos enums é conferida contra o tamanho canônico do `780cc5cc`: 22
-# eventos e 9 agentes. Ampliar a cópia aqui afrouxaria o contrato de um lado só,
-# e é a primeira coisa que esta bancada barra — inclusive para `null`, que não é
-# valor de enum em lugar nenhum.
+# A cópia dos enums é conferida contra o tamanho canônico: 23 eventos (os 22 do
+# `780cc5cc` mais `artefato_gravado`) e 9 agentes. Ampliar a cópia aqui
+# afrouxaria o contrato de um lado só, e é a primeira coisa que esta bancada
+# barra — inclusive para `null`, que não é valor de enum em lugar nenhum.
 n_ev="$(printf '%s\n' $EVENTOS | grep -c .)"
-[ "$n_ev" = 22 ] \
-  && ok "o vocabulário canônico desta bancada tem os 22 eventos" \
-  || falha "o vocabulário canônico desta bancada tem $n_ev eventos, não os 22"
+[ "$n_ev" = 23 ] \
+  && ok "o vocabulário desta bancada tem os 23 eventos canônicos" \
+  || falha "o vocabulário desta bancada tem $n_ev eventos, não os 23"
 n_ag="$(printf '%s\n' $AGENTES | grep -c .)"
 [ "$n_ag" = 9 ] \
   && ok "o enum de agente desta bancada tem os 9 valores canônicos" \
@@ -209,16 +207,13 @@ else
   ok 'null continua fora do enum de agente desta bancada'
 fi
 
-# `artefato_gravado` é o único evento que a mergex declara além do enum, e não
-# entra na lista canônica: ele está pendente no `EventoNome` do ExpxDev.
+# `artefato_gravado` é o evento da mergex para a falha de gravação (DM-227) e
+# está no `EventoNome` do ExpxDev (AxisGov/expxdev#18).
 if em_lista artefato_gravado "$EVENTOS"; then
-  falha 'artefato_gravado entrou na lista canônica: ele é declarado pela mergex, não está no enum'
+  ok 'artefato_gravado está no vocabulário canônico desta bancada'
 else
-  ok 'artefato_gravado não foi misturado à lista canônica'
+  falha 'artefato_gravado saiu do vocabulário canônico desta bancada'
 fi
-[ "$EVENTOS_DECLARADOS" = 'artefato_gravado' ] \
-  && ok 'a mergex declara exatamente um evento além do enum: artefato_gravado' \
-  || falha "a lista de eventos declarados é '$EVENTOS_DECLARADOS', não só artefato_gravado"
 
 # Nenhuma instrução, fora de citação, grava evento que não seja o canônico ou o
 # declarado: os nomes de evento que a falha de gravação poderia emprestar.

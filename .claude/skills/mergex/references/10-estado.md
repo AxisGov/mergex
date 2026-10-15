@@ -227,8 +227,8 @@ O que a falha **não** faz:
   fechamento final do E8 (`08-registro.md`, "O fechamento final — a entrega precisa sobreviver
   ao worktree"); a observabilidade da falha complementa DM-91 a DM-93, não os substitui.
 
-`artefato_gravado` não está no enum de `EventoNome` do contrato `expx-eventos`. Até entrar, o
-`doctor` e o painel tratam a linha como fora do contrato; ver a decisão registrada em DM-227.
+`artefato_gravado` é evento do contrato `expx-eventos` (enum `EventoNome` do `expxdev`,
+AxisGov/expxdev#18): o `doctor` e o painel o reconhecem. A decisão está registrada em DM-227.
 
 ## O que NÃO fazer
 

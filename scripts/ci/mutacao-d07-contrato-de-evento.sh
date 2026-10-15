@@ -89,8 +89,8 @@ M4() { # um evento inventado (que não é o declarado) volta num exemplo normati
 M5() { # a ocorrência passa a usar um evento existente com semântica falsa
   troca_trecho "$ESTADO" 'A barra nunca barra trabalho'     'o rastro leva {"ts":"<ISO>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"commit_criado","fase":"e0","task":null,"agente":"principal","resultado":"falha","detalhe":"x","arquivos":[]} e A barra nunca barra trabalho'
 }
-M6() { # a bancada afrouxa o vocabulário, acrescentando outro evento à lista declarada
-  troca_trecho "$BANCADA" "EVENTOS_DECLARADOS='artefato_gravado'" "EVENTOS_DECLARADOS='artefato_gravado artefato_nao_gravado'"
+M6() { # a bancada afrouxa o vocabulário, acrescentando um evento à cópia do enum
+  troca_trecho "$BANCADA" 'bloqueio_resolvido suite_executada' 'artefato_nao_gravado bloqueio_resolvido suite_executada'
 }
 M7() { # a bancada afrouxa o enum de agente, aceitando null pela porta de trás
   troca_trecho "$BANCADA" "AGENTES='principal" "AGENTES='null principal"
@@ -140,7 +140,7 @@ M2|exemplo do E7 volta a agente:null
 M3|agente fora do enum Agente
 M4|evento inventado, além do declarado, volta num exemplo normativo
 M5|evento existente com semântica falsa
-M6|bancada amplia a lista de eventos declarados
+M6|bancada amplia o vocabulário de evento
 M7|bancada amplia o enum de agente para aceitar null
 M8|a falha de gravação deixa de ser declarada rastreada
 M9|regra de que a falha não interrompe é perdida
