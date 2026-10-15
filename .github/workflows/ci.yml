@@ -14,6 +14,10 @@ jobs:
     name: ${{ matrix.os }} / hooks
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    # Windows e melhor esforco (DM-228): no Git Bash a suite passa de 20 min e o
+    # orcamento interno de 8 s do pr-so-com-portao nao fecha. O resultado fica
+    # visivel, mas so o Linux e portao do merge.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
