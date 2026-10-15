@@ -10,7 +10,7 @@
   <img alt="harness: Claude Code" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-claude.svg">
   <img alt="harness: OpenCode" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-opencode.svg">
   <img alt="atencao humana: 3 faixas" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-faixas.svg">
-  <img alt="portao: 10 verificacoes" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-portao.svg">
+  <img alt="portao: 11 verificacoes" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-portao.svg">
   <img alt="schema expx v1" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-schema.svg">
   <img alt="docs pt-BR" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-lang.svg">
   <img alt="licenca MIT" src="https://raw.githubusercontent.com/bittencourtthulio/mergex/main/.github/assets/badge-license.svg">
@@ -51,7 +51,7 @@ O método Expx é um conjunto de skills que se compõem, instaladas e mantidas p
 | **[stackx](https://github.com/bittencourtthulio/stackx)** | **camada** de convenções do repositório | convenções de branch, commit e teste vêm do `CONVENCOES.md` |
 | **[memox](https://github.com/bittencourtthulio/MemoX)** | **camada** de memória do projeto | arquivo com histórico de regressão sobe de faixa de atenção |
 | **[prodx](https://github.com/bittencourtthulio/prodx)** | **camada** de produto: decide **se** há trabalho | a montante: o `PD-ID` de origem acompanha o trabalho até a descrição do PR |
-| **[buildx](https://github.com/bittencourtthulio/buildx)** | orquestra um projeto inteiro, da descrição ao sistema pronto | invoca `mergex-abrir`, `mergex-check`, `mergex-pr` e `mergex-qa` uma vez por feature do mapa; nunca invoca `mergex-revisar` — merge continua decisão humana. É dependência obrigatória dela |
+| **[buildx](https://github.com/bittencourtthulio/buildx)** | orquestra um projeto inteiro, da descrição ao sistema pronto | não chama a mergex diretamente: quem a aciona é a **F6 da sprintx**, dona de E0, E1 e E2→E8 em cada feature do mapa. A buildx **consome o resultado** (entrega registrada ou bloqueio persistido) e **nunca invoca `mergex-revisar`** — merge continua decisão humana |
 | **mergex** *(este repositório)* | entrega: o último metro, E0…E9 | — |
 
 A `mergex` é a **última peça do fluxo** — assim como a `prodx` é a primeira: uma decide se o trabalho existe, a outra o entrega. As irmãs produzem os artefatos, a `mergex` os costura na entrega. **A ausência da `mergex` nunca quebra o fluxo das outras skills**, e a ausência de qualquer irmã nunca quebra o fluxo da `mergex`. A `buildx` é a única exceção do método: por ficar acima de todas, ela é a única peça que **depende** de outras — e a `mergex` é uma delas.
@@ -194,9 +194,9 @@ As nove primeiras são automáticas; a décima só roda quando você a chama.
 
 | Etapa | Quando | O que faz |
 |---|---|---|
-| **E0** Abertura | No início do trabalho | Cria a branch antes da primeira linha de código. Árvore suja: para e avisa. Branch que já existe: retoma nela |
+| **E0** Abertura | No início do trabalho | Garante a branch antes da primeira linha de código. Adota a branch e a árvore de trabalho que a skill de origem já abriu; só cria branch quando não existe nenhuma, e aí árvore suja: para e avisa |
 | **E1** Commit por task | A cada task que fecha | Um commit por task, com a intenção na mensagem. Varredura de segredo antes de cada um |
-| **E2** Portão de prontidão | Ao fim da execução | Dez verificações. `PRONTO` ou `BLOQUEADO` com o que falta. Nunca maquia |
+| **E2** Portão de prontidão | Ao fim da execução | Onze verificações. `PRONTO` ou `BLOQUEADO` com o que falta. Nunca maquia |
 | **E3** Atenção humana | Depois do portão | Classifica o diff nas três faixas, arquivo por arquivo, com a evidência de cada um |
 | **E4** Descrição do PR | Depois da classificação | Monta a descrição a partir dos artefatos. Cabe em uma tela |
 | **E5** Pacote de QA | Antes do push | Documento executável por quem não programa |
@@ -214,8 +214,10 @@ O revisor humano é recurso caro e finito. O trabalho da `mergex` é gastar esse
 | Faixa | O que o revisor faz | Quando um arquivo cai aqui |
 |---|---|---|
 | **OLHO OBRIGATÓRIO** | Lê linha a linha | Zona de risco declarada; regra de negócio ou cálculo; migração de banco, qualquer uma; autenticação, autorização, dado pessoal; contrato público (rota, payload, evento, retorno); código sem cobertura antes e depois; efeito irreversível; raio ALTO |
-| **LEITURA RÁPIDA** | Confere a intenção, não a implementação | Coberto por caracterização que continua passando; camada isolada com cobertura existente; código novo em arquivo novo com os dois testes verdes |
-| **DISPENSÁVEL** | Não abre — a máquina já provou | Teste que só acrescenta caso; alteração mecânica coberta por regressão verde; arquivo gerado automaticamente, quando declarado como tal |
+| **LEITURA RÁPIDA** | Confere a intenção, não a implementação | Coberto por caracterização que continua passando; camada isolada com cobertura existente; código novo em arquivo novo com os dois testes verdes; artefato de método reconhecido (decisão, plano, base, fechamento) |
+| **DISPENSÁVEL** | Não abre — a máquina já provou | Teste que só acrescenta caso; alteração mecânica coberta por regressão verde; arquivo gerado automaticamente, quando declarado como tal; artefato de método mecânico reconhecido, com prova mecânica (bloqueios vazios, índice consistente, histórico que só acrescenta) |
+
+**Artefato de método nunca anula critério O**, e só é reconhecido por um catálogo fechado — caminho exato na pasta do trabalho e `kind` conferido, nunca pela pasta nem pelo frontmatter. O que não é reconhecido segue a regra de sempre.
 
 A classificação é **derivada de evidência registrada** — zonas de risco, raio, cobertura, tipo de mudança. Nunca de sensação. Na dúvida entre duas faixas, sobe para a mais rigorosa e diz por quê.
 
@@ -282,7 +284,7 @@ Toda regra inviolável da skill era, até aqui, uma instrução que o modelo pod
 | Hook | Modo | O que garante |
 |---|---|---|
 | `sem-segredo` | **bloqueio** | Varredura a cada commit e a cada escrita, não só no portão |
-| `git-perigoso` | **bloqueio** | Nunca forçado, nunca na principal, nunca reescrever o já enviado, nunca descartar alteração local |
+| `mergex/git-perigoso` | **bloqueio** | Nunca forçado, nunca na principal, nunca reescrever o já enviado, nunca descartar alteração local |
 | `branch-limpa` | **bloqueio** | Nunca criar ou trocar branch com alteração pendente |
 | `commit-por-task` | aviso | Um commit por task, concluída e com suíte verde |
 | `arquivo-fora-do-plano` | aviso | Nada commitado fora da lista declarada na task |
@@ -306,6 +308,10 @@ Os dois agentes fixam `model: opus` e `effort: high` no frontmatter, em vez de h
 | [`runx`](https://github.com/bittencourtthulio/runx) | E0 no início do fix, E1 a cada task, E2–E8 entre o QA e o relatório — [patch](docs/integracao/patch-runx.md) |
 | [`legadox`](https://github.com/bittencourtthulio/legadox) | Sem acionamento próprio: raio, caracterização, reversão e dívida alimentam o portão, a classificação e o PR — [patch](docs/integracao/patch-legadox.md) |
 | [`stackx`](https://github.com/bittencourtthulio/stackx) | Convenções de branch, commit e teste vêm do `CONVENCOES.md` — [patch](docs/integracao/patch-stackx.md) |
+
+Na integração com a SprintX, `00-PREDECESSORES.md` pode provar spec e plano consumidos antes de o planejamento nascer. A MergeX valida o manifesto por conteúdo e código de saída, inclui somente esses caminhos exatos na V9 e falha fechado quando o protocolo é inconclusivo. Uma entrega encerrada sem publicação apenas por essa V9 pode usar a retomada estreita descrita em `references/13-predecessores-sprintx.md`; ela não altera tasks concluídas nem a sequência E1 e sempre volta ao E2 completo.
+
+Essa capacidade exige versões compatíveis das duas skills. MergeX anterior não entende o manifesto; o ExpxDev só deve instalar a combinação depois de os PRs de SprintX e MergeX estarem integrados e certificados juntos.
 
 Os patches em [`docs/integracao/`](docs/integracao/) são prompts prontos para colar no repositório de cada skill irmã. Nenhum deles altera comportamento quando a `mergex` não está instalada.
 

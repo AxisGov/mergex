@@ -1,19 +1,52 @@
 ---
-description: Verifica se o trabalho está realmente pronto para entregar — etapa E2 da mergex, o portão de prontidão, isolada. Roda as dez verificações (tasks concluídas, suíte verde, dois testes por task, teste de regressão, QA, auditoria, bloqueios, modo legado, arquivos fora do escopo, segredos no diff) e devolve PRONTO ou BLOQUEADO com o que falta. Use antes de entregar, ao perguntar se está pronto para PR, ou para conferir a entrega.
+description: Verifica se o trabalho está realmente pronto para entregar — etapa E2 da mergex, o portão de prontidão, isolada. Roda as onze verificações (tasks concluídas, registro de suíte por task e suíte inteira no fechamento da sprint, dois testes por task, teste de regressão, QA, auditoria, bloqueios, modo legado, arquivos fora do escopo, segredos no diff, commit do E1 por task concluída) e devolve PRONTO ou BLOQUEADO com o que falta. Use antes de entregar, ao perguntar se está pronto para PR, ou para conferir a entrega.
 ---
 
-Acione a skill `mergex` e execute **apenas a etapa E2 (portão de prontidão)**, seguindo `references/02-prontidao.md`.
+Acione a skill `mergex` e execute **apenas a etapa E2 (portão de prontidão)**, seguindo `references/02-prontidao.md` — começando pela prova funcional do `pre-push` (`ativacao-pre-push.sh --provar`) e gravando o resultado só por `registrar-portao.sh`.
 
 Trabalho: $ARGUMENTS
 
 ## O que fazer
 
-Rode **todas as dez verificações**, mesmo depois de a primeira falhar — o usuário precisa da lista completa do que falta, não do primeiro erro. Verificação que não se aplica é marcada `n/a`, nunca omitida.
+Primeiro prove que o `pre-push` da MergeX está ativo, sem confiar no caminho nem na existência do arquivo:
+
+```bash
+bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --provar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md
+```
+
+Falhou: o E2 não começa e nada é gravado; mande rodar o E0 (`ativacao-pre-push.sh --instalar`).
+
+**Fora de um repositório Git** (`git rev-parse --show-toplevel` falha): não há push a proteger — não rode a prova; o `registrar-portao.sh` também a dispensa e grava `portao_sha: null`. O critério é só o Git real, **nunca pelo campo `versionado`** do `ENTREGA.md`: dentro de um repositório Git, um `ENTREGA.md` com `versionado: false` continua exigindo a prova.
+
+Depois execute somente a barreira:
+
+```bash
+bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id> --checkpoint pre-e2
+```
+
+Se houver método pendente, pare. Este comando não chama o modo de gravação; o checkpoint é ação explícita anterior ao E2.
+
+Se a entrega tem reconciliação de base (`reconciliacoes` não vazia no `ENTREGA.md`), exija também a barreira da reconciliação, verificada e persistida:
+
+```bash
+bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
+  --checkpoint reconciliacao-base --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
+  --origem <sprintx|runx> --trabalho <trabalho_id>
+```
+
+Sem `ok=true`, o portão não emite `PRONTO`; relate os `motivo` (`references/11-reconciliacao-base.md`).
+
+Em trabalho SprintX, a V9 também lê o manifesto exato `00-PREDECESSORES.md` por `predecessores-sprintx.sh`. Valide conteúdo e código de saída juntos: `resultado=v9_sem_prova`, resultado ausente ou duplicado, saída truncada ou texto divergente do código falham fechado. Se a entrega já terminou sem publicação e foi bloqueada exclusivamente por `[v9]`/`arquivo_fora_do_plano`, não edite o terminal: use somente `retomar-v9-predecessores.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho>` e, com `ok=true`, os mesmos argumentos com `--aplicar`, conforme `references/13-predecessores-sprintx.md`; depois rode novamente todas as V1–V11.
+
+Rode **todas as onze verificações**, mesmo depois de a primeira falhar — o usuário precisa da lista completa do que falta, não do primeiro erro. Verificação que não se aplica é marcada `n/a`, nunca omitida.
 
 | # | Verificação |
 |---|---|
 | V1 | Task com status diferente de `concluida` |
-| V2 | Task concluída com suíte diferente de verde |
+| V2 | Task concluída sem registro de suíte que a sustente (`parcial` e `verde` valem; `vermelha` e `nao_executada` barram), e a evidência da suíte inteira no fechamento de cada sprint |
 | V3 | Task sem teste de integração ou sem teste funcional |
 | V4 | Bug da runx cuja primeira task não tem teste de regressão |
 | V5 | QA da runx reprovado, ou ausente quando exigido |
@@ -22,9 +55,16 @@ Rode **todas as dez verificações**, mesmo depois de a primeira falhar — o us
 | V8 | Modo legado: raio, caracterização, reversão, orçamento, aprovação |
 | V9 | Arquivo alterado fora da lista declarada no plano |
 | V10 | Segredo, credencial ou dado real de cliente no diff |
+| V11 | Task concluída sem commit do E1 correspondente em `ENTREGA.commits` |
+
+**V9 é o resultado do script**, sobre a base validada por SHA (nunca o nome da ref) e com os caminhos `coberto` da reconciliação: `scripts/portao-v9.sh --verificar --entrega <ENTREGA.md> --origem <sprintx|runx> --trabalho <trabalho_id>`. Código `1` é `FALHA` com as linhas `fora_do_plano`; código `3` é `FALHA` registrada como `v9_sem_prova`.
 
 **V10 roda sempre, mesmo quando todo o resto passou.**
 
+**V11 responde uma pergunta só:** cada task `concluida` tem pelo menos um item em `ENTREGA.commits` com `task` igual ao id dela e `commit` válido? Task não concluída não é alvo dela — isso é da V1. Rode com `scripts/prova-de-commit.sh --verificar <ENTREGA.md> <tasks.md>...`.
+
 Use `assets/TEMPLATE-prontidao.md`. A saída é binária: `PRONTO` ou `BLOQUEADO`, com o que falta e onde corrigir.
+
+Grave o resultado **só** por `registrar-portao.sh` (`--resultado pronto`, ou `--resultado bloqueado --falhas <vN>...`), nunca editando `portao` à mão. Com `pronto`, ele refaz a prova do `pre-push` antes de gravar; se imprimir `RESULTADO: BLOQUEADO — pre-push sem prova funcional`, nada foi gravado e o portão não está `PRONTO`. O `pronto` grava `portao_sha`, o SHA avaliado: qualquer commit de produto, teste, plano ou merge depois dele vence o portão (`validade-do-portao.sh`).
 
 O portão barra e explica. **Nunca maquia, nunca passa com ressalva, nunca ajusta o trabalho para caber.** Este comando só verifica: não commite, não suba nada, não abra PR.

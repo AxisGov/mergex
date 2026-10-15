@@ -15,9 +15,11 @@ Sempre diga de qual skill é o estágio.
 |---|---|---|
 | Início do **E3 da runx** (fix), antes da primeira task | **E0 ABERTURA** | Cria `fix/<OC-ID>-<slug>` ou `chore/<OC-ID>-<slug>`, registra no `ORQUESTRADOR.md` e cria `docs/entregas/<OC-ID>-<slug>/ENTREGA.md` |
 | Ao fechar **cada** task | **E1 COMMIT** | Um commit por task |
-| **Entre o E4 e o E5 da runx** | **E2 → E8** | Portão, classificação, descrição do PR, pacote de QA, push, abertura do PR, registro |
+| **Entre o E4 e o E5 da runx** | **pre-e2 → E2 → E8** | `persistir-metodo pre-e2`, portão, E3–E5, `pre-e6`, push, PR e `e8` |
 
 ### Por que a entrega fica entre o E4 e o E5 da runx
+
+A runx entrega explicitamente `trabalho_id`, origem e `ENTREGA.md` ao `persistir-metodo pre-e2`; a branch é só conferência. E2 e E6 são barreiras puras (`--verificar`), precedidas respectivamente pelas ações `pre-e2` e `pre-e6`. O E8 persiste o terminal com `persistir-metodo e8`.
 
 O **E4 da runx é o QA**: valida a entrega contra o plano e o escopo, e grava `QA.md` com `VEREDITO: APROVADO` ou `REPROVADO`.
 
@@ -68,6 +70,12 @@ Isso aparece em três etapas da mergex:
 | Relatório de uso | `docs/relatorios/<data>-<OC-ID>-<slug>/uso.md` | E5 (apontado no pacote de QA como o texto que o suporte devolve ao cliente) |
 
 O `trabalho_id` da mergex é o **mesmo `<OC-ID>-<slug>`** da runx.
+
+No **E3**, os artefatos da pasta da ocorrência (`00-OCORRENCIA.md`, `01-CAUSA-RAIZ.md`,
+`ORQUESTRADOR.md`, `QA.md`, `BLOQUEIOS.md`, `sprint-NN/`, `base/`) são classificados pelo
+**catálogo de artefatos de método da runx** (`references/03-atencao-humana.md`). Ele não herda nomes
+da sprintx: `00-DECISOES.md`, `FECHAMENTO.md` ou o `HISTORICO.md` da sprintx num trabalho da runx não
+são reconhecidos. `docs/relatorios/` fica de fora: só existe depois do E5 da runx.
 
 ## O relatório de uso, no pacote de QA
 

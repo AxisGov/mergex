@@ -1,0 +1,13 @@
+expx_tool	sprintx
+trabalho_id	ft-rec
+numero	1
+anterior	null
+branch	feature/ft-rec
+branch_base	main
+origem_base	registrada_e0
+b0_sha	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+p1_sha	bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+b1_sha	cccccccccccccccccccccccccccccccccccccccc
+m_sha	dddddddddddddddddddddddddddddddddddddddd
+estado	ativa
+registrado_em	2026-10-07

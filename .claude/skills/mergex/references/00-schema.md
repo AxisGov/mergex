@@ -13,7 +13,8 @@ O painel apenas LÊ. Esta skill continua sendo a única a escrever `docs/entrega
 
 O `expx-schema v1` é compartilhado com a [`sprintx`](https://github.com/bittencourtthulio/sprintx)
 (Build, F1–F6) e a [`runx`](https://github.com/bittencourtthulio/runx) (Run, E1–E5). A mergex
-não tem kind compartilhado: ela produz um kind só, o `entrega`, exclusivo dela.
+não tem kind compartilhado: ela produz dois kinds, exclusivos dela — o `entrega` e o
+`reconciliacao_base` (DM-178, ver "O kind da reconciliação de base").
 
 O que **é** compartilhado são os **nomes dos campos de indexação**. `modulo_afetado`,
 `arquivos_alterados` e `palavras_chave` existem nas três skills com **exatamente estes nomes**
@@ -63,9 +64,12 @@ Valem para todo arquivo que leva frontmatter:
 | `tipo_trabalho` | `feature` \| `ocorrencia` |
 | `estado` | `aberto` \| `entregue` \| `bloqueado` |
 | `portao` | `pronto` \| `bloqueado` \| `null` (ainda não rodou) |
+| `falhas_portao` (por item) | `v1` … `v11` \| `v1_sem_prova` … `v11_sem_prova` |
+| `causa` | ver "A causa do bloqueio" \| `null` (não bloqueado) |
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
 | `faixa` (por arquivo) | `alta` \| `media` \| `baixa` |
+| `origem_base` (no `entrega`) | `registrada_e0` \| `inferida_legado` \| `null` (sem versionador) |
 
 `expx_tool` fica como a skill de **origem** do trabalho (`sprintx` ou `runx`) — é ela que
 governa o trabalho. O campo `entregue_por: mergex` diz quem gravou este arquivo. Mudar o enum
@@ -103,10 +107,15 @@ estado: entregue
 versionado: true
 branch: fix/OC-2026-0184-icms-st-base-desconto
 branch_base: main
+base_validada_sha: 4c1e9a0b2d3f4e5a6b7c8d9e0f1a2b3c4d5e6f70
+origem_base: registrada_e0
+reconciliacoes: []
 commits:
-  - task: T-01.01
+  - seq: 1
+    task: T-01.01
     commit: a3f19c2
-  - task: T-01.02
+  - seq: 2
+    task: T-01.02
     commit: 7b2e401
 modulo_afetado: [fiscal, relatorios]
 arquivos_alterados: [src/fiscal/calculo_icms_st.py, src/fiscal/base_calculo.py, tests/fiscal/test_icms_st_desconto.py]
@@ -123,6 +132,9 @@ atencao:
   leitura_rapida: 2
   dispensavel: 4
 portao: pronto
+portao_sha: 7b2e4019c1d8e2f3a4b5c6d7e8f90a1b2c3d4e5f
+falhas_portao: []
+causa: null
 desvios: []
 push_feito: true
 pr_url: https://github.com/<org>/<repo>/pull/482
@@ -143,18 +155,151 @@ entregue_em: 2026-08-29
 | `estado` | `aberto` no E0; `entregue` quando o fluxo completou; `bloqueado` quando o portão barrou |
 | `versionado` | `false` em repositório sem versionador |
 | `branch`, `branch_base` | `null` quando `versionado: false` |
-| `commits` | Um item por task commitada, na ordem em que fecharam; `[]` sem versionador |
+| `base_validada_sha` | SHA de 40 hex da base em que o trabalho foi validado; gravado no E0 (`git merge-base HEAD <branch_base>`); atualizado pelo `reconciliacao-base.sh --registrar` para o `b1_sha` registrado. Nunca nome de ref. `null` sem versionador |
+| `origem_base` | `registrada_e0` \| `inferida_legado` (gravado uma única vez, pela primeira reconciliação de uma entrega anterior a esta chave — DM-183) |
+| `reconciliacoes` | Lista `{numero, arquivo, b1_sha, m_sha}`, na ordem da cadeia; `[]` sem reconciliação. Escrita só pelo `--registrar` |
+| `portao_sha` | SHA de 40 hex do `HEAD` que o E2 avaliou, gravado com `portao` só por `registrar-portao.sh`; `null` antes do E2 e depois de um `--registrar`. O `--resultado bloqueado` também grava `portao_sha` = `HEAD` avaliado, sem efeito na validade (`portao_nao_pronto` vem antes do SHA). O portão vale só para ele e para os commits de método `pre-e6`/`e8` de um pai que o seguem (DM-181) |
+| `commits` | Um item por task commitada, na ordem em que fecharam, cada um com a chave de ordem `seq`; `[]` sem versionador. Ver "A ordem de registro" |
 | `modulo_afetado` | Os módulos que a entrega toca (ver abaixo) |
 | `arquivos_alterados` | **O diff real** — ver abaixo. É o campo mais importante deste kind |
 | `faixa_atencao` | A faixa de atenção por arquivo (ver abaixo) |
 | `raio` | A faixa da legadox; `null` sem modo legado — **nunca invente uma faixa** |
 | `atencao` | As três contagens do E3; zeros quando o E3 não rodou |
 | `portao` | O resultado do E2 |
+| `falhas_portao` | As verificações que deram FALHA no E2, na numeração do portão; `[]` quando o portão não rodou ou deu PRONTO. Ver "A causa do bloqueio" |
+| `causa` | `null` salvo em `estado: bloqueado`, onde é **obrigatória e não nula**: derivada de `falhas_portao`, nunca escrita à mão. Ver "A causa do bloqueio" |
 | `desvios` | Arquivos alterados fora da lista declarada, detectados no E1 e no E2; `[]` quando não houve |
 | `push_feito` | `true` só quando o E6 confirmou que o remoto tem o mesmo commit |
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
 | `pr_estado` | `rascunho` na abertura normal; `aberto` quando o QA já aprovou; `merged`/`fechado` quando o E9 ou uma pessoa atualizarem |
 | `entregue_em` | A data em que o fluxo completou; `null` enquanto `estado` não for `entregue` |
+
+## A ordem de registro — a chave `seq`
+
+`commits` é uma lista **ordenada**: o contrato sempre disse "na ordem em que fecharam". Até aqui
+essa ordem existia só na **posição física** dos itens, e posição não tem identidade própria. Ela
+não sobrevive a uma reordenação (nada prova que houve uma), não distingue duas passagens da mesma
+task, não diz numa sessão nova qual foi o último registro, e não dá a um E1 tardio um lugar que
+signifique "aconteceu agora".
+
+Por isso **todo item novo leva `seq`**.
+
+```yaml
+commits:
+  - seq: 15
+    task: T-04.03
+    commit: 9f3c1aa
+```
+
+| Regra | |
+|---|---|
+| O que é | A **ordem de registro do E1**: a posição deste fechamento na série de fechamentos desta entrega |
+| Tipo | Inteiro **positivo** |
+| Alcance | **Global à ENTREGA** — um contador só, para todas as tasks e todas as sprints |
+| Progressão | O primeiro item é `seq: 1`; cada item novo é **o maior `seq` efetivo existente + 1** |
+| Obrigatoriedade | **Obrigatório em toda gravação nova.** A exceção é só de leitura: o prefixo legado, abaixo |
+| Nunca | Reutilizado, renumerado, reordenado, diminuído, nem escolhido por task |
+
+**`seq` não é** número da task, número do sprint, timestamp, rodada da F5, nem quantidade de
+commits que a branch tem no versionador. Ele conta **registros de E1**, e nada mais.
+
+**A mesma task pode aparecer mais de uma vez, com `seq` diferentes.** Isso é o que já valia para
+`commits` (é histórico de execução, não índice de plano — `references/01-commits.md`) e continua
+valendo: `seq: 15` e `seq: 22` para `T-04.03` é uma lista correta.
+
+### O prefixo legado — compatibilidade sem migração
+
+Uma `ENTREGA.md` gravada antes desta chave tem itens **sem** `seq`. Ela continua legível, e
+**não há migração em massa**: os itens antigos não são reescritos só para ganhar a chave.
+
+```yaml
+commits:
+  - task: T-01.01
+    commit: aaa1111
+  - task: T-01.02
+    commit: bbb2222
+  - seq: 3
+    task: T-01.03
+    commit: ccc3333
+  - seq: 4
+    task: T-01.04
+    commit: ddd4444
+```
+
+- Os itens sem `seq` do **início** da lista formam o **prefixo legado**. A ordem efetiva deles vem
+  da posição: o primeiro é 1, o segundo é 2, e assim por diante até N.
+- O **primeiro item moderno** acrescentado depois deles recebe **N+1**.
+- **Depois que aparece o primeiro `seq`, nenhum item posterior pode voltar a omiti-lo.** A exceção
+  é um prefixo, não um modo.
+
+| Lista | |
+|---|---|
+| `[legado, legado, seq 3, seq 4]` | válida |
+| `[seq 1, legado]` | **inválida** |
+| `[legado, seq 2, legado]` | **inválida** |
+
+### A invariante da sequência
+
+Considerado o prefixo legado como 1..N, os itens modernos continuam exatamente N+1, N+2, N+3…
+Como a ordem efetiva de um item **é** a posição dele na lista, isso se resume a uma igualdade só:
+
+> **todo `seq` explícito é igual à posição do seu item.**
+
+É essa mesma comparação que recusa as quatro formas de lista quebrada — e é por isso que `seq`
+também é **prova de integridade do histórico**:
+
+| Lista | Por quê |
+|---|---|
+| `seq 1`, `seq 1` | duplicata — o mesmo registro contado duas vezes |
+| `seq 1`, `seq 3` | buraco — um registro sumiu |
+| `seq 1`, `seq 3`, `seq 2` | regressão |
+| `seq 2`, `seq 1` | reordenação — a ordem física deixou de bater com a de registro |
+
+**Datas não resolvem isso.** `AAAA-MM-DD` não distingue dois fechamentos do mesmo dia, e o
+timestamp do rastro (`docs/eventos/<trabalho_id>.jsonl`) é local da máquina, append-only e não
+versionado — não é fonte canônica. A regra geral: **datas são registro; quando há ordem
+contratual, existe campo de ordem.**
+
+### Entrega nova
+
+O template continua podendo nascer com `commits: []`. **Não existe `seq` de topo**: o próximo
+número sai da própria lista, nunca de um contador guardado à parte. O primeiro E1 daquela entrega
+grava `seq: 1`.
+
+### Quem lê e quem escreve
+
+Uma interpretação mecânica só, num script só — `scripts/sequencia-de-commits.sh`:
+
+```
+sequencia-de-commits.sh --ler <ENTREGA.md>     # ordem_efetiva, seq, task, commit por item
+sequencia-de-commits.sh --validar <ENTREGA.md> # a invariante acima; PARA quando quebra
+sequencia-de-commits.sh --proximo <ENTREGA.md> # o maior seq efetivo + 1
+sequencia-de-commits.sh --acrescentar <ENTREGA.md> <task> <commit>
+```
+
+- **`--acrescentar` é o escritor do E1** (e do E1 tardio). Ele acrescenta no **fim**, com `seq`,
+  e **nunca** reescreve item existente, reordena ou faz backfill do prefixo legado.
+- **Gravação nova nunca cria item legado.** Leitura histórica aceita o prefixo; escrita, não.
+- A V11 usa a **leitura crua** desse mesmo script (`references/02-prontidao.md`). Ela pergunta se
+  existe prova de E1 para a task, e **não** depende de ordem, `seq` ou sequência.
+
+### Sequência inválida é contrato inválido — e PARA
+
+Duplicata, buraco, regressão e mistura inválida de legado com `seq` **não são causa de negócio do
+portão**. Não viram `indeterminada` e não entram em `falhas_portao`: são **violação de contrato do
+`ENTREGA.md`**, tratadas como as demais — a gravação para, e ninguém corrige o registro por conta
+própria.
+
+**Nunca "conserte" escolhendo outro número.** Se duas sessões calcularem o mesmo próximo `seq` ao
+mesmo tempo, o resultado é uma lista com `seq` duplicado — e o certo é parar e mostrar isso. Um
+número escolhido para caber esconderia o registro perdido. Este contrato **não resolve corrida**:
+ele garante que a corrida, quando acontece, fique visível.
+
+**Quem impede a corrida é o E1**, e não esta chave. O `seq` é atribuído **dentro da seção crítica
+do E1** — a trava do índice daquela worktree, descrita em `references/01-commits.md`, "A seção
+crítica do E1". A gravação nova de um item só acontece sob essa seção; a **leitura** da lista
+(`--ler`, `--validar`, `--proximo`) nunca exige trava nenhuma. A invariante acima continua sendo a
+rede de segurança: se um item duplicado chegar à lista por qualquer caminho, ela para.
 
 ## Os campos de indexação
 
@@ -251,6 +396,170 @@ A regra prática: a mergex grava o que **só ela** sabe (o diff real, a faixa po
 branch, os commits) e copia o que a origem já declarou (`modulo_afetado`). O que ela não sabe,
 ela não inventa.
 
+## A causa do bloqueio — `falhas_portao` e `causa`
+
+### Retomada estreita de predecessores SprintX
+
+O estado terminal `bloqueado` só pode voltar a `aberto` pelo protocolo de
+`references/13-predecessores-sprintx.md`: bloqueio exclusivo `[v9]`, causa
+`arquivo_fora_do_plano`, sem push nem PR, e `desvios` exatamente iguais aos
+predecessores historicamente provados. A transição limpa apenas `portao`,
+`portao_sha`, `falhas_portao`, `causa` e `desvios`; não altera tasks,
+`commits`, base, reconciliações nem datas históricas. O checkpoint
+`retomar-v9-predecessores` torna essa reabertura durável antes de um novo E2.
+
+Quando o portão barra, quem vem depois (a buildx, uma sessão futura, uma pessoa) precisa saber
+**por que** — lendo o `ENTREGA.md` commitado (`git show <branch>:docs/entregas/<trabalho_id>/ENTREGA.md`),
+sem depender da memória da sessão nem da prosa. Duas chaves respondem isso, e as duas seguem a
+regra universal 6: **nunca são omitidas**.
+
+- **`falhas_portao`** é o que o portão **viu**: as verificações que deram `FALHA` no E2, como
+  lista de uma linha, na numeração do portão (`[v1, v7]`). Uma verificação que **não pôde rodar**
+  (o E2 marca `FALHA` porque ausência de prova não é prova) entra como `vN_sem_prova`, nunca como
+  `vN`. Gravada pelo E2 junto com `portao` (`references/02-prontidao.md`, "Registro das falhas").
+- **`causa`** é **uma** das causas abaixo, derivada **mecanicamente** de `falhas_portao` — e de
+  nada mais. Gravada pelo E8 no fechamento bloqueado, junto com `estado: bloqueado`, pelo script
+  `scripts/causa-do-portao.sh --derivar`.
+
+A mergex é dona **só da causa observável do portão**. Ela não lê a descrição do `B-NN`, não
+interpreta a narrativa de quem executou e não conhece as classes de pendência da buildx: traduzir
+`causa` para o que fazer com o trabalho é da buildx.
+
+### O enum — uma causa por verificação, e a ordem de precedência
+
+| Ordem | Verificação | `causa` |
+|---|---|---|
+| 1 | `v10` | `segredo_no_diff` |
+| 2 | `v6` | `auditoria_reprovada` |
+| 3 | `v7` | `bloqueio_aberto` |
+| 4 | `v8` | `legado_incompleto` |
+| 5 | `v9` | `arquivo_fora_do_plano` |
+| 6 | `v1` | `tarefa_nao_concluida` |
+| 7 | `v2` | `suite_reprovada` |
+| 8 | `v3` | `teste_nao_declarado` |
+| 9 | `v4` | `regressao_nao_declarada` |
+| 10 | `v5` | `qa_nao_aprovado` |
+| 11 | `v11` | `commit_nao_registrado` |
+
+E um valor a mais, que não é causa de trabalho nenhum: **`indeterminada`** — a mergex não
+conseguiu provar a causa. Nenhum outro valor existe. `falha_tecnica`, `decisao_humana` ou qualquer
+classificação pelo conteúdo do bloqueio **não** são valores deste enum.
+
+**A regra, inteira:** percorra a ordem acima; a primeira verificação presente em
+`falhas_portao` decide. Presente como `vN`, a causa é a da linha. Presente como `vN_sem_prova`,
+a causa é `indeterminada` — a verificação que decidiria não pôde rodar, e uma causa de ordem
+mais baixa, mesmo provada, não é a causa inequívoca.
+
+**Por que esta ordem.** Ela não é um juízo sobre qual falha é mais grave; é o que torna uma
+falha consequência da outra:
+
+- `v10` primeiro: é a única verificação que não pode ser pulada por nenhum motivo (regra 5).
+- `v6` a `v9` em seguida, na numeração: são **fatos que existem independentemente de a execução
+  ter terminado** — o veredito da auditoria (que devolve o plano à F3 e invalida as verificações
+  medidas contra ele), o `B-NN` registrado, as pré-condições do modo legado, o arquivo no diff.
+- `v1` a `v5` e `v11` por último, na numeração: leem o **registro da execução**, que fica
+  incompleto justamente quando um daqueles fatos parou o trabalho. O próprio contrato do E2 diz
+  isso: task `bloqueada` aponta o `B-NN` (V1 é sintoma da V7), e o QA da runx ausente é o fluxo
+  que não chegou ao E4 da runx (V5 é sintoma da V1). A `v11` fecha esse grupo porque a prova de
+  E1 que falta é a **última** coisa que a execução registra sobre uma task: com a execução
+  interrompida antes (V1), ou com o commit abortado por segredo (V10), a ausência da prova é
+  consequência, não causa.
+
+Exemplo: `falhas_portao: [v1, v7]` → `causa: bloqueio_aberto`. `[v1, v2]` →
+`tarefa_nao_concluida`. `[v7, v10_sem_prova]` → `indeterminada`. `[v11]` →
+`commit_nao_registrado`.
+
+**`commit_nao_registrado` não é `tarefa_nao_concluida`.** A task da V11 **está** `concluida` —
+o que falta é a prova de E1 dela em `commits`. Quem lê `tarefa_nao_concluida` vai ao `tasks.md`
+procurar status; quem lê `commit_nao_registrado` vai à lista `commits` deste mesmo arquivo
+procurar o item que falta. Duas evidências diferentes, dois lugares diferentes de correção:
+uma causa só para as duas apagaria a diferença justamente onde ela é acionável.
+
+### Por estado
+
+| `estado` | `portao` | `falhas_portao` | `causa` |
+|---|---|---|---|
+| `aberto` | `null` ou `pronto` | `[]` | `null` |
+| `aberto` (E2 barrou, E8 ainda não fechou) | `bloqueado` | não vazia | `null` |
+| `entregue` | `pronto` | `[]` | `null` |
+| `bloqueado` | `bloqueado` | não vazia | **não nula**, igual à derivada de `falhas_portao` |
+
+`bloqueado` sem falha registrada não tem causa a derivar: o registro está inconsistente e o E8
+não grava — roda o E2 de novo. **Nunca** se escreve uma causa sem as falhas que a sustentam.
+
+`scripts/causa-do-portao.sh --validar <ENTREGA.md>` confere tudo isto antes de o E8 commitar.
+
+### `ENTREGA.md` anterior a estas chaves
+
+Um `ENTREGA.md` gravado antes de `causa` e `falhas_portao` existirem, **sem as duas**:
+
+- **em leitura histórica é aceito** (`--validar-historico`): a causa dele é `ausente` — **não
+  commitada**. Quem lê trata assim; ninguém a infere da prosa;
+- **como gravação nova é inválido** (`--validar`): toda gravação da mergex a partir daqui leva as
+  duas chaves;
+- **não há migração em massa**: vale a regra de migração abaixo. A mergex acrescenta as chaves na
+  próxima vez que gravar aquele arquivo — e só grava onde o valor é `null`/`[]` por definição (E0
+  na retomada, E9 atualizando `pr_estado` de uma entrega `entregue`). **Um bloqueio legado nunca
+  ganha causa retroativa**: a causa só existe quando o portão roda de novo.
+
+Um arquivo com **uma** das duas chaves e sem a outra não é legado: é gravação incompleta, e
+reprova nos dois modos.
+
+## O kind da reconciliação de base
+
+### `docs/entregas/<trabalho_id>/RECONCILIACAO-BASE-NNN.md` → `kind: reconciliacao_base`
+
+Um arquivo por merge de base integrado depois do E8, com `NNN` de três dígitos, a partir de `001`,
+contínuo e sem lacunas. É artefato de método da MergeX: entra no catálogo do checkpoint
+`reconciliacao-base` (e nos de `pre-e6` e `e8`), nunca no commit de uma task. **Só o
+`reconciliacao-base.sh --registrar` o escreve**: a `assinatura` cobre os SHAs e os arquivos, e
+editar à mão a quebra.
+
+```yaml
+---
+expx_schema: 1
+expx_tool: sprintx
+kind: reconciliacao_base
+trabalho_id: "ft-exemplo"
+numero: 1
+anterior: null
+branch: "feature/ft-exemplo"
+branch_base: "main"
+origem_base: registrada_e0
+b0_sha: <sha de 40 hex>
+p1_sha: <sha de 40 hex>
+b1_sha: <sha de 40 hex>
+m_sha: <sha de 40 hex>
+estado: ativa
+arquivos:
+  - caminho: "tests/ui/exemplo.test.tsx"
+    status_base: A
+    blob_b1: <sha de 40 hex>
+    blob_m: <sha de 40 hex>
+    diff_b1_m_sha256: <sha256 de 64 hex>
+    motivo: "a feature dividiu o botao em duas etapas"
+registrado_em: 2026-10-07
+assinatura: <sha256 de 64 hex>
+---
+```
+
+| Campo | Regra |
+|---|---|
+| `numero` | Igual ao `NNN` do nome do arquivo |
+| `anterior` | `RECONCILIACAO-BASE-<NNN-1>.md`; `null` só no `001` |
+| `origem_base` | `registrada_e0` \| `inferida_legado` (só no `001`) \| `reconciliacao_anterior` (do `002` em diante) |
+| `b0_sha`, `p1_sha`, `b1_sha`, `m_sha` | SHAs completos, nunca nome de ref; `b0_sha` é o `b1_sha` da anterior |
+| `estado` | `ativa` (a última da cadeia) \| `superada` (uma seguinte já a encadeou) |
+| `arquivos` | Um item por caminho reconciliado; `[]` quando o merge não exigiu ajuste — é esse artefato que avança a base validada |
+| `arquivos[].status_base` | `A` (nasceu entre `B0` e `B1`) \| `M` (mudou entre `B0` e `B1`) |
+| `arquivos[].motivo` | Uma linha, não vazia, para o revisor; não entra em prova nem na assinatura |
+| `assinatura` | sha256 das linhas canônicas (`numero`, `anterior`, `trabalho_id`, os quatro SHAs e uma linha por arquivo) |
+
+Abaixo do frontmatter, a prosa tem um parágrafo com a base integrada e o merge, e uma tabela por
+arquivo (caminho, status na base, motivo); nenhum frontmatter extra, nenhuma cópia de diff. O
+contrato completo, com as quatro provas e o diff canônico de `diff_b1_m_sha256`, está em
+`references/11-reconciliacao-base.md`. O painel ainda não lê este kind (fora de escopo).
+
 ## Arquivos SEM frontmatter
 
 Não recebem frontmatter, porque o painel não os lê individualmente:
@@ -274,6 +583,8 @@ Ao abrir um `ENTREGA.md` que já existe e não tem os campos de indexação:
 3. Se um valor não puder ser inferido com segurança, use `[]` e siga — nunca invente, nunca
    pergunte, nunca pare. A chave sempre existe.
 4. Migrar o frontmatter NÃO autoriza reescrever a prosa nem apagar o histórico de `commits`.
+5. Migrar o frontmatter NÃO autoriza **backfill de `seq`** nos itens que já estão na lista. O
+   prefixo legado fica como está, e a chave entra só nos itens novos (ver "O prefixo legado").
 
 ## Verificação antes de gravar
 
@@ -287,3 +598,9 @@ Ao abrir um `ENTREGA.md` que já existe e não tem os campos de indexação:
 - [ ] `faixa` usa `alta`/`media`/`baixa`, nunca o nome da faixa em prosa.
 - [ ] `modulo_afetado` em minúscula e sem acento.
 - [ ] Nenhum caminho absoluto em nenhum valor.
+- [ ] `falhas_portao` e `causa` presentes; `causa` não nula só em `estado: bloqueado`, e igual à
+      derivada de `falhas_portao` (`scripts/causa-do-portao.sh --validar` passa).
+- [ ] Todo item **novo** de `commits` tem `seq`; nenhum item legado ganhou `seq` retroativo
+      (`scripts/sequencia-de-commits.sh --validar` passa).
+- [ ] `base_validada_sha` e `portao_sha` são SHA de 40 hex ou `null`, nunca nome de ref; nenhum
+      dos dois, nem `reconciliacoes`, foi escrito à mão.

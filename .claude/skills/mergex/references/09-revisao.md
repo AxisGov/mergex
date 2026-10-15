@@ -878,7 +878,8 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    para tomá-la.
 
    Não toque em `branch`. O procedimento é o de `10-estado.md`, e falha de gravação vai
-   para o rastro sem interromper a condução dos PRs seguintes.
+   para o rastro (`artefato_gravado` com `resultado: falha`) sem interromper a condução dos
+   PRs seguintes.
 8. Recusa ou silêncio: **não faça o merge**, siga para o próximo, e registre que ele ficou pendente.
 
 ### As seis recusas duras

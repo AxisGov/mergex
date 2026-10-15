@@ -6,9 +6,9 @@ Este repositório usa a skill **mergex**, em `.claude/skills/mergex/`. Ela cuida
 
 ## Quando acionar a mergex
 
-**Ao começar a implementar um trabalho** — antes da primeira linha de código —, acione a mergex para **abrir a branch** (etapa E0). A branch nasce com o trabalho, não no fim. Sem ela, tudo acontece na branch em que o desenvolvedor estava, normalmente a principal.
+**Ao começar a implementar um trabalho** — antes da primeira linha de código —, acione a mergex para **garantir a branch** (etapa E0). A branch nasce com o trabalho, não no fim. Sem ela, tudo acontece na branch em que o desenvolvedor estava, normalmente a principal. Se a skill de origem já abriu a branch e a árvore de trabalho — a F1 da sprintx abre a feature em `git worktree` próprio —, o E0 **adota** o que existe: não troca de branch, não cria uma segunda e não exige árvore limpa para isso.
 
-**Ao concluir cada task** — com os dois testes escritos, a suíte inteira verde e a task marcada como concluída —, acione a mergex para **commitar aquela task** (etapa E1). Um commit por task, no momento em que ela fecha. Nada é montado no fim.
+**Ao concluir cada task** — com os dois testes escritos, os testes da task passando (`suite: parcial` ou `verde`) e a task marcada como concluída —, acione a mergex para **commitar aquela task** (etapa E1). Um commit por task, no momento em que ela fecha. Nada é montado no fim. A suíte inteira continua sendo cobrada no fechamento da sprint, e o portão (E2) a verifica.
 
 **Ao terminar a implementação**, acione o **fluxo de entrega** (etapas E2 a E8): portão de prontidão, classificação da atenção humana, descrição do pull request, pacote para o QA, push e abertura do PR.
 
@@ -42,6 +42,9 @@ Valem sempre, em qualquer etapa:
 - Nunca descartar alteração local de ninguém.
 - Nunca configurar credencial nem armazenar segredo.
 - Nunca commitar arquivo fora da lista declarada na task.
+- Nunca rodar dois E1 ao mesmo tempo na mesma árvore de trabalho: o índice Git é de dono único enquanto uma task fecha. A execução das tasks pode ser paralela; o fechamento delas é serial. Árvores de trabalho diferentes têm índices independentes e não se bloqueiam.
+- Um único escritor por árvore de trabalho. Tasks sequenciais podem reutilizar a mesma árvore depois do fechamento da anterior; tasks simultaneamente em voo exigem árvores distintas. O E1 inventaria a árvore inteira antes do `git add`: produto de task irmã, desvio e produto da task atual não listado barram o fechamento — nada é absorvido no commit.
+- Nunca commitar com o índice já preenchido por outra execução, e nunca limpar o que se encontrou nele — pare e relate.
 - A varredura de segredo, credencial e dado real de cliente roda a cada commit e no portão de prontidão. Encontrou, aborta.
 - Repositório sem versionador: siga sem essas etapas, sem erro e sem bloqueio.
 
@@ -60,11 +63,31 @@ de ferramenta.
 Três nascem em **bloqueio**, porque o erro não tem volta:
 
 - `sem-segredo` — segredo, credencial ou dado real de cliente em commit ou escrita
-- `git-perigoso` — push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva
+- `mergex/git-perigoso` — push forçado, commit/push na principal, reescrita de histórico enviado, descarte de alteração local, limpeza destrutiva
 - `branch-limpa` — criar ou trocar branch com alteração não commitada pendente
 
 Três nascem em **aviso**, e só sobem a bloqueio depois de rodarem sem falso
 positivo: `commit-por-task`, `arquivo-fora-do-plano` e `pr-so-com-portao`.
+O `pr-so-com-portao` é consultivo: é aviso antecipado no `git push`, bloqueia só
+o push que prova inválido e o `--no-verify` reconhecido, e no indeterminado
+avisa e deixa o Git seguir. Não é barreira (DM-184).
+
+Entre as condições de commit, uma única barra **mesmo em aviso**, no
+`commit-por-task`: commitar, no fechamento
+de uma task, um arquivo que **só outra task da feature declara**. Ele não é
+desvio — foi planejado, só que noutra task —, e deixá-lo passar criaria um
+commit parcial enganoso, que o histórico não desfaz. Tire-o do índice
+(`git restore --staged`), **não o apague e não o restaure**, e leve a condição
+ao planejamento: quem abre bloqueio e replaneja é a sprintx.
+
+O `pr-so-com-portao`, que é consultivo, também sai 2 em qualquer modo, mas só
+em dois casos provados: o `--no-verify` reconhecido num `git push` e o push
+simples que a regra do portão prova inválido. No resto, só avisa.
+
+Fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo
+(DM-184): ativado pelo E0 e provado pelo E2, ele é a barreira local contra erro
+normal e decide pelo SHA realmente enviado. Nunca o contorne com `--no-verify`.
+Detalhe: `.claude/skills/mergex/references/12-barreira-de-push.md`.
 
 Se um hook barrar sua ação, **a mensagem diz o que fazer** — leia e corrija, não
 contorne. O modo de cada hook vive em `.expx/hooks.json`.

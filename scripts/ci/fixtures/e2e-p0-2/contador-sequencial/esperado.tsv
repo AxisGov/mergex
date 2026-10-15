@@ -1,0 +1,18 @@
+src/proximo-numero.js	OLHO OBRIGATÓRIO	O2	cria a regra de proximoNumero
+src/index.js	OLHO OBRIGATÓRIO	O5	module.exports passa
+test/proximo-numero.test.js	DISPENSÁVEL	D1	só acrescenta casos
+docs/sprintx/features/contador-sequencial/00-DECISOES.md	OLHO OBRIGATÓRIO	O2	origem das regras de entrada
+docs/sprintx/features/contador-sequencial/BUILDX-PREMISSAS.md	OLHO OBRIGATÓRIO	O5	PR-14
+docs/entregas/contador-sequencial/ENTREGA.md	DISPENSÁVEL	D4	registro da entrega, gravado pela própria mergex
+docs/sprintx/estimativas/HISTORICO.md	LEITURA RÁPIDA	L4	D4 não provado: acrescenta prosa ou estrutura
+docs/sprintx/features/contador-sequencial/00-AUDITORIA.md	LEITURA RÁPIDA	L4	veredito e achados da auditoria
+docs/sprintx/features/contador-sequencial/00-BLOQUEIOS.md	DISPENSÁVEL	D4	bloqueios: [] e nenhum B-NN
+docs/sprintx/features/contador-sequencial/FECHAMENTO.md	LEITURA RÁPIDA	L4	resumo, decisão principal e risco residual
+docs/sprintx/features/contador-sequencial/ORQUESTRADOR.md	LEITURA RÁPIDA	L4	objetivo, mapa e rota do trabalho
+docs/sprintx/features/contador-sequencial/base/00-INDICE.md	DISPENSÁVEL	D4	as 3 área(s) listadas existem na base
+docs/sprintx/features/contador-sequencial/base/00-LACUNAS.md	LEITURA RÁPIDA	L4	lacunas da investigação
+docs/sprintx/features/contador-sequencial/base/convencoes.md	LEITURA RÁPIDA	L4	listada no índice
+docs/sprintx/features/contador-sequencial/base/harness-de-teste.md	LEITURA RÁPIDA	L4	listada no índice
+docs/sprintx/features/contador-sequencial/base/modulo-principal.md	LEITURA RÁPIDA	L4	listada no índice
+docs/sprintx/features/contador-sequencial/sprint-01/tasks.md	LEITURA RÁPIDA	L4	plano: tasks, testes e critérios de aceite
+docs/sprintx/features/contador-sequencial/sprint-02/tasks.md	LEITURA RÁPIDA	L4	plano: tasks, testes e critérios de aceite

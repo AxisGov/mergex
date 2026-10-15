@@ -13,6 +13,11 @@ jobs:
   hooks:
     name: ${{ matrix.os }} / hooks
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    # Windows e melhor esforco (DM-228): no Git Bash a suite passa de 20 min e o
+    # orcamento interno de 8 s do pr-so-com-portao nao fecha. O resultado fica
+    # visivel, mas so o Linux e portao do merge.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -76,3 +81,15 @@ jobs:
       - name: Validate Mergex contract
         shell: bash
         run: bash scripts/ci/validate-mergex-contract.sh
+
+      - name: Validate review evidence contract
+        shell: bash
+        run: bash scripts/ci/validate-review-evidence-contract.sh
+
+      - name: Guard that CI runs every validator
+        shell: bash
+        run: bash scripts/ci/check-ci-runs-validators.sh
+
+      - name: Test the CI guard
+        shell: bash
+        run: bash scripts/ci/test-ci-guard.sh

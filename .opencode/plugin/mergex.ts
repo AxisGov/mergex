@@ -117,7 +117,7 @@ function nomeCanonico(tool: string): string {
 const NA_ESCRITA = ["comum/sem-segredo.sh"]
 const NO_COMANDO = [
   "comum/sem-segredo.sh",
-  "comum/git-perigoso.sh",
+  "mergex/git-perigoso.sh",
   "comum/branch-limpa.sh",
   "mergex/commit-por-task.sh",
   "mergex/arquivo-fora-do-plano.sh",

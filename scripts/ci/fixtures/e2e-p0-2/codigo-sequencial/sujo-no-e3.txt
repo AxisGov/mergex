@@ -1,0 +1,5 @@
+docs/entregas/codigo-sequencial/ENTREGA.md
+docs/sprintx/estimativas/HISTORICO.md
+docs/sprintx/features/codigo-sequencial/FECHAMENTO.md
+docs/sprintx/features/codigo-sequencial/ORQUESTRADOR.md
+docs/sprintx/features/codigo-sequencial/sprint-02/tasks.md

@@ -195,7 +195,7 @@ push, nunca barra uma etapa, nunca vira aviso na saída ao usuário.
 | `.expx/` não existe | Segue sem gravar. Sem erro, sem aviso, sem criar o diretório |
 | `estado.json` não existe, mas `.expx/` existe | Cria a partir de `{}`, com os seus campos e `expx_estado: 1` |
 | `estado.json` ilegível ou corrompido | Segue sem gravar. Não conserta, não substitui |
-| Sem permissão de escrita, disco cheio, `mv` falhou | Registra no rastro e segue |
+| Sem permissão de escrita, disco cheio, `mv` falhou | Segue, **sem tratar o `estado.json` como gravado**, e registra a falha no rastro (ver "Falha de gravação é rastreada") |
 | `python3` e `jq` ausentes | Segue sem gravar |
 | Repositório sem versionador | Não grava nada |
 
@@ -204,11 +204,31 @@ trabalho continua. No E9 sem trabalho atual, o destino é `docs/eventos/sem-trab
 "Destino do rastro" em `references/09-revisao.md`):
 
 ```json
-{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"artefato_gravado","fase":"<e0|e7|e8|e9>","task":null,"agente":null,"resultado":"falha","detalhe":"estado.json nao gravado: <erro literal>","arquivos":[".expx/estado.json"]}
+{"ts":"<ISO-8601 UTC>","expx_eventos":1,"trabalho_id":"<id>","ferramenta":"mergex","origem":"skill","evento":"artefato_gravado","fase":"<e0|e7|e8|e9>","task":null,"agente":"principal","resultado":"falha","detalhe":"estado.json nao gravado: <erro literal>","arquivos":[".expx/estado.json"]}
 ```
 
 `.expx/` ausente **não** é falha e não gera evento: é a configuração normal de um projeto
 sem a barra instalada.
+
+### Falha de gravação é rastreada
+
+A falha de gravar o `estado.json` **não é silenciosa**: gera a linha `artefato_gravado` com
+`resultado: falha`, no rastro do trabalho — ou em `docs/eventos/sem-trabalho.jsonl`, no E9 sem
+trabalho atual. `agente` é `principal`, nunca `null` (R6).
+
+O que a falha **não** faz:
+
+- **A falha nunca interrompe a etapa.** A barra nunca barra trabalho, e a fonte de verdade da
+  entrega continua sendo o `ENTREGA.md`.
+- **Não faz o estado avançar nem parecer sucesso.** O `estado.json` é **saída derivada**, nunca
+  entrada de decisão: o que não foi gravado não é tratado como gravado, nenhuma etapa o lê, e a
+  linha de rastro diz `falha`, não `ok`.
+- **Não muda o estado final da entrega.** Quem leva o `ENTREGA.md` ao histórico é o
+  fechamento final do E8 (`08-registro.md`, "O fechamento final — a entrega precisa sobreviver
+  ao worktree"); a observabilidade da falha complementa DM-91 a DM-93, não os substitui.
+
+`artefato_gravado` é evento do contrato `expx-eventos` (enum `EventoNome` do `expxdev`,
+AxisGov/expxdev#18): o `doctor` e o painel o reconhecem. A decisão está registrada em DM-227.
 
 ## O que NÃO fazer
 
@@ -244,4 +264,4 @@ sem a barra instalada.
 - [ ] Sem versionador: os dois campos `null` e nenhuma gravação.
 - [ ] Nenhuma decisão da skill leu este arquivo.
 - [ ] Nenhum campo de árvore suja foi criado.
-- [ ] Falha de gravação virou linha no rastro, não interrupção.
+- [ ] Falha de gravação não interrompeu nada, e não inventou evento nem reusou um alheio.

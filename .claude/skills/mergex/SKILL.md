@@ -57,11 +57,11 @@ Como consequência direta dessa última linha, duas coisas são tratadas como pr
 
 O fluxo não é uma máquina de estados sequencial como a da sprintx ou da runx: E0 e E1 acontecem *durante* a execução do trabalho, E2–E8 acontecem no fim, e E9 é manual e avulsa.
 
-**E0 ABERTURA** — no início do trabalho (F6 da sprintx, E3 da runx). Detecta versionamento, exige árvore limpa, determina a branch base, cria a branch do trabalho e registra em `ORQUESTRADOR.md` e em `docs/entregas/<trabalho_id>/ENTREGA.md`. Branch que já existe é retomada, nunca duplicada.
+**E0 ABERTURA** — no início do trabalho (F6 da sprintx, E3 da runx). Detecta versionamento, localiza o trabalho (na sprintx, `docs/sprintx/features/<slug>/`, com `docs/<slug>/` como formato antigo) e determina a branch base — a informada pelo chamador vem antes de qualquer convenção. Quando a skill de origem já abriu a branch e a árvore de trabalho — como a F1 da sprintx faz, em `git worktree` próprio —, o E0 **adota a branch e o worktree** que encontra: não troca de branch e não exige árvore limpa para isso. Só cria branch quando não existe nenhuma, e aí a árvore precisa estar limpa. Registra em `ORQUESTRADOR.md` e em `docs/entregas/<trabalho_id>/ENTREGA.md`. **Nunca duplica a branch de um trabalho.**
 
-**E1 COMMIT POR TASK** — durante a execução. Cada task com os dois testes escritos, suíte inteira verde e `status: concluida` vira um commit próprio, no momento em que fecha. Varredura de segredo antes de cada commit.
+**E1 COMMIT POR TASK** — durante a execução. Cada task com os dois testes escritos, `suite: parcial` ou `verde` e `status: concluida` vira um commit próprio, no momento em que fecha. O append do SHA em `ENTREGA.commits` pode deixar o registro dirty até o checkpoint seguinte; isso não cria outro E1. Arquivo de produto fora do plano nunca entra. Varredura de segredo antes de cada commit. **O índice Git é de dono único enquanto o E1 roda**: a execução das tasks pode ser paralela, o fechamento delas é serial. Na mesma árvore de trabalho, dois E1 nunca executam ao mesmo tempo; árvores diferentes têm índices independentes e não se bloqueiam. Um único escritor por árvore: tasks sequenciais reutilizam a mesma árvore depois do fechamento; tasks simultaneamente em voo exigem árvores distintas. O E1 inventaria a árvore inteira antes do primeiro `git add`, e a lista do agente não limita a detecção nem autoriza inclusão: produto da task atual não listado barra. Antes do primeiro `git add`, com a trava já adquirida e o stage de entrada já confirmado vazio, **o dono do arquivo é verificado**: a task que está fechando. Arquivo que mudou e que **só outra task da feature declara** não entra, não vira commit parcial e **não é desvio** — é evidência mecânica de que execução e plano não batem (`arquivo_de_task_irma`), e o fechamento para ali, liberando a trava normalmente.
 
-**E2 PORTÃO DE PRONTIDÃO** — ao fim da execução, antes de qualquer preparação de entrega. Devolve `PRONTO` ou `BLOQUEADO` com o que falta e onde corrigir. `BLOQUEADO` encerra: a mergex não segue e não maquia.
+**E2 PORTÃO DE PRONTIDÃO** — ao fim da execução, depois da ação explícita `persistir-metodo pre-e2`. O E2 apenas verifica a barreira e devolve `PRONTO` ou `BLOQUEADO`; nunca persiste método silenciosamente. Em repositório Git, o resultado `PRONTO` exige prova prévia do `pre-push` funcional; registrar `BLOQUEADO` não depende dessa prova. Fora de um repositório Git, a prova para `PRONTO` é dispensada. Quando há reconciliação de base, prova também a barreira `reconciliacao-base`; a V9 é o resultado de `scripts/portao-v9.sh`, sobre a base validada por SHA. Em trabalho SprintX, `00-PREDECESSORES.md` é fonte adicional exata da V9: `predecessores-sprintx.sh` valida conteúdo e código de saída, e qualquer protocolo inconclusivo falha fechado. Uma entrega encerrada somente por `[v9]`/`arquivo_fora_do_plano` causado por predecessores usa a retomada explícita de `references/13-predecessores-sprintx.md`; nunca se reabre por edição manual. O `PRONTO` grava `portao_sha`: o portão vale para aquele SHA, e só commits de método `pre-e6`/`e8` de um pai o mantêm válido depois (DM-181). `PRONTO` segue para o E3. **`BLOQUEADO` encerra as etapas de entrega — E3 a E7 não executam — e segue apenas ao E8 para registrar e persistir o bloqueio.**
 
 **E3 CLASSIFICAÇÃO DA ATENÇÃO HUMANA** — divide o diff em três faixas e explica cada arquivo. É o coração da skill.
 
@@ -69,11 +69,11 @@ O fluxo não é uma máquina de estados sequencial como a da sprintx ou da runx:
 
 **E5 PACOTE PARA O QA** — gera `docs/entregas/<trabalho_id>/QA-PACOTE.md`. O QA não deve precisar ler código para trabalhar.
 
-**E6 PUSH** — sobe a branch depois de E2 aprovar e do pacote de QA existir. Nunca forçado, nunca na principal.
+**E6 PUSH** — começa somente depois da ação explícita `persistir-metodo pre-e6` e verifica essa barreira e a validade do portão (`validade-do-portao.sh`) antes de subir a branch. Quem autoriza o push é o `pre-push` do Git, sobre o SHA enviado (DM-184). Nunca força e nunca conserta o lifecycle por trás.
 
 **E7 ABERTURA DO PULL REQUEST** — abre o PR pela ferramenta de linha de comando do serviço de hospedagem, quando existir e estiver autenticada. Ausente, grava a descrição em `PR.md` e informa — nunca falha, nunca pede credencial.
 
-**E8 REGISTRO DA ENTREGA** — grava `ENTREGA.md` com frontmatter `expx-schema v1`, `kind: entrega`. É o que o expx-panel lê para mostrar o que aguarda revisão.
+**E8 REGISTRO DA ENTREGA** — é o último escritor do terminal e chama `scripts/persistir-metodo.sh --persistir ... --checkpoint e8`. Fecha **os dois desfechos**: `entregue`, publicando depois o commit pelo mesmo princípio do E6; e `bloqueado`, persistindo sem publicar a branch.
 
 **E9 REVISÃO E MERGE — MANUAL.** Lista os pull requests abertos, ordena do menor para o maior impacto, apresenta o estado de cada um — inclusive o veredito do REVIEW EVIDENCE GATE — e conduz um PR por vez com confirmação explícita. Nunca resolve conflito. **Só roda por chamada explícita do desenvolvedor.**
 
@@ -88,6 +88,14 @@ Cada finding ou thread cai em uma de seis situações — `ACTIONABLE_UNRESOLVED
 **Fronteira de responsabilidade.** A mergex lê reviews, valida findings, reúne evidência, responde thread, verifica CI e re-review, e resolve thread quando o critério é atendido — mas **não corrige código de produto**. Finding válido que exige mudança vira um pacote de remediação devolvido à skill de origem (sprintx, runx ou buildx); o PR fica `REVIEW PENDENTE` e não é oferecido para merge até o novo commit.
 
 Definição normativa completa — os seis estados, R1–R6, o formato da resposta ao review, a ordem de resolução de thread e o pacote de remediação — está em `references/09-revisao.md`; aqui vai só o resumo do contrato.
+
+## Lifecycle executável dos artefatos de método
+
+O executor único é `.claude/skills/mergex/scripts/persistir-metodo.sh`. O trabalho vem dos argumentos explícitos conferidos contra `ENTREGA.md`; a branch apenas prova consistência. Os checkpoints formam o enum fechado `pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8`, usam a mesma trava C5 do índice e só adicionam paths dirty do catálogo fechado. Commit de método é classe própria, com `Trabalho:` e `Metodo:` (um dos seis checkpoints), sem `Task:`; não entra em `ENTREGA.commits`, não consome `seq` e não satisfaz V11.
+
+## Reconciliação de base pós-E8
+
+Quando a base avança **depois** do E8 e a integração exige ajustar arquivos que nasceram ou mudaram na base nova e que nenhuma task declara, o caminho é a reconciliação de base: evento da entrega, não defeito de plano, e **nunca altera task** (DM-178). Depois do merge de integração (classe própria, com `Trabalho:` e `Integra-base:`), `scripts/reconciliacao-base.sh --registrar` prova cada arquivo pelas quatro provas e pelo inventário completo do merge (DM-179), grava `docs/entregas/<trabalho_id>/RECONCILIACAO-BASE-NNN.md`, avança `base_validada_sha` e reabre a entrega com `portao: null`. Segue o checkpoint `reconciliacao-base`, um E2 completo, o E3 com todo reconciliado em OLHO OBRIGATÓRIO (O10, DM-182), e o fluxo até o E8 retomando o PR existente. Base legada é inferida uma única vez, e a inferência ambígua falha fechada (DM-183). Detalhe: `references/11-reconciliacao-base.md`.
 
 ## As três faixas de atenção humana
 
@@ -104,10 +112,18 @@ aplica e a classificação é a mesma de sempre.
 | Faixa | O que o revisor faz | Critérios — basta um |
 |---|---|---|
 | **OLHO OBRIGATÓRIO** | Lê linha a linha | Arquivo em zona de risco declarada no `PERFIL.md`; mudança de regra de negócio ou de cálculo; migração de banco, qualquer uma; autenticação, autorização ou dado pessoal; alteração de contrato público (rota, payload, evento, retorno); código sem cobertura de teste antes e depois; efeito irreversível declarado no plano de reversão; tudo que veio de raio ALTO; **arquivo com histórico de regressão registrado no memox, ou com reprovação anterior em QA no mesmo arquivo** |
-| **LEITURA RÁPIDA** | Confere intenção, não implementação | Mudança coberta por teste de caracterização que continua passando; alteração em camada isolada com cobertura existente; código novo em arquivo novo, com os dois testes verdes |
-| **DISPENSÁVEL** | A máquina já provou | Arquivo de teste que só acrescenta caso; alteração mecânica coberta por teste de regressão verde; arquivo gerado automaticamente, quando declarado como tal |
+| **LEITURA RÁPIDA** | Confere intenção, não implementação | Mudança coberta por teste de caracterização que continua passando; alteração em camada isolada com cobertura existente; código novo em arquivo novo, com os dois testes verdes; **artefato de método reconhecido, de decisão, plano ou registro** |
+| **DISPENSÁVEL** | A máquina já provou | Arquivo de teste que só acrescenta caso; alteração mecânica coberta por teste de regressão verde; arquivo gerado automaticamente, quando declarado como tal; **artefato de método reconhecido, mecânico, com a prova mecânica aprovada** |
 
-Todo arquivo do diff cai em exatamente uma faixa, e cada um leva a evidência que o classificou. Detalhe operacional, exemplos de classificação correta e incorreta: `references/03-atencao-humana.md`.
+Todo arquivo do diff cai em exatamente uma faixa, e cada um leva a evidência que o classificou.
+
+**Artefato de método nunca anula critério O.** Decisão, plano, base e registro escritos pela
+sprintx, pela runx ou pela própria mergex não são automaticamente de baixo risco, nem
+automaticamente OLHO OBRIGATÓRIO: os critérios O vêm primeiro, e a decisão de risco é lida linha a
+linha onde nasce. Sem O, o artefato só vai para LEITURA RÁPIDA (L4) ou DISPENSÁVEL (D4) quando o
+classificador da skill (`scripts/classificar-atencao.sh`) o reconhece num **catálogo fechado** —
+caminho exato na pasta deste trabalho, `kind` conferido. Nunca pela pasta, nunca pelo `expx_tool`
+do frontmatter. O que não é reconhecido segue a classificação de sempre. Detalhe operacional, exemplos de classificação correta e incorreta: `references/03-atencao-humana.md`.
 
 ## Segurança de versionamento
 
@@ -148,15 +164,24 @@ O `analista-de-conflito` não tem ferramenta de escrita nem de execução: é
 | Hook | Modo inicial | O que garante |
 |---|---|---|
 | `sem-segredo` | **bloqueio** | Regra 5 — varredura a cada commit, não só no portão |
-| `git-perigoso` | **bloqueio** | Regra 11 — nunca forçado, nunca na principal, nunca reescrever o enviado |
+| `mergex/git-perigoso` | **bloqueio** | Regra 11 — nunca forçado, nunca na principal, nunca reescrever o enviado |
 | `branch-limpa` | **bloqueio** | Regra 2 — nunca criar ou trocar branch com alteração pendente |
-| `commit-por-task` | aviso | Regra 3 — um commit por task, concluída e com suíte verde |
+| `commit-por-task` | aviso | Regra 3 — um commit por task, concluída e com suíte verde; e nenhum arquivo de **outra** task no commit desta — essa condição barra **mesmo em aviso** |
 | `arquivo-fora-do-plano` | aviso | Regra 4 — nunca commitar arquivo fora da lista declarada |
-| `pr-so-com-portao` | aviso | Regra 6 — sem `PRONTO` no portão, não sobe e não abre PR |
+| `pr-so-com-portao` | aviso | Regra 6 — **consultivo**: aviso antecipado no `git push`; bloqueia só o push que prova inválido e o `--no-verify` reconhecido, e no indeterminado avisa. Não é barreira (DM-184) |
 
 Os de segurança nascem em bloqueio: segredo commitado não tem volta. Os de
 método nascem em aviso e só sobem depois de rodarem sem falso positivo — hook
 que atrapalha é desinstalado, e junto com ele vão os que funcionavam.
+
+Entre as condições de commit, a de task irmã do `commit-por-task` é a única que
+barra mesmo em aviso. O `pr-so-com-portao`, que é consultivo, também sai 2 em qualquer modo, mas só
+nos dois casos provados: o `--no-verify` reconhecido e o push simples que a regra
+do portão prova inválido; no resto, só avisa. Fora dos hooks do Claude, o `pre-push` do Git barra o portão inválido em qualquer modo (DM-184):
+ele é a barreira local autoritativa contra erro normal, e o CI com proteção de
+merge, quando o produto o ativar, é a barreira contra o `--no-verify` e contra o
+contorno pelo nome da branch, nos limites da spec, seção 15.1 (itens 1 e 12)
+(DM-185; `references/12-barreira-de-push.md`).
 
 O modo de cada um vive em `.expx/hooks.json`. Detalhe operacional, os três
 cuidados de desenho e os testes: `.claude/hooks/README.md`.
@@ -207,9 +232,11 @@ Regra transversal: use sempre caminhos relativos; nunca escreva caminhos absolut
 
 ## Onde ficam os artefatos da entrega
 
-`docs/entregas/<trabalho_id>/` é sempre ancorado na raiz do repositório mais próxima do diretório de trabalho atual (o diretório que contém `.git/`). Em monorepo sem `.git` visível, suba diretórios até encontrar a raiz; se não houver `.git` em nenhum ancestral, use a raiz do diretório de trabalho. Antes de criar `docs/`, verifique se já existe um na raiz — se existir, use-o.
+`docs/entregas/<trabalho_id>/` é sempre ancorado na raiz que o próprio versionador informa (`git rev-parse --show-toplevel`) — que, dentro de um `git worktree`, é a raiz **daquele worktree**, não a do checkout principal. É lá que o trabalho está acontecendo, e é lá que a entrega é registrada.
 
-O `<trabalho_id>` é o mesmo da skill de origem: o `<slug-da-feature>` da sprintx (`docs/<slug>/`) ou o `<OC-ID>-<slug>` da runx (`docs/manutencao/<OC-ID>-<slug>/`).
+Sem git no caminho, suba diretórios procurando `.git` — **que num worktree é `arquivo`, não diretório**, e uma busca que só aceita diretório passa longe da raiz certa. Se não houver `.git` em nenhum ancestral, use a raiz do diretório de trabalho. Antes de criar `docs/`, verifique se já existe um na raiz — se existir, use-o.
+
+O `<trabalho_id>` é o mesmo da skill de origem: o `<slug-da-feature>` da sprintx (`docs/sprintx/features/<slug>/`, e `docs/<slug>/` nas pastas em formato antigo) ou o `<OC-ID>-<slug>` da runx (`docs/manutencao/<OC-ID>-<slug>/`). A mergex procura o canônico primeiro, usa o antigo como fallback e **nunca move pasta de trabalho**.
 
 ```
 docs/entregas/
@@ -218,6 +245,7 @@ docs/entregas/
     QA-PACOTE.md      pacote executável pelo QA, sem ler código
     ATENCAO.md        a classificação das três faixas
     PR.md             a descrição do PR (sempre gravada, mesmo com PR aberto)
+    RECONCILIACAO-BASE-NNN.md   uma por base integrada depois do E8 (kind: reconciliacao_base)
 ```
 
 ## Etapas → arquivos da skill
@@ -237,6 +265,9 @@ Os caminhos são relativos à raiz desta skill. O detalhe operacional de cada et
 | E6 PUSH | `references/06-push.md` | — |
 | E7 ABERTURA DO PR | `references/07-abertura-pr.md` | `assets/TEMPLATE-PR.md` |
 | E8 REGISTRO | `references/08-registro.md` | `assets/TEMPLATE-ENTREGA.md` |
+| reconciliação de base pós-E8 | `references/11-reconciliacao-base.md` | — |
+| barreira de push (E0, E2, E6, E7) | `references/12-barreira-de-push.md` | `assets/pre-push-gerenciado.sh`, `assets/ci/mergex-portao.yml` |
+| predecessores SprintX e retomada estreita da V9 | `references/13-predecessores-sprintx.md` | — |
 | E9 REVISÃO (manual) | `references/09-revisao.md` | `assets/TEMPLATE-revisao.md` |
 
 ## Integração com as skills irmãs

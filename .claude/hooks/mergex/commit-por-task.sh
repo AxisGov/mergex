@@ -2,7 +2,13 @@
 # commit-por-task — PreToolUse em execução de comando.
 #
 # Verifica que o que está sendo commitado corresponde aos arquivos de UMA
-# task, e que essa task está `concluida` com `suite: verde`.
+# task, e que essa task está `concluida` com registro de suíte válido.
+#
+# `suite` da task: `parcial` (o subconjunto afetado pela task passou) e `verde`
+# (a suíte inteira passou) são os dois registros válidos do expx-schema; a
+# sprintx cobra a suíte INTEIRA no fechamento da sprint, não em cada task.
+# `vermelha` e `nao_executada` continuam barrando: commit sobre teste que não
+# passa põe no histórico um ponto em que quem bisecar depois cai.
 #
 # É a regra que sustenta a qualidade do histórico — que, como a mergex não
 # previne colisão, é o principal ativo de quem for resolver um conflito depois.
@@ -17,6 +23,8 @@ PADRAO="aviso"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../comum/base.sh
 . "$DIR/../comum/base.sh"
+# shellcheck source=../comum/integracao-da-mensagem.sh
+. "$DIR/../comum/integracao-da-mensagem.sh"
 
 # Falha aberta: sem `set -e`, um comando que retorna não-zero não derruba o
 # script — ele segue e, no limite, chega ao fim e sai 0. É esse o comportamento
@@ -29,7 +37,11 @@ ENTRADA="$(cat)"
 
 CMD="$(printf '%s' "$ENTRADA" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 [ -n "$CMD" ] || exit 0
-printf '%s' "$CMD" | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' || exit 0
+# Sem `-q`, de propósito: base.sh liga `pipefail`, e um grep que casa na primeira
+# linha e sai dá SIGPIPE ao printf quando o comando passa do buffer do pipe — o
+# pipeline devolvia 141 e este `|| exit 0` pulava o hook (rodada extra da
+# revisão). Sem `-q` o grep lê até o fim, e o status é só dele.
+printf '%s' "$CMD" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' >/dev/null || exit 0
 
 CWD="$(printf '%s' "$ENTRADA" | jq -r '.cwd // empty' 2>/dev/null)"
 RAIZ="$(expx_raiz "${CWD:-$PWD}")"
@@ -41,13 +53,255 @@ MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
 PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
 [ -n "$PREP" ] || exit 0
 
+# Contexto defensivo do commit manual: a branch ativa casa com exatamente uma
+# ENTREGA. A task continua vindo somente do rodapé Task: da mensagem.
+TRABALHO="$(expx_trabalho_atual_por_branch "$RAIZ")" || TRABALHO=""
+ORIGEM=""
+PASTA_TRABALHO=""
+if [ -n "$TRABALHO" ]; then
+  ENTREGA_ATUAL="$RAIZ/docs/entregas/$TRABALHO/ENTREGA.md"
+  ORIGEM="$(expx_frontmatter_valor "$ENTREGA_ATUAL" expx_tool)"
+  case "$ORIGEM" in
+    sprintx)
+      if [ -d "$RAIZ/docs/sprintx/features/$TRABALHO" ]; then
+        PASTA_TRABALHO="$RAIZ/docs/sprintx/features/$TRABALHO"
+      elif [ -d "$RAIZ/docs/$TRABALHO" ]; then
+        PASTA_TRABALHO="$RAIZ/docs/$TRABALHO"
+      fi ;;
+    runx) PASTA_TRABALHO="$RAIZ/docs/manutencao/$TRABALHO" ;;
+  esac
+fi
+
+# --------------------------------------------------------------------------
+# Arquivo de task irmã — a quarta situação do E1
+# --------------------------------------------------------------------------
+# Antes de tudo: um arquivo que mudou, que NÃO é da task sendo fechada e que
+# outra task da feature declara. Não é mistura de tasks (o conselho "commite
+# uma de cada vez" fecharia de novo uma task congelada) e não é desvio (o
+# arquivo foi planejado). É evidência mecânica de incompatibilidade entre
+# execução e plano, e o fechamento para aqui.
+#
+# Esta condição FALHA FECHADO mesmo com o hook em `aviso`, e é a única deste
+# hook que faz isso. O motivo é o da própria condição: deixá-la passar produz
+# um commit parcial enganoso da task — o dano que o hook existe para impedir,
+# e que não tem volta depois de entrar no histórico. As demais verificações
+# deste hook continuam exatamente no modo configurado.
+#
+# Quem classifica é o script da skill, não o hook: uma implementação só,
+# provada pela bancada. Ausente — instalação parcial —, o hook segue com o que
+# sempre fez (falha aberta no método).
+#
+# P0.2-C7-A: `scripts/fechamento-do-e1.sh` — a seção crítica do E1 — chama o
+# MESMO script, ANTES do primeiro `git add`. Pelo caminho normal, o arquivo de
+# task irmã nunca chega a este hook, porque nunca chega a ser staged. Este
+# bloco continua existindo como DEFESA EM PROFUNDIDADE, para quem roda
+# `git add`/`git commit` por fora da seção crítica; ele não implementa uma
+# segunda regra, só chama de novo a mesma classificação.
+OWNERSHIP="$DIR/../../skills/mergex/scripts/ownership-da-task.sh"
+CONTRATO_COMMIT="$DIR/../../skills/mergex/scripts/contrato-de-commit.sh"
+
+# A task que está sendo fechada é a que a mensagem DECLARA no rodapé `Task:`,
+# que o contrato do E1 já exige em todo commit de task. Nunca é adivinhada:
+# escolher a primeira task do plano, ou a do arquivo mais recente, inventaria
+# o dono. Duas declarações diferentes, ou nenhuma, é "não determinada".
+MSG="$CMD"
+# A mensagem só como o hook a leu (arquivo de -F/--file, com ou sem aspas, ou
+# -m), sem o comando: a leitura é a da biblioteca (integracao-da-mensagem.sh),
+# a mesma do arquivo-fora-do-plano — uma implementação só, provada pelo
+# teste.sh, em vez de um sed repetido aqui.
+MSG_LIDA="$(integracao_mensagem_do_comando "$CMD")"
+ARQ_MSG="$(integracao_arquivo_do_comando "$CMD")"
+if [ -n "$ARQ_MSG" ]; then
+  if [ -r "$ARQ_MSG" ]; then
+    MSG="$MSG
+$MSG_LIDA"
+  fi
+else
+  # O evento do harness traz a linha de comando, não argv. Para `-m "..."`,
+  # retire somente o invólucro externo usado pelo chamador; o corpo, inclusive
+  # quebras de linha e trailers, permanece byte a byte para o parser do Git.
+  MARCADOR_M=' -m "'
+  case "$CMD" in
+    *"$MARCADOR_M"*)
+      MSG="${CMD#*"$MARCADOR_M"}"
+      MSG="${MSG%\"*}"
+      ;;
+  esac
+fi
+
+# --------------------------------------------------------------------------
+# Merge de integração da base — a terceira classe de commit
+# --------------------------------------------------------------------------
+# A classe é ativada pela MENSAGEM, não pelo estado do Git: com MERGE_HEAD, só
+# a mensagem lida que declara `Integra-base:` passa por
+# contrato-de-commit.sh --validar-integracao (Trabalho + Integra-base igual a
+# MERGE_HEAD, sem Task nem Metodo). Inválida: exit 2. Válida: as regras de
+# mistura de tasks, status e suíte não se aplicam. Qualquer outra mensagem —
+# sem Integra-base, ilegível, com trailers que a leitura não isola — segue as
+# regras de sempre: bloquear só com prova.
+if git -C "$RAIZ" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && [ -n "$MSG_LIDA" ]; then
+  integracao_da_mensagem "$MSG_LIDA" "$TRABALHO" "$CONTRATO_COMMIT"
+  case "$INT_CLASSE" in
+    invalida)
+      printf '%s
+' "mergex/commit-por-task — merge de integração com mensagem inválida
+
+$INT_SAIDA
+
+O merge em andamento declara Integra-base, então é a integração da base: exige
+exatamente Trabalho + Integra-base (SHA completo de MERGE_HEAD) e nunca aceita
+Task nem Metodo." >&2
+      exit 2 ;;
+    valida) expx_permite "$RAIZ" "$HOOK" "merge de integracao da base" ;;
+  esac
+fi
+
+# As três chaves de controle formam duas classes mutuamente exclusivas. Esta
+# gramática falha fechada mesmo no modo aviso: aceitar Task+Metodo ou trailers
+# duplicados tornaria o histórico ambíguo depois do commit.
+TRAILERS_CONTROLE="$(printf '%s\n' "$MSG" | git interpret-trailers --parse 2>/dev/null)"
+Q_TASK="$(printf '%s\n' "$TRAILERS_CONTROLE" | grep -Ec '^Task:[[:space:]]*')"
+Q_TRABALHO="$(printf '%s\n' "$TRAILERS_CONTROLE" | grep -Ec '^Trabalho:[[:space:]]*')"
+Q_METODO="$(printf '%s\n' "$TRAILERS_CONTROLE" | grep -Ec '^Metodo:[[:space:]]*')"
+TASK_ATUAL="$(printf '%s\n' "$TRAILERS_CONTROLE" | sed -n 's/^Task:[[:space:]]*//p' | head -1)"
+TRABALHO_MENSAGEM="$(printf '%s\n' "$TRAILERS_CONTROLE" | sed -n 's/^Trabalho:[[:space:]]*//p' | head -1)"
+METODO_ATUAL="$(printf '%s\n' "$TRAILERS_CONTROLE" | sed -n 's/^Metodo:[[:space:]]*//p' | head -1)"
+
+if [ "$Q_TASK" -gt 0 ] || [ "$Q_METODO" -gt 0 ]; then
+  [ -r "$CONTRATO_COMMIT" ] || {
+    printf '%s\n' "mergex/commit-por-task — instalação MergeX incompleta
+
+Componente ausente: $CONTRATO_COMMIT
+Um commit declarou Task ou Metodo, mas sua classe não pode ser provada." >&2
+    exit 2
+  }
+  TMP_MENSAGEM="$(mktemp)" || exit 2
+  printf '%s\n' "$MSG" > "$TMP_MENSAGEM" || { rm -f "$TMP_MENSAGEM"; exit 2; }
+  if [ "$Q_METODO" -gt 0 ]; then
+    SAIDA_CONTRATO="$(bash "$CONTRATO_COMMIT" --validar-metodo \
+      --trabalho "$TRABALHO_MENSAGEM" --checkpoint "$METODO_ATUAL" \
+      --arquivo "$TMP_MENSAGEM" 2>&1)"
+    RC_CONTRATO=$?
+    rm -f "$TMP_MENSAGEM"
+    if [ "$RC_CONTRATO" != 0 ]; then
+      printf '%s\n' "mergex/commit-por-task — classe de commit inválida
+
+$SAIDA_CONTRATO
+
+Commit de método exige exatamente Trabalho + Metodo (pre-e2, pre-e6 ou e8)
+e nunca aceita Task." >&2
+      exit 2
+    fi
+    # Método válido não representa task. O hook de escopo continua responsável
+    # por conferir os arquivos; este hook termina sem exigir status/suíte.
+    exit 0
+  fi
+
+  SAIDA_CONTRATO="$(bash "$CONTRATO_COMMIT" --validar-e1 \
+    --trabalho "$TRABALHO_MENSAGEM" --task "$TASK_ATUAL" \
+    --arquivo "$TMP_MENSAGEM" 2>&1)"
+  RC_CONTRATO=$?
+  rm -f "$TMP_MENSAGEM"
+  if [ "$RC_CONTRATO" != 0 ]; then
+    printf '%s\n' "mergex/commit-por-task — classe de commit inválida
+
+$SAIDA_CONTRATO
+
+Commit E1 exige exatamente Task + Trabalho e nunca aceita Metodo." >&2
+    exit 2
+  fi
+fi
+
+if [ -n "$TASK_ATUAL" ] && [ -n "$TRABALHO" ] \
+  && [ "$TRABALHO_MENSAGEM" != "$TRABALHO" ]; then
+  printf '%s\n' "mergex/commit-por-task — Trabalho diverge do contexto corrente
+
+Trabalho da mensagem: $TRABALHO_MENSAGEM
+Trabalho corrente:     $TRABALHO" >&2
+  exit 2
+fi
+
+if [ -n "$TASK_ATUAL" ] && [ -n "$TRABALHO" ]; then
+  if [ "$ORIGEM" = sprintx ] || [ "$ORIGEM" = runx ]; then
+    if [ ! -r "$OWNERSHIP" ]; then
+      printf '%s\n' "mergex/commit-por-task — instalação MergeX incompleta
+
+Trabalho: $TRABALHO
+Origem:   $ORIGEM
+Componente ausente: $OWNERSHIP
+
+Este trabalho usa modelo de tasks. A ausência do classificador de ownership
+não pode ser tratada como n/a nem liberar o commit." >&2
+      exit 2
+    fi
+  fi
+fi
+
+if [ -n "$TASK_ATUAL" ] && [ -r "$OWNERSHIP" ] && [ -n "$TRABALHO" ]; then
+  SAIDA_OWNERSHIP="$(printf '%s\n' "$PREP" \
+    | bash "$OWNERSHIP" --classificar "$RAIZ" "$ORIGEM" "$TRABALHO" "$TASK_ATUAL" 2>&1)"
+  RC_OWNERSHIP=$?
+  case "$RC_OWNERSHIP" in
+    0|2) ;;
+    *)
+      printf '%s\n' "mergex/commit-por-task — ownership não determinável
+
+Trabalho: $TRABALHO
+Origem:   $ORIGEM
+Task:     $TASK_ATUAL
+
+$SAIDA_OWNERSHIP
+
+O plano corrente task-based está ausente, ilegível ou inconsistente. O commit
+manual para sem procurar outro trabalho nem degradar para n/a." >&2
+      exit 2 ;;
+  esac
+
+  IRMA="$(printf '%s\n' "$SAIDA_OWNERSHIP" \
+    | awk -F'\t' '$1 == "arquivo_de_task_irma" { print "  - " $2 "   (declarado em " $3 ")" }')"
+  if [ -n "$IRMA" ]; then
+    QTD_IRMA="$(printf '%s\n' "$IRMA" | grep -c .)"
+    ARQ_IRMA="$(printf '%s\n' "$IRMA" | sed 's/^  - //; s/   (declarado em .*//' \
+      | jq -R . | jq -sc . 2>/dev/null || echo '[]')"
+    expx_rastro "$RAIZ" "acao_bloqueada" "bloqueado" \
+      "arquivo de task irma no fechamento de $TASK_ATUAL ($QTD_IRMA)" "$HOOK" "$ARQ_IRMA"
+    printf '%s\n' "mergex/commit-por-task — arquivo de OUTRA task no fechamento desta
+
+Task sendo fechada: $TASK_ATUAL
+Arquivo(s) que mudaram e que só outra task da feature declara:
+
+$IRMA
+No E1 o dono do arquivo é a task que está sendo fechada. Estes arquivos foram
+planejados — só que em outra task —, então NÃO são desvio de escopo; e não
+podem entrar neste commit, porque isso os atribuiria em silêncio a $TASK_ATUAL.
+
+Isto é evidência mecânica de que a execução e o plano não batem.
+
+O que fazer:
+  - Tire o arquivo do índice, sem tocar na sua alteração:
+      git restore --staged <arquivo>
+  - Não apague, não restaure o conteúdo, não faça stash e não o mova para
+    outra task: a alteração é real e precisa continuar na árvore.
+  - Leve a condição ao planejamento. Depois que o plano passar a declarar o
+    arquivo na task atual, este commit passa normalmente.
+
+A mergex só detecta e nomeia a condição (arquivo_de_task_irma). Registrar
+bloqueio, abrir B-NN e replanejar é da sprintx." >&2
+    exit 2
+  fi
+fi
+
 # --------------------------------------------------------------------------
 # As tasks do trabalho
 # --------------------------------------------------------------------------
 # Sem estado próprio: tudo sai de tasks.md, que já existe.
 # Sem tasks.md, não há o que verificar — passa (falha aberta).
 # bash 3.2 (o do macOS) não tem mapfile: usa lista separada por linha.
-TASKS_ARQS="$(find "$RAIZ/docs" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
+if [ -n "$PASTA_TRABALHO" ] && [ -d "$PASTA_TRABALHO" ]; then
+  TASKS_ARQS="$(find "$PASTA_TRABALHO" -name tasks.md -not -path '*/node_modules/*' 2>/dev/null)"
+else
+  TASKS_ARQS=""
+fi
 [ -n "$TASKS_ARQS" ] || exit 0
 
 # Para cada task do plano, extrai: id, status, suite e arquivos declarados.
@@ -152,10 +406,13 @@ O que fazer:
 fi
 
 # --------------------------------------------------------------------------
-# 2. Task não concluída ou com suíte não verde
+# 2. Task não concluída, ou com registro de suíte que não sustenta um commit
 # --------------------------------------------------------------------------
 for id in $TASKS_TOCADAS; do
-  linha="$(grep -F "$id	" "$TMP" | head -1)" || continue
+  # o `head -1` sai cedo: o status do pipeline sob `pipefail` pode ser 141; a
+  # decisão é pelo conteúdo (rodada extra da revisão)
+  linha="$(grep -F "$id	" "$TMP" | head -1)"
+  [ -n "$linha" ] || continue
   status="$(printf '%s' "$linha" | cut -f2)"
   suite="$(printf '%s' "$linha" | cut -f3)"
 
@@ -166,28 +423,37 @@ for id in $TASKS_TOCADAS; do
 Task:   $id
 Status: $status
 
-O commit acontece quando a task fecha: os dois testes escritos, a suíte inteira
-verde, e a task marcada 'concluida' em tasks.md. Antes disso, não commita.
+O commit acontece quando a task fecha: os dois testes escritos, os testes
+afetados pela task passando, e a task marcada 'concluida' em tasks.md. Antes
+disso, não commita.
 
 O que fazer:
-  - Termine a task, rode a suíte inteira, marque 'status: concluida' e
-    'suite: verde' no tasks.md — no frontmatter e na prosa — e commite então."
+  - Termine a task, rode os testes afetados, marque 'status: concluida' e
+    'suite: parcial' (ou 'verde') no tasks.md — no frontmatter e na prosa — e
+    commite então."
   fi
 
-  if [ -n "$suite" ] && [ "$suite" != "verde" ]; then
+  case "${suite:-}" in
+    ''|parcial|verde) ;;
+    *)
     expx_barra "$MODO" "$RAIZ" "$HOOK" "task $id com suite $suite" \
-"mergex/commit-por-task — suíte não está verde
+"mergex/commit-por-task — a task fechou sem teste passando
 
 Task:  $id
 Suíte: $suite
 
-Commit com suíte vermelha põe no histórico um ponto que não compila ou não
-passa. Quem bisecar esse histórico depois cai justamente aí.
+Commit com suíte vermelha, ou sem teste executado, põe no histórico um ponto
+que não passa. Quem bisecar esse histórico depois cai justamente aí.
+
+Registros válidos numa task concluída:
+  parcial — os testes afetados pela task passaram (a suíte inteira é cobrada
+            no fechamento da sprint)
+  verde   — a suíte inteira passou
 
 O que fazer:
-  - Faça a suíte inteira passar — não só os testes novos.
-  - Atualize 'suite: verde' no tasks.md e commite."
-  fi
+  - Faça os testes da task passarem e atualize 'suite' no tasks.md."
+    ;;
+  esac
 done
 
 # --------------------------------------------------------------------------
@@ -199,4 +465,4 @@ if [ "${QTD_TASKS:-0}" = "0" ] && [ -n "$SEM_TASK" ]; then
   exit 0
 fi
 
-expx_permite "$RAIZ" "$HOOK" "commit de uma task concluida com suite verde"
+expx_permite "$RAIZ" "$HOOK" "commit de uma task concluida com suite valida"

@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#
+# Validador de contrato da mergex — compatibilidade com os worktrees da sprintx.
+#
+# Checagens determinísticas sobre o texto dos contratos: o que este P0 fixou
+# precisa continuar escrito, e o que ele proibiu não pode voltar. Roda em
+# qualquer máquina com bash e grep, sem rede e sem dependência nova.
+#
+# Uso: bash scripts/ci/validate-mergex-contract.sh
+
 set -euo pipefail
 
 fail() {
@@ -7,69 +16,1653 @@ fail() {
 }
 
 skill='.claude/skills/mergex/SKILL.md'
-review='.claude/skills/mergex/references/09-revisao.md'
-claude_cmd='.claude/commands/mergex-revisar.md'
-opencode_cmd='.opencode/commands/mergex-revisar.md'
-readme='README.md'
+abertura='.claude/skills/mergex/references/00-abertura.md'
+commits='.claude/skills/mergex/references/01-commits.md'
+prontidao='.claude/skills/mergex/references/02-prontidao.md'
+integ_sprintx='.claude/skills/mergex/references/integracao/sprintx.md'
+patch_sprintx='docs/integracao/patch-sprintx.md'
+base_sh='.claude/hooks/comum/base.sh'
+hook_escopo='.claude/hooks/mergex/arquivo-fora-do-plano.sh'
+abrir_cmd='.claude/commands/mergex-abrir.md'
+abrir_oc='.opencode/commands/mergex-abrir.md'
+mergex_cmd='.claude/commands/mergex.md'
+mergex_oc='.opencode/commands/mergex.md'
+mergex_check='.claude/commands/mergex-check.md'
+mergex_check_oc='.opencode/commands/mergex-check.md'
+persiste_sh='.claude/skills/mergex/scripts/persistir-metodo.sh'
 
-for f in "$skill" "$review" "$claude_cmd" "$opencode_cmd" "$readme"; do
+for f in "$skill" "$abertura" "$commits" "$prontidao" "$integ_sprintx" \
+         "$patch_sprintx" "$base_sh" "$hook_escopo" "$abrir_cmd" "$abrir_oc" \
+         "$mergex_cmd" "$mergex_oc" "$mergex_check" "$mergex_check_oc" "$persiste_sh"; do
   [ -f "$f" ] || fail "missing required file: $f"
 done
 
-# E9 remains the manual review/merge boundary.
-grep -Fq 'E9 REVISÃO E MERGE — MANUAL' "$skill" \
-  || fail 'SKILL.md no longer declares E9 as manual'
-grep -Fq 'O E9 NUNCA executa automaticamente.' "$review" \
-  || fail '09-revisao.md no longer forbids automatic E9 execution'
-grep -Fq 'só roda por chamada explícita do desenvolvedor' "$claude_cmd" \
-  || fail 'Claude command no longer requires explicit developer invocation'
+# ---------------------------------------------------------------------------
+# Caminho canônico da sprintx, com fallback legado e sem migração automática
+# ---------------------------------------------------------------------------
+for f in "$abertura" "$integ_sprintx" "$abrir_cmd" "$abrir_oc" "$mergex_cmd" \
+         "$mergex_oc" "$skill"; do
+  grep -Fq 'docs/sprintx/features/' "$f" \
+    || fail "$f does not use the canonical sprintx path"
+  grep -Fq 'docs/<slug>/' "$f" \
+    || fail "$f dropped the legacy sprintx path fallback"
+done
+grep -Fq 'Nunca mova a pasta legada' "$abertura" \
+  || fail 'E0 no longer forbids moving a legacy work folder'
 
-# No E10 stage may be introduced in active skill/command/reference contracts.
-# Detects E10 declared as a stage: in a heading, in bold, or as the first token of a line after
-# optional structural markers (blockquote, list bullet, ordered item, table cell, heading, bold).
-# Prose that only mentions E10 mid-sentence ("sem E10", "não existe E10") is not a declaration.
-if grep -R -n -E \
-  '^#{1,6}[[:space:]].*\bE10\b|\*\*E10\b|^[[:space:]]*((>|[-*+]|[0-9]+[.)]|\||#{1,6}|\*\*|__)[[:space:]]*)*E10\b' \
-  "$skill" .claude/skills/mergex/references .claude/commands .opencode/commands; then
-  fail 'E10 stage detected'
+# V6 e V7 procuram o canônico antes do legado.
+grep -Fq 'docs/sprintx/features/<slug>/00-AUDITORIA.md' "$prontidao" \
+  || fail 'V6 missing the canonical audit path'
+grep -Fq 'docs/<slug>/00-AUDITORIA.md' "$prontidao" \
+  || fail 'V6 dropped the legacy audit path'
+grep -Fq 'docs/sprintx/features/<slug>/00-BLOQUEIOS.md' "$prontidao" \
+  || fail 'V7 missing the canonical blockers path'
+
+# ---------------------------------------------------------------------------
+# A runx não regride: os caminhos canônicos dela continuam nos mesmos contratos
+# ---------------------------------------------------------------------------
+grep -Fq 'docs/manutencao/<OC-ID>-<slug>/ORQUESTRADOR.md' "$abertura" \
+  || fail 'E0 lost the runx work path'
+grep -Fq 'docs/manutencao/<OC-ID>-<slug>/QA.md' "$prontidao" \
+  || fail 'V5 lost the runx QA path'
+grep -Fq 'docs/manutencao/<trabalho_id>/' "$commits" \
+  || fail 'E1 lost the runx folder among the method artifacts'
+
+# ---------------------------------------------------------------------------
+# Base informada pelo chamador: precedência mais alta, validada, sem troca muda
+# ---------------------------------------------------------------------------
+grep -Fq '1. **Base informada pelo chamador**' "$abertura" \
+  || fail 'caller-provided base is not the highest precedence in E0'
+grep -Fq 'nunca substitua silenciosamente por outra' "$abertura" \
+  || fail 'E0 may silently replace an invalid explicit base'
+
+# ---------------------------------------------------------------------------
+# Adoção de branch e worktree; árvore limpa continua barrando criação/troca
+# ---------------------------------------------------------------------------
+grep -Fq 'Caso A — a branch ativa já é a branch do trabalho' "$abertura" \
+  || fail 'E0 has no adoption case for an already-correct branch'
+grep -Fq 'não execute `git switch`' "$abertura" \
+  || fail 'E0 adoption still switches branches'
+grep -Fq 'Caso B — a branch alvo existe e está em uso por outro worktree' "$abertura" \
+  || fail 'E0 has no case for a branch checked out in another worktree'
+grep -Fq 'git worktree list --porcelain' "$abertura" \
+  || fail 'E0 cannot locate a branch checked out in another worktree'
+grep -Fq 'nunca remova o worktree de ninguém' "$abertura" \
+  || fail 'E0 no longer forbids removing someone else worktree'
+grep -Fq 'Árvore limpa é pré-condição para criar ou trocar branch' "$abertura" \
+  || fail 'E0 lost the clean-tree precondition wording'
+grep -Fq 'Arquivo apenas não rastreado' "$abertura" \
+  || fail 'E0 no longer counts untracked files in the clean-tree gate'
+grep -Fq 'nunca cria uma segunda branch para o mesmo trabalho' "$abertura" \
+  || fail 'E0 no longer forbids a second branch for the same work'
+grep -Fq 'adota a branch e o worktree' "$skill" \
+  || fail 'SKILL.md does not describe E0 adoption'
+grep -Fq 'F1 da sprintx é a dona' "$integ_sprintx" \
+  || fail 'integration doc no longer names sprintx F1 as branch/worktree owner'
+
+# A raiz é a que o versionador informa; num worktree, `.git` é arquivo.
+grep -Fq 'num worktree é `arquivo`, não diretório' "$skill" \
+  || fail 'SKILL.md still assumes .git is a directory when anchoring docs/entregas/'
+
+# ---------------------------------------------------------------------------
+# Suíte por task: parcial e verde valem; vermelha e nao_executada barram
+# ---------------------------------------------------------------------------
+grep -Fq 'Suíte da task: `parcial` ou `verde`' "$commits" \
+  || fail 'E1 still demands a green whole suite per task'
+grep -Fq '`parcial` e `verde` são registros válidos' "$prontidao" \
+  || fail 'V2 does not accept suite: parcial'
+grep -Fq '`vermelha` e `nao_executada` são FALHA' "$prontidao" \
+  || fail 'V2 no longer fails on red or unexecuted suites'
+grep -Fq 'evidência da suíte inteira no fechamento de cada sprint' "$prontidao" \
+  || fail 'V2 dropped the whole-suite evidence requirement'
+
+# ---------------------------------------------------------------------------
+# Artefato de método do próprio trabalho não é desvio; produto fora do plano é
+# ---------------------------------------------------------------------------
+grep -Fq 'artefatos de método do próprio trabalho' "$commits" \
+  || fail 'E1 does not define method artifacts'
+grep -Fq 'docs/sprintx/features/<trabalho_id>/' "$commits" \
+  || fail 'E1 does not scope the method-artifact exemption to the work folder'
+grep -Fq 'Commit de método é classe de primeira classe' "$commits" \
+  || fail 'E1 has no deterministic moment for method artifacts'
+grep -Fq 'continua sendo desvio' "$commits" \
+  || fail 'E1 no longer treats undeclared product files as deviations'
+grep -Fq 'artefatos de método do próprio trabalho não são desvio' "$prontidao" \
+  || fail 'V9 does not exempt the work own method artifacts'
+
+# ---------------------------------------------------------------------------
+# Hook manual continua defensivo pela branch; lifecycle M2 usa contexto explícito
+# ---------------------------------------------------------------------------
+grep -Fq 'expx_trabalho_atual_por_branch()' "$base_sh" \
+  || fail 'base.sh does not define the branch-based current-work resolver'
+grep -Fq 'branch --show-current' "$base_sh" \
+  || fail 'the resolver does not read the current branch'
+
+# O helper histórico do rastro continua existindo. A IMPLEMENTAÇÃO dele não é
+# contrato: o que este script protege é que o hook de escopo não dependa dela.
+grep -Fq 'expx_trabalho_id()' "$base_sh" \
+  || fail 'expx_trabalho_id was removed from base.sh'
+
+# Só o código conta: o comentário do hook cita o helper antigo justamente para
+# dizer que não o usa.
+grep -Fq 'expx_trabalho_atual_por_branch' "$hook_escopo" \
+  || fail 'scope hook does not use the branch-based resolver'
+if grep -v '^[[:space:]]*#' "$hook_escopo" | grep -Fq 'expx_trabalho_id'; then
+  fail 'scope hook still resolves the current work by most recent ENTREGA.md'
+fi
+if grep -Fq 'estado.json' "$hook_escopo"; then
+  fail 'scope hook must never read estado.json to decide the current work'
 fi
 
-# Claude and OpenCode must expose the same manual command contract.
-cmp -s "$claude_cmd" "$opencode_cmd" \
-  || fail 'Claude and OpenCode mergex-revisar commands diverged'
+# A fonte normativa do lifecycle está escrita no contrato, não só no código.
+grep -Fq 'contexto explícito do chamador' "$commits" \
+  || fail 'method lifecycle does not take current work from explicit context'
+grep -Fq 'prova de consistência, nunca mecanismo de seleção' "$commits" \
+  || fail 'method lifecycle still selects current work from the branch'
 
-# BuildX integration must never invoke the manual review command automatically.
-grep -Fq 'nunca invoca `mergex-revisar`' "$readme" \
-  || fail 'README no longer preserves the BuildX -> no mergex-revisar boundary'
+# ---------------------------------------------------------------------------
+# O comando manual de revisão nunca é encadeado por contrato nenhum
+# ---------------------------------------------------------------------------
+# `09-revisao.md` fica fora da varredura: é o reference do PRÓPRIO E9, onde o
+# comando é o assunto. Esta varredura existe para pegar menção solta em
+# QUALQUER OUTRO contrato, do tipo "ao terminar, rode /mergex-revisar".
+encontrou=0
+while IFS= read -r linha; do
+  [ -n "$linha" ] || continue
+  case "$linha" in
+    .claude/skills/mergex/references/09-revisao.md:*) continue ;;
+    *não*|*NÃO*|*nunca*|*NUNCA*|*nenhum*|*Nenhum*|*manual*|*MANUAL*|*explícit*|*Explícit*|*jamais*) continue ;;
+  esac
+  printf 'unqualified mergex-revisar mention: %s\n' "$linha" >&2
+  encontrou=1
+done <<EOF
+$(grep -RIn -- 'mergex-revisar' \
+    .claude/skills/mergex/references .claude/skills/mergex/assets docs/integracao \
+    "$mergex_cmd" "$abrir_cmd" .claude/commands/mergex-pr.md \
+    .claude/commands/mergex-check.md 2>/dev/null || true)
+EOF
+[ "$encontrou" = '0' ] || fail 'mergex-revisar mentioned without an explicit prohibition'
 
-# R1-R6 are canonical and each criterion remains present exactly once in the normative table.
-for n in 1 2 3 4 5 6; do
-  count="$(grep -Fc "| R${n} |" "$review" || true)"
-  [ "$count" = '1' ] || fail "R${n} normative definition count is $count, expected 1"
+# ---------------------------------------------------------------------------
+# P0 — o estado final do E8 é persistido: commit de fechamento + publicação
+# ---------------------------------------------------------------------------
+registro='.claude/skills/mergex/references/08-registro.md'
+push='.claude/skills/mergex/references/06-push.md'
+schema='.claude/skills/mergex/references/00-schema.md'
+for f in "$registro" "$push" "$schema"; do
+  [ -f "$f" ] || fail "missing required file: $f"
 done
 
-grep -Fq 'REVIEW EVIDENCE' "$review" || fail 'Review Evidence Gate missing'
-grep -Fq 'SATISFEITO' "$review" || fail 'SATISFEITO verdict missing'
-grep -Fq 'BLOQUEADO' "$review" || fail 'BLOQUEADO verdict missing'
-grep -Fq 'Revalidação obrigatória imediatamente antes do merge' "$review" \
-  || fail 'pre-merge revalidation requirement missing'
-grep -Fq 'Merge atomicamente preso ao HEAD revalidado — obrigatório.' "$review" \
-  || fail 'atomic head-bound merge requirement missing'
-grep -Fq -- '--match-head-commit <headRefOid>' "$review" \
-  || fail 'GitHub --match-head-commit binding missing'
-grep -Fq 'Sem mecanismo atômico' "$review" && grep -Fq 'a mergex não executa o merge' "$review" \
-  || fail 'refusal to merge without an atomic head-bound mechanism missing'
-
-# R6 external closure by reaction: verifiable +1 on the evidence comment may count; generic reactions never do.
-if grep -Fq 'Reação isolada (emoji) não é confirmação' "$review"; then
-  fail 'absolute "no reaction is confirmation" rule reintroduced; verifiable +1 closure must be allowed'
+# A regra antiga — deixar a gravação do E8 no disco — não pode voltar.
+if grep -Fq 'entra no próximo commit de artefatos' "$commits"; then
+  fail 'E1 still defers the E8 final update to a future artifact commit'
 fi
-grep -Fq '**Reação positiva verificável.**' "$review" && grep -Fq 'hoje, só `+1`' "$review" \
-  && grep -Fq 'comentário específico de evidência daquele finding' "$review" \
-  || fail 'verifiable +1 reaction on the evidence comment as R6 closure missing'
-grep -Fq 'Reação genérica ou ambígua não satisfaz R6' "$review" \
-  || fail 'rule that generic or ambiguous reactions do not satisfy R6 missing'
-grep -Fq '(resposta explícita, aprovação, ou reação positiva verificável conforme "Reação positiva' "$review" \
-  || fail 'FÁBRICA-resolved branch must accept a prior verifiable positive reaction as external confirmation'
+
+grep -Fq '## O fechamento final' "$registro" \
+  || fail 'E8 has no final closing step'
+grep -Fq 'git status --porcelain' "$registro" \
+  || fail 'E8 closing step does not inspect the dirty tree'
+grep -Fq 'persistir-metodo.sh --persistir' "$registro" \
+  || fail 'E8 closing no longer uses the lifecycle executor'
+grep -Fq 'chore(mergex): persiste metodo e8' "$commits" \
+  || fail 'E1 reference does not describe the E8 method commit'
+grep -Fq 'três checkpoints executáveis e cumulativos' "$commits" \
+  || fail 'E1 no longer lists the three lifecycle checkpoints'
+
+# O commit de fechamento é artefato de método, nunca task nem produto.
+grep -Fq 'não entra em `ENTREGA.commits`' "$registro" \
+  || fail 'E8 closing commit is not excluded from the task commit list'
+grep -Fq 'não inclui produto' "$registro" \
+  || fail 'E8 closing commit does not exclude product files'
+grep -Fq 'varredura de segredo' "$registro" \
+  || fail 'E8 closing commit skips the secret sweep'
+if grep -v '^[[:space:]]*#' "$persiste_sh" | grep -Eq 'git add (-A|--all|\.)'; then
+  fail 'E8 lifecycle executor allows bulk staging'
+fi
+
+# Publicação final: mesmo princípio conservador do E6, sem reconciliar nem forçar.
+grep -Fq 'git rev-list --count HEAD..origin/<branch>' "$registro" \
+  || fail 'E8 final push does not check whether the remote is ahead'
+grep -Fq 'nunca `--force-with-lease`' "$registro" \
+  || fail 'E8 final push no longer forbids forced publication'
+grep -Fq 'O fechamento final' "$push" \
+  || fail 'E6 does not point to the E8 final closing'
+
+# push_feito diz a verdade sobre o remoto, e nenhum enum novo foi criado.
+grep -Fq 'o commit que carrega este registro está no remoto' "$registro" \
+  || fail 'push_feito semantics do not cover the closing commit'
+grep -Fq 'commit corretivo' "$registro" \
+  || fail 'E8 has no corrective commit when the final push fails'
+if grep -Fq 'pending' "$schema"; then
+  fail 'expx-schema gained a pending value'
+fi
+
+# Sem remoto o fechamento continua acontecendo: a evidência não depende de hospedagem.
+grep -Fq 'Sem remoto, sem versionador, sem PR' "$registro" \
+  || fail 'E8 does not define the closing behaviour without a remote'
+
+# ---------------------------------------------------------------------------
+# P0 final — push_feito por estágio, bloqueio persistido, E0 idempotente
+# ---------------------------------------------------------------------------
+# A definição antiga de push_feito não pode conviver com o fechamento final.
+if grep -Fq '`true` só quando o E6 confirmou que o remoto tem o mesmo commit' "$registro"; then
+  fail 'E8 field table still defines push_feito only by the E6 push'
+fi
+grep -Fq 'Ao encerrar o E8' "$registro" \
+  || fail 'push_feito has no end-of-E8 meaning'
+grep -Fq 'O E8 revalida a verdade final' "$registro" \
+  || fail 'E8 does not revalidate push_feito at the end'
+grep -Fq 'A palavra final é do E8' "$push" \
+  || fail 'E6 does not defer the final push_feito truth to E8'
+
+# E2 BLOQUEADO: encerra a ENTREGA, mas o bloqueio é persistido pelo E8.
+if grep -Fq 'encerre o fluxo da mergex' "$prontidao"; then
+  fail 'E2 still ends the whole flow instead of going to E8 for the blocked closing'
+fi
+grep -Fq 'encerra as etapas de entrega e segue apenas ao E8' "$prontidao" \
+  || fail 'E2 does not route a blocked gate to E8'
+grep -Fq 'encerra as etapas de entrega' "$skill" \
+  || fail 'SKILL.md does not describe the blocked route to E8'
+grep -Fq '### Fechamento bloqueado' "$registro" \
+  || fail 'E8 has no blocked closing section'
+grep -Fq '**O passo 3 não roda**' "$registro" \
+  || fail 'blocked closing does not forbid publishing the branch'
+grep -Fq 'E2 → E8 (fechamento bloqueado)' "$integ_sprintx" \
+  || fail 'sprintx integration does not describe the blocked closing'
+
+# A garantia do fechamento é sobre artefato de método, não sobre a árvore inteira.
+if grep -Fq 'árvore fica limpa' "$registro"; then
+  fail 'E8 promises a fully clean tree again'
+fi
+grep -Fq 'não é "árvore inteira limpa"' "$registro" \
+  || fail 'E8 lost the precise clean-tree guarantee'
+
+# E0 idempotente: retomada não recria e não apaga histórico.
+grep -Fq 'CASO 2 — o arquivo existe' "$abertura" \
+  || fail 'E0 has no resume case for an existing ENTREGA.md'
+grep -Fq 'Nunca zere' "$abertura" \
+  || fail 'E0 resume does not preserve the commit history'
+grep -Fq 'Nunca abra um segundo PR e nunca recrie a branch' "$abertura" \
+  || fail 'E0 resume may open a second PR or recreate the branch'
+
+# commits é histórico de execução, não índice de plano.
+grep -Fq 'um commit por fechamento de task em cada execução' "$commits" \
+  || fail 'E1 does not define commits as per-execution history'
+grep -Fq 'Nunca apague item antigo' "$commits" \
+  || fail 'E1 allows deleting past commit entries on replanning'
+
+# ---------------------------------------------------------------------------
+# P0 E2E — HISTORICO global da sprintx (exceção exata) e os dois formatos de sprint
+# ---------------------------------------------------------------------------
+historico='docs/sprintx/estimativas/HISTORICO.md'
+readme='README.md'
+[ -f "$readme" ] || fail "missing required file: $readme"
+
+# A exceção existe, é do E1 ao E8, e é EXATA: nunca curinga.
+for f in "$commits" "$prontidao" "$registro" "$integ_sprintx"; do
+  grep -Fq "$historico" "$f" \
+    || fail "$f does not declare the sprintx global method artifact"
+done
+# No código do hook, curinga nenhum. Nos contratos, o curinga só pode aparecer
+# quando a frase o está PROIBINDO — é assim que a regra fica escrita, não só obedecida.
+if grep -Fq 'docs/sprintx/estimativas/**' "$hook_escopo" || grep -Fq 'docs/sprintx/**' "$hook_escopo"; then
+  fail 'scope hook turned the HISTORICO exception into a wildcard'
+fi
+for f in "$commits" "$prontidao" "$registro" "$integ_sprintx"; do
+  if grep -F -e 'docs/sprintx/estimativas/**' -e 'docs/sprintx/**' "$f" \
+     | grep -qv -e 'Não existe isenção' -e 'Nada mais sob' -e 'nada sob' \
+                -e 'nada equivalente na runx' -e 'nem para'; then
+    fail "$f turned the HISTORICO exception into a wildcard"
+  fi
+done
+grep -Fq 'A exceção é exata' "$commits" \
+  || fail 'E1 does not state that the HISTORICO exception is exact'
+grep -Fq 'nada equivalente na runx' "$registro" \
+  || fail 'E8 does not keep the HISTORICO exception out of runx'
+grep -Fq 'a runx não ganha isenção equivalente' "$prontidao" \
+  || fail 'V9 does not keep the HISTORICO exception out of runx'
+
+# E1: não entra no commit de task; entra no checkpoint pre-e2.
+grep -Fq 'não entra no commit de uma task' "$commits" \
+  || fail 'E1 lets the HISTORICO into a task commit'
+grep -Fq 'o catálogo `pre-e2` o seleciona' "$commits" \
+  || fail 'E1 does not put the HISTORICO in the pre-e2 checkpoint'
+
+# V9: exclusão cirúrgica e válida também para o que já está no histórico da branch.
+grep -Fq 'exata e cirúrgica' "$prontidao" \
+  || fail 'V9 HISTORICO exclusion is not surgical'
+grep -Fq 'já está no histórico da branch' "$prontidao" \
+  || fail 'V9 does not cover a HISTORICO committed in a previous attempt'
+
+# E8: bloqueado persiste o HISTORICO; pronto não o perde.
+grep -Fq 'Inclusive o `HISTORICO.md`' "$registro" \
+  || fail 'blocked closing does not persist the HISTORICO'
+grep -Fq 'porque entrou no `pre-e2`' "$registro" \
+  || fail 'final closing may lose a still-dirty HISTORICO'
+
+# O hook de escopo implementa a mesma exceção exata, e só para a sprintx.
+grep -Fq 'eh_historico_global_sprintx' "$hook_escopo" \
+  || fail 'scope hook does not implement the HISTORICO exception'
+grep -Fq 'runx nao ganha a isencao' "$hook_escopo" \
+  || fail 'scope hook may exempt the HISTORICO for runx work'
+
+# Regra única de leitura de sprint: os dois formatos, num lugar só.
+grep -Fq '## Como ler uma sprint da sprintx' "$integ_sprintx" \
+  || fail 'sprintx integration has no single sprint-format rule'
+grep -Fq 'kind: plano' "$integ_sprintx" \
+  || fail 'sprintx integration does not cover the condensed plan'
+grep -Fq 'Não exija `sprint.md` nem' "$integ_sprintx" \
+  || fail 'sprintx integration still demands sprint.md on condensed plans'
+grep -Fq 'a sprintx escreve, a mergex versiona' "$integ_sprintx" \
+  || fail 'sprintx integration does not declare HISTORICO ownership'
+for f in "$commits" "$prontidao"; do
+  grep -Fq 'Como ler uma sprint da sprintx' "$f" \
+    || fail "$f does not point to the single sprint-format rule"
+done
+grep -Fq '`sprint.md` não existe' "$prontidao" \
+  || fail 'V2 does not accept a condensed sprint without sprint.md'
+
+# A documentação não pode voltar a dizer que a buildx chama a mergex direto.
+if grep -Fq 'invoca `mergex-abrir`, `mergex-check`' "$readme"; then
+  fail 'README still says buildx invokes mergex commands directly'
+fi
+
+# ---------------------------------------------------------------------------
+# P1 — E3: artefatos de método (L4/D4). Reference, agente nos dois harnesses e
+# classificador carregam o MESMO contrato efetivo.
+# ---------------------------------------------------------------------------
+atencao='.claude/skills/mergex/references/03-atencao-humana.md'
+agente_cl='.claude/agents/revisor-diff.md'
+agente_oc='.opencode/agent/revisor-diff.md'
+classificador='.claude/skills/mergex/scripts/classificar-atencao.sh'
+atencao_cmd='.claude/commands/mergex-atencao.md'
+atencao_oc='.opencode/commands/mergex-atencao.md'
+for f in "$atencao" "$agente_cl" "$agente_oc" "$classificador" "$atencao_cmd" "$atencao_oc"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# O espelho OpenCode do agente só pode diferir no frontmatter.
+corpo_agente() { awk 'f { print } /^---[[:space:]]*$/ && NR > 1 && !f { f = 1 }' "$1" | sed '/./,$!d'; }
+[ "$(corpo_agente "$agente_cl")" = "$(corpo_agente "$agente_oc")" ] \
+  || fail 'OpenCode revisor-diff body diverges from the Claude Code agent'
+cmp -s "$atencao_cmd" "$atencao_oc" || fail 'OpenCode mergex-atencao command diverges from Claude Code'
+
+# A ordem dos critérios: a do classificador é a das tabelas do reference e do agente.
+ordem_script="$(bash "$classificador" --ordem)"
+[ "$ordem_script" = 'O1 O2 O3 O4 O5 O6 O7 O8 O9 O10 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO' ] \
+  || fail "classifier order changed: $ordem_script"
+ordem_tabelas() { grep -oE '^\| [OLD][0-9]+ \|' "$1" | tr -d '| ' | tr '\n' ' ' | sed 's/ $//'; }
+for f in "$atencao" "$agente_cl"; do
+  [ "$(ordem_tabelas "$f") PADRAO" = "$ordem_script" ] \
+    || fail "$f criteria tables are not in the classifier order ($(ordem_tabelas "$f"))"
+done
+
+# L4 e D4: o critério é o mesmo texto no reference e no agente.
+criterio_de() { grep -E "^\| $2 \|" "$1" | head -1 | awk -F'|' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3 }'; }
+for c in L4 D4; do
+  [ -n "$(criterio_de "$atencao" "$c")" ] || fail "reference has no $c criterion"
+  [ "$(criterio_de "$atencao" "$c")" = "$(criterio_de "$agente_cl" "$c")" ] \
+    || fail "$c criterion text diverges between reference and agent"
+done
+
+# O bloco da regra — precedência de O, O em artefato de método, L4, D4, reconhecimento —
+# é idêntico, byte a byte, no reference e no agente.
+bloco_metodo() { awk '/<!-- contrato-e3:artefato-de-metodo:inicio -->/ { f = 1 } f { print } /<!-- contrato-e3:artefato-de-metodo:fim -->/ { f = 0 }' "$1" | tr -d '\r'; }
+[ -n "$(bloco_metodo "$atencao")" ] || fail 'reference lost the method-artifact contract block'
+[ "$(bloco_metodo "$atencao")" = "$(bloco_metodo "$agente_cl")" ] \
+  || fail 'method-artifact contract block diverges between reference and agent'
+for frase in 'Artefato de método nunca anula critério O.' \
+             'L4 e D4 só existem pela saída do classificador' \
+             '`expx_tool` no frontmatter nunca basta' \
+             'O6** fala de código sem cobertura'; do
+  bloco_metodo "$atencao" | tr '\n' ' ' | sed 's/  */ /g' | grep -Fq "$frase" \
+    || fail "method-artifact block lost: $frase"
+done
+
+# O padrão conservador continua escrito nos dois.
+grep -Fq 'Um arquivo que não bate em nenhum critério de nenhuma faixa vai para **OLHO OBRIGATÓRIO** por padrão' "$atencao" \
+  || fail 'reference lost the conservative default'
+grep -Fq '**Arquivo que não bate em nenhum critério vai para OLHO OBRIGATÓRIO**' "$agente_cl" \
+  || fail 'agent lost the conservative default'
+
+# D1–D3 não foram afrouxados.
+grep -Fq '| D1 | Arquivo de teste que só acrescenta caso |' "$atencao" || fail 'D1 changed in the reference'
+grep -Fq '| D2 | Alteração mecânica coberta por teste de regressão verde |' "$atencao" || fail 'D2 changed in the reference'
+grep -Fq '| D3 | Arquivo gerado automaticamente, **quando declarado como tal** |' "$atencao" || fail 'D3 changed in the reference'
+grep -Fq '"Escrito por um agente" não é "gerado"' "$atencao" || fail 'reference no longer forbids D3 for agent-written files'
+
+# O catálogo do reference é o catálogo do classificador — linha a linha.
+catalogo_ref="$(grep -E '^\| (sprintx|runx|mergex) \|' "$atencao" \
+  | sed 's/`//g' | awk -F'|' '{ l = ""; for (i = 2; i < NF; i++) { c = $i; gsub(/^[[:space:]]+|[[:space:]]+$/, "", c); l = l (i > 2 ? "|" : "") c }; print l }' | sort)"
+catalogo_script="$(bash "$classificador" --catalogo | sort)"
+[ "$catalogo_ref" = "$catalogo_script" ] || {
+  diff <(printf '%s\n' "$catalogo_ref") <(printf '%s\n' "$catalogo_script") >&2 || true
+  fail 'method-artifact catalog diverges between reference and classifier'
+}
+
+# Nenhum curinga no catálogo: caminhos exatos, só `sprint-NN` e `base/<area>.md` como variáveis.
+if bash "$classificador" --catalogo | cut -d'|' -f2 | grep -Eq '\*|\?|\[|^docs/?$|^docs/sprintx/?$|^docs/manutencao/?$'; then
+  fail 'method-artifact catalog contains a wildcard'
+fi
+if grep -v '^[[:space:]]*#' "$classificador" | grep -Eq '"?docs/sprintx/"?\*|docs/sprintx/\*\*|"?docs/"?\*\)'; then
+  fail 'classifier recognizes by directory wildcard'
+fi
+# Nos contratos, o curinga só aparece na frase que o proíbe.
+for f in "$atencao" "$agente_cl" "$atencao_cmd" "$skill"; do
+  # A frase proibitiva do bloco quebra em duas linhas; as duas são aceitas literalmente.
+  if grep -F -e 'docs/sprintx/**' -e 'docs/**' "$f" \
+       | grep -Fv -e 'Nenhum curinga de pasta reconhece nada — nem `docs/**`, nem' \
+                  -e '`docs/sprintx/**`. Artefato não reconhecido segue a classificação normal' \
+       | grep -qv -e 'docs/relatorios/\*\*` da runx' -e 'docs/projeto/\*\*` da buildx'; then
+    fail "$f uses a directory wildcard for method artifacts"
+  fi
+done
+
+# O frontmatter não reconhece nada sozinho: o classificador lê expx_tool só do ENTREGA.md.
+if grep -v '^[[:space:]]*#' "$classificador" | grep -F 'expx_tool' | grep -vq 'ENTREGA.md'; then
+  fail 'classifier reads expx_tool from something other than the ENTREGA.md'
+fi
+
+# A runx tem catálogo próprio e não herda nomes da sprintx.
+for nome in 00-DECISOES.md FECHAMENTO.md 00-BLOQUEIOS.md docs/sprintx/estimativas/HISTORICO.md BUILDX-PREMISSAS.md; do
+  if bash "$classificador" --catalogo | grep -Eq "^runx\|$nome\|"; then
+    fail "runx catalog inherited the sprintx artifact $nome"
+  fi
+done
+
+# Os comandos do E3 apontam para L1–L4, D1–D4 e para o classificador.
+grep -Fq 'LEITURA RÁPIDA (L1–L4), DISPENSÁVEL (D1–D4)' "$atencao_cmd" || fail 'E3 command does not list L4/D4'
+grep -Fq 'classificar-atencao.sh' "$atencao_cmd" || fail 'E3 command does not call the classifier'
+grep -Fq 'classificar-atencao.sh' "$agente_cl" || fail 'agent does not call the classifier'
+
+# ---------------------------------------------------------------------------
+# P0.2-A4 — o portão registra as falhas e o E8 deriva a causa. Schema, E2, E8,
+# E0, template e script carregam o MESMO enum e a MESMA ordem.
+# ---------------------------------------------------------------------------
+causa_sh='.claude/skills/mergex/scripts/causa-do-portao.sh'
+template_entrega='.claude/skills/mergex/assets/TEMPLATE-ENTREGA.md'
+for f in "$causa_sh" "$template_entrega" scripts/ci/test-causa-portao.sh; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# A tabela do schema é a tabela do script: ordem, verificação e causa, linha a linha.
+tabela_schema="$(grep -E '^\| [0-9]+ \| `v[0-9]+` \| `[a-z_]+` \|$' "$schema" | tr -d '`' \
+  | awk -F'|' '{ gsub(/ /, ""); print $3 "|" $4 }')"
+[ -n "$tabela_schema" ] || fail 'schema lost the causa table'
+ordem_schema="$(printf '%s\n' "$tabela_schema" | cut -d'|' -f1 | tr '\n' ' ' | sed 's/ $//')"
+[ "$ordem_schema" = "$(bash "$causa_sh" --ordem)" ] \
+  || fail "causa precedence diverges: schema '$ordem_schema' vs script '$(bash "$causa_sh" --ordem)'"
+[ "$(printf '%s\n' "$tabela_schema" | sort)" = "$(bash "$causa_sh" --causas | grep -v '^\*' | sort)" ] \
+  || fail 'causa enum diverges between schema and script'
+[ "$(bash "$causa_sh" --causas | grep -c .)" = 12 ] || fail 'causa enum gained or lost a value'
+bash "$causa_sh" --causas | grep -Fxq '*|indeterminada' || fail 'causa enum lost indeterminada'
+grep -Fq '**`indeterminada`**' "$schema" || fail 'schema does not define indeterminada'
+if bash "$causa_sh" --causas | grep -Eq 'falha_tecnica|decisao_humana|trabalho_novo|recurso_externo'; then
+  fail 'causa enum absorbed a classification that is not observable by the gate'
+fi
+
+# A chave nunca é omitida: exemplos, template, E0 e E2 carregam as duas.
+bloco_exemplo() { awk '/^```yaml$/ { n++; f = (n == ALVO) ; next } /^```$/ { f = 0 } f' ALVO="$2" "$1"; }
+for par in "$schema:2" "$registro:1"; do
+  arq="${par%:*}"; n="${par##*:}"
+  bloco_exemplo "$arq" "$n" | bash "$causa_sh" --validar - >/dev/null 2>&1 \
+    || fail "$arq example ENTREGA does not pass causa-do-portao --validar"
+done
+grep -Eq '^falhas_portao: ' "$template_entrega" || fail 'ENTREGA template omits falhas_portao'
+grep -Eq '^causa: ' "$template_entrega" || fail 'ENTREGA template omits causa'
+grep -Fq '`falhas_portao: []`, `causa: null`' "$abertura" || fail 'E0 does not create falhas_portao and causa'
+grep -Fq '| `falhas_portao`, `causa` | voltam para `[]` e `null`' "$abertura" || fail 'E0 resume keeps a stale causa'
+grep -Fq '## Registro das falhas' "$prontidao" || fail 'E2 does not register the failures'
+grep -Fq '`vN_sem_prova`' "$prontidao" || fail 'E2 does not register unverifiable checks apart'
+grep -Fq 'O portão **não grava `causa`**' "$prontidao" || fail 'E2 writes causa before the E8 closing'
+
+# O E8 deriva pelo script, na mesma gravação do estado bloqueado, e nunca deixa null.
+grep -Fq 'causa-do-portao.sh --derivar' "$registro" || fail 'E8 does not derive causa with the script'
+grep -Fq 'causa-do-portao.sh --validar' "$registro" || fail 'E8 does not validate causa before committing'
+grep -Fq '**nunca** `causa: null` com `estado: bloqueado`' "$registro" || fail 'E8 allows a null causa when blocked'
+grep -Fq 'Um bloqueio legado nunca' "$schema" || fail 'schema may backfill a causa for legacy blocks'
+
+# ---------------------------------------------------------------------------
+# P0.2-C3 — V11: task concluída sem commit do E1. Reference, template, comandos
+# nos dois harnesses, script e enum carregam a MESMA verificação.
+# ---------------------------------------------------------------------------
+prova_sh='.claude/skills/mergex/scripts/prova-de-commit.sh'
+template_prontidao='.claude/skills/mergex/assets/TEMPLATE-prontidao.md'
+check_cmd='.claude/commands/mergex-check.md'
+check_oc='.opencode/commands/mergex-check.md'
+hook_pr='.claude/hooks/mergex/pr-so-com-portao.sh'
+for f in "$prova_sh" "$template_prontidao" "$check_cmd" "$check_oc" "$hook_pr" \
+         scripts/ci/test-portao-v11.sh; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# O espelho OpenCode do comando do portão nunca diverge.
+cmp -s "$check_cmd" "$check_oc" || fail 'OpenCode mergex-check command diverges from Claude Code'
+
+# São ONZE verificações, e a contagem antiga não pode voltar em lugar nenhum.
+# A varredura ignora as fixtures (snapshots congelados) e este próprio arquivo,
+# que precisa citar a forma antiga para poder proibi-la. `-i` porque a contagem
+# aparece no começo de frase ("Dez verificações") e no badge ("10 verificacoes").
+if grep -rIl -i --exclude-dir=.git -e 'dez verifica' -e '10 verifica' -e 'V1\.\.V10)' -e 'as dez linhas' . \
+   | grep -v -e '^\./scripts/ci/fixtures/' -e '^\./scripts/ci/validate-mergex-contract\.sh$' \
+   | grep -q .; then
+  fail 'the gate is still described as ten checks somewhere'
+fi
+grep -Fq 'Onze verificações' "$readme" || fail 'README no longer announces eleven checks'
+grep -Fq '11 verificacoes' .github/assets/badge-portao.svg || fail 'gate badge still shows ten checks'
+grep -Fq '## As onze verificações' "$prontidao" || fail 'E2 no longer announces eleven checks'
+grep -Fq 'a tabela das onze verificações' "$prontidao" || fail 'E2 output table is not eleven rows'
+grep -Fq 'As onze linhas da tabela' "$template_prontidao" || fail 'readiness template is not eleven rows'
+grep -Fq '| V11 |' "$template_prontidao" || fail 'readiness template has no V11 row'
+grep -Fq '| V11 |' "$check_cmd" || fail 'E2 command has no V11 row'
+grep -Fq 'onze verificações (V1..V11)' "$hook_pr" || fail 'PR hook still announces ten checks'
+
+# A V11 existe, é própria, e não é uma V1/V2 ampliada.
+grep -Fq '### V11 — Task concluída sem commit do E1 correspondente' "$prontidao" \
+  || fail 'E2 has no V11 section'
+grep -Fq 'pelo menos um** item em `ENTREGA.commits`' "$prontidao" \
+  || fail 'V11 does not require at least one commits item'
+grep -Fq 'nunca exatamente um' "$prontidao" \
+  || fail 'V11 may demand exactly one commit per task'
+grep -Fq 'não é alvo positivo** da V11' "$prontidao" \
+  || fail 'V11 no longer spares tasks that are not concluded'
+grep -Fq 'A V11 não audita o `git log`' "$prontidao" \
+  || fail 'V11 turned into a git log audit'
+grep -Fq 'prova-de-commit.sh' "$prontidao" || fail 'E2 does not call the V11 script'
+grep -Fq 'prova-de-commit.sh' "$check_cmd" || fail 'E2 command does not call the V11 script'
+
+# `versionado` é do repositório, nunca da task: a isenção não vira exceção textual.
+grep -Fq '`versionado: false` | `n/a`' "$prontidao" \
+  || fail 'V11 does not mark n/a for an unversioned repository'
+if grep -RIn --exclude-dir=.git -e 'task.*versionado: false' -e 'versionado.*por task' \
+     .claude/skills/mergex/references | grep -qv 'nunca'; then
+  fail 'a per-task versionado exemption was invented for V11'
+fi
+
+# O E1 tardio continua permitido, agora distinguindo criação tardia de
+# recuperação de um commit que já existe; ambos preservam a ordem histórica.
+grep -Fq '### Dois tipos de lacuna E1' "$commits" || fail 'E1 has no late-commit procedure'
+grep -Fq '**Não reordene** os itens antigos' "$commits" \
+  || fail 'the late E1 may reorder the existing commit history'
+grep -Fq 'E1 tardio' "$prontidao" || fail 'E2 does not point to the late E1 as the fix'
+grep -Fq 'a **V11**' "$commits" || fail 'E1 does not name V11 as the check that enforces its promise'
+
+# A causa da V11: valor próprio, última posição do grupo que lê a execução.
+grep -Fq '| 11 | `v11` | `commit_nao_registrado` |' "$schema" \
+  || fail 'schema has no causa row for v11'
+grep -Fq '`v1` … `v11`' "$schema" || fail 'schema falhas_portao enum does not reach v11'
+[ "$(bash "$causa_sh" --derivar v11)" = commit_nao_registrado ] \
+  || fail 'v11 does not derive commit_nao_registrado'
+[ "$(bash "$causa_sh" --derivar v1 v11)" = tarefa_nao_concluida ] \
+  || fail 'v11 outranks v1 in the precedence order'
+[ "$(bash "$causa_sh" --derivar v11_sem_prova)" = indeterminada ] \
+  || fail 'v11 without proof does not derive indeterminada'
+grep -Fq '`commit_nao_registrado` não é `tarefa_nao_concluida`' "$schema" \
+  || fail 'schema does not separate commit_nao_registrado from tarefa_nao_concluida'
+grep -Eq '^falhas_portao: .*v1\.\.v11' "$template_entrega" \
+  || fail 'ENTREGA template does not reach v11 in falhas_portao'
+
+# ---------------------------------------------------------------------------
+# P0.2-C4 — a ordem de registro de ENTREGA.commits: a chave `seq`
+# ---------------------------------------------------------------------------
+seq_sh='.claude/skills/mergex/scripts/sequencia-de-commits.sh'
+[ -f "$seq_sh" ] || fail "missing required file: $seq_sh"
+
+# O contrato da chave vive no schema, e é um contrato só.
+grep -Fq '## A ordem de registro — a chave `seq`' "$schema" \
+  || fail 'schema has no section for the commits order key'
+grep -Fq 'Inteiro **positivo**' "$schema" || fail 'seq is not declared a positive integer'
+grep -Fq '**Global à ENTREGA**' "$schema" || fail 'seq is not declared global to the ENTREGA'
+grep -Fq 'o maior `seq` efetivo existente + 1' "$schema" \
+  || fail 'schema does not define how the next seq is computed'
+grep -Fq 'Reutilizado, renumerado, reordenado, diminuído, nem escolhido por task' "$schema" \
+  || fail 'schema dropped what seq must never be'
+grep -Fq 'Ele conta **registros de E1**, e nada mais' "$schema" \
+  || fail 'schema does not fence off what seq is not'
+
+# O prefixo legado é exceção de LEITURA, com fim declarado — e sem backfill.
+grep -Fq '### O prefixo legado' "$schema" || fail 'schema has no legacy-prefix rule'
+grep -Fq 'nenhum item posterior pode voltar a omiti-lo' "$schema" \
+  || fail 'the legacy prefix has no declared end'
+grep -Fq '| `[legado, legado, seq 3, seq 4]` | válida |' "$schema" \
+  || fail 'schema lost the valid legacy-prefix example'
+grep -Fq '| `[seq 1, legado]` | **inválida** |' "$schema" \
+  || fail 'schema lost the invalid legacy-after-modern example'
+for f in "$schema" "$commits" "$template_entrega"; do
+  grep -Fq 'backfill' "$f" || fail "$f does not forbid backfilling seq on legacy items"
+done
+grep -Fq 'NÃO autoriza **backfill de `seq`**' "$schema" \
+  || fail 'the migration rule does not forbid seq backfill'
+
+# A invariante, e as quatro listas que ela recusa.
+grep -Fq 'todo `seq` explícito é igual à posição do seu item' "$schema" \
+  || fail 'schema does not state the sequence invariant'
+for d in duplicata buraco 'regressão' 'reordenação'; do
+  grep -Fq "$d" "$schema" || fail "schema does not name $d as an invalid sequence"
+done
+
+# Sequência quebrada é contrato inválido, não causa de negócio do portão.
+grep -Fq 'não são causa de negócio do' "$schema" \
+  || fail 'schema turns a broken sequence into a gate cause'
+grep -Fq 'não entram em `falhas_portao`' "$schema" \
+  || fail 'schema lets a broken sequence enter falhas_portao'
+grep -Fq 'Nunca "conserte" escolhendo outro número' "$schema" \
+  || fail 'schema allows picking another number to fit'
+# `seq` como identificador, não como pedaço de "sequência"/"consequência": a
+# causa do bloqueio não conhece a chave de ordem, e nunca vai derivar dela.
+if grep -Eq '(^|[^a-zà-ú])seq($|[^a-zà-ú])' "$causa_sh"; then
+  fail 'the gate cause script learned about seq'
+fi
+
+# Data é registro; quando há ordem contratual, existe campo de ordem.
+grep -Fq 'datas são registro' "$schema" \
+  || fail 'schema does not state the date-vs-order rule'
+grep -Fq 'não é fonte canônica' "$schema" \
+  || fail 'schema does not rule out the local event trail as the order source'
+
+# Entrega nova: a lista nasce vazia e não há contador de topo.
+grep -Fq '**Não existe `seq` de topo**' "$schema" \
+  || fail 'schema does not forbid a top-level seq counter'
+grep -Fq '**Não existe `seq` de topo**' "$abertura" \
+  || fail 'E0 does not forbid a top-level seq counter'
+grep -Fq 'commits: []' "$abertura" || fail 'E0 no longer opens the list empty'
+
+# O escritor canônico: um só, e é ele que o E1 chama.
+grep -Fq 'sequencia-de-commits.sh --acrescentar' "$commits" \
+  || fail 'E1 does not call the canonical commits writer'
+grep -Fq 'Não escreva o item à mão' "$commits" \
+  || fail 'E1 still lets the item be written by hand'
+grep -Fq 'Gravação nova nunca cria item sem `seq`' "$commits" \
+  || fail 'E1 allows a new legacy item'
+grep -Fq 'Sequência quebrada PARA' "$commits" \
+  || fail 'E1 does not stop on a broken sequence'
+grep -Fq 'sequencia-de-commits.sh' "$template_entrega" \
+  || fail 'ENTREGA template does not point at the commits writer'
+grep -Fq '  - seq: ' "$template_entrega" \
+  || fail 'ENTREGA template item has no seq key'
+grep -Fq '  - seq: 1' "$schema" || fail 'schema example item has no seq key'
+grep -Fq '  - seq: 1' "$registro" || fail 'E8 example item has no seq key'
+
+# O E1 tardio recebe o próximo seq e nunca é inserido no meio.
+grep -Fq 'O E1 tardio recebe SEMPRE o próximo `seq` global' "$commits" \
+  || fail 'the late E1 does not take the next global seq'
+grep -Fq 'não a ordem numérica das tasks' "$commits" \
+  || fail 'the late E1 may be inserted at the task position'
+
+# A V11 não passa a depender da ordem.
+grep -Fq '**A V11 não lê `seq`.**' "$prontidao" \
+  || fail 'V11 no longer declares itself independent of seq'
+grep -Fq 'exige `seq` em leitura histórica' "$prontidao" \
+  || fail 'V11 may demand seq on historical reads'
+grep -Fq 'quantidade de commits esperada para a task' "$prontidao" \
+  || fail 'V11 does not rule out reading seq as a commit count'
+
+# Um leitor de `commits` só no repositório inteiro.
+grep -Fq 'sequencia-de-commits.sh' "$prova_sh" \
+  || fail 'the V11 script does not use the shared commits reader'
+if grep -Fq 'bloco "$arq" commits' "$prova_sh"; then
+  fail 'the V11 script still carries its own commits parser'
+fi
+
+# A C4 não implementa a seção crítica, que é da C5.
+for t in flock 'mkdir -p "$arq.lock' ownership; do
+  if grep -Fq "$t" "$seq_sh"; then fail "the commits writer implements $t (that is C5)"; fi
+done
+grep -Fq 'não resolve corrida' "$schema" \
+  || fail 'schema claims the order key solves concurrency'
+
+# ---------------------------------------------------------------------------
+# P0.2-C5 — o índice é do E1, e o E1 não é reentrante
+# ---------------------------------------------------------------------------
+trava_sh='.claude/skills/mergex/scripts/trava-do-e1.sh'
+fecha_sh='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
+for f in "$trava_sh" "$fecha_sh"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# A seção crítica é contrato do E1, não detalhe de implementação.
+grep -Fq '## A seção crítica do E1' "$commits" \
+  || fail 'E1 has no critical-section contract'
+grep -Fq '**O índice Git é recurso de DONO ÚNICO durante o E1.**' "$commits" \
+  || fail 'E1 does not declare the index a single-owner resource'
+grep -Fq 'o **fechamento** delas é serial' "$commits" \
+  || fail 'E1 no longer serializes task closing'
+grep -Fq 'Travar depois de montar o stage é não travar' "$commits" \
+  || fail 'E1 allows acquiring the lock after staging'
+grep -Fq 'A atribuição do `seq` acontece **dentro** da seção' "$commits" \
+  || fail 'E1 lets seq be assigned outside the critical section'
+grep -Fq '**Quem impede a corrida é o E1**' "$schema" \
+  || fail 'schema does not place the race fix in the E1 critical section'
+
+# O escopo é o índice DA WORKTREE. Trava global é proibida, e `.git` pode ser arquivo.
+grep -Fq '<git-path do index>.mergex-e1.lock' "$commits" \
+  || fail 'E1 does not say where the lock lives'
+grep -Fq '**Nunca use `[ -d .git ]`.**' "$commits" \
+  || fail 'E1 allows deciding the gitdir by testing a directory'
+grep -Fq 'git rev-parse --git-path index' "$commits" \
+  || fail 'E1 does not ask the versioner where the index is'
+grep -Fq 'Trava no **diretório Git comum** é proibida' "$commits" \
+  || fail 'E1 allows a repository-wide lock'
+grep -Fq 'git rev-parse --git-path index' "$trava_sh" \
+  || fail 'the E1 lock does not resolve the index through git'
+if grep -Fq 'git-common-dir' "$trava_sh"; then
+  fail 'the E1 lock reaches the common git dir'
+fi
+# Só o código conta: os comentários citam `.git/index` justamente para dizer
+# que o caminho vem do versionador, e não de uma suposição sobre o layout.
+# Só o CÓDIGO conta. Os comentários destes scripts citam `.git/index`, `flock`
+# e `rm -rf` justamente para dizer que nenhum deles é usado — uma varredura que
+# não descontasse comentário reprovaria a explicação junto com a violação.
+codigo() { grep -v '^[[:space:]]*#' "$1"; }
+
+if codigo "$trava_sh" | grep -Fq '.git'; then
+  fail 'the E1 lock hardcodes the gitdir layout'
+fi
+
+# O mecanismo é `mkdir` atômico; `flock` quebraria Windows/macOS/Git Bash.
+codigo "$trava_sh" | grep -Fq 'mkdir "$trava"' \
+  || fail 'the E1 lock is not an atomic mkdir'
+for f in "$trava_sh" "$fecha_sh"; do
+  if codigo "$f" | grep -Fq 'flock'; then fail "$f depends on flock"; fi
+done
+
+# Nada de recuperação automática, e nada de remover a trava de outro E1.
+grep -Fq '**Não remova a trava automaticamente.**' "$commits" \
+  || fail 'E1 allows removing an orphan lock automatically'
+grep -Fq 'decisão sobre uma trava órfã é humana' "$commits" \
+  || fail 'E1 does not leave the orphan-lock call to a person'
+if codigo "$trava_sh" | grep -Fq 'rm -rf'; then
+  fail 'the E1 lock wipes a directory tree'
+fi
+grep -Fq 'nenhuma execução remove a trava de outra' "$commits" \
+  || fail 'E1 lets one run release another run lock'
+
+# M3: a recuperacao de uma trava orfa e um runbook humano, literal e auditavel.
+grep -Fq '### Recuperação humana de trava órfã' "$commits" \
+  || fail 'E1 has no canonical human orphan-lock recovery runbook'
+for prova in \
+  'trava-do-e1.sh --status' \
+  'git status --porcelain' \
+  'git diff --cached --name-status' \
+  "rm -f -- '<caminho-exato-da-trava>/dono'" \
+  "rmdir -- '<caminho-exato-da-trava>'" \
+  'Stage não vazio: PARE' \
+  '`--force-unlock` é proibido' \
+  'idade ou PID nunca autorizam remoção'; do
+  grep -Fq "$prova" "$commits" || fail "orphan-lock runbook lost: $prova"
+done
+bloco_orfao="$(sed -n '/^### Recuperação humana de trava órfã/,/^### /p' "$commits")"
+if printf '%s\n' "$bloco_orfao" | grep -E '^[[:space:]]*(rm|rmdir).*([*?]|\[[^]]*\])' >/dev/null; then
+  fail 'orphan-lock runbook uses a glob in a removal command'
+fi
+if printf '%s\n' "$bloco_orfao" | grep -Fq 'git-common-dir'; then
+  fail 'orphan-lock runbook reaches the common git directory'
+fi
+if codigo "$trava_sh" | grep -Fq -- '--force-unlock'; then
+  fail 'production lock exposes --force-unlock'
+fi
+
+# Stage de entrada: PARA, e nada é desfeito.
+grep -Fq '**Stage já não vazio antes de o E1 preparar qualquer coisa: PARE.**' "$commits" \
+  || fail 'E1 no longer stops on a dirty index'
+grep -Fq '**Deixe exatamente como estava**' "$commits" \
+  || fail 'E1 no longer preserves a preexisting stage'
+for g in 'git reset' 'git stash' 'git restore' 'git checkout' 'git clean'; do
+  if codigo "$fecha_sh" | grep -Fq "$g"; then
+    fail "the E1 critical section runs $g on state it does not own"
+  fi
+done
+
+# Commit feito e registro não concluído: PARA, sem segundo commit.
+grep -Fq '**NÃO crie um segundo commit.**' "$commits" \
+  || fail 'E1 allows a second commit when the append fails'
+for f in "$commits" "$fecha_sh"; do
+  grep -Fq 'commit Git existe; registro E1 não foi concluído' "$f" \
+    || fail "$f lost the commit-without-record outcome"
+done
+# Só chamada ao versionador: a mensagem do código 5 cita `--no-verify` para
+# PROIBI-LO, e proibir não é usar.
+for g in '--amend' '--no-verify' 'reset --hard'; do
+  if codigo "$fecha_sh" | grep -F 'git ' | grep -Fq -- "$g"; then
+    fail 'the E1 critical section rewrites or discards history'
+  fi
+done
+
+# O escritor da lista não ganhou trava própria, e leitura nunca trava.
+for t in mkdir flock; do
+  if codigo "$seq_sh" | grep -Fq "$t"; then
+    fail "the commits writer implements its own lock ($t)"
+  fi
+done
+grep -Fq '**Leitura não trava nada**' "$commits" \
+  || fail 'E1 turns reading the list into a locked operation'
+
+# Um segundo escritor REAL não escapa da regra: os call sites executáveis de
+# `--acrescentar` são a seção crítica, o próprio escritor e as bancadas.
+escritores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e '--acrescentar' . \
+  | LC_ALL=C sort | tr '\n' ' ')"
+esperado='./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/sequencia-de-commits.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m2-lifecycle-recuperacao.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/mutacao-r1-reconciliacao-base.sh ./scripts/ci/mutacao-r3-predecessores-sprintx.sh ./scripts/ci/mutacao-trava-e1.sh ./scripts/ci/test-sequencia-commits.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+[ "$escritores" = "$esperado" ] \
+  || fail "unexpected executable writer of ENTREGA.commits: $escritores"
+grep -Fq 'gravação nova do E1 só acontece sob a seção crítica' "$commits" \
+  || fail 'E1 does not fence new writes behind the critical section'
+
+# ---------------------------------------------------------------------------
+# P0.2-C1 — arquivo de task irmã: ownership unitário no E1, união na V9
+# ---------------------------------------------------------------------------
+own_sh='.claude/skills/mergex/scripts/ownership-da-task.sh'
+own_teste='scripts/ci/test-ownership-task.sh'
+hook_task='.claude/hooks/mergex/commit-por-task.sh'
+hooks_readme='.claude/hooks/README.md'
+
+for f in "$own_sh" "$own_teste" "$hook_task" "$hooks_readme"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# As quatro situações existem, são exatamente quatro, e o reference nomeia
+# cada uma delas com o mesmo termo do script. Prosa e script ficam amarrados:
+# renomear de um lado só quebra aqui.
+situacoes="$(bash "$own_sh" --situacoes | cut -d'|' -f1)"
+[ "$(printf '%s\n' "$situacoes" | grep -c .)" = 4 ] \
+  || fail 'ownership-da-task no longer declares exactly four situations'
+for s in na_task_atual declarado_nao_mudou desvio arquivo_de_task_irma; do
+  printf '%s\n' "$situacoes" | grep -Fxq "$s" \
+    || fail "ownership-da-task dropped the situation: $s"
+  grep -Fq "$s" "$commits" \
+    || fail "E1 reference does not name the situation: $s"
+done
+[ "$(bash "$own_sh" --condicao)" = arquivo_de_task_irma ] \
+  || fail 'the structured condition is no longer arquivo_de_task_irma'
+
+# A mergex nomeia o que OBSERVA; a classe é da sprintx (DM-147).
+if bash "$own_sh" --situacoes | grep -Fq 'defeito_de_plano'; then
+  fail 'mergex emits the sprintx class defeito_de_plano instead of what it observes'
+fi
+# Só em comentário, explicando de quem é a classe: nunca em código que a emita.
+if grep -v '^[[:space:]]*#' "$own_sh" | grep -Fq 'defeito_de_plano'; then
+  fail 'the ownership script emits the sprintx class defeito_de_plano'
+fi
+grep -Fq 'defeito_de_plano' "$own_sh" \
+  || fail 'the ownership script no longer says who owns the defeito_de_plano class'
+
+# O E1 é unitário e diz que arquivo de task irmã NÃO é desvio.
+grep -Fq 'O dono do arquivo é a task que está sendo fechada' "$commits" \
+  || fail 'E1 no longer states unitary ownership'
+grep -Fq 'ownership-da-task.sh --classificar' "$commits" \
+  || fail 'E1 does not call the ownership script'
+grep -Fq 'mudou e **só outra task** declara' "$commits" \
+  || fail 'E1 dropped the fourth situation from the table'
+grep -Fq 'não é desvio' "$commits" \
+  || fail 'E1 no longer separates arquivo_de_task_irma from desvio'
+grep -Fq 'commit parcial enganoso' "$commits" \
+  || fail 'E1 no longer forbids the misleading partial commit'
+for proibido in 'não** apague' 'não** faça `stash`' 'não** o mova para outra task'; do
+  grep -Fq "$proibido" "$commits" \
+    || fail "E1 dropped a forbidden recovery action: $proibido"
+done
+
+# A V9 continua com a UNIÃO, e o contrato proíbe convertê-la para unitário.
+grep -Fq 'união dos `arquivos.cria` + `arquivos.altera` de todas as tasks' "$prontidao" \
+  || fail 'V9 no longer compares against the union of all tasks'
+grep -Fq '**Não converta a V9 para o conjunto unitário.**' "$prontidao" \
+  || fail 'V9 lost the ban on switching to unitary scope'
+grep -Fq 'passa na V9' "$prontidao" \
+  || fail 'V9 no longer states that a sister-task file passes'
+
+# O hook delega ao script (uma implementação só) e FALHA FECHADO: o bloco da
+# condição não pode ser regido pelo modo do hook, senão em `aviso` — o padrão —
+# ele deixaria passar o commit parcial que a condição existe para impedir.
+grep -Fq 'ownership-da-task.sh' "$hook_task" \
+  || fail 'commit-por-task does not delegate to the ownership script'
+grep -Fq "grep -Ec '^Task:[[:space:]]*'" "$hook_task" \
+  && grep -Fq "sed -n 's/^Task:[[:space:]]*//p'" "$hook_task" \
+  || fail 'commit-por-task no longer reads the declared current task from parsed Task trailers'
+bloco_irma="$(awk 'index($0, "if [ -n \"$TASK_ATUAL\" ] && [ -r \"$OWNERSHIP\" ]") == 1, /^    exit 2$/' "$hook_task")"
+[ -n "$bloco_irma" ] || fail 'commit-por-task lost the sister-task block'
+if printf '%s\n' "$bloco_irma" | grep -Fq 'MODO'; then
+  fail 'the sister-task block is gated by the hook mode: it must fail closed even in aviso'
+fi
+printf '%s\n' "$bloco_irma" | grep -Fxq '    exit 2' \
+  || fail 'the sister-task block no longer blocks the commit'
+grep -Fq 'falha fechada mesmo em aviso' "$hooks_readme" \
+  || fail 'hooks README no longer documents the fail-closed exception'
+
+# Nenhum outro hook foi promovido por oportunidade neste bloco.
+grep -Fq '"commit-por-task": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'commit-por-task was promoted out of aviso'
+grep -Fq '"arquivo-fora-do-plano": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'arquivo-fora-do-plano was promoted out of aviso'
+grep -Fq '"pr-so-com-portao": { "modo": "aviso" }' .expx/hooks.json \
+  || fail 'pr-so-com-portao was promoted out of aviso'
+
+# As decisões ficaram registradas (renumeradas de DM-117..123 para DM-147..153
+# na integração P0.2-C7-A: a faixa antiga colidia com a P0.2-C3).
+for dm in DM-147 DM-148 DM-149 DM-150 DM-151 DM-152 DM-153; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+for dm in DM-154 DM-155 DM-156 DM-157 DM-158 DM-159 DM-160; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-A — compõe C1 (ownership) com C5 (seção crítica) no fechamento real
+# ---------------------------------------------------------------------------
+for f in "$fecha_sh" "$own_sh" "$hook_task"; do
+  [ -f "$f" ] || fail "missing required file: $f"
+done
+
+# A ordem normativa dentro de `--fechar` e `--preparar`: resolver/lock, stage
+# vazio, OWNERSHIP, e só então o primeiro `git add`. Checagem estrutural — não
+# de execução — porque é exatamente a ordem das LINHAS que compõe os dois
+# contratos sem ambiguidade.
+bloco_fechar="$(awk '/^  --fechar\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
+[ -n "$bloco_fechar" ] || fail 'fechamento-do-e1 lost the --fechar block'
+# A sequência de RÓTULOS, na ordem em que as linhas aparecem — nunca a
+# ordenação das próprias linhas, que `grep -n` já devolve crescente por
+# construção e não provaria nada.
+ordem_fechar="$(printf '%s\n' "$bloco_fechar" | awk '
+  /abre_secao /              { print "abre_secao"; next }
+  /confere_stage_de_entrada/ { print "confere_stage_de_entrada"; next }
+  /carrega_contexto /        { print "carrega_contexto"; next }
+  /valida_mensagem/          { print "valida_mensagem"; next }
+  /classifica_arvore /       { print "classifica_arvore"; next }
+  /^    prepara( |$)/         { print "prepara"; next }
+  /verifica "\$VERIFICACAO"/ { print "verifica"; next }
+  /conclui /                 { print "conclui"; next }
+')"
+esperado_fechar='abre_secao
+confere_stage_de_entrada
+carrega_contexto
+valida_mensagem
+classifica_arvore
+prepara
+verifica
+conclui'
+[ "$ordem_fechar" = "$esperado_fechar" ] \
+  || fail "--fechar does not call the critical-section steps in the normative order: got [$ordem_fechar]"
+
+bloco_preparar="$(awk '/^  --preparar\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
+[ -n "$bloco_preparar" ] || fail 'fechamento-do-e1 lost the --preparar block'
+ordem_preparar="$(printf '%s\n' "$bloco_preparar" | awk '
+  /abre_secao /              { print "abre_secao"; next }
+  /confere_stage_de_entrada/ { print "confere_stage_de_entrada"; next }
+  /carrega_contexto /        { print "carrega_contexto"; next }
+  /valida_mensagem/          { print "valida_mensagem"; next }
+  /registra_contexto_preparado/ { print "registra_contexto_preparado"; next }
+  /classifica_arvore /       { print "classifica_arvore"; next }
+  /^    prepara( |$)/         { print "prepara"; next }
+')"
+esperado_preparar='abre_secao
+confere_stage_de_entrada
+carrega_contexto
+valida_mensagem
+registra_contexto_preparado
+classifica_arvore
+prepara'
+[ "$ordem_preparar" = "$esperado_preparar" ] \
+  || fail "--preparar does not call the critical-section steps in the normative order: got [$ordem_preparar]"
+
+bloco_concluir="$(awk '/^  --concluir\)$/,/^    exit 0 ;;$/' "$fecha_sh")"
+[ -n "$bloco_concluir" ] || fail 'fechamento-do-e1 lost the --concluir block'
+printf '%s\n' "$bloco_concluir" | grep -Fq 'confere_contexto_preparado' \
+  || fail '--concluir does not bind task/work/origin to the prepared section'
+printf '%s\n' "$bloco_concluir" | grep -Fq 'verifica_ownership "$TASK"' \
+  || fail '--concluir does not reclassify the prepared stage before commit'
+
+# Ownership é obrigatório quando a ENTREGA declara origem task-based. Ausente,
+# o fechamento para antes do staging e nomeia a instalação incompleta.
+grep -Fq 'OWNERSHIP_SH="$AQUI/ownership-da-task.sh"' "$fecha_sh" \
+  || fail 'fechamento-do-e1 no longer wires the ownership script'
+grep -Fq '[ -f "$OWNERSHIP_SH" ] || para 9' "$fecha_sh" \
+  || fail 'fechamento-do-e1 does not fail closed when ownership is absent for task-based work'
+grep -Fq 'instalação MergeX incompleta' "$fecha_sh" \
+  || fail 'fechamento-do-e1 does not name an incomplete MergeX installation'
+grep -Fq '"$RAIZ" "$ORIGEM" "$TRABALHO" "$task"' "$fecha_sh" \
+  || fail 'fechamento-do-e1 does not pass current-work context to ownership'
+if grep -Fq 'find "$RAIZ/docs" -name tasks.md' "$own_sh" "$fecha_sh"; then
+  fail 'M1 regressed to a global tasks.md search'
+fi
+
+# `arquivo_de_task_irma`: nenhum `add` ocorreu, a trava é liberada, e a lista
+# de commits não foi tocada por esse caminho.
+grep -Fq 'para 8 ' "$fecha_sh" || fail 'fechamento-do-e1 lost the arquivo_de_task_irma exit code'
+bloco_ownership="$(awk '/^verifica_ownership\(\) \{/,/^}$/' "$fecha_sh")"
+[ -n "$bloco_ownership" ] || fail 'fechamento-do-e1 lost the verifica_ownership function'
+if printf '%s\n' "$bloco_ownership" | grep -Fq 'git add -- '; then
+  fail 'verifica_ownership stages something itself'
+fi
+if printf '%s\n' "$bloco_ownership" | grep -F 'sequencia-de-commits.sh' | grep -Fq -- '--acrescentar'; then
+  fail 'verifica_ownership appends to ENTREGA.commits'
+fi
+
+# Ownership nunca "explica" um stage preexistente: DM-138 continua valendo, e
+# a checagem do stage de entrada vem ANTES do ownership em todo call site.
+if grep -Fq 'confere_stage_de_entrada' "$fecha_sh"; then
+  linha_stage="$(grep -n '    confere_stage_de_entrada' "$fecha_sh" | head -1 | cut -d: -f1)"
+  linha_own="$(grep -n '    classifica_arvore "\$TASK" "\$@"' "$fecha_sh" | head -1 | cut -d: -f1)"
+  [ -n "$linha_stage" ] && [ -n "$linha_own" ] && [ "$linha_stage" -lt "$linha_own" ] \
+    || fail 'ownership runs before the entry-stage check somewhere in --fechar'
+fi
+
+# Uma implementação só de classificação: os call sites executáveis de
+# Call sites e provas que nomeiam o classificador formam uma lista fechada.
+own_chamadores="$(grep -rlF --include='*.sh' --exclude-dir=.git -e 'ownership-da-task.sh' . \
+  | LC_ALL=C sort | tr '\n' ' ')"
+own_esperado='./.claude/hooks/mergex/commit-por-task.sh ./.claude/skills/mergex/scripts/fechamento-do-e1.sh ./.claude/skills/mergex/scripts/ownership-da-task.sh ./.claude/skills/mergex/scripts/portao-v9.sh ./.claude/skills/mergex/scripts/reconciliacao-base.sh ./scripts/ci/mutacao-atencao-metodo.sh ./scripts/ci/mutacao-m1-ownership-contextual.sh ./scripts/ci/mutacao-m4b-arvore-inteira.sh ./scripts/ci/test-integracao-c7a.sh ./scripts/ci/test-m1-ownership-contextual.sh ./scripts/ci/test-m4b-arvore-inteira.sh ./scripts/ci/test-ownership-task.sh ./scripts/ci/test-trava-e1.sh ./scripts/ci/validate-mergex-contract.sh '
+[ "$own_chamadores" = "$own_esperado" ] \
+  || fail "unexpected caller of ownership-da-task.sh: $own_chamadores"
+
+# O hook é defesa em profundidade, não uma segunda regra: ele classifica pelo
+# MESMO script que o fechamento real, nunca por uma reimplementação própria.
+if grep -v '^[[:space:]]*#' "$hook_task" | grep -Ev 'ownership-da-task\.sh|OWNERSHIP=' \
+   | grep -Eq 'S_IRMA|arquivo_de_task_irma.*=.*\['; then
+  fail 'commit-por-task reimplements the ownership classification instead of delegating'
+fi
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M2 — lifecycle executável dos artefatos de método
+# ---------------------------------------------------------------------------
+persiste_sh='.claude/skills/mergex/scripts/persistir-metodo.sh'
+contrato_commit_sh='.claude/skills/mergex/scripts/contrato-de-commit.sh'
+for f in "$persiste_sh" "$contrato_commit_sh"; do
+  [ -f "$f" ] || fail "missing required M2 file: $f"
+done
+
+for modo in --listar --persistir --verificar; do
+  grep -Fq -- "$modo" "$persiste_sh" || fail "persistir-metodo lost mode $modo"
+done
+for checkpoint in pre-e2 pre-e6 e8; do
+  grep -Fq "$checkpoint" "$persiste_sh" || fail "persistir-metodo lost checkpoint $checkpoint"
+done
+grep -Fq 'trava-do-e1.sh' "$persiste_sh" || fail 'method lifecycle does not reuse the C5 lock'
+grep -Fq 'contrato-de-commit.sh' "$persiste_sh" || fail 'method lifecycle does not validate commit grammar'
+grep -Fq 'sem-segredo.sh' "$persiste_sh" || fail 'method lifecycle bypasses the secret gate'
+if codigo "$persiste_sh" | grep -Eq 'git add (-A|--all|docs/)'; then
+  fail 'method lifecycle performs broad staging'
+fi
+if codigo "$persiste_sh" | grep -Fq 'expx_trabalho_atual_por_branch'; then
+  fail 'method lifecycle selects current work from the branch'
+fi
+grep -Fq -- '--checkpoint pre-e2' '.claude/skills/mergex/references/02-prontidao.md' \
+  || fail 'E2 lost the pre-e2 barrier'
+grep -Fq -- '--checkpoint pre-e6' '.claude/skills/mergex/references/06-push.md' \
+  || fail 'E6 lost the pre-e6 barrier'
+grep -Fq -- '--checkpoint e8' '.claude/skills/mergex/references/08-registro.md' \
+  || fail 'E8 lost the terminal checkpoint'
+
+# O contrato decisorio do M2 e parte da superficie verificavel, nao memoria da
+# implementacao. Cada ambiguidade relevante fica numerada e rastreavel.
+for dm in DM-161 DM-162 DM-163 DM-164 DM-165 DM-166 DM-167 DM-168; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+
+# As duas classes de commit e a recuperacao explicita precisam continuar
+# nomeadas no contrato vivo; isso impede que futuras edicoes voltem a tratar
+# checkpoint como E1 ou a escolher trabalho pela branch.
+grep -Fq 'Commit E1' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'commit reference lost the first-class E1 grammar'
+grep -Fq 'Commit de método' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'commit reference lost the first-class method grammar'
+grep -Fq -- '--registrar-existente' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'commit reference lost explicit E1 recovery'
+# Desde o M4 o catálogo mora em catalogo-de-metodo.sh, fonte única do
+# lifecycle (persistir-metodo.sh) e do inventário do E1.
+grep -Fq '00-PLANEJAMENTO.md' '.claude/skills/mergex/scripts/catalogo-de-metodo.sh' \
+  || fail 'method catalog no longer admits the current SprintX planning artifact'
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M3 — fixture fail-closed, runbook humano e LF materializado
+# ---------------------------------------------------------------------------
+fixture_lib='scripts/ci/lib/fixture-git.sh'
+teste_m3='scripts/ci/test-m3-fixture-lock-lf.sh'
+[ -f "$fixture_lib" ] || fail 'M3 fixture helper is missing'
+[ -f "$teste_m3" ] || fail 'M3 focused suite is missing'
+[ -f .gitattributes ] || fail 'root .gitattributes is missing'
+[ "$(cat .gitattributes)" = '*.sh text eol=lf' ] \
+  || fail '.gitattributes must contain only the shell LF policy'
+[ "$(wc -l < .gitattributes | tr -d '[:space:]')" = 1 ] \
+  || fail '.gitattributes gained rules outside M3 scope'
+grep -Fq 'git switch -q "$@" || return 1' "$fixture_lib" \
+  || fail 'fixture helper no longer rejects switch failure'
+grep -Fq '[ "$atual" = "$esperado" ] || return 1' "$fixture_lib" \
+  || fail 'fixture helper no longer verifies the resulting branch'
+grep -Fq 'git restore --worktree -- "$@"' "$fixture_lib" \
+  || fail 'fixture helper no longer restores explicit tracked paths'
+grep -Fq '. "$REPO_ROOT/scripts/ci/lib/fixture-git.sh"' .claude/hooks/teste.sh \
+  || fail 'hook bench does not use the fail-closed fixture helper'
+grep -Fq 'HOOK_CWD="$HIST_T"' .claude/hooks/teste.sh \
+  || fail 'historical hook block is not isolated in its own repository'
+grep -Fq "grep -q \$'\\r'" "$teste_m3" \
+  || fail 'M3 clone proof no longer inspects CR bytes'
+for dm in DM-169 DM-170; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M4-A — git-perigoso com caminho e id da skill
+# ---------------------------------------------------------------------------
+hook_git='.claude/hooks/mergex/git-perigoso.sh'
+[ -f "$hook_git" ] || fail 'M4-A: mergex/git-perigoso.sh is missing'
+[ ! -e '.claude/hooks/comum/git-perigoso.sh' ] || fail 'M4-A: comum/git-perigoso.sh still published'
+grep -Fxq 'HOOK="mergex/git-perigoso"' "$hook_git" || fail 'M4-A: hook id is not namespaced'
+grep -Fq '. "$DIR/../comum/base.sh"' "$hook_git" || fail 'M4-A: hook does not import comum/base.sh'
+grep -Fq '"mergex/git-perigoso": { "modo": "bloqueio" }' .expx/hooks.json \
+  || fail 'M4-A: .expx/hooks.json lost mergex/git-perigoso in bloqueio'
+if grep -Eq '"git-perigoso"[[:space:]]*:' .expx/hooks.json; then
+  fail 'M4-A: .expx/hooks.json still registers the bare git-perigoso id'
+fi
+[ "$(grep -Fc '/.claude/hooks/mergex/git-perigoso.sh' .claude/settings.json)" = 1 ] \
+  || fail 'M4-A: settings.json must register mergex/git-perigoso.sh exactly once'
+if grep -rFq --exclude-dir=.git --exclude-dir=.superpowers --exclude='validate-mergex-contract.sh' \
+    --exclude='test-m4a-git-perigoso-namespace.sh' \
+    'comum/git-perigoso.sh' .claude .opencode scripts AGENTS.md README.md; then
+  fail 'M4-A: a registry or document still points to comum/git-perigoso.sh'
+fi
+grep -Fq '"mergex/git-perigoso.sh",' .opencode/plugin/mergex.ts \
+  || fail 'M4-A: OpenCode bridge does not run the namespaced hook'
+grep -Fq 'command -v jq' "$hook_git" || fail 'M4-A: hook lost the jq contract check'
+[ -f scripts/ci/test-m4a-git-perigoso-namespace.sh ] || fail 'M4-A focused suite is missing'
+grep -Fq '| DM-171 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-171'
+
+# ---------------------------------------------------------------------------
+# P0.2-C7-B / M4-B — o E1 classifica a árvore inteira antes do staging
+# ---------------------------------------------------------------------------
+catalogo_sh='.claude/skills/mergex/scripts/catalogo-de-metodo.sh'
+[ -f "$catalogo_sh" ] || fail 'M4-B: shared method catalog is missing'
+grep -Fq 'catalogo-de-metodo.sh' "$fecha_sh" || fail 'M4-B: E1 does not use the shared method catalog'
+grep -Fq 'catalogo-de-metodo.sh' "$persiste_sh" || fail 'M4-B: method lifecycle does not use the shared catalog'
+grep -Fq 'git status --porcelain=v1 -z --untracked-files=all' "$fecha_sh" \
+  || fail 'M4-B: E1 lost the NUL-safe whole-tree inventory'
+if codigo "$catalogo_sh" | grep -Fq 'docs/*'; then
+  fail 'M4-B: method catalog uses a directory glob'
+fi
+grep -Fq 'para 11 ' "$fecha_sh" || fail 'M4-B: E1 lost the unlisted-current-product barrier (code 11)'
+bloco_classifica="$(awk '/^classifica_arvore\(\) \{/,/^}$/' "$fecha_sh")"
+printf '%s\n' "$bloco_classifica" | grep -Fq 'inventaria_arvore' \
+  || fail 'M4-B: classification does not inventory the whole tree'
+if printf '%s\n' "$bloco_classifica" | grep -Fq 'git add'; then
+  fail 'M4-B: classification stages something itself'
+fi
+grep -Fq '**Um único escritor por worktree**' "$commits" \
+  || fail 'M4-B: contract lost the single-writer-per-worktree rule'
+grep -Fq 'tasks simultaneamente em voo exigem árvores distintas' AGENTS.md \
+  || fail 'M4-B: AGENTS.md lost the in-flight tasks rule'
+for f in scripts/ci/test-m4b-arvore-inteira.sh scripts/ci/mutacao-m4b-arvore-inteira.sh; do
+  [ -f "$f" ] || fail "M4-B: missing $f"
+done
+for dm in DM-172 DM-173; do
+  grep -Fq "| $dm |" '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+    || fail "decision log is missing $dm"
+done
+
+# ---------------------------------------------------------------------------
+# P0.2 / D-02 — primeiro HISTORICO global da sprintx
+# ---------------------------------------------------------------------------
+grep -Fq '| DM-174 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-174'
+grep -Fq 'confere_historico_inicial()' "$persiste_sh" \
+  || fail 'D-02: method lifecycle lost the whole-file proof of the first HISTORICO'
+if codigo "$persiste_sh" | grep -Fq 'untracked não tem base'; then
+  fail 'D-02: method lifecycle still refuses every untracked HISTORICO'
+fi
+grep -Fq 'ls-tree --name-only HEAD -- "$caminho"' "$persiste_sh" \
+  || fail 'D-02: first HISTORICO no longer proves absence in HEAD'
+grep -Fq "remove ou reescreve evidência existente" "$persiste_sh" \
+  || fail 'D-02: tracked HISTORICO lost the proof against HEAD'
+grep -Fq 'DM-174' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'D-02: E1 reference does not state the first HISTORICO rule'
+for f in scripts/ci/test-d02-historico-inicial.sh scripts/ci/mutacao-d02-historico-inicial.sh; do
+  [ -f "$f" ] || fail "D-02: missing $f"
+done
+# Alinhamento ao contrato publicado: a prova não é um segundo schema sprintx.
+if codigo "$persiste_sh" | grep -Fq 'cita_tasks'; then
+  fail 'D-02: first HISTORICO proof scans task ids in free prose again'
+fi
+grep -Fq 'marcador do template não substituído' "$persiste_sh" \
+  || fail 'D-02: first HISTORICO proof lets template markers through'
+grep -Fq 'Alinhamento ao contrato publicado' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'D-02: DM-174 does not state the alignment to the published sprintx contract'
+grep -Fq 'grupo_contrato' scripts/ci/test-d02-historico-inicial.sh \
+  || fail 'D-02: bench lost the differential contract group'
+
+# DM-175 — HISTORICO tracked: append-only quanto às entradas, não aos bytes.
+grep -Fq '| DM-175 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-175'
+grep -Fq 'DM-175' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'DM-175: E1 reference does not state the tracked HISTORICO rule'
+for fn in 'ler_historico()' 'confere_ownership_historico()' 'confere_historico_versionado()'; do
+  grep -Fq "$fn" "$persiste_sh" || fail "DM-175: method lifecycle lost $fn"
+done
+# Um leitor só: HEAD e working tree passam pelo mesmo parser da primeira criação.
+[ "$(codigo "$persiste_sh" | grep -c 'ler_historico "')" -ge 3 ] \
+  || fail 'DM-175: initial, HEAD and worktree HISTORICO no longer share one reader'
+if codigo "$persiste_sh" | grep -Eq 'diff HEAD .*-- "\$caminho"'; then
+  fail 'DM-175: tracked HISTORICO is proved by textual diff again'
+fi
+grep -Fq 'grupo_tracked' scripts/ci/test-d02-historico-inicial.sh \
+  || fail 'DM-175: bench lost the tracked group'
+
+# ---------------------------------------------------------------------------
+# P0.2 / D-04 — valor efetivo de escalares YAML no HISTORICO (DM-176)
+# ---------------------------------------------------------------------------
+grep -Fq '| DM-176 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-176'
+grep -Fq 'DM-176' '.claude/skills/mergex/references/01-commits.md' \
+  || fail 'DM-176: E1 reference does not state the effective-value rule'
+grep -Fq 'function decodifica(' "$persiste_sh" \
+  || fail 'DM-176: HISTORICO reader lost the single quoted-scalar decoder'
+# Um decodificador só: escalar e efetivo não desaspam o miolo cru.
+if codigo "$persiste_sh" | grep -Fq -e 'if (aspas) return substr(v, 2' -e 'if (aspas) return "s:" substr(v, 2'; then
+  fail 'DM-176: a quoted scalar is unquoted outside the single decoder'
+fi
+# Não é parser YAML geral, e a decisão diz isso.
+grep -F '| DM-176 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' | grep -Fq 'falha fechado' \
+  || fail 'DM-176: decision does not state that unsupported escapes fail closed'
+grep -Fq 'parser YAML geral' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'DM-176: decision no longer states it is not a general YAML parser'
+# Comentário #3 do CodeAnt: a DM-174 não pode voltar a barrar {{...}} na prosa
+# humana, que a DM-175 esclareceu; a redação original fica citada, não apagada.
+dm174="$(grep -F '| DM-174 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md')"
+printf '%s\n' "$dm174" | grep -Fq 'na prosa humana explicativa é texto' \
+  && printf '%s\n' "$dm174" | grep -Fq 'parcialmente esclarecida pela DM-175' \
+  || fail 'DM-174 contradicts DM-175 again: {{...}} in human prose is text, not pending data'
+for f in scripts/ci/test-d04-historico-yaml-escalar.sh scripts/ci/mutacao-d04-historico-yaml-escalar.sh; do
+  [ -f "$f" ] || fail "D-04: missing $f"
+done
+
+# ---------------------------------------------------------------------------
+# P0.2 / D-07 — exemplo normativo de rastro e a lacuna do `estado.json` (DM-177)
+# ---------------------------------------------------------------------------
+grep -Fq '| DM-177 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-177'
+estado='.claude/skills/mergex/references/10-estado.md'
+[ -f "$estado" ] || fail "D-07: missing $estado"
+# `agente` é enum e nunca é null: sem subagente, `principal`.
+for f in "$commits" '.claude/skills/mergex/references/07-abertura-pr.md'; do
+  grep -Fq '"agente":"principal"' "$f" \
+    || fail "D-07: $f lost the canonical agente:\"principal\" in its trace example"
+done
+grep -Fq 'agente:"principal"' "$base_sh" \
+  || fail 'D-07: the hook trace writer no longer records agente:"principal"'
+# A falha de gravação é rastreada (DM-227, que supera a lacuna da DM-177), sem
+# interromper a etapa nem parecer sucesso.
+grep -Fq '| DM-227 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
+  || fail 'decision log is missing DM-227'
+grep -Fq 'Falha de gravação é rastreada' "$estado" \
+  || fail 'D-07: the reference no longer declares the estado.json write failure as traced'
+grep -Fq 'artefato_gravado' "$estado" \
+  || fail 'D-07: the reference dropped the artefato_gravado event for the write failure'
+if grep -Fq 'LACUNA REGISTRADA' "$estado"; then
+  fail 'D-07: the superseded estado.json gap is still registered as open'
+fi
+grep -Fq 'nunca interrompe' "$estado" \
+  || fail 'D-07: the reference dropped the rule that a write failure never interrupts'
+for f in scripts/ci/test-d07-contrato-de-evento.sh scripts/ci/mutacao-d07-contrato-de-evento.sh; do
+  [ -f "$f" ] || fail "D-07: missing $f"
+done
+# Comentário #1 do CodeAnt: no E0 e no E7 o `ENTREGA.md` está só na árvore — o
+# commit que o leva ao histórico é o fechamento final do E8. A justificativa da
+# passagem silenciosa não pode prometer esse commit.
+if grep -Fq 'foi gravado e commitado de todo modo' "$estado"; then
+  fail 'D-07: the text claims a ENTREGA.md commit that E0 and E7 do not make'
+fi
+grep -Fq 'fechamento final do E8' "$estado" \
+  || fail 'D-07: the text no longer names the E8 closing as what carries ENTREGA.md to history'
+# Comentário #2 do CodeAnt: a bancada de mutação é o que sustenta a regressão
+# D-07, e ela só vale se cada cópia estiver inteira. Sem este guarda, `copia()`
+# devolve diretório utilizável depois de um pipeline que falhou, e o relatório
+# de mutantes mortos passa a afirmar o que não foi medido. A bancada de mutação não pode
+# provar a si mesma de dentro das próprias cópias — por isso o guarda é ancorado
+# aqui, fora do círculo, e o M15 morre por esta linha.
+grep -Fq 'cópia da árvore falhou' scripts/ci/mutacao-d07-contrato-de-evento.sh \
+  || fail 'D-07: mutation harness copia() no longer aborts on a failed tree copy'
+
+# ---------------------------------------------------------------------------
+# DM-184 / Task 15 — o E0 ativa e o E2 prova o pre-push, nos entrypoints em
+# prosa; o enforcement executável é testado em test-r2-barreira-push.sh
+# (grupos ativacao e entrypoints)
+# ---------------------------------------------------------------------------
+barreira_ref='.claude/skills/mergex/references/12-barreira-de-push.md'
+ativacao_sh='.claude/skills/mergex/scripts/ativacao-pre-push.sh'
+registrar_sh='.claude/skills/mergex/scripts/registrar-portao.sh'
+modelo_pp='.claude/skills/mergex/assets/pre-push-gerenciado.sh'
+
+# E0: a ativação e a parada, nas duas cópias do comando e no reference
+for f in "$abrir_cmd" "$abrir_oc"; do
+  grep -Fq 'ativacao-pre-push.sh --instalar' "$f" || fail "mergex-abrir sem ativacao-pre-push.sh --instalar: $f"
+  grep -Fq 'mergex E0 BLOQUEADO — pre-push' "$f" || fail "mergex-abrir sem a parada mergex E0 BLOQUEADO — pre-push: $f"
+done
+grep -Fq 'ativacao-pre-push.sh --instalar' "$abertura" || fail '00-abertura sem ativacao-pre-push.sh --instalar'
+grep -Fq 'mergex E0 BLOQUEADO — pre-push' "$abertura" || fail '00-abertura sem a parada mergex E0 BLOQUEADO — pre-push'
+grep -Fq -- '- [ ] O `pre-push` efetivo' "$abertura" || fail '00-abertura: o checklist do E0 não tem o item do pre-push ativo'
+cmp -s "$abrir_cmd" "$abrir_oc" || fail 'OpenCode mergex-abrir command diverges from Claude Code'
+
+# E2: a prova antes da primeira menção a V1, e o resultado só pelo gravador
+primeira_linha() { { grep -nF -- "$2" "$1" || true; } | sed -n '1s/:.*//p'; }
+for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao"; do
+  p="$(primeira_linha "$f" 'ativacao-pre-push.sh --provar')"
+  v="$(primeira_linha "$f" 'V1')"
+  [ -n "$p" ] || fail "$f sem ativacao-pre-push.sh --provar"
+  [ -n "$v" ] && [ "$p" -lt "$v" ] || fail "$f cita ativacao-pre-push.sh --provar depois da primeira menção a V1"
+  grep -Fq 'registrar-portao.sh' "$f" || fail "$f não grava o resultado do portão por registrar-portao.sh"
+done
+grep -Eq 'Grave `portao: (pronto|bloqueado)`' "$prontidao" \
+  && fail '02-prontidao ainda manda editar portao diretamente (o resultado é gravado só por registrar-portao.sh)'
+grep -Fq 'só por `registrar-portao.sh`' "$prontidao" || fail '02-prontidao não diz que o resultado é gravado só por registrar-portao.sh'
+
+# Fluxo completo: as duas chamadas nas linhas E0 e E2, nas duas cópias
+for f in "$mergex_cmd" "$mergex_oc"; do
+  grep -F '**E0**' "$f" | grep -Fq 'ativacao-pre-push.sh --instalar' || fail "$f: a linha E0 não chama ativacao-pre-push.sh --instalar"
+  grep -F '**E2**' "$f" | grep -Fq 'ativacao-pre-push.sh --provar' || fail "$f: a linha E2 não chama ativacao-pre-push.sh --provar"
+  grep -F '**E2**' "$f" | grep -Fq 'registrar-portao.sh' || fail "$f: a linha E2 não grava o resultado por registrar-portao.sh"
+done
+cmp -s "$mergex_cmd" "$mergex_oc" || fail 'OpenCode mergex command diverges from Claude Code'
+
+# Reference da barreira e executáveis
+for f in "$barreira_ref" "$ativacao_sh" "$registrar_sh" "$modelo_pp"; do
+  [ -f "$f" ] || fail "DM-184: missing $f"
+done
+for s in '## Ativação' '## Composição com hook de terceiro' '## Prova funcional' '## Reversão'; do
+  grep -Fxq "$s" "$barreira_ref" || fail "12-barreira-de-push sem a seção $s"
+done
+# a instrução de composição é a mesma no reference e na mensagem de erro
+composicao='o `pre-push` existente chama `portao-push.sh --pre-push "$@"`, repassa a entrada padrão e propaga exatamente o código de saída dele'
+grep -Fq -- "$composicao" "$barreira_ref" || fail '12-barreira-de-push sem a instrução de composição'
+grep -Fq -- "$composicao" "$ativacao_sh" || fail 'ativacao-pre-push.sh: a instrução de composição diverge do reference'
+grep -Fxq '# mergex: pre-push gerenciado' "$modelo_pp" || fail 'o modelo do pre-push gerenciado perdeu o marcador'
+# o E0 nunca escreve core.hooksPath; nenhuma opção de força nos executáveis novos
+codigo "$ativacao_sh" | grep -Eq 'config[^|;&]*core\.hooksPath' && fail 'ativacao-pre-push.sh escreve core.hooksPath'
+for f in "$ativacao_sh" "$registrar_sh"; do
+  codigo "$f" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$f tem opção de força"
+  grep -Fq '# guarda:' "$f" || fail "$f sem linha de guarda"
+done
+grep -Fq 'ativacao-pre-push.sh' "$persiste_sh" || fail 'persistir-metodo.sh não prova o pre-push antes de persistir pronto'
+grep -Fq '# guarda:E2SEMHOOK' "$persiste_sh" || fail 'persistir-metodo.sh sem a guarda E2SEMHOOK'
+
+# ---------------------------------------------------------------------------
+# DM-184 / Task 16 — o contrato e o template de CI; esta branch não ativa CI
+# ---------------------------------------------------------------------------
+ci_sh='.claude/skills/mergex/scripts/portao-ci.sh'
+ci_tpl='.claude/skills/mergex/assets/ci/mergex-portao.yml'
+for f in "$ci_sh" "$ci_tpl"; do
+  [ -f "$f" ] || fail "DM-184: missing $f"
+done
+grep -Fxq '## CI' "$barreira_ref" || fail '12-barreira-de-push sem a seção ## CI'
+codigo "$ci_sh" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$ci_sh tem opção de força"
+# DM-185: o CI seleciona pelo conteúdo (pr_entregas_do_intervalo) e decide
+# cada entrega pela regra compartilhada (pr_decide_entregas); nada nele filtra
+# a seleção pelo nome da branch
+grep -Fq 'pr_entregas_do_intervalo' "$ci_sh" || fail "$ci_sh não seleciona pelo conteúdo (pr_entregas_do_intervalo)"
+grep -Fq 'pr_decide_entregas' "$ci_sh" || fail "$ci_sh não decide pela regra compartilhada (pr_decide_entregas)"
+grep -Fq 'aviso=branch_divergente' "$ci_sh" || fail "$ci_sh não trata --branch como conferência (aviso=branch_divergente)"
+grep -Fq 'fetch-depth: 0' "$ci_tpl" || fail "$ci_tpl sem fetch-depth: 0"
+grep -Fq 'portao-ci.sh --verificar' "$ci_tpl" || fail "$ci_tpl não chama portao-ci.sh --verificar"
+# Nenhum arquivo versionado afirma que o CI do portão está ativo: esta branch só
+# entrega o executável e o template (spec, seção 13, item 8). A frase-alvo é
+# "CI do portão ativo" (sem distinguir maiúsculas nem o acento de "portão"). Ficam
+# de fora só os arquivos que precisam citá-la para testá-la: este validador, as
+# suítes test-*, os mutantes mutacao-* e a fixture em scripts/ci/lib.
+# O grep sai 1 sem achado e 2 em erro: só o erro derruba a varredura.
+ci_ativo="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' ':!scripts/ci/mutacao-*' ':!scripts/ci/lib/*' \
+  | xargs -0 sh -c 'grep -IlEi -- "ci do port.{0,2}o ativo" "$@"; [ "$?" -le 1 ]' _)" \
+  || fail 'DM-184: a varredura de arquivos que afirmam CI ativo falhou'
+[ -z "$ci_ativo" ] || fail "DM-184: arquivo afirma que o CI do portão está ativo (esta branch não ativa CI): $(printf '%s' "$ci_ativo" | tr '\n' ' ')" # guarda:CIATIVO
+
+# ---------------------------------------------------------------------------
+# Task 19 — contrato textual da reconciliação de base pós-E8 e do portão por
+# SHA (spec 2026-10-07, seções 4–20 e "Decisões propostas"; DM-178..DM-184)
+# ---------------------------------------------------------------------------
+SKILL_DIR='.claude/skills/mergex'
+REF="$SKILL_DIR/references"
+reconc_ref="$REF/11-reconciliacao-base.md"
+abertura_pr="$REF/07-abertura-pr.md"
+
+# O enum fechado de checkpoints é o mesmo na prosa e nos três executáveis.
+enum_cp='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8'
+for f in "$skill" "$commits" "$registro"; do
+  grep -Fq "$enum_cp" "$f" || fail "$f sem o enum de checkpoints novo"
+done
+[ -f "$reconc_ref" ] || fail "missing required file: $reconc_ref"
+for f in persistir-metodo.sh contrato-de-commit.sh catalogo-de-metodo.sh; do
+  grep -Fq 'pre-e2|reconciliacao-base|predecessores|retomar-v9-predecessores|pre-e6|e8' "$SKILL_DIR/scripts/$f" \
+    || fail "$SKILL_DIR/scripts/$f sem o enum de checkpoints novo"
+done
+for checkpoint in pre-e2 reconciliacao-base predecessores retomar-v9-predecessores pre-e6 e8; do
+  sed -n '1,35p' "$SKILL_DIR/scripts/catalogo-de-metodo.sh" | grep -Fq "$checkpoint" \
+    || fail "catalogo-de-metodo.sh: o enum documentado não cita $checkpoint"
+done
+grep -Fq 'Metodo: pre-e2 | pre-e6 | e8`, sem `Task:`' "$skill" \
+  && fail 'SKILL.md ainda dá o enum antigo como a gramática do commit de método'
+grep -Fq '(`pre-e2`, `pre-e6`' "$hooks_readme" \
+  && fail 'hooks README ainda dá o enum antigo de checkpoints'
+grep -Fq "$enum_cp" "$hooks_readme" || fail 'hooks README sem o enum de checkpoints novo'
+
+# E2: ordem reconciliação → V1..V11 (V9 por script) → gravação com portao_sha
+grep -Fq 'portao-v9.sh' "$prontidao" || fail "02-prontidao não manda rodar portao-v9.sh"
+grep -Fq 'portao_sha' "$prontidao" || fail "02-prontidao não grava portao_sha"
+grep -Fq 'validade-do-portao.sh' "$prontidao" || fail '02-prontidao não cita validade-do-portao.sh'
+for f in "$prontidao" .claude/commands/mergex-check.md .opencode/commands/mergex-check.md; do
+  r="$(primeira_linha "$f" '--checkpoint reconciliacao-base')"
+  v="$(primeira_linha "$f" 'V1')"
+  [ -n "$r" ] || fail "$f sem a barreira --verificar --checkpoint reconciliacao-base"
+  [ -n "$v" ] && [ "$r" -lt "$v" ] || fail "$f cita a barreira reconciliacao-base depois da primeira menção a V1"
+  grep -Fq 'portao-v9.sh --verificar' "$f" || fail "$f: a V9 não roda portao-v9.sh --verificar"
+done
+grep -Fq -- '--persistir' "$prontidao" && fail '02-prontidao manda persistir (o E2 só verifica)'
+
+# E6 e E7: validade como pré-requisito; o pre-push decide; o hook é consultivo
+for f in "$push" "$abertura_pr"; do
+  grep -Fq 'validade-do-portao.sh --verificar' "$f" || fail "$f sem a validade do portão como pré-requisito"
+  grep -Fq '12-barreira-de-push.md' "$f" || fail "$f não aponta para 12-barreira-de-push.md"
+  grep -Fq 'consultivo' "$f" || fail "$f não diz que o hook do Claude é consultivo"
+done
+grep -Fq 'o `pre-push` funcional quando o `ENTREGA.md` tem `portao: pronto`' "$push" \
+  || fail '06-push: a barreira pre-e6 não diz que exige o pre-push funcional com portao: pronto'
+
+# ---------------------------------------------------------------------------
+# DM-186 — ajustes da revisão do PR (spec, seção 13, itens 6 e 9; seção 15)
+# ---------------------------------------------------------------------------
+# E0: o diretório efetivo fora da árvore e do diretório Git comum não recebe o
+# chamador; a regra está no executável, no reference da barreira, no E0 e no
+# comando. Fora de um repositório Git, --instalar sai 0 sem instalar.
+grep -Fq 'hooks_no_repositorio || fora_do_repositorio' "$ativacao_sh" \
+  || fail 'ativacao-pre-push.sh: o braço instalar) não recusa o diretório efetivo fora do repositório (DM-186)'
+grep -Fq 'pwd -P' "$ativacao_sh" || fail 'ativacao-pre-push.sh: a comparação do diretório efetivo não é por caminho canônico (pwd -P)'
+for f in "$barreira_ref" "$abertura" "$abrir_cmd" "$abrir_oc"; do
+  grep -Fq 'fora da árvore de trabalho e do diretório Git comum' "$f" \
+    || fail "$f não diz que o E0 não instala o chamador num diretório de hooks fora da árvore de trabalho e do diretório Git comum (DM-186)"
+done
+# E2: fora de um repositório Git a prova é dispensada — pelo Git real, nunca
+# pelo campo `versionado`; o gravador e a prosa dizem o mesmo
+grep -Fq '[ "$SEM_GIT" = 1 ] ||' "$registrar_sh" || fail 'registrar-portao.sh não dispensa a prova fora de um repositório Git (DM-186)'
+# "sem Git" é só a ausência de repositório (ambiente limpo, nenhum .git nos
+# ancestrais e o Git sem repositório); outra falha do Git é ambiente. A função
+# é a mesma, byte a byte, nos dois executáveis que dispensam.
+fn_sem_git() { awk '/^sem_repositorio_git\(\) \{/,/^}$/' "$1"; }
+[ -n "$(fn_sem_git "$registrar_sh")" ] || fail 'registrar-portao.sh sem sem_repositorio_git() (DM-186, rodada 1)'
+[ -n "$(fn_sem_git "$ativacao_sh")" ] || fail 'ativacao-pre-push.sh sem sem_repositorio_git() (DM-186, rodada 1)'
+[ "$(fn_sem_git "$registrar_sh")" = "$(fn_sem_git "$ativacao_sh")" ] || fail 'sem_repositorio_git() diverge entre registrar-portao.sh e ativacao-pre-push.sh'
+for s in 'GIT_DIR' 'not a git repository' '/.git'; do
+  fn_sem_git "$registrar_sh" | grep -Fq -- "$s" || fail "sem_repositorio_git() não confere: $s"
+done
+grep -Fq 'sem_repositorio_git ||' "$registrar_sh" || fail 'registrar-portao.sh não exige sem_repositorio_git antes de dispensar'
+grep -Fq 'sem_repositorio_git ||' "$ativacao_sh" || fail 'ativacao-pre-push.sh não exige sem_repositorio_git antes de sair 0'
+grep -F '# guarda:E2SEMHOOK' "$registrar_sh" | grep -Fq 'SEM_GIT' || fail 'registrar-portao.sh: a dispensa sem Git não está na linha da guarda E2SEMHOOK'
+codigo "$registrar_sh" | grep -Fq 'versionado' && fail 'registrar-portao.sh decide a dispensa pelo campo versionado (o critério é só o Git real)'
+for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao" "$barreira_ref"; do
+  grep -Fq 'nunca pelo campo `versionado`' "$f" \
+    || fail "$f não diz que fora de um repositório Git a prova é dispensada pelo Git real, nunca pelo campo versionado (DM-186)"
+done
+# E3: a lista de reconciliados só depois de o --verificar aprovar (rc 0 e ok=true)
+grep -Fq -- "--verificar | awk" "$atencao" && fail '03-atencao-humana ainda encadeia o --verificar direto no awk, sem conferir o código de saída (DM-186)'
+grep -Fq "grep -Fxq 'ok=true'" "$atencao" || fail '03-atencao-humana não exige ok=true do --verificar antes de extrair os coberto (DM-186)'
+grep -Fq 'o E3 não classifica' "$atencao" || fail '03-atencao-humana não diz que a reconciliação reprovada impede o E3 de classificar'
+# os arquivos de trabalho do E3 vão para um temporário, nunca para a raiz da árvore
+grep -Fq 'mktemp -d' "$atencao" || fail '03-atencao-humana não manda verificar.out e reconciliados.tsv para um temporário (mktemp -d)'
+grep -Eq '> (verificar\.out|reconciliados\.tsv)' "$atencao" && fail '03-atencao-humana ainda grava verificar.out ou reconciliados.tsv na raiz da árvore'
+# E7: a validade sobre o SHA publicado, que tem de ser o enviado no E6; remoto e
+# ref vêm do upstream da branch, a busca é conferida e a divergência aborta
+grep -Fq -- '--rev "$publicado"' "$abertura_pr" || fail '07-abertura-pr não roda a validade sobre a ponta remota (--rev "$publicado") (DM-186)'
+grep -Fq "'@{u}'" "$abertura_pr" || fail '07-abertura-pr não deriva remoto e ref do upstream da branch (@{u})'
+grep -Fq 'git fetch "$remoto" "$ref_remota" ||' "$abertura_pr" || fail '07-abertura-pr não confere o git fetch (falhou: o E7 não abre nem retoma)'
+grep -Fq 'git fetch origin' "$abertura_pr" && fail '07-abertura-pr ainda fixa origin no E7 (o remoto vem do upstream)'
+grep -Fq '[ "$publicado" = "$enviado" ] ||' "$abertura_pr" || fail '07-abertura-pr não aborta na divergência entre a ponta remota e o SHA enviado'
+for f in "$abertura_pr" .claude/commands/mergex-pr.md .opencode/commands/mergex-pr.md; do
+  grep -Fq 'SHA enviado no E6' "$f" || fail "$f não exige que a ponta remota seja o SHA enviado no E6 (DM-186)"
+  grep -Fq 'não abre nem retoma o PR' "$f" || fail "$f não diz que a divergência impede o E7 de abrir ou retomar o PR (DM-186)"
+done
+
+# E0: base por SHA, nunca reescrita na retomada
+grep -Fq 'base_validada_sha' "$abertura" || fail '00-abertura não grava base_validada_sha'
+grep -Fq 'origem_base: registrada_e0' "$abertura" || fail '00-abertura não grava origem_base: registrada_e0'
+grep -Fq 'nunca acrescenta nem troca `base_validada_sha`' "$abertura" \
+  || fail '00-abertura: a retomada pode acrescentar ou trocar base_validada_sha'
+
+# Schema e template: as chaves novas do kind entrega e o kind novo
+for k in base_validada_sha origem_base reconciliacoes portao_sha; do
+  grep -Fq "\`$k\`" "$schema" || fail "00-schema sem a chave $k"
+  grep -Eq "^$k: " "$template_entrega" || fail "TEMPLATE-ENTREGA sem a chave $k"
+done
+grep -Fq 'kind: reconciliacao_base' "$schema" || fail '00-schema sem o kind reconciliacao_base'
+sem_fm="$(sed -n '/^## Arquivos SEM frontmatter/,/^## /p' "$schema")"
+printf '%s\n' "$sem_fm" | grep -Fq 'RECONCILIACAO-BASE' \
+  && fail '00-schema lista o artefato de reconciliação entre os arquivos sem frontmatter'
+
+# E8: a tabela "Quando o arquivo é escrito" tem a reconciliação; catálogo cumulativo
+quando="$(sed -n '/^## Quando o arquivo é escrito/,/^## /p' "$registro")"
+printf '%s\n' "$quando" | grep -Fq 'reconciliacao-base.sh --registrar' \
+  || fail '08-registro: a tabela "Quando o arquivo é escrito" não tem a reconciliação'
+grep -Fq 'RECONCILIACAO-BASE-NNN.md' "$registro" || fail '08-registro: o catálogo e8 não cita os artefatos de reconciliação'
+
+# Commits: a classe integração
+grep -Fq 'Integra-base:' "$commits" || fail '01-commits sem a classe integração de base'
+
+# 11-reconciliacao-base: as quatro provas, os códigos, os riscos residuais
+for p in '| 1 | `f` nasceu ou mudou na base' '| 2 | A feature não tocou `f`' \
+         '| 3 | `f` não consta das tasks' '| 4 | Existe diferença real entre `B1` e `M`'; do
+  grep -Fq -- "$p" "$reconc_ref" || fail "11-reconciliacao-base sem a prova: $p"
+done
+for c in '| 0 |' '| 1 |' '| 2 |' '| 3 |' '| 4 |' '| 5 |' '| 6 |' '| 64 |'; do
+  sed -n '/^## Códigos de saída/,/^## /p' "$reconc_ref" | grep -Fq -- "$c" \
+    || fail "11-reconciliacao-base: a tabela de códigos de saída não tem $c"
+done
+for r in 'Portão reposicionado por commit de método' 'Entrega legada sem reconciliação' \
+         'B1 lateral' 'Clone raso legítimo falha fechado' 'Isenção por prefixo' \
+         '`core.autocrlf` na barreira' 'Hash do diff com atributos `-diff`/`binary`' \
+         'Escala resolvida pela DM-184'; do
+  sed -n '/^### Riscos residuais conhecidos/,/^## /p' "$reconc_ref" | grep -Fq -- "$r" \
+    || fail "11-reconciliacao-base: falta o risco residual \"$r\""
+done
+grep -Fq 'RECONCILIACAO-BASE-<NNN-1>.md' "$reconc_ref" || fail '11-reconciliacao-base: anterior não é RECONCILIACAO-BASE-<NNN-1>.md'
+grep -Fq 'base integrada e o PR' "$reconc_ref" && fail '11-reconciliacao-base: a prosa do artefato cita PR (o frontmatter não tem PR)'
+grep -Fq '12-barreira-de-push.md' "$reconc_ref" || fail '11-reconciliacao-base não remete os riscos da barreira a 12-barreira-de-push.md'
+grep -Fq 'references/11-reconciliacao-base.md' "$skill" || fail 'SKILL.md não aponta para 11-reconciliacao-base.md'
+
+# Decisões
+for dm in DM-178 DM-179 DM-180 DM-181 DM-182 DM-183 DM-184 DM-185 DM-186 DM-187 DM-188 DM-189 DM-190; do
+  grep -q "^| $dm |" "$SKILL_DIR/DECISOES-DA-SKILL.md" || fail "falta $dm"
+done
+# DM-185: a linha registra a seleção pelo conteúdo, o que ela substitui na
+# DM-184 e os limites (15.1); a DM-184 fica como registro histórico
+dm185="$(grep -F '| DM-185 |' "$SKILL_DIR/DECISOES-DA-SKILL.md")"
+for s in 'pelo **conteúdo**' 'pr_entregas_do_intervalo' 'aviso=branch_divergente' 'cobertura_indeterminada' 'substitui na DM-184' '15.1'; do
+  printf '%s\n' "$dm185" | grep -Fq -- "$s" || fail "DM-185 em DECISOES-DA-SKILL.md sem: $s"
+done
+grep -q '^| DM-184 |' "$SKILL_DIR/DECISOES-DA-SKILL.md" && grep -F '| DM-184 |' "$SKILL_DIR/DECISOES-DA-SKILL.md" | grep -Fq 'Barreira contra contorno deliberado' \
+  || fail 'DM-184 em DECISOES-DA-SKILL.md foi reescrita (é registro histórico; a DM-185 diz o que substitui)'
+
+# Hooks README: validade do portão e a biblioteca da integração
+grep -Fq 'comum/integracao-da-mensagem.sh' "$hooks_readme" || fail 'hooks README não cita comum/integracao-da-mensagem.sh'
+grep -Fq 'validade-do-portao.sh' "$hooks_readme" || fail 'hooks README sem a validade do portão'
+grep -Fq 'Sem nenhuma das três declarações' "$hooks_readme" || fail 'hooks README ainda fala em duas classes de mensagem'
+# O bloqueado também grava portao_sha, sem efeito na validade; a V9 executável exige Git
+for f in "$prontidao" "$schema"; do
+  grep -Fq '`--resultado bloqueado` também grava `portao_sha`' "$f" || fail "$f não diz que o bloqueado também grava portao_sha"
+done
+grep -Fq '`fora de um repositório Git`' "$prontidao" || fail '02-prontidao não diz o que portao-v9.sh faz sem versionador'
+
+# pr-so-com-portao é consultivo: AGENTS.md e SKILL.md o descrevem assim, e a
+# exceção "mesmo em aviso" ganha a ressalva do pre-push (DM-184)
+ressalva='o `pre-push` do Git barra o portão inválido em qualquer modo'
+for f in AGENTS.md "$skill"; do
+  grep -F '`pr-so-com-portao`' "$f" | grep -Fq 'consultivo' || fail "$f não descreve pr-so-com-portao como consultivo"
+  grep -Fq -- "$ressalva" "$f" || fail "$f: a condição que barra mesmo em aviso não tem a ressalva do pre-push"
+done
+grep -Fq 'Regra 6 — sem `PRONTO` no portão, não sobe e não abre PR' "$skill" \
+  && fail 'SKILL.md ainda trata pr-so-com-portao como barreira do push'
+# A task irmã do commit-por-task NÃO é a única condição de hook do Claude que sai
+# 2 em qualquer modo: o pr-so-com-portao também sai 2 no --no-verify reconhecido e
+# no push que prova inválido. Nenhum texto pode voltar a dizer que é a única.
+for f in AGENTS.md "$skill"; do
+  grep -Fq 'única dos hooks do Claude' "$f" && fail "$f diz que a task irmã é a única condição dos hooks do Claude que barra em qualquer modo"
+  grep -Fq 'mesmo em aviso** entre os hooks do Claude' "$f" && fail "$f diz que a task irmã é a única condição dos hooks do Claude que barra em qualquer modo"
+  grep -Fq 'também sai 2 em qualquer modo' "$f" || fail "$f não diz que o pr-so-com-portao também sai 2 em qualquer modo nos dois casos provados"
+done
+# Nenhum texto versionado trata o hook como barreira: numa linha que cita
+# `pr-so-com-portao`, "é barreira" e "barra o push" reprovam sempre (as negações
+# literais "não é barreira", "não barreira" e "nunca é barreira" são retiradas
+# antes); "autoritativ" só passa quando a mesma linha o qualifica como consultivo
+# ou aviso antecipado (é a linha que contrapõe o pre-push autoritativo ao hook).
+# Spec, plano e as suítes (inclusive .claude/hooks/teste.sh, cujos nomes de caso
+# dizem "barra o push") ficam de fora: são o registro da decisão e citam a regra para
+# proibi-la. Como na varredura CIATIVO, o grep sai 1 sem achado e 2 em erro, e só
+# o erro (ou o de git ls-files/xargs) derruba a varredura.
+pr_linhas="$(git ls-files -z -- . ':!scripts/ci/validate-mergex-contract.sh' ':!scripts/ci/test-*' \
+    ':!scripts/ci/mutacao-*' ':!scripts/ci/lib/*' ':!scripts/ci/fixtures/*' ':!docs/superpowers/*' \
+    ':!.claude/hooks/teste.sh' \
+  | xargs -0 sh -c 'grep -nIF -- "pr-so-com-portao" "$@"; [ "$?" -le 1 ]' _)" \
+  || fail 'DM-184: a varredura de textos que tratam pr-so-com-portao como barreira falhou'
+pr_autoritativo="$(printf '%s\n' "$pr_linhas" | awk '{
+  l = tolower($0)
+  gsub(/não é barreira|não barreira|nunca é barreira|não É barreira/, "", l)
+  if (l ~ /é barreira|É barreira|barra o push/) { print; next }
+  if (l ~ /autoritativ/ && l !~ /consultiv|aviso antecipado/) print
+}')"
+[ -z "$pr_autoritativo" ] || fail "DM-184: texto trata pr-so-com-portao como barreira: $(printf '%s' "$pr_autoritativo" | tr '\n' ' ')"
+
+# ---------------------------------------------------------------------------
+# DM-187..DM-190 / Task 9 — predecessores SprintX verificáveis
+# ---------------------------------------------------------------------------
+pred_ref="$SKILL_DIR/references/13-predecessores-sprintx.md"
+pred_sh="$SKILL_DIR/scripts/predecessores-sprintx.sh"
+retoma_pred_sh="$SKILL_DIR/scripts/retomar-v9-predecessores.sh"
+for f in "$pred_ref" "$pred_sh" "$retoma_pred_sh" "$mergex_cmd" "$mergex_oc" "$mergex_check" "$mergex_check_oc"; do
+  [ -f "$f" ] || fail "predecessores SprintX: missing $f"
+done
+for f in "$mergex_cmd" "$mergex_oc" "$mergex_check" "$mergex_check_oc"; do
+  grep -Fq 'predecessores-sprintx.sh' "$f" || fail "$f não publica a fonte adicional da V9"
+  grep -Fq 'resultado=v9_sem_prova' "$f" || fail "$f não explicita a falha fechada"
+  grep -Fq 'retomar-v9-predecessores.sh' "$f" || fail "$f não publica a retomada explícita"
+  grep -Fq 'references/13-predecessores-sprintx.md' "$f" || fail "$f não aponta para o contrato único"
+done
+cmp -s "$mergex_cmd" "$mergex_oc" || fail 'mergex.md diverge entre Claude Code e OpenCode'
+cmp -s "$mergex_check" "$mergex_check_oc" || fail 'mergex-check.md diverge entre Claude Code e OpenCode'
+grep -Fq 'registrar → validar → checkpoint predecessores → verificar retomada →' "$integ_sprintx" \
+  || fail 'integração SprintX sem a primeira metade da ordem operacional'
+grep -Fq 'aplicar/checkpoint retomada → pre-e2 → E2 completo' "$integ_sprintx" \
+  || fail 'integração SprintX sem a segunda metade da ordem operacional'
+grep -Fq 'Versões anteriores da MergeX não entendem esse manifesto' "$integ_sprintx" \
+  || fail 'integração SprintX não registra a incompatibilidade anterior'
+grep -Fq 'ExpxDev só pode instalar a combinação depois de os PRs correspondentes' "$integ_sprintx" \
+  || fail 'integração SprintX não fecha o handoff coordenado ao ExpxDev'
+grep -Fq 'MergeX anterior não entende o manifesto' README.md \
+  || fail 'README não registra a compatibilidade coordenada'
+grep -Fq 'references/13-predecessores-sprintx.md' "$skill" \
+  || fail 'SKILL.md não aponta para 13-predecessores-sprintx.md'
+if grep -REn -- 'evento:[[:space:]]*"?(predecessor_registrado|predecessores_validados|retomada_predecessores)"?' \
+    "$pred_ref" "$pred_sh" "$retoma_pred_sh"; then
+  fail 'predecessores SprintX inventam evento fora do vocabulário ExpxDev'
+fi
+
+# Nenhum executável da skill aceita opção de bypass (varredura; sem guarda).
+# Limite: só pega a opção longa escrita literalmente em scripts/*.sh (não lê
+# opção curta, nome montado em variável, variável de ambiente nem os hooks); o
+# que ela não cobre fica com as varreduras por executável acima e com os testes.
+if grep -nE -- '--(force|sem-prova|bypass)' "$SKILL_DIR"/scripts/*.sh; then fail "flag de bypass encontrada"; fi
 
 printf 'contract checks passed\n'

@@ -11,6 +11,21 @@ vocabulário do índice (`alta`/`media`/`baixa`), não o nome da faixa em prosa:
 OBRIGATÓRIO → `alta`, LEITURA RÁPIDA → `media`, DISPENSÁVEL → `baixa`. As duas listas são
 `[]` enquanto o E3 não rodou; nunca omita a chave.
 
+Numa entrega nova, `commits` nasce `[]` e o primeiro E1 grava `seq: 1`. **Não escreva item de
+`commits` à mão**: o escritor é `scripts/sequencia-de-commits.sh --acrescentar`, que calcula o
+próximo `seq` e acrescenta no fim. Toda gravação nova leva `seq`; item legado (sem `seq`) só
+existe como **prefixo** de lista antiga, e não há backfill — ele nunca ganha a chave
+retroativamente (`references/00-schema.md`, "A ordem de registro").
+
+`falhas_portao` e `causa` nunca são omitidas (`references/00-schema.md`, "A causa do
+bloqueio"). `causa` é `null` salvo em `estado: bloqueado`, onde é obrigatória e sai do script,
+nunca da mão. Confira com `scripts/causa-do-portao.sh --validar` antes de commitar.
+
+`base_validada_sha`, `origem_base`, `reconciliacoes` e `portao_sha` nunca são omitidas
+(`references/00-schema.md`; `references/11-reconciliacao-base.md`). O E0 grava a base por SHA;
+só o `reconciliacao-base.sh --registrar` a troca e acrescenta itens a `reconciliacoes`; só o
+`registrar-portao.sh` grava `portao_sha`. Nenhuma delas é escrita à mão.
+
 ---
 
 ---
@@ -26,8 +41,12 @@ estado: {{aberto | entregue | bloqueado}}
 versionado: {{true | false}}
 branch: {{nome da branch | null}}
 branch_base: {{nome da base | null}}
+base_validada_sha: {{sha de 40 hex de git merge-base HEAD <branch_base>, gravado no E0 | null sem versionador}}
+origem_base: {{registrada_e0 | inferida_legado | null sem versionador}}
+reconciliacoes: []
 commits:
-  - task: {{T-NN.MM}}
+  - seq: {{ordem de registro do E1: 1, 2, 3...}}
+    task: {{T-NN.MM}}
     commit: {{identificador curto}}
 modulo_afetado: [{{modulos em minuscula sem acento, ou vazio}}]
 arquivos_alterados: [{{o diff real: git diff --name-only <base>...HEAD, sem repeticao, ou vazio}}]
@@ -40,6 +59,9 @@ atencao:
   leitura_rapida: {{n}}
   dispensavel: {{n}}
 portao: {{pronto | bloqueado | null}}
+portao_sha: {{sha de 40 hex do HEAD que o E2 avaliou, gravado so por registrar-portao.sh | null}}
+falhas_portao: [{{as verificacoes com FALHA no E2: v1..v11, ou vN_sem_prova; vazio sem portao ou com PRONTO}}]
+causa: {{null | a causa derivada por scripts/causa-do-portao.sh --derivar, so com estado bloqueado}}
 desvios: []
 push_feito: {{true | false}}
 pr_url: {{url | null}}
@@ -65,8 +87,11 @@ entregue_em: {{AAAA-MM-DD | null}}
 
 ## Estado da entrega
 
+- Branch: {{nome}} — {{aberta pela mergex | retomada | adotada da skill de origem}}
+- Base: {{branch_base}} — {{informada pelo chamador | CONVENCOES.md | origin/HEAD | principal atual}}
 - Portão de prontidão: {{PRONTO | BLOQUEADO}}
 - Commits: {{n}}, um por task
+- Commit de artefatos de método: {{identificador curto | não feito}}
 - Atenção humana: {{x}} olho obrigatório, {{y}} leitura rápida, {{z}} dispensável
 - Push: {{feito | não feito — motivo}}
 - Pull request: {{estado}}
