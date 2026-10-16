@@ -80,9 +80,15 @@ grep -Fq 'Resultado ausente **não** é CI ausente' "$review" \
 # A definicao NORMATIVA (a linha | R1 | da tabela) tem que dizer o mesmo: o texto
 # explicativo sozinho nao basta, e uma linha R1 contraditoria passaria.
 r1="$(grep -F '| R1 |' "$review")"
-printf '%s\n' "$r1" | grep -Fq '`n/a` (sem CI configurado: nenhuma configuração de CI no HEAD)' \
+printf '%s\n' "$r1" | grep -Fq '`n/a` (sem CI configurado: nenhuma configuração de CI no HEAD e nenhum check reportado pela plataforma para ele' \
   && printf '%s\n' "$r1" | grep -Fq 'inclusive o pipeline que ainda não anexou ao HEAD' \
   || fail 'the normative R1 row does not define n/a as no CI config in HEAD and a not-yet-attached pipeline as NAO VERIFICAVEL'
+# CI externo (Jenkins, CircleCI, app de checks) nao deixa arquivo de workflow no
+# HEAD: um check reportado pela plataforma tambem e CI configurado, e vermelho e FALHOU
+printf '%s\n' "$r1" | grep -Fq 'check reportado pela plataforma para o HEAD também é CI configurado' \
+  || fail 'the normative R1 row lets an external CI check (no workflow file) become n/a'
+grep -Fq 'Check reportado é CI configurado' "$review" \
+  || fail 'the CI source row does not count a reported external check as configured CI'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
