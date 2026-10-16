@@ -56,26 +56,24 @@ viola_ou_avisa() {
 # KiB com arredondamento para cima, só para exibir
 kib() { echo $((($1 + 1023) / 1024)); }
 
-# linhas alteradas e arquivos de um diff, sem os gerados. O numstat é separado
-# por TAB e o caminho é o terceiro campo inteiro: caminho com espaço não quebra.
-# Na renomeacao o campo traz os dois nomes (`a => b` ou `pre/{a => b}/suf`): o
-# FATIA_IGNORAR vale para o DESTINO, como no F4; sem isto, um arquivo tirado de
-# fixtures/candidatos/ para um caminho revisado ficaria fora da conta.
+# linhas alteradas e arquivos de um diff, sem os gerados. O numstat vem com -z: o
+# caminho e um campo terminado por NUL, entao espaco, `=>` ou quebra no nome nao o
+# confundem. Na renomeacao o campo do caminho vem vazio e seguem origem e destino;
+# o FATIA_IGNORAR vale para o DESTINO, como no F4 — sem isto, um arquivo tirado de
+# fixtures/candidatos/ para um caminho revisado ficaria fora da conta. A saida do
+# git vai para um arquivo, nao para um pipe: um diff que falha tem de falhar aqui.
 soma() { # <argumentos do git diff>
-  git -c core.quotepath=off diff --numstat -M "$@" | IGN="$ignorar" awk -F'\t' '
-    $1 == "-" { l = 0 } $1 != "-" { l = $1 + $2 }
-    {
-      p = $3
-      if (p ~ / => /) {
-        if (match(p, /\{[^}]* => [^}]*\}/)) {
-          meio = substr(p, RSTART + 1, RLENGTH - 2); sub(/.* => /, "", meio)
-          p = substr(p, 1, RSTART - 1) meio substr(p, RSTART + RLENGTH)
-          gsub(/\/\/+/, "/", p); sub(/^\//, "", p)
-        } else sub(/.* => /, "", p)
-      }
-      if (p ~ ENVIRON["IGN"]) next; linhas += l; n++
-    }
-    END { printf "%d %d\n", linhas + 0, n + 0 }'
+  local t a d p linhas=0 n=0
+  t="$(mktemp)" || return 1
+  git -c core.quotepath=off diff --numstat -z -M "$@" > "$t" || { rm -f "$t"; return 1; }
+  while IFS=$'\t' read -r -d '' a d p; do
+    [ -n "$p" ] || { read -r -d '' p; read -r -d '' p; }
+    [[ $p =~ $ignorar ]] && continue
+    [ "$a" = - ] || linhas=$((linhas + a + d))
+    n=$((n + 1))
+  done < "$t"
+  rm -f "$t"
+  printf '%d %d\n' "$linhas" "$n"
 }
 
 # a medida vai para uma variavel, nunca direto num `read < <(...)`: a substituicao

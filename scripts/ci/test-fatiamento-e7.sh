@@ -112,6 +112,17 @@ printf 'nova %s\n' $(seq 1 300) >> "$tmp/src/q.md"; g add -A; g commit -q -m "pr
 saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=250 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" renomeia renomeia-pr 2>&1)" \
   && quebra 'renomeacao de fixtures/candidatos para src/ ficou fora da conta' \
   || { case "$saida" in *"F2:"*) passa 'renomeacao de fixtures/candidatos para src/ conta pelo destino (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
+# caminho que so PARECE renomeacao (` => ` no nome) nao e cortado ate o FATIA_IGNORAR
+g switch -q -c seta main
+mkdir -p "$tmp/docs"
+if printf 'linha %s\n' $(seq 1 450) > "$tmp/docs/x => package-lock.json" 2>/dev/null; then
+  g add -A; g commit -q -m "nome com seta"
+  saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=250 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main seta 2>&1)" \
+    && quebra "o arquivo 'docs/x => package-lock.json' saiu da conta como se fosse package-lock.json" \
+    || { case "$saida" in *"F2:"*) passa "nome com ' => ' conta pelo caminho inteiro (F2)" ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
+else
+  passa "nome com ' => ': pulado, o sistema de arquivos nao aceita '>' (o CI em Linux cobre)"
+fi
 # e a raiz de historia sem pai (merge de historia sem relacao) mede contra a arvore vazia
 g switch -q --orphan raiz-solta; printf 'linha\n%.0s' $(seq 1 350) > "$tmp/solta.md"; g add solta.md; g commit -q -m "raiz solta"
 g switch -q -c com-raiz main; g merge -q --allow-unrelated-histories -m "junta raiz" raiz-solta
