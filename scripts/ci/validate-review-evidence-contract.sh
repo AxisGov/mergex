@@ -24,6 +24,16 @@ grep -Fq 'O E9 NUNCA executa automaticamente.' "$review" \
 grep -Fq 'só roda por chamada explícita do desenvolvedor' "$claude_cmd" \
   || fail 'Claude command no longer requires explicit developer invocation'
 
+# Passo 1 lista TODOS os PRs abertos: `gh pr list` para em 30 (e `--limit N` so
+# desloca o corte), e o criterio de saida do E9 exige todos.
+grep -Fq 'gh api --paginate "repos/{owner}/{repo}/pulls?state=open&per_page=100"' "$review" \
+  || fail '09-revisao.md Passo 1 does not page through every open PR'
+grep -Fq 'glab api --paginate "projects/:id/merge_requests?state=opened&per_page=100"' "$review" \
+  || fail '09-revisao.md Passo 1 does not page through every open MR on GitLab'
+if grep -n -E '^[[:space:]]*gh pr list\b' "$review"; then
+  fail '09-revisao.md lists PRs with `gh pr list` (stops at 30 by default)'
+fi
+
 # No E10 stage may be introduced in active skill/command/reference contracts.
 # Detects E10 declared as a stage: in a heading, in bold, or as the first token of a line after
 # optional structural markers (blockquote, list bullet, ordered item, table cell, heading, bold).
