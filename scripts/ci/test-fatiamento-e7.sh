@@ -28,7 +28,15 @@ if [ -n "$l15" ] && [ -n "$l2" ] && [ "$l15" -lt "$l2" ]; then
 else
   quebra 'o Passo 1.5 nao existe ou nao vem antes da abertura'
 fi
-ign_e7="$(sed -n 's/^FATIA_IGNORAR="\${FATIA_IGNORAR:-\(.*\)}" \\$/\1/p' "$e7")"
+# o FATIA_IGNORAR que o E7 monta, avaliando o trecho real: sem padrao do projeto, e com um
+# (que soma ao do E7, nunca o substitui — os artefatos de metodo saem da medida sempre)
+ign_trecho="$(sed -n '/^e7_ignorar=/p; /^FATIA_IGNORAR=/{s/ \\$//;p;}' "$e7")"
+ign_e7="$(unset FATIA_IGNORAR; eval "$ign_trecho"; printf '%s' "${FATIA_IGNORAR:-}")"
+ign_proj="$(FATIA_IGNORAR='^extra/'; eval "$ign_trecho"; printf '%s' "$FATIA_IGNORAR")"
+case "$ign_proj" in
+  '^extra/|'*'docs/(sprintx|entregas|eventos)/'*) passa 'o FATIA_IGNORAR do projeto soma ao do E7, sem tirar os artefatos de metodo' ;;
+  *) quebra "o FATIA_IGNORAR do projeto substitui o do E7: '$ign_proj'" ;;
+esac
 [ -n "$ign_e7" ] && passa 'o E7 declara o FATIA_IGNORAR do projeto' \
   || quebra 'o E7 herda o FATIA_IGNORAR do ExpxDev (fixtures/candidatos fora da conta)'
 grep -Fq 'fatiamento-da-pr.sh "$base" "$publicado"' "$e7" \
@@ -79,6 +87,24 @@ printf 'linha\n%.0s' $(seq 1 450) > "$tmp/fixtures/candidatos/x.md"; g add -A; g
 saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main candidatos 2>&1)" \
   && quebra 'com o FATIA_IGNORAR do E7, 450 linhas em fixtures/candidatos passaram' \
   || { case "$saida" in *"F2:"*) passa 'com o FATIA_IGNORAR do E7, fixtures/candidatos conta (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
+# artefatos de metodo (docs/sprintx, docs/entregas, docs/eventos) ficam fora da medida;
+# o codigo ao lado deles continua contando
+g switch -q -c metodo main
+mkdir -p "$tmp/docs/sprintx/features/x/sprint-01" "$tmp/docs/entregas/x" "$tmp/docs/eventos"
+for i in $(seq 1 25); do printf 'linha\n%.0s' $(seq 1 40) > "$tmp/docs/sprintx/features/x/sprint-01/a$i.md"; done
+printf 'linha\n%.0s' $(seq 1 300) > "$tmp/docs/entregas/x/ENTREGA.md"
+printf '{}\n%.0s' $(seq 1 300) > "$tmp/docs/eventos/x.jsonl"
+printf 'codigo\n%.0s' $(seq 1 50) > "$tmp/app.ts"; g add -A; g commit -q -m metodo
+if (cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main metodo >/dev/null 2>&1); then
+  passa 'artefatos de metodo (27 arquivos, 1600 linhas) ficam fora do F2 do E7'
+else
+  quebra 'os artefatos de metodo contaram no F2 do E7'
+fi
+g switch -q -c metodo-e-codigo metodo
+printf 'codigo\n%.0s' $(seq 1 400) > "$tmp/app2.ts"; g add -A; g commit -q -m codigo
+saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main metodo-e-codigo 2>&1)" \
+  && quebra 'o codigo ao lado dos artefatos de metodo saiu da conta' \
+  || { case "$saida" in *"F2:"*) passa 'o codigo ao lado dos artefatos de metodo continua contando (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
 
 # medicao que falha nao e PR limpo: um objeto ausente faz o `git diff` falhar
 # depois de as refs resolverem, e o script sai 2 (nao mediu), nunca 0
@@ -169,6 +195,20 @@ base_do_e7() { # <branch_base> — roda o trecho do E7 ate o calculo da base, im
 for bb in main origin/HEAD upstream/main refs/remotes/upstream/main estreito/main; do
   [ "$(base_do_e7 "$bb")" = "$atual" ] && passa "branch_base $bb mede contra a ponta atual do remoto" \
     || quebra "branch_base $bb mediu contra outra base (ref velha?)"
+done
+# origin/HEAD vira o NOME da branch padrao do remoto, nao `HEAD`: o `gh pr create
+# --base "$bb"` e a instrucao manual do passo 3 recebem esse $bb, e `HEAD` nao e
+# branch no servico. A padrao muda para `padrao` para nao passar por acaso com `main`
+git -C "$aux/principal.git" branch padrao main
+git -C "$aux/principal.git" symbolic-ref HEAD refs/heads/padrao
+bb_do_e7() { # <branch_base> — roda o trecho do E7 ate o calculo da base, imprime $bb
+  sed -n '/^rb="\$remoto"/,/^base=/p' "$e7" | sed "s|<branch_base>|$1|" > "$aux/bb.sh"
+  (cd "$aux/dev" && remoto=origin && . "$aux/bb.sh" >/dev/null 2>&1 && printf '%s' "$bb")
+}
+for par in 'origin/HEAD|padrao' 'refs/remotes/upstream/HEAD|padrao' 'main|main'; do
+  r="$(bb_do_e7 "${par%%|*}")"
+  [ "$r" = "${par#*|}" ] && passa "branch_base ${par%%|*} abre o PR contra '${par#*|}'" \
+    || quebra "branch_base ${par%%|*} deu bb='$r', esperado '${par#*|}' (o gh pr create receberia isso)"
 done
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
