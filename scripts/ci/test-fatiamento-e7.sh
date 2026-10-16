@@ -28,7 +28,15 @@ if [ -n "$l15" ] && [ -n "$l2" ] && [ "$l15" -lt "$l2" ]; then
 else
   quebra 'o Passo 1.5 nao existe ou nao vem antes da abertura'
 fi
-ign_e7="$(sed -n 's/^FATIA_IGNORAR="\${FATIA_IGNORAR:-\(.*\)}" \\$/\1/p' "$e7")"
+# o FATIA_IGNORAR que o E7 monta, avaliando o trecho real: sem padrao do projeto, e com um
+# (que soma ao do E7, nunca o substitui — os artefatos de metodo saem da medida sempre)
+ign_trecho="$(sed -n '/^e7_ignorar=/p; /^FATIA_IGNORAR=/{s/ \\$//;p;}' "$e7")"
+ign_e7="$(unset FATIA_IGNORAR; eval "$ign_trecho"; printf '%s' "${FATIA_IGNORAR:-}")"
+ign_proj="$(FATIA_IGNORAR='^extra/'; eval "$ign_trecho"; printf '%s' "$FATIA_IGNORAR")"
+case "$ign_proj" in
+  '^extra/|'*'docs/(sprintx|entregas|eventos)/'*) passa 'o FATIA_IGNORAR do projeto soma ao do E7, sem tirar os artefatos de metodo' ;;
+  *) quebra "o FATIA_IGNORAR do projeto substitui o do E7: '$ign_proj'" ;;
+esac
 [ -n "$ign_e7" ] && passa 'o E7 declara o FATIA_IGNORAR do projeto' \
   || quebra 'o E7 herda o FATIA_IGNORAR do ExpxDev (fixtures/candidatos fora da conta)'
 grep -Fq 'fatiamento-da-pr.sh "$base" "$publicado"' "$e7" \

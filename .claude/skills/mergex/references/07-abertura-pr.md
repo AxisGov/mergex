@@ -82,14 +82,16 @@ if [ "$bb" = HEAD ]; then
 fi
 git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 1; }
 base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
-FATIA_IGNORAR="${FATIA_IGNORAR:-(^|/)package-lock\.json$|^docs/(sprintx|entregas|eventos)/}" \
+e7_ignorar='(^|/)package-lock\.json$|^docs/(sprintx|entregas|eventos)/'
+FATIA_IGNORAR="${FATIA_IGNORAR:+$FATIA_IGNORAR|}$e7_ignorar" \
   bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 ```
 
 O `FATIA_IGNORAR` vai explícito porque o padrão do script é o do ExpxDev, que também tira
 `fixtures/candidatos/` da conta; no projeto do desenvolvedor esse caminho pode ser código
 revisado. Gerado que o projeto exclui da revisão automática entra aqui só se o desenvolvedor
-declarar o padrão.
+declarar o padrão — e o padrão dele **soma** ao do E7, nunca o substitui: os artefatos de
+método saem da medida sempre.
 
 Os **artefatos de método** — `docs/sprintx/`, `docs/entregas/`, `docs/eventos/`, o que a
 `sprintx` e esta skill gravam na branch — ficam fora da medida (exceção "artefato de método"
@@ -97,8 +99,9 @@ do F6 do `expx-fatiamento`). Eles entram no PR para rastreabilidade, mas o plane
 feature sozinho passa de centenas de arquivos e dezenas de milhares de linhas: medi-los
 reprovaria todo PR, e o que o revisor precisa ler é o código. Fora da medida também deve ser
 fora da revisão automática: no CodeAnt, os mesmos três caminhos vão na exclusão de arquivos
-do painel do projeto (Code Review → Configuration → Exclusions → Exclude Files), e o
-`PR.md` diz isso na seção de atenção quando o projeto ainda não os exclui.
+do painel do projeto (Code Review → Configuration → Exclusions → Exclude Files). A mergex
+não enxerga o painel: quando o PR leva artefatos de método, o relato do E7 ao desenvolvedor
+lembra os três padrões a excluir lá — o `PR.md` não, que sai do E4 sem essa entrada.
 
 Saída `0`: siga para o passo 2 (ou 3, sem ferramenta); avisos (arquivo perto do limite) vão para a seção de atenção do
 `PR.md`, sem impedir. Saída `1`: o E7 **não abre o PR**. Um PR acima do limite não recebe
