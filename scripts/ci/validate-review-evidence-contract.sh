@@ -89,6 +89,11 @@ printf '%s\n' "$r1" | grep -Fq 'check reportado pela plataforma para o HEAD tamb
   || fail 'the normative R1 row lets an external CI check (no workflow file) become n/a'
 grep -Fq 'Check reportado é CI configurado' "$review" \
   || fail 'the CI source row does not count a reported external check as configured CI'
+# CI externo que ainda nao reportou nada para o HEAD so aparece como check obrigatorio
+# da protecao da base: sem conferir isso, ele viraria n/a e o gate passaria sem resultado
+printf '%s\n' "$r1" | grep -Fq 'nem check obrigatório na proteção da base' \
+  && grep -Fq 'check obrigatório sem resultado no HEAD é R1 `NÃO VERIFICÁVEL`' "$review" \
+  || fail 'R1 becomes n/a while the base protection requires a check that has not reported'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
