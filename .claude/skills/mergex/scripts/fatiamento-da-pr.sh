@@ -120,9 +120,12 @@ while IFS=$'\t' read -r st a b; do
   [[ $novo =~ $ignorar ]] && continue
   tipo="$(git -c core.quotepath=off diff --numstat "$mb" "$head" -- "$novo" | awk -F'\t' 'NR == 1 { print $1 }')"
   [ "$tipo" = "-" ] && continue   # binário: não é revisado como texto
-  tam_head="$(git cat-file -s "$head:$novo" 2>/dev/null || echo 0)"
+  # o arquivo existe no head (A/M/R): sem ler o tamanho dele nao ha medida, e um 0
+  # passaria por arquivo pequeno. No ancestral ele pode nao existir (A): ali, 0.
+  tam_head="$(git cat-file -s "$head:$novo" 2>/dev/null)" \
+    && lin_head="$(git cat-file -p "$head:$novo" 2>/dev/null | awk 'END { print NR }')" \
+    || { echo "nao foi possivel medir $novo no head" >&2; exit 2; }
   tam_base="$(git cat-file -s "$mb:$antigo" 2>/dev/null || echo 0)"
-  lin_head="$(git cat-file -p "$head:$novo" 2>/dev/null | awk 'END { print NR }')"
   lin_base="$(git cat-file -p "$mb:$antigo" 2>/dev/null | awk 'END { print NR }')"
 
   # linhas por `awk NR`, nao `wc -l`: o wc conta quebras, e a ultima linha sem
