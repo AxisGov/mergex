@@ -93,4 +93,10 @@ grep -Fq 'Check reportado é CI configurado' "$review" \
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
 
+# REVIEW_REQUIRED nao e pedido de mudanca (R2 nao muda), mas o servico recusa o
+# merge: o PR nao e oferecido, vai para os inelegiveis com o motivo nomeado
+grep -Fq '`REVIEW_REQUIRED` não muda R2, mas o serviço recusaria o merge' "$review" \
+  && grep -Fq 'review obrigatório pendente (`reviewDecision: REVIEW_REQUIRED`' "$review" \
+  || fail 'a PR with reviewDecision REVIEW_REQUIRED can be offered for a merge the service will reject'
+
 printf 'contract checks passed\n'

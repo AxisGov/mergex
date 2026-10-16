@@ -321,6 +321,9 @@ Ordem de fonte:
 1. **Decisão efetiva do PR, quando o serviço expõe** — no GitHub, `reviewDecision`
    (`CHANGES_REQUESTED` bloqueia; `APPROVED`/`REVIEW_REQUIRED`/vazio não é bloqueio de R2 por
    si só); em outro serviço, o campo que diz se há pedido de mudança ativo no merge request.
+   `REVIEW_REQUIRED` não muda R2, mas o serviço recusaria o merge: a aprovação que a proteção da
+   branch exige ainda não veio. O PR vai para os inelegíveis do passo 4 com o motivo `review
+   obrigatório pendente` — a mergex não aprova e não pede confirmação de um merge que vai falhar.
 2. **Reconstrução por reviewer**, quando a decisão efetiva não existir ou não cobrir o caso
    (por exemplo, repositório sem regra de review obrigatório): a partir de `latestReviews` e
    `reviews` (ou equivalente), para cada reviewer, o último review **com decisão**
@@ -689,7 +692,7 @@ Some, em ordem lexicográfica de prioridade (o primeiro critério que difere dec
 
 **Declare o critério na saída**, sempre. A ordem sem o critério é opinião; com o critério, é auditável.
 
-PRs **inelegíveis para merge** — rascunho, integração contínua vermelha, ou `REVIEW EVIDENCE: BLOQUEADO` por **bloqueio corrigível por remediação** (ver "Dois tipos de bloqueio", acima) — aparecem na lista, **no fim**, marcados com o motivo, e **não entram na condução do passo 7**.
+PRs **inelegíveis para merge** — rascunho, integração contínua vermelha, review obrigatório pendente (`reviewDecision: REVIEW_REQUIRED` no GitHub; aprovações exigidas ainda não dadas no GitLab), ou `REVIEW EVIDENCE: BLOQUEADO` por **bloqueio corrigível por remediação** (ver "Dois tipos de bloqueio", acima) — aparecem na lista, **no fim**, marcados com o motivo, e **não entram na condução do passo 7**.
 
 PRs com `REVIEW EVIDENCE: BLOQUEADO` **apenas** por **bloqueio confirmável humanamente nesta execução**, e sem nenhum outro impedimento (não rascunho, CI não vermelha), ficam na fila pela mesma ordem de impacto, marcados `confirmação humana necessária`, e entram no passo 7 **só** na condução limitada: pedir as confirmações específicas, recalcular o gate, e seguir apenas se o resultado for `SATISFEITO`.
 
