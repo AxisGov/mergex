@@ -79,6 +79,24 @@ printf 'linha\n%.0s' $(seq 1 450) > "$tmp/fixtures/candidatos/x.md"; g add -A; g
 saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main candidatos 2>&1)" \
   && quebra 'com o FATIA_IGNORAR do E7, 450 linhas em fixtures/candidatos passaram' \
   || { case "$saida" in *"F2:"*) passa 'com o FATIA_IGNORAR do E7, fixtures/candidatos conta (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
+# artefatos de metodo (docs/sprintx, docs/entregas, docs/eventos) ficam fora da medida;
+# o codigo ao lado deles continua contando
+g switch -q -c metodo main
+mkdir -p "$tmp/docs/sprintx/features/x/sprint-01" "$tmp/docs/entregas/x" "$tmp/docs/eventos"
+for i in $(seq 1 25); do printf 'linha\n%.0s' $(seq 1 40) > "$tmp/docs/sprintx/features/x/sprint-01/a$i.md"; done
+printf 'linha\n%.0s' $(seq 1 300) > "$tmp/docs/entregas/x/ENTREGA.md"
+printf '{}\n%.0s' $(seq 1 300) > "$tmp/docs/eventos/x.jsonl"
+printf 'codigo\n%.0s' $(seq 1 50) > "$tmp/app.ts"; g add -A; g commit -q -m metodo
+if (cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main metodo >/dev/null 2>&1); then
+  passa 'artefatos de metodo (27 arquivos, 1600 linhas) ficam fora do F2 do E7'
+else
+  quebra 'os artefatos de metodo contaram no F2 do E7'
+fi
+g switch -q -c metodo-e-codigo metodo
+printf 'codigo\n%.0s' $(seq 1 400) > "$tmp/app2.ts"; g add -A; g commit -q -m codigo
+saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main metodo-e-codigo 2>&1)" \
+  && quebra 'o codigo ao lado dos artefatos de metodo saiu da conta' \
+  || { case "$saida" in *"F2:"*) passa 'o codigo ao lado dos artefatos de metodo continua contando (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
 
 # medicao que falha nao e PR limpo: um objeto ausente faz o `git diff` falhar
 # depois de as refs resolverem, e o script sai 2 (nao mediu), nunca 0
