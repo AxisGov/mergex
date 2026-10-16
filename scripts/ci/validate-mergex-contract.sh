@@ -1505,6 +1505,14 @@ grep -Fq 'o E3 não classifica' "$atencao" || fail '03-atencao-humana não diz q
 # os arquivos de trabalho do E3 vão para um temporário, nunca para a raiz da árvore
 grep -Fq 'mktemp -d' "$atencao" || fail '03-atencao-humana não manda verificar.out e reconciliados.tsv para um temporário (mktemp -d)'
 grep -Eq '> (verificar\.out|reconciliados\.tsv)' "$atencao" && fail '03-atencao-humana ainda grava verificar.out ou reconciliados.tsv na raiz da árvore'
+# o revisor-diff recebe a lista de reconciliados e a passa ao classificador: sem
+# --reconciliados na chamada dele, os reconciliados nao ganham O10
+grep -Fq 'a lista de reconciliados (`$e3/reconciliados.tsv`' "$atencao" \
+  || fail '03-atencao-humana não passa a lista de reconciliados ao revisor-diff'
+for f in "$agente_cl" "$agente_oc"; do
+  grep -Fq -- '--base <base> --reconciliados <reconciliados.tsv>' "$f" \
+    || fail "$f não passa --reconciliados ao classificador (os reconciliados ficam sem O10)"
+done
 # E7: a validade sobre o SHA publicado, que tem de ser o enviado no E6; remoto e
 # ref vêm do upstream da branch, a busca é conferida e a divergência aborta
 grep -Fq -- '--rev "$publicado"' "$abertura_pr" || fail '07-abertura-pr não roda a validade sobre a ponta remota (--rev "$publicado") (DM-186)'
