@@ -112,9 +112,11 @@ Rascunho é o padrão: no fluxo normal, a mergex entrega antes do QA rodar. Um P
 ### O comando
 
 Título: o do trabalho — o mesmo do `ORQUESTRADOR.md`. Corpo: o conteúdo de `PR.md`, integralmente.
+A base é o `$bb` do passo 1.5 — a `branch_base` já sem o remoto e sem `refs/...` —, nunca a
+`branch_base` crua: o serviço não conhece `upstream/main` como branch, e a abertura falharia.
 
 ```
-gh pr create --base <branch-base> --head <branch> --title "<título>" --body-file docs/entregas/<trabalho_id>/PR.md --draft
+gh pr create --base "$bb" --head <branch> --title "<título>" --body-file docs/entregas/<trabalho_id>/PR.md --draft
 ```
 
 Sem `--draft` quando o QA já aprovou.
@@ -145,7 +147,7 @@ O trabalho está entregue:
   descrição pronta em docs/entregas/<trabalho_id>/PR.md
   pacote de QA em docs/entregas/<trabalho_id>/QA-PACOTE.md
 
-Para abrir o PR: crie o pull request de <branch> para <branch-base> e cole o
+Para abrir o PR: crie o pull request de <branch> para <$bb do passo 1.5> e cole o
 conteúdo de PR.md na descrição.
 ```
 

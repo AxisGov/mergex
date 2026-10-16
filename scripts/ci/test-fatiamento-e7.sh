@@ -45,6 +45,9 @@ grep -Fq 'rb="$remoto"; bb="<branch_base>"' "$e7" && grep -Fq 'git fetch "$rb" "
   && grep -Fq 'git rev-parse --verify "FETCH_HEAD^{commit}"' "$e7" \
   && passa 'a base vem do remoto do upstream, buscada agora' \
   || quebra 'a base nao e buscada no remoto do upstream (ref antiga ou fork mediria errado)'
+grep -Fq 'gh pr create --base "$bb"' "$e7" && ! grep -Fq 'gh pr create --base <branch-base>' "$e7" \
+  && passa 'o gh pr create recebe a base sem o remoto ($bb do passo 1.5)' \
+  || quebra 'o gh pr create recebe a branch_base crua (upstream/main nao e branch no GitHub)'
 grep -Fq 'o passo 1.5 roda do mesmo jeito, e só depois dele vá para o passo 3' "$e7" \
   && passa 'servico sem ferramenta tambem passa pela medicao' \
   || quebra 'o caminho manual (passo 3) contorna a medicao'
