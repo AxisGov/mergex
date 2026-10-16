@@ -170,6 +170,20 @@ for bb in main origin/HEAD upstream/main refs/remotes/upstream/main estreito/mai
   [ "$(base_do_e7 "$bb")" = "$atual" ] && passa "branch_base $bb mede contra a ponta atual do remoto" \
     || quebra "branch_base $bb mediu contra outra base (ref velha?)"
 done
+# origin/HEAD vira o NOME da branch padrao do remoto, nao `HEAD`: o `gh pr create
+# --base "$bb"` e a instrucao manual do passo 3 recebem esse $bb, e `HEAD` nao e
+# branch no servico. A padrao muda para `padrao` para nao passar por acaso com `main`
+git -C "$aux/principal.git" branch padrao main
+git -C "$aux/principal.git" symbolic-ref HEAD refs/heads/padrao
+bb_do_e7() { # <branch_base> — roda o trecho do E7 ate o calculo da base, imprime $bb
+  sed -n '/^rb="\$remoto"/,/^base=/p' "$e7" | sed "s|<branch_base>|$1|" > "$aux/bb.sh"
+  (cd "$aux/dev" && remoto=origin && . "$aux/bb.sh" >/dev/null 2>&1 && printf '%s' "$bb")
+}
+for par in 'origin/HEAD|padrao' 'refs/remotes/upstream/HEAD|padrao' 'main|main'; do
+  r="$(bb_do_e7 "${par%%|*}")"
+  [ "$r" = "${par#*|}" ] && passa "branch_base ${par%%|*} abre o PR contra '${par#*|}'" \
+    || quebra "branch_base ${par%%|*} deu bb='$r', esperado '${par#*|}' (o gh pr create receberia isso)"
+done
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
