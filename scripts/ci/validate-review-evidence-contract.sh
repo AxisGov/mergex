@@ -104,4 +104,9 @@ grep -Fq '`REVIEW_REQUIRED` não muda R2, mas o serviço recusaria o merge' "$re
 grep -Fq 'NÃO PERSISTIDO (handoff NÃO VERIFICÁVEL;' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
   || fail 'TEMPLATE-revisao.md does not mark an unpersisted REVIEW REMEDIATION handoff as NAO VERIFICAVEL'
 
+# o comando nao pode exigir recomendacao de todo PR: PR BLOQUEADO nao recebe
+# recomendacao de merge (09-revisao.md, passo 6; TEMPLATE-revisao.md)
+grep -Fq 'a recomendação em uma linha (ausente quando o gate está `BLOQUEADO`)' "$claude_cmd" \
+  || fail 'mergex-revisar asks for a recommendation on every PR, including BLOQUEADO'
+
 printf 'contract checks passed\n'
