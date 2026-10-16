@@ -73,6 +73,36 @@ saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash 
   && quebra 'com o FATIA_IGNORAR do E7, 450 linhas em fixtures/candidatos passaram' \
   || { case "$saida" in *"F2:"*) passa 'com o FATIA_IGNORAR do E7, fixtures/candidatos conta (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
 
+# medicao que falha nao e PR limpo: um objeto ausente faz o `git diff` falhar
+# depois de as refs resolverem, e o script sai 2 (nao mediu), nunca 0
+falha_ao_medir() { # <desc> <branch> — espera saida 2
+  local rc
+  (cd "$tmp" && bash "$script" main "$2" >/dev/null 2>&1); rc=$?
+  [ "$rc" = 2 ] && passa "$1: sai 2" || quebra "$1: saiu $rc, esperado 2 (nao mediu)"
+}
+sem_objeto() { # <branch> <caminho> — apaga o blob solto do caminho na ponta
+  local o; o="$(git -C "$tmp" rev-parse "$1:$2")"
+  rm -f "$tmp/.git/objects/${o:0:2}/${o:2}"
+}
+g switch -q -c sem-blob-pr main
+printf 'linha\n%.0s' $(seq 1 30) > "$tmp/perdido.md"; g add -A; g commit -q -m "blob que some"
+sem_objeto sem-blob-pr perdido.md
+falha_ao_medir 'git diff falha na PR inteira (F2)' sem-blob-pr
+# F3: o blob some num commit do meio; a PR inteira mede, o commit nao
+g switch -q -c sem-blob-commit main
+printf 'linha\n%.0s' $(seq 1 350) > "$tmp/meio.md"; g add -A; g commit -q -m "commit de 350 linhas"
+o_meio="$(git -C "$tmp" rev-parse HEAD:meio.md)"
+printf 'curto\n' > "$tmp/meio.md"; g add -A; g commit -q -m "encurta"
+rm -f "$tmp/.git/objects/${o_meio:0:2}/${o_meio:2}"
+falha_ao_medir 'git diff falha num commit (F3)' sem-blob-commit
+# e a raiz de historia sem pai (merge de historia sem relacao) mede contra a arvore vazia
+g switch -q --orphan raiz-solta; printf 'linha\n%.0s' $(seq 1 350) > "$tmp/solta.md"; g add solta.md; g commit -q -m "raiz solta"
+g switch -q -c com-raiz main; g merge -q --allow-unrelated-histories -m "junta raiz" raiz-solta
+saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=9000 bash "$script" main com-raiz 2>&1)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *"F3:"*) true ;; *) false ;; esac \
+  && passa 'commit raiz no intervalo e medido contra a arvore vazia (F3)' \
+  || quebra "commit raiz no intervalo: saiu $rc: $saida"
+
 # o trecho do E7 que resolve a base, rodado de verdade: branch_base com e sem o
 # remoto no nome (a base informada pelo chamador no E0 pode vir `upstream/main`)
 mkdir -p "$aux/clone"; git -C "$aux/clone" init -q

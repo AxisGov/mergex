@@ -12,7 +12,8 @@
 # Compara <base>...<head> e falha, com a lista de violações, em F2 (PR: linhas e
 # arquivos), F3 (linhas por commit) e F4 (tamanho de arquivo, em KB e em linhas;
 # acima do limite o arquivo não cresce, com tolerância POR PR). Os limites e as
-# exceções (FATIA_*) estão no contrato. Saída: 0 sem violação, 1 com, 2 uso.
+# exceções (FATIA_*) estão no contrato. Saída: 0 sem violação, 1 com, 2 uso ou
+# medição impossível (ref inexistente, sem ancestral comum, `git diff` que falha).
 
 set -uo pipefail
 
@@ -64,16 +65,29 @@ soma() { # <argumentos do git diff>
     END { printf "%d %d\n", linhas + 0, n + 0 }'
 }
 
+# a medida vai para uma variavel, nunca direto num `read < <(...)`: a substituicao
+# de processo esconde a saida do `git diff`, e um diff que falha (objeto ausente)
+# imprimiria `0 0` e passaria por PR limpo. Nao mediu e saida 2, nunca 0.
+mede() { # <rotulo> <argumentos do git diff>
+  local r="$1"; shift
+  soma "$@" || { echo "nao foi possivel medir $r (git diff falhou)" >&2; exit 2; }
+}
+
 # F2 — a PR inteira
-read -r linhas_pr arquivos_pr < <(soma "$mb" "$head")
+med="$(mede "a PR $mb..$head" "$mb" "$head")" || exit 2
+read -r linhas_pr arquivos_pr <<< "$med"
 [ "$linhas_pr" -le "$max_linhas_pr" ] \
   || viola_ou_avisa "F2: a PR altera $linhas_pr linhas (limite $max_linhas_pr); divida por assunto"
 [ "$arquivos_pr" -le "$max_arquivos" ] \
   || viola_ou_avisa "F2: a PR altera $arquivos_pr arquivos (limite $max_arquivos); divida por assunto"
 
-# F3 — cada commit (merges ficam de fora: o conteúdo deles é o dos pais)
+# F3 — cada commit (merges ficam de fora: o conteúdo deles é o dos pais). Commit
+# sem pai (raiz de historia trazida por merge) mede contra a arvore vazia.
+vazia="$(git hash-object -t tree /dev/null)"
 while IFS= read -r c; do
-  read -r l _ < <(soma "$c^" "$c" 2>/dev/null || echo "0 0")
+  pai="$c^"; git rev-parse -q --verify "$c^" >/dev/null || pai="$vazia"
+  med="$(mede "o commit $c" "$pai" "$c")" || exit 2
+  read -r l _ <<< "$med"
   if [ "$l" -gt "$max_linhas_commit" ]; then
     viola_ou_avisa "F3: o commit $(git rev-parse --short "$c") altera $l linhas (limite $max_linhas_commit): $(git log -1 --format=%s "$c" | cut -c1-70)"
   fi
