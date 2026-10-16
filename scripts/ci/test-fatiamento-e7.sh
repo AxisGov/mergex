@@ -95,6 +95,16 @@ o_meio="$(git -C "$tmp" rev-parse HEAD:meio.md)"
 printf 'curto\n' > "$tmp/meio.md"; g add -A; g commit -q -m "encurta"
 rm -f "$tmp/.git/objects/${o_meio:0:2}/${o_meio:2}"
 falha_ao_medir 'git diff falha num commit (F3)' sem-blob-commit
+# renomeacao de fixtures/candidatos/ para caminho normal: o destino conta
+g switch -q -c renomeia main
+mkdir -p "$tmp/fixtures/candidatos" "$tmp/src"
+printf 'linha %s\n' $(seq 1 450) > "$tmp/fixtures/candidatos/r.md"; g add -A; g commit -q -m "fixture"
+g switch -q -c renomeia-pr renomeia
+g mv fixtures/candidatos/r.md src/q.md
+printf 'nova %s\n' $(seq 1 300) >> "$tmp/src/q.md"; g add -A; g commit -q -m "promove a fixture"
+saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=250 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" renomeia renomeia-pr 2>&1)" \
+  && quebra 'renomeacao de fixtures/candidatos para src/ ficou fora da conta' \
+  || { case "$saida" in *"F2:"*) passa 'renomeacao de fixtures/candidatos para src/ conta pelo destino (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
 # e a raiz de historia sem pai (merge de historia sem relacao) mede contra a arvore vazia
 g switch -q --orphan raiz-solta; printf 'linha\n%.0s' $(seq 1 350) > "$tmp/solta.md"; g add solta.md; g commit -q -m "raiz solta"
 g switch -q -c com-raiz main; g merge -q --allow-unrelated-histories -m "junta raiz" raiz-solta
