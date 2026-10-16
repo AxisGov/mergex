@@ -93,6 +93,11 @@ assunto (F1), um PR por fatia, na ordem das tasks. No passo 3 vale igual: o `PR.
 abrir à mão um PR que reprovou aqui. A exceção de movimento mecânico (F6) só vale
 quando **o desenvolvedor** a declara (`FATIA_EXCECAO=<motivo>`), nunca por decisão do E7.
 
+Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre o PR**. O script não conseguiu
+medir — ref inexistente, sem ancestral comum entre a base e o SHA publicado, `git diff` que
+falhou — e PR não medido não é PR dentro do limite. Registre o erro literal, deixe `pr_estado` em
+`null` e diga ao desenvolvedor o que impediu a medição; no passo 3 vale igual.
+
 ## Passo 2 — Abrir o PR
 
 ### Rascunho ou pronto para revisão
@@ -214,6 +219,7 @@ Siga para o E8.
 | Ferramenta não autenticada | Passo 3. **Nunca** rode `gh auth login` nem equivalente |
 | Serviço não suportado | Passo 3 |
 | `fatiamento-da-pr.sh` saiu `1` (PR acima de F2, F3 ou F4) | O E7 **não abre o PR**: registra as violações, `pr_estado` fica `null`, e o desenvolvedor recebe como dividir |
+| `fatiamento-da-pr.sh` saiu `2` ou outro código (não mediu: ref inexistente, sem ancestral comum, `git diff` falhou) | O E7 **não abre o PR**: registra o erro literal, `pr_estado` fica `null`; não medido não é dentro do limite |
 | Comando falhou por permissão | Passo 3, com o erro literal registrado |
 | PR já existe | Recupere a URL e registre; é retomada |
 | Sem push | O E7 não roda; siga para o E8 |

@@ -37,6 +37,10 @@ grep -Fq 'fatiamento-da-pr.sh "$base" "$publicado"' "$e7" \
 grep -Fq 'o E7 **não abre o PR**' "$e7" \
   && passa 'violacao impede a abertura' \
   || quebra 'o E7 nao diz que a violacao impede a abertura'
+grep -Fq 'Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre o PR**' "$e7" \
+  && grep -Fq '| `fatiamento-da-pr.sh` saiu `2`' "$e7" \
+  && passa 'medicao impossivel (saida 2) tambem impede a abertura' \
+  || quebra 'o E7 so trata as saidas 0 e 1 do fatiamento; a 2 (nao mediu) abriria sem medir'
 grep -Fq 'rb="$remoto"; bb="<branch_base>"' "$e7" && grep -Fq 'git fetch "$rb" "$bb"' "$e7" \
   && grep -Fq 'git rev-parse --verify "FETCH_HEAD^{commit}"' "$e7" \
   && passa 'a base vem do remoto do upstream, buscada agora' \
