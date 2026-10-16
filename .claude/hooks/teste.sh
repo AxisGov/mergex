@@ -32,10 +32,15 @@ case "$(uname -s 2>/dev/null)" in
 esac
 # Tempo em milissegundos, nao em $SECONDS: o $SECONDS conta viradas de segundo, e
 # uma execucao de 1,1 s que atravessa duas viradas mede 2 e reprova o "menos de 2 s".
-# Sem `date +%N` (macOS), cai no $SECONDS, como antes.
+# Fontes, da mais barata: $EPOCHREALTIME (bash 5), `date +%N` (GNU), perl
+# (presente no macOS, cujo date nao tem %N); so sem nenhuma, o $SECONDS de antes.
 agora_ms() {
-  local t; t="$(date +%s%N 2>/dev/null)"
-  case "$t" in ''|*[!0-9]*) echo $((SECONDS * 1000)) ;; *) echo $((t / 1000000)) ;; esac
+  local t
+  if [ -n "${EPOCHREALTIME:-}" ]; then t="${EPOCHREALTIME/[.,]/}"; echo $((10#$t / 1000)); return; fi
+  t="$(date +%s%N 2>/dev/null)"
+  case "$t" in ''|*[!0-9]*) ;; *) echo $((t / 1000000)); return ;; esac
+  t="$(perl -MTime::HiRes=time -e 'printf "%d", time * 1000' 2>/dev/null)"
+  case "$t" in ''|*[!0-9]*) echo $((SECONDS * 1000)) ;; *) echo "$t" ;; esac
 }
 # Caso que depende de um ambiente ausente (Git for Windows sobre
 # \\wsl.localhost): NAO_EXECUTADO, listado a parte, nunca conta como ok.
