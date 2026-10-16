@@ -99,4 +99,9 @@ grep -Fq '`REVIEW_REQUIRED` não muda R2, mas o serviço recusaria o merge' "$re
   && grep -Fq 'review obrigatório pendente (`reviewDecision: REVIEW_REQUIRED`' "$review" \
   || fail 'a PR with reviewDecision REVIEW_REQUIRED can be offered for a merge the service will reject'
 
+# sem canal de escrita, o handoff e NAO VERIFICAVEL (09-revisao.md, "O pacote de
+# remediacao"): o template tem de oferecer esse estado, nao so NAO PERSISTIDO
+grep -Fq 'NÃO PERSISTIDO (handoff NÃO VERIFICÁVEL;' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
+  || fail 'TEMPLATE-revisao.md does not mark an unpersisted REVIEW REMEDIATION handoff as NAO VERIFICAVEL'
+
 printf 'contract checks passed\n'
