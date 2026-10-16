@@ -80,11 +80,38 @@ grep -Fq 'Resultado ausente **não** é CI ausente' "$review" \
 # A definicao NORMATIVA (a linha | R1 | da tabela) tem que dizer o mesmo: o texto
 # explicativo sozinho nao basta, e uma linha R1 contraditoria passaria.
 r1="$(grep -F '| R1 |' "$review")"
-printf '%s\n' "$r1" | grep -Fq '`n/a` (sem CI configurado: nenhuma configuração de CI no HEAD)' \
+printf '%s\n' "$r1" | grep -Fq '`n/a` (sem CI configurado: nenhuma configuração de CI no HEAD e nenhum check reportado pela plataforma para ele' \
   && printf '%s\n' "$r1" | grep -Fq 'inclusive o pipeline que ainda não anexou ao HEAD' \
   || fail 'the normative R1 row does not define n/a as no CI config in HEAD and a not-yet-attached pipeline as NAO VERIFICAVEL'
+# CI externo (Jenkins, CircleCI, app de checks) nao deixa arquivo de workflow no
+# HEAD: um check reportado pela plataforma tambem e CI configurado, e vermelho e FALHOU
+printf '%s\n' "$r1" | grep -Fq 'check reportado pela plataforma para o HEAD também é CI configurado' \
+  || fail 'the normative R1 row lets an external CI check (no workflow file) become n/a'
+grep -Fq 'Check reportado é CI configurado' "$review" \
+  || fail 'the CI source row does not count a reported external check as configured CI'
+# CI externo que ainda nao reportou nada para o HEAD so aparece como check obrigatorio
+# da protecao da base: sem conferir isso, ele viraria n/a e o gate passaria sem resultado
+printf '%s\n' "$r1" | grep -Fq 'nem check obrigatório na proteção da base' \
+  && grep -Fq 'check obrigatório sem resultado no HEAD é R1 `NÃO VERIFICÁVEL`' "$review" \
+  || fail 'R1 becomes n/a while the base protection requires a check that has not reported'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
+
+# REVIEW_REQUIRED nao e pedido de mudanca (R2 nao muda), mas o servico recusa o
+# merge: o PR nao e oferecido, vai para os inelegiveis com o motivo nomeado
+grep -Fq '`REVIEW_REQUIRED` não muda R2, mas o serviço recusaria o merge' "$review" \
+  && grep -Fq 'review obrigatório pendente (`reviewDecision: REVIEW_REQUIRED`' "$review" \
+  || fail 'a PR with reviewDecision REVIEW_REQUIRED can be offered for a merge the service will reject'
+
+# sem canal de escrita, o handoff e NAO VERIFICAVEL (09-revisao.md, "O pacote de
+# remediacao"): o template tem de oferecer esse estado, nao so NAO PERSISTIDO
+grep -Fq 'NÃO PERSISTIDO (handoff NÃO VERIFICÁVEL;' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
+  || fail 'TEMPLATE-revisao.md does not mark an unpersisted REVIEW REMEDIATION handoff as NAO VERIFICAVEL'
+
+# o comando nao pode exigir recomendacao de todo PR: PR BLOQUEADO nao recebe
+# recomendacao de merge (09-revisao.md, passo 6; TEMPLATE-revisao.md)
+grep -Fq 'a recomendação em uma linha (ausente quando o gate está `BLOQUEADO`)' "$claude_cmd" \
+  || fail 'mergex-revisar asks for a recommendation on every PR, including BLOQUEADO'
 
 printf 'contract checks passed\n'
