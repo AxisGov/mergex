@@ -270,8 +270,8 @@ e as fontes.
 - relatório de cobertura — O6 não pôde ser descartado por medição
 ```
 
-**Toda justificativa nomeia pelo menos um critério** (`O1`..`O10`, `L1`..`L4`,
-`D1`..`D4`) **e a evidência que o confirma.** Sem isso é opinião, e opinião não
+**Toda justificativa nomeia pelo menos um critério** (`O1`–`O10`, `L1`–`L4`,
+`D1`–`D4`) **e a evidência que o confirma.** Sem isso é opinião, e opinião não
 é auditável.
 
 Errado, porque não nomeia evidência:
