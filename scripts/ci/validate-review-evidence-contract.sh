@@ -158,6 +158,18 @@ grep -Fq 'NÃO PERSISTIDO (handoff NÃO VERIFICÁVEL;' .claude/skills/mergex/ass
 grep -F '{{motivo: rascunho,' .claude/skills/mergex/assets/TEMPLATE-revisao.md | grep -Fq '`empilhado sobre #<n>`' \
   && grep -F 'PRs **inelegíveis para merge** — rascunho,' "$review" | grep -Fq '`empilhado sobre #<n>`' \
   || fail 'the ineligibility reasons in TEMPLATE-revisao.md (or 09-revisao.md) omit the stacked PR (empilhado sobre #<n>)'
+# PR aberto fora do metodo (sem ENTREGA.md) nao tem skill de origem: o pacote de
+# remediacao precisa de destinatario declarado, o autor do PR
+grep -Fq 'PR aberto fora do método — sem `ENTREGA.md`' "$review" \
+  && grep -Fq 'autor do PR (@<login>)' "$review" \
+  && grep -Fq 'ou, no PR aberto fora do método (sem `ENTREGA.md`), que não tem skill de origem, ao autor do PR' "$skill" \
+  && grep -Fq 'autor do PR (@<login>)' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
+  || fail 'the REVIEW REMEDIATION handoff has no recipient for a PR opened outside the method (no ENTREGA.md)'
+# PR com conflito com a base nao chega a confirmacao nem ao merge do passo 7: o
+# conflito e motivo de inelegibilidade no reference e no modelo do relatorio
+grep -F '{{motivo: rascunho,' .claude/skills/mergex/assets/TEMPLATE-revisao.md | grep -Fq 'conflito com a base' \
+  && grep -F 'PRs **inelegíveis para merge** — rascunho,' "$review" | grep -Fq 'conflito com a base' \
+  || fail 'the ineligibility reasons in TEMPLATE-revisao.md (or 09-revisao.md) omit the conflict with the base'
 # o bloco CONFLITO tem o campo da pergunta a quem decidir (analista-de-conflito
 # exige uma por trecho): sem ele, o relatorio feito pelo template a omite
 grep -Fq '  O que perguntar a quem decidir:' .claude/skills/mergex/assets/TEMPLATE-revisao.md \

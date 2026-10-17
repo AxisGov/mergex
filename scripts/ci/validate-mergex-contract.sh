@@ -420,7 +420,8 @@ bloco_metodo() { awk '/<!-- contrato-e3:artefato-de-metodo:inicio -->/ { f = 1 }
 for frase in 'Artefato de método nunca anula critério O.' \
              'L4 e D4 só existem pela saída do classificador' \
              '`expx_tool` no frontmatter nunca basta' \
-             'O6** fala de código sem cobertura'; do
+             'O6** fala de código sem cobertura' \
+             'que é D4 **sem prova de conteúdo**'; do
   bloco_metodo "$atencao" | tr '\n' ' ' | sed 's/  */ /g' | grep -Fq "$frase" \
     || fail "method-artifact block lost: $frase"
 done

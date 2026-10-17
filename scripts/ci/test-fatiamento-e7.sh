@@ -281,5 +281,80 @@ for par in 'origin/HEAD|padrao' 'refs/remotes/upstream/HEAD|padrao' 'main|main' 
     || quebra "branch_base ${par%%|*} deu bb='$r', esperado '${par#*|}' (o gh pr create receberia isso)"
 done
 
+# cada bloco do E7 roda numa chamada propria do shell (conselho #204, rodada 3): o do
+# passo 1.5 nao herda $remoto nem $publicado dos pre-requisitos, e o do passo 2 nao herda
+# o $bb do passo 1.5. Os blocos reais, extraidos do reference, rodam cada um num bash novo
+bloco_do_e7() { # <trecho> — imprime o bloco cercado do E7 que contem o trecho
+  awk -v t="$1" '/^```/ { if (dentro) { if (achou) { printf "%s", buf; exit } dentro = 0; next }
+                          dentro = 1; buf = ""; achou = 0; next }
+                 dentro { buf = buf $0 "\n"; if (index($0, t)) achou = 1 }' "$e7"
+}
+git init -q --bare -b main "$aux/m2-remoto.git"
+git clone -q "$aux/m2-remoto.git" "$aux/m2-dev" 2>/dev/null
+d() { git -C "$aux/m2-dev" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+printf 'base\n' > "$aux/m2-dev/base.txt"; d add -A; d commit -q -m base; d push -q origin main 2>/dev/null
+d switch -q -c feature/x; printf 'linha\n' > "$aux/m2-dev/a.md"; d add -A; d commit -q -m a
+d push -q -u origin feature/x 2>/dev/null
+bloco_do_e7 'fatiamento-da-pr.sh "$base" "$publicado"' | sed "s|<branch_base>|main|" \
+  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' > "$aux/passo15.sh"
+saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
+[ "$rc" = 0 ] && passa 'o bloco do passo 1.5 roda sozinho, sem $remoto e $publicado de outra chamada' \
+  || quebra "o bloco do passo 1.5 depende de variavel de outra chamada (rc $rc): $saida"
+mkdir -p "$aux/bin"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$ARGS_GH"\n' > "$aux/bin/gh"; chmod +x "$aux/bin/gh"
+bloco_do_e7 'gh pr create' | sed 's|<título>|titulo simples|; s|<trabalho_id>|x|' > "$aux/passo2.sh"
+rm -f "$aux/args-gh"
+saida="$(cd "$aux/m2-dev" && env -u bb PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/passo2.sh" 2>&1)"; rc=$?
+args="$(tr '\n' ' ' 2>/dev/null < "$aux/args-gh")"
+[ "$rc" = 0 ] && case "$args" in *'--base main --head feature/x '*) true ;; *) false ;; esac \
+  && passa 'o bloco do gh pr create recebe a base do passo 1.5 e a branch, noutra chamada' \
+  || quebra "o bloco do gh pr create nao tem a base do passo 1.5 (rc $rc, args '$args'): $saida"
+# o titulo vem do ORQUESTRADOR.md e e texto, nao comando: com $(...) e crases, nada roda
+# (nenhum arquivo-sentinela nasce) e o gh/glab recebe o titulo literal
+cp "$aux/bin/gh" "$aux/bin/glab"
+titulo_mau='fix: $(touch sentinela-1) e `touch sentinela-2` com $HOME, "aspas", '"'"'apostrofo'"'"' & \barra'
+for cmd in 'gh pr create' 'glab mr create'; do
+  bloco="$(bloco_do_e7 "$cmd")"
+  bloco="${bloco//'<título>'/"$titulo_mau"}"; printf '%s\n' "${bloco//'<trabalho_id>'/x}" > "$aux/titulo.sh"
+  rm -f "$aux/args-gh" "$aux/m2-dev/sentinela-1" "$aux/m2-dev/sentinela-2"
+  (cd "$aux/m2-dev" && PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/titulo.sh" >/dev/null 2>&1)
+  recebido="$(awk 'pega { print; exit } $0 == "--title" { pega = 1 }' "$aux/args-gh" 2>/dev/null)"
+  if [ -e "$aux/m2-dev/sentinela-1" ] || [ -e "$aux/m2-dev/sentinela-2" ]; then
+    quebra "$cmd: o titulo com \$(...) ou crase executou comando na abertura do PR"
+  elif [ "$recebido" != "$titulo_mau" ]; then
+    quebra "$cmd: o titulo chegou alterado: '$recebido'"
+  else
+    passa "$cmd: titulo com \$(...) e crases chega literal, sem executar nada"
+  fi
+done
+# PR reprovado na medicao nao deixa base para o passo 2: o estado so nasce com saida 0
+estado="$(git -C "$aux/m2-dev" rev-parse --path-format=absolute --git-path mergex-e7-base)"
+[ -s "$estado" ] || quebra 'fixture: o passo 1.5 aprovado nao gravou o estado'
+saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" FATIA_MAX_LINHAS_PR=0 \
+  bash "$aux/passo15.sh" 2>&1)"; rc=$?
+[ "$rc" = 1 ] && [ ! -e "$estado" ] \
+  && passa 'passo 1.5 reprovado (saida 1) nao deixa o estado da base para o passo 2' \
+  || quebra "passo 1.5 reprovado: rc $rc, estado $( [ -e "$estado" ] && echo presente || echo ausente): $saida"
+# a branch remota anda entre a chamada dos pre-requisitos e a do passo 1.5: a ref de
+# rastreio local continua igual ao HEAD, e so uma busca nesta chamada mostra a ponta nova
+git clone -q -b feature/x "$aux/m2-remoto.git" "$aux/m2-outro" 2>/dev/null
+printf 'outro\n' > "$aux/m2-outro/b.md"
+git -C "$aux/m2-outro" add -A; git -C "$aux/m2-outro" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m b
+git -C "$aux/m2-outro" push -q origin feature/x 2>/dev/null
+saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *'não é o HEAD'*) true ;; *) false ;; esac \
+  && passa 'passo 1.5 busca o upstream de novo: ponta remota que andou para o E7' \
+  || quebra "passo 1.5 mediu a ref de rastreio velha (rc $rc): $saida"
+# estado de uma execucao anterior bem-sucedida + fetch do upstream que falha agora: o
+# passo 1.5 para, e o passo 2 nao acha base nenhuma, entao nao abre o PR
+printf 'main\n' > "$estado"
+git -C "$aux/m2-dev" remote set-url origin "$aux/nao-existe.git"
+(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" >/dev/null 2>&1); rc15=$?
+rm -f "$aux/args-gh"
+(cd "$aux/m2-dev" && env -u bb PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/passo2.sh" >/dev/null 2>&1); rc2=$?
+[ "$rc15" != 0 ] && [ ! -e "$estado" ] && [ "$rc2" != 0 ] && [ ! -e "$aux/args-gh" ] \
+  && passa 'fetch do upstream que falha apaga o estado antigo: o passo 2 nao abre o PR' \
+  || quebra "estado antigo sobreviveu a falha do passo 1.5 (rc $rc15, estado $( [ -e "$estado" ] && echo presente || echo ausente), passo 2 rc $rc2, gh $( [ -e "$aux/args-gh" ] && echo chamado || echo nao chamado))"
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
