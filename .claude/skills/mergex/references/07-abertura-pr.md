@@ -90,8 +90,8 @@ FATIA_EXCECAO="${FATIA_EXCECAO:-}" \
 
 O `FATIA_IGNORAR` vai explícito porque o padrão do script é o do ExpxDev, que também tira
 `fixtures/candidatos/` da conta; no projeto do desenvolvedor esse caminho pode ser código
-revisado. Gerado que o projeto exclui da revisão automática entra aqui só se o desenvolvedor
-declarar o padrão — e o padrão dele **soma** ao do E7, nunca o substitui: os artefatos de
+revisado. Código gerado que o projeto exclui da revisão automática entra aqui só se o
+desenvolvedor declarar o padrão — e o padrão dele **soma** ao do E7, nunca o substitui: os artefatos de
 método saem da medida sempre.
 
 Os **artefatos de método** — `docs/sprintx/`, `docs/entregas/`, `docs/eventos/`, o que a
