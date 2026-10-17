@@ -163,6 +163,7 @@ grep -F '{{motivo: rascunho,' .claude/skills/mergex/assets/TEMPLATE-revisao.md |
 grep -Fq 'PR aberto fora do método — sem `ENTREGA.md`' "$review" \
   && grep -Fq 'autor do PR (@<login>)' "$review" \
   && grep -Fq 'ou, no PR aberto fora do método (sem `ENTREGA.md`), que não tem skill de origem, ao autor do PR' "$skill" \
+  && grep -Fq 'autor do PR (@<login>)' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
   || fail 'the REVIEW REMEDIATION handoff has no recipient for a PR opened outside the method (no ENTREGA.md)'
 # PR com conflito com a base nao chega a confirmacao nem ao merge do passo 7: o
 # conflito e motivo de inelegibilidade no reference e no modelo do relatorio
