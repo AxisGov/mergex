@@ -165,12 +165,21 @@ A base é o `$bb` do passo 1.5 — a `branch_base` já sem o remoto e sem `refs/
 O comando roda noutra chamada do shell, então o `$bb` vem do arquivo de estado que o passo 1.5
 gravou (sem ele, o passo 1.5 não chegou à medição, e o PR não abre), e a branch, do upstream.
 
+O título é texto do `ORQUESTRADOR.md`, não comando: entre aspas duplas, um `$(...)` ou uma crase
+nele rodaria na abertura do PR. Ele entra pelo heredoc com o delimitador entre aspas
+(`<<'TITULO_DO_PR'`), que o shell não avalia, e chega ao `gh`/`glab` como `"$titulo"`, literal.
+Troque só a linha `<título>` do bloco, por uma linha só; nunca ponha o título dentro do comando.
+
 No GitHub (`gh`, do passo 1):
 
 ```bash
 bb="$(cat "$(git rev-parse --git-path mergex-e7-base)")" && [ -n "$bb" ] || { echo "sem a base do passo 1.5: o E7 não abre o PR"; exit 1; }
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1
-gh pr create --base "$bb" --head "${upstream#*/}" --title "<título>" --body-file docs/entregas/<trabalho_id>/PR.md --draft
+IFS= read -r titulo <<'TITULO_DO_PR'
+<título>
+TITULO_DO_PR
+[ -n "$titulo" ] || { echo "título vazio: o E7 não abre o PR"; exit 1; }
+gh pr create --base "$bb" --head "${upstream#*/}" --title "$titulo" --body-file docs/entregas/<trabalho_id>/PR.md --draft
 ```
 
 No GitLab (`glab`, do passo 1), o equivalente é o merge request; o `--yes` pula a confirmação
@@ -179,7 +188,11 @@ interativa do `glab`, que de outro modo esperaria uma resposta:
 ```bash
 bb="$(cat "$(git rev-parse --git-path mergex-e7-base)")" && [ -n "$bb" ] || { echo "sem a base do passo 1.5: o E7 não abre o PR"; exit 1; }
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1
-glab mr create --target-branch "$bb" --source-branch "${upstream#*/}" --title "<título>" --description "$(cat docs/entregas/<trabalho_id>/PR.md)" --draft --yes
+IFS= read -r titulo <<'TITULO_DO_PR'
+<título>
+TITULO_DO_PR
+[ -n "$titulo" ] || { echo "título vazio: o E7 não abre o PR"; exit 1; }
+glab mr create --target-branch "$bb" --source-branch "${upstream#*/}" --title "$titulo" --description "$(cat docs/entregas/<trabalho_id>/PR.md)" --draft --yes
 ```
 
 Sem `--draft` quando o QA já aprovou.

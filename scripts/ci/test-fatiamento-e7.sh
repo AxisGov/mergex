@@ -309,6 +309,24 @@ args="$(tr '\n' ' ' 2>/dev/null < "$aux/args-gh")"
 [ "$rc" = 0 ] && case "$args" in *'--base main --head feature/x '*) true ;; *) false ;; esac \
   && passa 'o bloco do gh pr create recebe a base do passo 1.5 e a branch, noutra chamada' \
   || quebra "o bloco do gh pr create nao tem a base do passo 1.5 (rc $rc, args '$args'): $saida"
+# o titulo vem do ORQUESTRADOR.md e e texto, nao comando: com $(...) e crases, nada roda
+# (nenhum arquivo-sentinela nasce) e o gh/glab recebe o titulo literal
+cp "$aux/bin/gh" "$aux/bin/glab"
+titulo_mau='fix: $(touch sentinela-1) e `touch sentinela-2` com $HOME, "aspas", '"'"'apostrofo'"'"' & \barra'
+for cmd in 'gh pr create' 'glab mr create'; do
+  bloco="$(bloco_do_e7 "$cmd")"
+  bloco="${bloco//'<título>'/"$titulo_mau"}"; printf '%s\n' "${bloco//'<trabalho_id>'/x}" > "$aux/titulo.sh"
+  rm -f "$aux/args-gh" "$aux/m2-dev/sentinela-1" "$aux/m2-dev/sentinela-2"
+  (cd "$aux/m2-dev" && PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/titulo.sh" >/dev/null 2>&1)
+  recebido="$(awk 'pega { print; exit } $0 == "--title" { pega = 1 }' "$aux/args-gh" 2>/dev/null)"
+  if [ -e "$aux/m2-dev/sentinela-1" ] || [ -e "$aux/m2-dev/sentinela-2" ]; then
+    quebra "$cmd: o titulo com \$(...) ou crase executou comando na abertura do PR"
+  elif [ "$recebido" != "$titulo_mau" ]; then
+    quebra "$cmd: o titulo chegou alterado: '$recebido'"
+  else
+    passa "$cmd: titulo com \$(...) e crases chega literal, sem executar nada"
+  fi
+done
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
