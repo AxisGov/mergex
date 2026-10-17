@@ -81,7 +81,9 @@ agora, no remoto, para o nome da branch padrão (`refs/heads/main` → `main`).
 Cada bloco de comandos deste reference roda numa chamada própria do shell, e variável de um
 bloco não chega ao seguinte: este bloco recalcula o `$remoto` e o `$publicado` dos
 pré-requisitos (a busca de lá já atualizou a ref remota, e a ponta continua tendo de ser o
-`HEAD`), e grava o `$bb` resolvido num arquivo de estado do Git, que o passo 2 lê:
+`HEAD`), e grava o `$bb` resolvido num arquivo de estado do Git, que o passo 2 lê. O estado só
+é gravado quando a medição sai `0`: reprovado (`1`) ou não medido (`2`), o arquivo fica ausente,
+e o passo 2 não tem base para abrir o PR:
 
 ```bash
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1
@@ -108,11 +110,11 @@ if [ "$bb" = HEAD ]; then
 fi
 git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 1; }
 base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
-printf '%s\n' "$bb" > "$estado_bb" || exit 1
 e7_ignorar='(^|/)package-lock\.json$|^docs/(sprintx|entregas|eventos)/'
 FATIA_IGNORAR="${FATIA_IGNORAR:+$FATIA_IGNORAR|}$e7_ignorar" \
 FATIA_EXCECAO="${FATIA_EXCECAO:-}" \
   bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
+rc_fatia=$?; [ "$rc_fatia" = 0 ] && { printf '%s\n' "$bb" > "$estado_bb" || exit 1; }; exit "$rc_fatia"
 ```
 
 O `FATIA_IGNORAR` vai explícito porque o padrão do script é o do ExpxDev, que também tira

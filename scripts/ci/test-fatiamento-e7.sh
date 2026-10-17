@@ -327,6 +327,14 @@ for cmd in 'gh pr create' 'glab mr create'; do
     passa "$cmd: titulo com \$(...) e crases chega literal, sem executar nada"
   fi
 done
+# PR reprovado na medicao nao deixa base para o passo 2: o estado so nasce com saida 0
+estado="$(git -C "$aux/m2-dev" rev-parse --path-format=absolute --git-path mergex-e7-base)"
+[ -s "$estado" ] || quebra 'fixture: o passo 1.5 aprovado nao gravou o estado'
+saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" FATIA_MAX_LINHAS_PR=0 \
+  bash "$aux/passo15.sh" 2>&1)"; rc=$?
+[ "$rc" = 1 ] && [ ! -e "$estado" ] \
+  && passa 'passo 1.5 reprovado (saida 1) nao deixa o estado da base para o passo 2' \
+  || quebra "passo 1.5 reprovado: rc $rc, estado $( [ -e "$estado" ] && echo presente || echo ausente): $saida"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
