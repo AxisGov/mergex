@@ -93,8 +93,8 @@ D1–D4, padrão.
 
 ## Artefatos de método — decisão, plano, base, registro
 
-A sprintx, a runx e a própria mergex escrevem no diff arquivos que não são
-produto. Artefato de método **não é automaticamente de baixo risco**, e
+A sprintx, a runx e a própria mergex escrevem no diff arquivos que não fazem
+parte do produto. Artefato de método **não é automaticamente de baixo risco**, e
 **também não é automaticamente OLHO OBRIGATÓRIO**. A regra é a mesma,
 palavra por palavra, do `references/03-atencao-humana.md` da skill:
 

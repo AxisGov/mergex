@@ -196,7 +196,7 @@ sprintx ou pela runx são artefatos de método (L4), nunca D3.
 
 ### Artefatos de método
 
-A sprintx, a runx e a própria mergex escrevem, dentro do diff, arquivos que não são produto:
+A sprintx, a runx e a própria mergex escrevem, dentro do diff, arquivos que não fazem parte do produto:
 decisões, plano, base da investigação, auditoria, fechamento, registro da entrega. Sem critério
 próprio, eles caíam no padrão e iam todos para OLHO OBRIGATÓRIO — não por risco, mas porque
 nenhuma regra os descrevia. Quando quase tudo pede leitura linha a linha, a classificação para de
