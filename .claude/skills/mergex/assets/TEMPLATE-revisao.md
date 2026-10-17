@@ -103,7 +103,7 @@ CONFLITO — #{{n}} contra {{base | #n}}
 
 {{cada PR aqui também mostra, na fila acima ou junto do motivo, o bloco R1–R6 completo}}
 
-{{motivo: rascunho, integração contínua vermelha, review obrigatório pendente, `empilhado sobre #<n>` (a base é branch de outro PR aberto, ou de um mergeado nesta passagem), ou REVIEW EVIDENCE: BLOQUEADO (corrigível por remediação)}}
+{{motivo: rascunho, integração contínua vermelha, review obrigatório pendente, conflito com a base, `empilhado sobre #<n>` (a base é branch de outro PR aberto, ou de um mergeado nesta passagem), ou REVIEW EVIDENCE: BLOQUEADO (corrigível por remediação)}}
 
 | PR | Motivo |
 |---|---|
