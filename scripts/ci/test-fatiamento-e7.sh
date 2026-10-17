@@ -70,6 +70,15 @@ if (cd "$tmp" && bash "$script" main pequeno >/dev/null 2>&1); then passa 'PR pe
 g switch -q -c grande main
 for i in 1 2 3; do printf 'linha\n%.0s' $(seq 1 200) > "$tmp/g$i.md"; g add -A; g commit -q -m "parte $i"; done
 if (cd "$tmp" && bash "$script" main grande >/dev/null 2>&1); then quebra 'PR de 600 linhas passou'; else passa 'PR de 600 linhas reprova (F2)'; fi
+# a excecao declarada pelo desenvolvedor chega ao script mesmo sem `export`: o
+# trecho real do E7, rodado com FATIA_EXCECAO so como variavel de shell
+exc_trecho="$(sed -n '/^e7_ignorar=/,/fatiamento-da-pr\.sh "\$base"/p' "$e7" \
+  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#')"
+saida="$(cd "$tmp" && unset FATIA_EXCECAO FATIA_IGNORAR && FATIA_EXCECAO='movimento mecanico' \
+  && base=main && publicado=grande && eval "$exc_trecho" 2>&1)"; rc=$?
+[ "$rc" = 0 ] && case "$saida" in *"excecao declarada: movimento mecanico"*) true ;; *) false ;; esac \
+  && passa 'FATIA_EXCECAO nao exportada chega ao script pelo trecho do E7 (F2 vira aviso)' \
+  || quebra "FATIA_EXCECAO nao exportada nao chegou ao script (rc $rc): $saida"
 # F3: um commit so de 350 linhas, num PR que cabe em F2
 g switch -q -c commit-grande main
 printf 'linha\n%.0s' $(seq 1 350) > "$tmp/c.md"; g add -A; g commit -q -m "commit grande"

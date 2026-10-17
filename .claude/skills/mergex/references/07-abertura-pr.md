@@ -84,6 +84,7 @@ git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem 
 base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
 e7_ignorar='(^|/)package-lock\.json$|^docs/(sprintx|entregas|eventos)/'
 FATIA_IGNORAR="${FATIA_IGNORAR:+$FATIA_IGNORAR|}$e7_ignorar" \
+FATIA_EXCECAO="${FATIA_EXCECAO:-}" \
   bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 ```
 
@@ -110,7 +111,8 @@ arquivo), e PR sem revisão que parece revisado é pior que PR não aberto. Regi
 lista de violações, deixe `pr_estado` em `null` e diga ao desenvolvedor como dividir: por
 assunto (F1), um PR por fatia, na ordem das tasks. No passo 3 vale igual: o `PR.md` não manda
 abrir à mão um PR que reprovou aqui. A exceção de movimento mecânico (F6) só vale
-quando **o desenvolvedor** a declara (`FATIA_EXCECAO=<motivo>`), nunca por decisão do E7.
+quando **o desenvolvedor** a declara (`FATIA_EXCECAO=<motivo>`), nunca por decisão do E7. Ela
+vai explícita na chamada, como o `FATIA_IGNORAR`: declarada sem `export`, não chegaria ao script.
 
 Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre o PR**. O script não conseguiu
 medir — ref inexistente, sem ancestral comum entre a base e o SHA publicado, `git diff` que
