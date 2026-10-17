@@ -871,14 +871,17 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    Evidence (item 2), de OLHO OBRIGATÓRIO (item 3) e da confirmação final daquele PR (item 4), e
    **antes** da operação de merge, releia da plataforma: HEAD autoritativo (`headRefOid` ou
    equivalente); estado de rascunho; CI/status checks desse HEAD; decisão de review e pedidos de
-   mudança ativos (`reviewDecision` ou equivalente); threads e findings relevantes. A
+   mudança ativos (`reviewDecision` ou equivalente); threads e findings relevantes; a base
+   (`baseRefName`; no GitLab, `target_branch`), que não pode ser a branch de um PR aberto nem a
+   de um PR mergeado nesta passagem (ver "Antes do impacto: PRs empilhados", no passo 4). A
    confirmação humana final **não congela** o estado do PR.
    - **HEAD mudou** desde a confirmação: invalide todas as confirmações associadas ao estado
      anterior (Review Evidence, OLHO OBRIGATÓRIO e merge), recalcule o gate, e **não faça o
      merge nesta passagem**. Diga o SHA anterior e o novo, registre no rastro e siga para o
      próximo PR.
    - **HEAD igual, mas algum critério passou a bloquear** (virou rascunho, CI deixou de estar
-     verde, pedido de mudança novo, finding novo ou reaberto): não faça o merge; diga
+     verde, pedido de mudança novo, finding novo ou reaberto, base que passou a ser a branch de
+     outro PR aberto ou mergeado nesta passagem): não faça o merge; diga
      exatamente o que mudou.
    - **Releitura impossível**: trate como mudança; não faça o merge.
 
@@ -937,7 +940,7 @@ humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIF
 - [ ] A ordem vai do menor para o maior impacto, depois da ordem dos empilhados: nenhum PR empilhado foi oferecido antes da predecessora.
 - [ ] PRs com integração vermelha, rascunhos e `REVIEW EVIDENCE` diferente de `SATISFEITO` não foram oferecidos para merge.
 - [ ] Todo PR mostrou `Review Evidence: SATISFEITO | BLOQUEADO`, R1–R6 individuais e o bloco `Reviews` com as seis contagens.
-- [ ] Todo merge feito passou pela revalidação imediatamente anterior (HEAD, rascunho, CI, decisão de review, threads); HEAD alterado invalidou as confirmações e barrou o merge nesta passagem.
+- [ ] Todo merge feito passou pela revalidação imediatamente anterior (HEAD, rascunho, CI, decisão de review, threads, base); HEAD alterado invalidou as confirmações e barrou o merge nesta passagem.
 - [ ] Toda escrita de review (resposta, resolução, comentário) foi contada só com ID/URL ou releitura devolvidos pela plataforma.
 - [ ] PR bloqueado mostrou os findings pendentes nomeados e o tipo de bloqueio.
 - [ ] PR com bloqueio confirmável só chegou à pergunta de merge depois das confirmações específicas e do gate recalculado `SATISFEITO`; as confirmações aparecem na saída e no rastro.

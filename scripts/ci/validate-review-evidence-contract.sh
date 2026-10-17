@@ -118,6 +118,10 @@ grep -Fq '### Antes do impacto: PRs empilhados' "$review" \
   && grep -Fq 'a ordem é **topológica antes de ser de impacto**' "$review" \
   && grep -Fq '`empilhado sobre #<n>`' "$review" \
   || fail 'the E9 queue orders by impact only: a stacked PR can be merged before its predecessor'
+# a base tambem e relida na revalidacao pre-merge: mudar depois do passo 7 nao escapa
+grep -Fq 'threads e findings relevantes; a base' "$review" \
+  && grep -Fq '(HEAD, rascunho, CI, decisão de review, threads, base)' "$review" \
+  || fail 'the pre-merge revalidation does not reread the base: a stacked PR can still land on its predecessor branch'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
