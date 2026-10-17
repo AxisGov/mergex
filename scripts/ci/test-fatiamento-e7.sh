@@ -345,6 +345,16 @@ saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" b
 [ "$rc" = 1 ] && case "$saida" in *'não é o HEAD'*) true ;; *) false ;; esac \
   && passa 'passo 1.5 busca o upstream de novo: ponta remota que andou para o E7' \
   || quebra "passo 1.5 mediu a ref de rastreio velha (rc $rc): $saida"
+# estado de uma execucao anterior bem-sucedida + fetch do upstream que falha agora: o
+# passo 1.5 para, e o passo 2 nao acha base nenhuma, entao nao abre o PR
+printf 'main\n' > "$estado"
+git -C "$aux/m2-dev" remote set-url origin "$aux/nao-existe.git"
+(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" >/dev/null 2>&1); rc15=$?
+rm -f "$aux/args-gh"
+(cd "$aux/m2-dev" && env -u bb PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/passo2.sh" >/dev/null 2>&1); rc2=$?
+[ "$rc15" != 0 ] && [ ! -e "$estado" ] && [ "$rc2" != 0 ] && [ ! -e "$aux/args-gh" ] \
+  && passa 'fetch do upstream que falha apaga o estado antigo: o passo 2 nao abre o PR' \
+  || quebra "estado antigo sobreviveu a falha do passo 1.5 (rc $rc15, estado $( [ -e "$estado" ] && echo presente || echo ausente), passo 2 rc $rc2, gh $( [ -e "$aux/args-gh" ] && echo chamado || echo nao chamado))"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

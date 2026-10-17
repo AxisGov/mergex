@@ -82,16 +82,17 @@ Cada bloco de comandos deste reference roda numa chamada própria do shell, e va
 bloco não chega ao seguinte: este bloco recalcula o `$remoto` e o `$publicado` dos
 pré-requisitos — e busca a branch de novo, conferida, porque a ref remota pode ter andado
 desde aquela chamada; a ponta continua tendo de ser o `HEAD` —, e grava o `$bb` resolvido num arquivo de estado do Git, que o passo 2 lê. O estado só
-é gravado quando a medição sai `0`: reprovado (`1`) ou não medido (`2`), o arquivo fica ausente,
-e o passo 2 não tem base para abrir o PR:
+é gravado quando a medição sai `0`, e o de uma execução anterior é apagado na primeira linha,
+antes de qualquer busca ou conferência: qualquer falha do bloco, reprovado (`1`) ou não medido
+(`2`), deixa o arquivo ausente, e o passo 2 não tem base para abrir o PR:
 
 ```bash
+estado_bb="$(git rev-parse --git-path mergex-e7-base)" && rm -f "$estado_bb" || exit 1   # antes de tudo
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1
 remoto="${upstream%%/*}"; ref_remota="${upstream#*/}"
 git fetch "$remoto" "$ref_remota" || { echo "busca de $upstream falhou: o E7 não mede nem abre o PR"; exit 1; }
 publicado="$(git rev-parse --verify "refs/remotes/$upstream^{commit}")" || exit 1
 [ "$publicado" = "$(git rev-parse HEAD)" ] || { echo "a ponta remota ($publicado) não é o HEAD: o E7 não mede nem abre o PR"; exit 1; }
-estado_bb="$(git rev-parse --git-path mergex-e7-base)"; rm -f "$estado_bb"
 rb="$remoto"; bb="<branch_base>"
 case "$bb" in
   refs/remotes/*/*) bb="${bb#refs/remotes/}"; rb="${bb%%/*}"; bb="${bb#*/}" ;;
