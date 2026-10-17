@@ -56,6 +56,10 @@ grep -Fq 'rb="$remoto"; bb="<branch_base>"' "$e7" && grep -Fq 'git fetch "$rb" "
 grep -Fq 'gh pr create --base "$bb"' "$e7" && ! grep -Fq 'gh pr create --base <branch-base>' "$e7" \
   && passa 'o gh pr create recebe a base sem o remoto ($bb do passo 1.5)' \
   || quebra 'o gh pr create recebe a branch_base crua (upstream/main nao e branch no GitHub)'
+# o passo 1 reconhece `glab`: o passo 2 tem de ter o comando dele, ou o GitLab cai no manual
+grep -Fq 'glab mr create --target-branch "$bb"' "$e7" && grep -Fq -- '--draft --yes' "$e7" \
+  && passa 'o GitLab (glab) tem o comando de abertura, com a base do passo 1.5 e sem confirmacao interativa' \
+  || quebra 'o passo 1 reconhece glab, mas o passo 2 so tem o comando do gh'
 grep -Fq 'o passo 1.5 roda do mesmo jeito, e só depois dele vá para o passo 3' "$e7" \
   && passa 'servico sem ferramenta tambem passa pela medicao' \
   || quebra 'o caminho manual (passo 3) contorna a medicao'

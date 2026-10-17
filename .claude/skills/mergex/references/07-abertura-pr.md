@@ -136,8 +136,17 @@ Título: o do trabalho — o mesmo do `ORQUESTRADOR.md`. Corpo: o conteúdo de `
 A base é o `$bb` do passo 1.5 — a `branch_base` já sem o remoto e sem `refs/...` —, nunca a
 `branch_base` crua: o serviço não conhece `upstream/main` como branch, e a abertura falharia.
 
+No GitHub (`gh`, do passo 1):
+
 ```
 gh pr create --base "$bb" --head <branch> --title "<título>" --body-file docs/entregas/<trabalho_id>/PR.md --draft
+```
+
+No GitLab (`glab`, do passo 1), o equivalente é o merge request; o `--yes` pula a confirmação
+interativa do `glab`, que de outro modo esperaria uma resposta:
+
+```
+glab mr create --target-branch "$bb" --source-branch <branch> --title "<título>" --description "$(cat docs/entregas/<trabalho_id>/PR.md)" --draft --yes
 ```
 
 Sem `--draft` quando o QA já aprovou.
@@ -148,7 +157,8 @@ Não adicione revisor, etiqueta, marco ou responsável por conta própria: nada 
 
 Qualquer falha — sem permissão, PR já existe, base inválida, rede fora — **não interrompe a entrega**. Vá para o passo 3, registre o erro literal do comando, e siga.
 
-Se a falha for "PR já existe para esta branch", recupere a URL existente (`gh pr view --json url`) e registre-a: é uma retomada, não uma falha. É o caso normal depois de uma reconciliação de base (`references/11-reconciliacao-base.md`): o PR existente é retomado, **nunca um segundo PR**.
+Se a falha for "PR já existe para esta branch", recupere a URL existente (`gh pr view --json url`; no GitLab, `glab mr view <branch> --output json`,
+campo `web_url`) e registre-a: é uma retomada, não uma falha. É o caso normal depois de uma reconciliação de base (`references/11-reconciliacao-base.md`): o PR existente é retomado, **nunca um segundo PR**.
 
 ## Passo 3 — Quando a ferramenta não está disponível
 
