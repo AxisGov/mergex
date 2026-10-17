@@ -98,3 +98,7 @@ jobs:
       - name: Test E7 fatiamento
         shell: bash
         run: bash scripts/ci/test-fatiamento-e7.sh
+
+      - name: Test E9 R4 PR head from the base repository
+        shell: bash
+        run: bash scripts/ci/test-r4-cabeca-do-pr.sh

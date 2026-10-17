@@ -134,9 +134,23 @@ equivalente em outro serviço.
   ao HEAD autoritativo. Divergiu (push posterior não buscado, ref velha, branch homônima em
   outro repositório): descarte o fallback.
 - PR vindo de fork normalmente não tem `origin/<head>`, e o gate nunca depende dele. Para testar
-  ancestralidade, busque a cabeça do próprio PR (`git fetch origin pull/<n>/head` no GitHub;
-  `git fetch origin merge-requests/<iid>/head` no GitLab) e confira que o SHA obtido é o
-  autoritativo.
+  ancestralidade, busque a cabeça do próprio PR (`pull/<n>/head` no GitHub;
+  `merge-requests/<iid>/head` no GitLab) **no repositório base**, e confira que o SHA obtido é o
+  autoritativo. O repositório base sai da URL do PR, nunca do nome do remoto: o remoto dele pode
+  se chamar `upstream`, ou outro nome, e o `origin` ser o fork, que não tem essa ref. Vale o
+  remoto cuja URL termina no `<dono>/<repo>` do PR; sem nenhum, a própria URL. No GitHub:
+
+```bash
+pr_url="$(gh pr view <n> --json url --jq .url)" || exit 1   # https://<host>/<dono>/<repo>/pull/<n>
+repo_url="${pr_url%/pull/*}"; repo="${repo_url#*://*/}"
+remoto_base="$(git remote -v | awk -v r="$repo" '$3 == "(fetch)" { u = tolower($2); sub(/\/$/, "", u); sub(/\.git$/, "", u)
+  n = length(r); if (substr(u, length(u) - n + 1) == tolower(r) && substr(u, length(u) - n, 1) ~ /[\/:]/) { print $1; exit } }')"
+git fetch "${remoto_base:-$repo_url}" "pull/<n>/head" || exit 1
+cabeca="$(git rev-parse --verify 'FETCH_HEAD^{commit}')" || exit 1
+```
+
+  No GitLab, o mesmo com a URL do `glab mr view <iid> --output json` (campo `web_url`; o
+  repositório é o que vem antes de `/-/merge_requests/`) e a ref `merge-requests/<iid>/head`.
 - HEAD autoritativo não confirmado: **R4 nunca pode ser `OK`** (finding corrigido fica sem
   evidência válida, e o gate fica `BLOQUEADO` por bloqueio corrigível — não confirmável
   humanamente). **R1 não muda de regra por isso**, e a precedência é esta: sem CI configurado,
