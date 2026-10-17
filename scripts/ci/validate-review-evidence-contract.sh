@@ -134,6 +134,10 @@ grep -Fq 'A releitura **recalcula o gate R1–R6 inteiro**' "$review" \
 grep -Fq 'reverta por conta própria (a decisão de reverter é humana). **Releitura posterior' "$review" \
   && grep -Fq 'Releitura posterior impossível (falha ou página não obtida) tem a mesma conduta |' "$review" \
   || fail 'a failed or incomplete post-merge reread does not stop the passage: a finding older than the merge can go unnoticed'
+# encerrar a passagem depois do merge nao pula o registro do merge que aconteceu
+grep -Fq 'Encerrar a passagem não pula o' "$review" \
+  && grep -Fq 'faz o item 7 deste PR (o merge aconteceu), encerra a passagem' "$review" \
+  || fail 'ending the passage after a post-merge gate change skips step 7: ENTREGA.md keeps a merged PR without pr_estado: merged'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
