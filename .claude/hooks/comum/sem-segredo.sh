@@ -98,7 +98,10 @@ achou() {
 # que nao continua um identificador: "task-fora-do-plano" nao e chave "sk-"
 # (falso positivo que barrou a instalacao do framework no conselho #204).
 # `grep -E` nao tem limite de palavra portavel nem lookbehind: dai o grupo explicito.
-achou "chave de API"        '(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})' '(^|[^A-Za-z0-9_-])'
+achou "chave de API"        '(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})' '(^|[^A-Za-z0-9_-])'
+# A chave de acesso da AWS tem fronteira propria: o hifen antes dela nao continua
+# identificador nenhum ("id-AKIA..." e chave), so letra, digito ou _ continuam.
+achou "chave de API"        'AKIA[0-9A-Z]{16}' '(^|[^A-Za-z0-9_])'
 # 2. Credencial em atribuição
 achou "credencial"          '([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*['"'"'"]?[A-Za-z0-9/+_.=-]{8,}'
 # 3. Chave privada

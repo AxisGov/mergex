@@ -227,6 +227,15 @@ caso "sk- depois de aspas"                 comum/sem-segredo.sh "$(write_json "k
 caso "sk- depois de :"                     comum/sem-segredo.sh "$(write_json "chave:$SK")" 2
 caso "identificador e chave na mesma linha" comum/sem-segredo.sh "$(write_json "${IDENT} $SK")" 2
 caso "ghp_ depois de ="                    comum/sem-segredo.sh "$(write_json "GH=ghp_$(printf 'Z9%.0s' {1..12})")" 2
+# AKIA tem fronteira propria (conselho #204, rodada 3): o hifen antes dela nao
+# continua identificador, entao "id-AKIA..." e chave; letra, digito ou _ antes
+# continuam. O sk- depois de hifen segue passando (task-fora-do-plano).
+AK="AKIA$(printf 'QWERTY7ZJ2KLMNPR')"
+caso "AKIA depois de hifen: barra"         comum/sem-segredo.sh "$(write_json "id-$AK")" 2
+caso "AKIA no comeco da linha: barra"      comum/sem-segredo.sh "$(write_json "$AK")" 2
+caso "AKIA logo depois de letra: passa"    comum/sem-segredo.sh "$(write_json "x$AK")" 0
+caso "AKIA logo depois de _: passa"        comum/sem-segredo.sh "$(write_json "_$AK")" 0
+caso "sk- depois de hifen: passa"          comum/sem-segredo.sh "$(write_json "id-$SK")" 0
 
 echo
 echo "git-perigoso — tem que BARRAR"
