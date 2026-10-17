@@ -207,13 +207,26 @@ saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=9000 bash "$script" main com-raiz 2>&1
 
 # o trecho do E7 que resolve a base, rodado de verdade: branch_base com e sem o
 # remoto no nome (a base informada pelo chamador no E0 pode vir `upstream/main`)
+# O origin e um repositorio vazio de verdade: o nome curto `upstream/main` so vira
+# remoto/branch depois de o ls-remote responder que `upstream/main` nao e branch dele
 mkdir -p "$aux/clone"; git -C "$aux/clone" init -q
-git -C "$aux/clone" remote add origin https://exemplo.invalid/fork.git
+git init -q --bare "$aux/fork-vazio.git"
+git -C "$aux/clone" remote add origin "$aux/fork-vazio.git"
 git -C "$aux/clone" remote add upstream https://exemplo.invalid/principal.git
-resolve_base() { # <branch_base> — imprime "<remoto> <branch>" como o E7 resolve
+resolve_base() { # <branch_base> [dir] — imprime "<remoto> <branch>" como o E7 resolve
   sed -n '/^rb="\$remoto"/,/^if \[ "\$bb" = HEAD/p' "$e7" | sed '$d' | sed "s|<branch_base>|$1|" > "$aux/resolve.sh"
-  (cd "$aux/clone" && remoto=origin && . "$aux/resolve.sh" && printf '%s %s' "$rb" "$bb")
+  (cd "${2:-$aux/clone}" && remoto=origin && . "$aux/resolve.sh" && printf '%s %s' "$rb" "$bb")
 }
+# ls-remote que falha (rede, credencial) nao prova que a branch nao existe: o E7
+# para, em vez de trocar de remoto e medir contra a base errada
+mkdir -p "$aux/clone-sem-rede"; git -C "$aux/clone-sem-rede" init -q
+git -C "$aux/clone-sem-rede" remote add origin "$aux/nao-existe.git"
+git -C "$aux/clone-sem-rede" remote add upstream "$aux/nao-existe.git"
+r="$(resolve_base upstream/main "$aux/clone-sem-rede" 2>&1)"
+case "$r" in
+  *'o E7 não mede nem abre o PR'*) passa 'ls-remote que falha na conferencia do nome curto para o E7' ;;
+  *) quebra "ls-remote que falha virou 'nao e branch' e o E7 seguiu: '$r'" ;;
+esac
 # `refs/heads/...` e ref explicita de branch: nunca e partida em remoto/branch, nem
 # quando o primeiro segmento e um remoto configurado
 for par in 'main|origin main' 'upstream/main|upstream main' \

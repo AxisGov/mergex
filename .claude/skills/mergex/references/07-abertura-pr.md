@@ -70,7 +70,9 @@ informada pelo chamador no E0 pode vir): aí vale o remoto dela, e só o nome da
 fetch. Quem decide é a ref, não a primeira barra: `refs/remotes/<remoto>/<branch>` sempre nomeia o
 remoto e `refs/heads/<branch>` nunca nomeia; no nome curto, o primeiro segmento só vira remoto se
 for um remoto configurado (`git remote`) **e** o nome inteiro não for branch do remoto do
-upstream — `feature/<slug>` é uma branch válida, e um remoto chamado `feature` não a desvia. A base medida é o `FETCH_HEAD`, o que acabou de chegar, e não a ref de rastreio: um
+upstream — `feature/<slug>` é uma branch válida, e um remoto chamado `feature` não a desvia. Só a
+resposta "não há essa branch" (saída `2` do `ls-remote --exit-code`) troca o remoto; uma conferência
+que falha (rede, credencial) não prova nada e para o E7. A base medida é o `FETCH_HEAD`, o que acabou de chegar, e não a ref de rastreio: um
 `origin/HEAD` buscado não atualiza a ref simbólica local, que mediria contra o alvo antigo. E
 `origin/HEAD` normaliza para `bb=HEAD`, que não é branch no serviço: o `$bb` vai para o
 `gh pr create --base` e para a instrução manual do passo 3, então o `HEAD` do remoto é resolvido
@@ -81,9 +83,13 @@ rb="$remoto"; bb="<branch_base>"
 case "$bb" in
   refs/remotes/*/*) bb="${bb#refs/remotes/}"; rb="${bb%%/*}"; bb="${bb#*/}" ;;
   refs/heads/*) bb="${bb#refs/heads/}" ;;
-  */*) if git remote | grep -qxF "${bb%%/*}" \
-         && ! git ls-remote --exit-code --heads "$rb" "refs/heads/$bb" >/dev/null 2>&1; then
-         rb="${bb%%/*}"; bb="${bb#*/}"
+  */*) if git remote | grep -qxF "${bb%%/*}"; then
+         git ls-remote --exit-code --heads "$rb" "refs/heads/$bb" >/dev/null 2>&1; rc_ls=$?
+         case "$rc_ls" in
+           0) ;;
+           2) rb="${bb%%/*}"; bb="${bb#*/}" ;;
+           *) echo "conferência de $bb em $rb falhou (ls-remote saiu $rc_ls): o E7 não mede nem abre o PR"; exit 1 ;;
+         esac
        fi ;;
 esac
 if [ "$bb" = HEAD ]; then
