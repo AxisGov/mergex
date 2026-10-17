@@ -104,6 +104,24 @@ grep -Fq 'Check reportado é CI configurado' "$review" \
 printf '%s\n' "$r1" | grep -Fq 'nem check obrigatório na proteção da base' \
   && grep -Fq 'check obrigatório sem resultado no HEAD é R1 `NÃO VERIFICÁVEL`' "$review" \
   || fail 'R1 becomes n/a while the base protection requires a check that has not reported'
+# os checks obrigatorios do GitHub vem de dois mecanismos, cada um no seu endpoint: so os
+# rulesets deixariam um check obrigatorio da protecao classica de fora; leitura que falha
+# nao prova ausencia de check obrigatorio
+grep -Fq 'gh api repos/<dono>/<repo>/branches/<base>' "$review" \
+  && grep -Fq 'gh api repos/<dono>/<repo>/rules/branches/<base>' "$review" \
+  && grep -Fq 'leitura de qualquer dos dois que falha também é R1 `NÃO VERIFICÁVEL`, nunca `n/a`' "$review" \
+  && printf '%s\n' "$r1" | grep -Fq 'lida com sucesso na proteção clássica e nos rulesets' \
+  || fail 'R1 reads only the rulesets (or treats a failed read as no required check): classic branch protection checks are missed'
+# PR empilhado (base = branch de outro PR aberto) nao passa a frente da predecessora:
+# a fila e topologica antes de ser de impacto
+grep -Fq '### Antes do impacto: PRs empilhados' "$review" \
+  && grep -Fq 'a ordem é **topológica antes de ser de impacto**' "$review" \
+  && grep -Fq '`empilhado sobre #<n>`' "$review" \
+  || fail 'the E9 queue orders by impact only: a stacked PR can be merged before its predecessor'
+# a base tambem e relida na revalidacao pre-merge: mudar depois do passo 7 nao escapa
+grep -Fq 'threads e findings relevantes; a base' "$review" \
+  && grep -Fq '(HEAD, rascunho, CI, decisão de review, threads, base)' "$review" \
+  || fail 'the pre-merge revalidation does not reread the base: a stacked PR can still land on its predecessor branch'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'

@@ -56,6 +56,10 @@ grep -Fq 'rb="$remoto"; bb="<branch_base>"' "$e7" && grep -Fq 'git fetch "$rb" "
 grep -Fq 'gh pr create --base "$bb"' "$e7" && ! grep -Fq 'gh pr create --base <branch-base>' "$e7" \
   && passa 'o gh pr create recebe a base sem o remoto ($bb do passo 1.5)' \
   || quebra 'o gh pr create recebe a branch_base crua (upstream/main nao e branch no GitHub)'
+# o passo 1 reconhece `glab`: o passo 2 tem de ter o comando dele, ou o GitLab cai no manual
+grep -Fq 'glab mr create --target-branch "$bb"' "$e7" && grep -Fq -- '--draft --yes' "$e7" \
+  && passa 'o GitLab (glab) tem o comando de abertura, com a base do passo 1.5 e sem confirmacao interativa' \
+  || quebra 'o passo 1 reconhece glab, mas o passo 2 so tem o comando do gh'
 grep -Fq 'o passo 1.5 roda do mesmo jeito, e só depois dele vá para o passo 3' "$e7" \
   && passa 'servico sem ferramenta tambem passa pela medicao' \
   || quebra 'o caminho manual (passo 3) contorna a medicao'
@@ -70,6 +74,15 @@ if (cd "$tmp" && bash "$script" main pequeno >/dev/null 2>&1); then passa 'PR pe
 g switch -q -c grande main
 for i in 1 2 3; do printf 'linha\n%.0s' $(seq 1 200) > "$tmp/g$i.md"; g add -A; g commit -q -m "parte $i"; done
 if (cd "$tmp" && bash "$script" main grande >/dev/null 2>&1); then quebra 'PR de 600 linhas passou'; else passa 'PR de 600 linhas reprova (F2)'; fi
+# a excecao declarada pelo desenvolvedor chega ao script mesmo sem `export`: o
+# trecho real do E7, rodado com FATIA_EXCECAO so como variavel de shell
+exc_trecho="$(sed -n '/^e7_ignorar=/,/fatiamento-da-pr\.sh "\$base"/p' "$e7" \
+  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#')"
+saida="$(cd "$tmp" && unset FATIA_EXCECAO FATIA_IGNORAR && FATIA_EXCECAO='movimento mecanico' \
+  && base=main && publicado=grande && eval "$exc_trecho" 2>&1)"; rc=$?
+[ "$rc" = 0 ] && case "$saida" in *"excecao declarada: movimento mecanico"*) true ;; *) false ;; esac \
+  && passa 'FATIA_EXCECAO nao exportada chega ao script pelo trecho do E7 (F2 vira aviso)' \
+  || quebra "FATIA_EXCECAO nao exportada nao chegou ao script (rc $rc): $saida"
 # F3: um commit so de 350 linhas, num PR que cabe em F2
 g switch -q -c commit-grande main
 printf 'linha\n%.0s' $(seq 1 350) > "$tmp/c.md"; g add -A; g commit -q -m "commit grande"
@@ -138,6 +151,29 @@ printf 'nova %s\n' $(seq 1 300) >> "$tmp/src/q.md"; g add -A; g commit -q -m "pr
 saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=250 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" renomeia renomeia-pr 2>&1)" \
   && quebra 'renomeacao de fixtures/candidatos para src/ ficou fora da conta' \
   || { case "$saida" in *"F2:"*) passa 'renomeacao de fixtures/candidatos para src/ conta pelo destino (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
+# e no sentido contrario: codigo do produto movido PARA fixtures/candidatos/ com 450
+# linhas a menos (55% iguais: ainda e renomeacao) conta as linhas removidas
+g switch -q -c produto main
+mkdir -p "$tmp/src" "$tmp/fixtures/candidatos"
+printf 'linha %s\n' $(seq 1 1000) > "$tmp/src/p.md"; g add -A; g commit -q -m "produto"
+g switch -q -c produto-pr produto
+tail -n +451 "$tmp/src/p.md" > "$tmp/fixtures/candidatos/p.md"; rm "$tmp/src/p.md"
+g add -A; g commit -q -m "tira o produto para a fixture"
+saida="$(cd "$tmp" && unset FATIA_IGNORAR && bash "$script" produto produto-pr 2>&1)"
+case "$saida" in
+  *"PR com 450 linhas em 1 arquivo"*) passa 'renomeacao de src/ para fixtures/candidatos conta as linhas removidas (F2)' ;;
+  *) quebra "renomeacao de src/ para fixtures/candidatos escondeu as linhas removidas: $saida" ;;
+esac
+# controle: renomeacao entre dois caminhos gerados continua fora da conta
+g switch -q -c fixture-pr produto-pr
+mkdir -p "$tmp/fixtures/candidatos/y"
+tail -n +101 "$tmp/fixtures/candidatos/p.md" > "$tmp/fixtures/candidatos/y/p.md"; rm "$tmp/fixtures/candidatos/p.md"
+g add -A; g commit -q -m "regenera a fixture"
+saida="$(cd "$tmp" && unset FATIA_IGNORAR && bash "$script" produto-pr fixture-pr 2>&1)"
+case "$saida" in
+  *"PR com 0 linhas em 0 arquivo"*) passa 'renomeacao entre dois caminhos de fixtures/candidatos fica fora da conta' ;;
+  *) quebra "renomeacao entre dois caminhos gerados entrou na conta: $saida" ;;
+esac
 # caminho que so PARECE renomeacao (` => ` no nome) nao e cortado ate o FATIA_IGNORAR
 g switch -q -c seta main
 mkdir -p "$tmp/docs"
@@ -149,6 +185,18 @@ if printf 'linha %s\n' $(seq 1 450) > "$tmp/docs/x => package-lock.json" 2>/dev/
 else
   passa "nome com ' => ': pulado, o sistema de arquivos nao aceita '>' (o CI em Linux cobre)"
 fi
+# o lock no padrao do script casa o nome inteiro: `package-lock.json.backup` conta.
+# Tamanhos diferentes (lock 300, copia 450): so "450 em 1" prova que e a copia que conta
+# e o lock que sai; o inverso daria "300 em 1", os dois "750 em 2", nenhum "0 em 0".
+g switch -q -c lock-backup main
+mkdir -p "$tmp/web"
+printf 'linha %s\n' $(seq 1 300) > "$tmp/web/package-lock.json"
+printf 'linha %s\n' $(seq 1 450) > "$tmp/package-lock.json.backup"; g add -A; g commit -q -m "lock e copia do lock"
+saida="$(cd "$tmp" && unset FATIA_IGNORAR && FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main lock-backup 2>&1)"
+case "$saida" in
+  *"PR com 450 linhas em 1 arquivo"*) passa 'o padrao do lock casa o nome inteiro: package-lock.json.backup conta, web/package-lock.json nao' ;;
+  *) quebra "package-lock.json.backup saiu da conta (ou o lock entrou): $saida" ;;
+esac
 # e a raiz de historia sem pai (merge de historia sem relacao) mede contra a arvore vazia
 g switch -q --orphan raiz-solta; printf 'linha\n%.0s' $(seq 1 350) > "$tmp/solta.md"; g add solta.md; g commit -q -m "raiz solta"
 g switch -q -c com-raiz main; g merge -q --allow-unrelated-histories -m "junta raiz" raiz-solta
