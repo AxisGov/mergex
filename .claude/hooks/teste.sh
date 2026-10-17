@@ -202,6 +202,25 @@ caso "commit + 70 KB de linhas: a varredura continua, barra"      comum/sem-segr
 caso "commit + 200 KB de linhas: barra"                           comum/sem-segredo.sh "$(json_grande "git commit -m x"$'\n'"$LINHAS200")" 2
 caso "comando legitimo + 200 KB de linhas: passa"                 comum/sem-segredo.sh "$(json_grande "npm test"$'\n'"$LINHAS200")" 0
 git rm -q --cached segredo.pem && rm -f segredo.pem
+# Prefixo de chave no meio de um identificador nao e chave. Falso positivo do
+# conselho #204: "ta" + "sk-fora-do-plano-..." (nome de um caso da bancada da
+# sprintx) casava com sk-, e barrou os commits de instalacao do framework. O
+# prefixo so vale no comeco da linha ou depois de caractere fora de [A-Za-z0-9_-].
+echo "sem-segredo — prefixo dentro de identificador tem que PASSAR"
+IDENT='  n_fora:nfora-task-fora-do-plano-corrente-fail-closed'
+caso "sk- dentro de identificador"         comum/sem-segredo.sh "$(write_json "$IDENT")" 0
+printf '%s\n' "$IDENT" > ident.sh && git add ident.sh
+caso "sk- dentro de identificador no diff" comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
+git rm -q --cached ident.sh && rm -f ident.sh
+caso "ghp_ e AKIA dentro de palavra"       comum/sem-segredo.sh "$(write_json "abcghp_$(printf 'A%.0s' {1..24}) MEUAKIA$(printf 'B%.0s' {1..16})")" 0
+echo "sem-segredo — prefixo com limite a esquerda continua BARRANDO"
+caso "sk- no comeco da linha"              comum/sem-segredo.sh "$(write_json "$SK")" 2
+caso "sk- depois de espaco"                comum/sem-segredo.sh "$(write_json "Bearer $SK")" 2
+caso "sk- depois de ="                     comum/sem-segredo.sh "$(write_json "OPENAI=$SK")" 2
+caso "sk- depois de aspas"                 comum/sem-segredo.sh "$(write_json "k='$SK'")" 2
+caso "sk- depois de :"                     comum/sem-segredo.sh "$(write_json "chave:$SK")" 2
+caso "identificador e chave na mesma linha" comum/sem-segredo.sh "$(write_json "${IDENT} $SK")" 2
+caso "ghp_ depois de ="                    comum/sem-segredo.sh "$(write_json "GH=ghp_$(printf 'Z9%.0s' {1..12})")" 2
 
 echo
 echo "git-perigoso — tem que BARRAR"

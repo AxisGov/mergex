@@ -122,6 +122,22 @@ grep -Fq '### Antes do impacto: PRs empilhados' "$review" \
 grep -Fq 'threads e findings relevantes; a base' "$review" \
   && grep -Fq '(HEAD, rascunho, CI, decisão de review, threads, base)' "$review" \
   || fail 'the pre-merge revalidation does not reread the base: a stacked PR can still land on its predecessor branch'
+# a revalidacao recalcula o gate R1-R6 inteiro, nao so o HEAD: --match-head-commit
+# prende o SHA, nao um finding novo de bot nem um check que muda no mesmo SHA
+grep -Fq 'A releitura **recalcula o gate R1–R6 inteiro**' "$review" \
+  && grep -Fq 'resultado do gate entre a releitura e o merge invalida a passagem** — mesmo a que não' "$review" \
+  && grep -Fq '**O resto do gate não tem amarra atômica**' "$review" \
+  && grep -Fq 'com o gate R1–R6 recalculado e igual ao confirmado' "$review" \
+  && grep -Fq '| Gate muda no mesmo HEAD (finding novo de bot, check não obrigatório que muda) |' "$review" \
+  || fail 'the pre-merge revalidation is tied only to the HEAD: a new bot finding or a check that changes on the same SHA still lets the merge through'
+# a releitura depois do merge que falha ou perde pagina conta como mudanca
+grep -Fq 'reverta por conta própria (a decisão de reverter é humana). **Releitura posterior' "$review" \
+  && grep -Fq 'Releitura posterior impossível (falha ou página não obtida) tem a mesma conduta |' "$review" \
+  || fail 'a failed or incomplete post-merge reread does not stop the passage: a finding older than the merge can go unnoticed'
+# encerrar a passagem depois do merge nao pula o registro do merge que aconteceu
+grep -Fq 'Encerrar a passagem não pula o' "$review" \
+  && grep -Fq 'faz o item 7 deste PR (o merge aconteceu), encerra a passagem' "$review" \
+  || fail 'ending the passage after a post-merge gate change skips step 7: ENTREGA.md keeps a merged PR without pr_estado: merged'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
@@ -136,6 +152,12 @@ grep -Fq '`REVIEW_REQUIRED` não muda R2, mas o serviço recusaria o merge' "$re
 # remediacao"): o template tem de oferecer esse estado, nao so NAO PERSISTIDO
 grep -Fq 'NÃO PERSISTIDO (handoff NÃO VERIFICÁVEL;' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
   || fail 'TEMPLATE-revisao.md does not mark an unpersisted REVIEW REMEDIATION handoff as NAO VERIFICAVEL'
+# o bloco CONFLITO tem o campo da pergunta a quem decidir (analista-de-conflito
+# exige uma por trecho): sem ele, o relatorio feito pelo template a omite
+grep -Fq '  O que perguntar a quem decidir:' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
+  && grep -Fq '{{pergunta}}' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
+  && grep -Fq '  O que perguntar a quem decidir:' "$review" \
+  || fail 'the CONFLITO block in TEMPLATE-revisao.md (or 09-revisao.md) has no field for the question to whoever decides'
 
 # o comando nao pode exigir recomendacao de todo PR: PR BLOQUEADO nao recebe
 # recomendacao de merge (09-revisao.md, passo 6; TEMPLATE-revisao.md)
