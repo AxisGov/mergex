@@ -112,6 +112,12 @@ grep -Fq 'gh api repos/<dono>/<repo>/branches/<base>' "$review" \
   && grep -Fq 'leitura de qualquer dos dois que falha também é R1 `NÃO VERIFICÁVEL`, nunca `n/a`' "$review" \
   && printf '%s\n' "$r1" | grep -Fq 'lida com sucesso na proteção clássica e nos rulesets' \
   || fail 'R1 reads only the rulesets (or treats a failed read as no required check): classic branch protection checks are missed'
+# PR empilhado (base = branch de outro PR aberto) nao passa a frente da predecessora:
+# a fila e topologica antes de ser de impacto
+grep -Fq '### Antes do impacto: PRs empilhados' "$review" \
+  && grep -Fq 'a ordem é **topológica antes de ser de impacto**' "$review" \
+  && grep -Fq '`empilhado sobre #<n>`' "$review" \
+  || fail 'the E9 queue orders by impact only: a stacked PR can be merged before its predecessor'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'

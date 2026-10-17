@@ -702,6 +702,21 @@ Some, em ordem lexicográfica de prioridade (o primeiro critério que difere dec
 
 **Declare o critério na saída**, sempre. A ordem sem o critério é opinião; com o critério, é auditável.
 
+### Antes do impacto: PRs empilhados
+
+Um PR cuja base (`baseRefName`; no GitLab, `target_branch`) é a branch de outro PR aberto
+(`headRefName`; no GitLab, `source_branch`) está **empilhado** sobre ele. Mergeá-lo primeiro
+levaria o diff dele para a branch da predecessora, e o PR dela passaria a carregar código que
+ninguém revisou ali. Por isso a ordem é **topológica antes de ser de impacto**: a ordem de
+impacto vale só entre PRs sem essa dependência, e o empilhado vai **depois** da predecessora (e
+de toda a cadeia abaixo dela), qualquer que seja o impacto de cada um.
+
+Enquanto a predecessora estiver aberta, o empilhado fica nos inelegíveis com o motivo
+`empilhado sobre #<n>`. Ele só chega ao passo 7 se, na vez dele, a base relida no serviço não for
+a branch de um PR aberto nem a de um PR mergeado nesta passagem — depois do merge da
+predecessora, a base tem de ter sido redirecionada para a base dela, pelo serviço ou pelo
+desenvolvedor. Senão continua inelegível, com o motivo.
+
 PRs **inelegíveis para merge** — rascunho, integração contínua vermelha, review obrigatório pendente (`reviewDecision: REVIEW_REQUIRED` no GitHub; aprovações exigidas ainda não dadas no GitLab), ou `REVIEW EVIDENCE: BLOQUEADO` por **bloqueio corrigível por remediação** (ver "Dois tipos de bloqueio", acima) — aparecem na lista, **no fim**, marcados com o motivo, e **não entram na condução do passo 7**.
 
 PRs com `REVIEW EVIDENCE: BLOQUEADO` **apenas** por **bloqueio confirmável humanamente nesta execução**, e sem nenhum outro impedimento (não rascunho, CI não vermelha), ficam na fila pela mesma ordem de impacto, marcados `confirmação humana necessária`, e entram no passo 7 **só** na condução limitada: pedir as confirmações específicas, recalcular o gate, e seguir apenas se o resultado for `SATISFEITO`.
@@ -919,7 +934,7 @@ humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIF
 - [ ] Todos os PRs abertos foram listados, inclusive rascunhos e inelegíveis.
 - [ ] Sobreposições estão no topo, com os PRs identificados e os arquivos em comum.
 - [ ] O critério de ordenação está declarado.
-- [ ] A ordem vai do menor para o maior impacto.
+- [ ] A ordem vai do menor para o maior impacto, depois da ordem dos empilhados: nenhum PR empilhado foi oferecido antes da predecessora.
 - [ ] PRs com integração vermelha, rascunhos e `REVIEW EVIDENCE` diferente de `SATISFEITO` não foram oferecidos para merge.
 - [ ] Todo PR mostrou `Review Evidence: SATISFEITO | BLOQUEADO`, R1–R6 individuais e o bloco `Reviews` com as seis contagens.
 - [ ] Todo merge feito passou pela revalidação imediatamente anterior (HEAD, rascunho, CI, decisão de review, threads); HEAD alterado invalidou as confirmações e barrou o merge nesta passagem.
