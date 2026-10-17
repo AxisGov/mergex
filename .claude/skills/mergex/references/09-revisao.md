@@ -610,10 +610,18 @@ justificativa para um finding; marcar finding válido como resolvido sem evidên
 
 Finding válido que exige mudança **não é corrigido pela mergex**. Ela valida o finding contra
 o código atual, monta este pacote, e devolve à skill de origem do trabalho (sprintx, runx ou
-buildx):
+buildx): a do `expx_tool` do `ENTREGA.md` na branch do PR.
+
+PR aberto fora do método — sem `ENTREGA.md` ("sem registro da mergex", passo 2) — não tem skill
+de origem. O destinatário é então o **autor do PR** na plataforma (`author.login` no GitHub,
+`author.username` no GitLab), e o `Destino:` do pacote diz isso; a persistência abaixo é a mesma.
+Nunca escolha uma skill para ele por palpite.
 
 ```
 REVIEW REMEDIATION
+
+Destino:
+<skill de origem, do expx_tool do ENTREGA.md | autor do PR (@<login>): PR sem ENTREGA.md, sem skill de origem>
 
 Finding:
 <texto normalizado>
