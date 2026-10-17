@@ -266,7 +266,8 @@ e as fontes.
 ```
 
 **Toda justificativa nomeia pelo menos um critério** (`O1`–`O10`, `L1`–`L4`,
-`D1`–`D4`) **e a evidência que o confirma.** Sem isso é opinião, e opinião não
+`D1`–`D4`) **e a evidência que o confirma** — ou, quando nenhum bate, diz que é o
+**padrão** (OLHO OBRIGATÓRIO) e por que nenhum critério se confirmou. Sem isso é opinião, e opinião não
 é auditável.
 
 Errado, porque não nomeia evidência:
@@ -279,7 +280,7 @@ src/fiscal/calculo_icms_st.py — OLHO OBRIGATÓRIO
 ## Antes de entregar, confira
 
 - [ ] Todo arquivo do diff está em **exatamente uma** faixa — nenhum ficou de fora.
-- [ ] Toda classificação nomeia critério e evidência.
+- [ ] Toda classificação nomeia critério e evidência, ou o padrão com a razão.
 - [ ] A faixa de cada arquivo é a que o classificador devolveu; todo L4 e D4 veio dele.
 - [ ] Todo artefato de método que é origem de decisão de risco passou pelos critérios O antes.
 - [ ] Nenhuma justificativa usa tamanho de diff.

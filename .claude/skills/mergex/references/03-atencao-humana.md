@@ -494,7 +494,7 @@ Esta saída vai inteira para a seção **"Onde eu quero seu olho"** da descriç�
 ## Critério de saída
 
 - [ ] Todo arquivo do diff está em exatamente uma faixa.
-- [ ] Toda classificação nomeia pelo menos um critério (`O1`–`O10`, `L1`–`L4`, `D1`–`D4`).
+- [ ] Toda classificação nomeia pelo menos um critério (`O1`–`O10`, `L1`–`L4`, `D1`–`D4`) ou, quando nenhum bate, o padrão com a razão declarada.
 - [ ] Todo L4 e D4 veio da saída do classificador, com a linha do catálogo ou a prova.
 - [ ] Todo artefato de método que é origem de decisão de risco foi avaliado pelos critérios O antes.
 - [ ] Nenhuma justificativa é baseada em tamanho de diff.
