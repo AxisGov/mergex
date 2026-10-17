@@ -34,6 +34,7 @@ esac
 # 9 s no Git Bash (limite 10 s) passava afirmando uma regra que nao foi conferida.
 # Limite que nao e segundo inteiro vai em ms (2500 nao vira "2 s", mais estrito).
 case "$LIMITE_MS" in ''|*[!0-9]*) printf 'LIMITE_MS invalido: %s\n' "$LIMITE_MS" >&2; exit 1 ;; esac
+LIMITE_MS=$((10#$LIMITE_MS))   # base 10 explicita: 0800 e 800 ms, nao octal invalido
 if [ $((LIMITE_MS % 1000)) = 0 ]; then LIMITE_TXT="$((LIMITE_MS / 1000)) s"; else LIMITE_TXT="$LIMITE_MS ms"; fi
 # Tempo em milissegundos, nao em $SECONDS: o $SECONDS conta viradas de segundo, e
 # uma execucao de 1,1 s que atravessa duas viradas mede 2 e reprova o "menos de 2 s".
