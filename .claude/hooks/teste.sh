@@ -236,6 +236,11 @@ caso "AKIA no comeco da linha: barra"      comum/sem-segredo.sh "$(write_json "$
 caso "AKIA logo depois de letra: passa"    comum/sem-segredo.sh "$(write_json "x$AK")" 0
 caso "AKIA logo depois de _: passa"        comum/sem-segredo.sh "$(write_json "_$AK")" 0
 caso "sk- depois de hifen: passa"          comum/sem-segredo.sh "$(write_json "id-$SK")" 0
+# ASIA (chave temporaria do STS) tem a mesma fronteira da AKIA, como na sprintx
+AS="ASIA$(printf 'QWERTY7ZJ2KLMNPR')"
+caso "ASIA no comeco da linha: barra"      comum/sem-segredo.sh "$(write_json "$AS")" 2
+caso "ASIA depois de hifen: barra"         comum/sem-segredo.sh "$(write_json "id-$AS")" 2
+caso "ASIA dentro de identificador: passa" comum/sem-segredo.sh "$(write_json "x$AS")" 0
 
 echo
 echo "git-perigoso — tem que BARRAR"
