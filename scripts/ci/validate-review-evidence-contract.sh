@@ -130,6 +130,10 @@ grep -Fq 'A releitura **recalcula o gate R1–R6 inteiro**' "$review" \
   && grep -Fq 'com o gate R1–R6 recalculado e igual ao confirmado' "$review" \
   && grep -Fq '| Gate muda no mesmo HEAD (finding novo de bot, check não obrigatório que muda) |' "$review" \
   || fail 'the pre-merge revalidation is tied only to the HEAD: a new bot finding or a check that changes on the same SHA still lets the merge through'
+# a releitura depois do merge que falha ou perde pagina conta como mudanca
+grep -Fq 'reverta por conta própria (a decisão de reverter é humana). **Releitura posterior' "$review" \
+  && grep -Fq 'Releitura posterior impossível (falha ou página não obtida) tem a mesma conduta |' "$review" \
+  || fail 'a failed or incomplete post-merge reread does not stop the passage: a finding older than the merge can go unnoticed'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'
