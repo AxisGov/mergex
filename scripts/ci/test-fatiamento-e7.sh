@@ -211,11 +211,14 @@ mkdir -p "$aux/clone"; git -C "$aux/clone" init -q
 git -C "$aux/clone" remote add origin https://exemplo.invalid/fork.git
 git -C "$aux/clone" remote add upstream https://exemplo.invalid/principal.git
 resolve_base() { # <branch_base> — imprime "<remoto> <branch>" como o E7 resolve
-  sed -n '/^rb="\$remoto"/,/^if \[/p' "$e7" | sed "s|<branch_base>|$1|" > "$aux/resolve.sh"
+  sed -n '/^rb="\$remoto"/,/^if \[ "\$bb" = HEAD/p' "$e7" | sed '$d' | sed "s|<branch_base>|$1|" > "$aux/resolve.sh"
   (cd "$aux/clone" && remoto=origin && . "$aux/resolve.sh" && printf '%s %s' "$rb" "$bb")
 }
+# `refs/heads/...` e ref explicita de branch: nunca e partida em remoto/branch, nem
+# quando o primeiro segmento e um remoto configurado
 for par in 'main|origin main' 'upstream/main|upstream main' \
-           'refs/remotes/upstream/main|upstream main' 'feature/x|origin feature/x'; do
+           'refs/remotes/upstream/main|upstream main' 'feature/x|origin feature/x' \
+           'refs/heads/upstream/main|origin upstream/main'; do
   r="$(resolve_base "${par%%|*}")"
   [ "$r" = "${par#*|}" ] && passa "branch_base ${par%%|*} busca em ${par#*|}" \
     || quebra "branch_base ${par%%|*} resolveu '$r', esperado '${par#*|}'"
@@ -231,6 +234,11 @@ git -C "$aux/dev" remote add upstream "$aux/principal.git"; git -C "$aux/dev" fe
 # fetch de main nao atualiza refs/remotes/estreito/main, que fica velha
 git -C "$aux/dev" remote add estreito "$aux/principal.git"; git -C "$aux/dev" fetch -q estreito
 git -C "$aux/dev" config remote.estreito.fetch '+refs/heads/outra:refs/remotes/estreito/outra'
+# branch cujo primeiro segmento e um remoto configurado: `feature/x` existe no remoto
+# do upstream e `feature` tambem e remoto. A branch existente vence; `feature/main`,
+# que nao e branch do upstream, continua indo ao remoto `feature`
+git -C "$tmp" push -q "$aux/principal.git" main:refs/heads/feature/x 2>/dev/null
+git -C "$aux/dev" remote add feature "$aux/principal.git"
 g switch -q -c avanca main; printf 'novo\n' > "$tmp/novo.txt"; g add -A; g commit -q -m avanca
 git -C "$tmp" push -q "$aux/principal.git" avanca:main 2>/dev/null
 atual="$(git -C "$aux/principal.git" rev-parse main)"
@@ -240,7 +248,7 @@ base_do_e7() { # <branch_base> — roda o trecho do E7 ate o calculo da base, im
   sed -n '/^rb="\$remoto"/,/^base=/p' "$e7" | sed "s|<branch_base>|$1|" > "$aux/base.sh"
   (cd "$aux/dev" && remoto=origin && . "$aux/base.sh" >/dev/null 2>&1 && printf '%s' "$base")
 }
-for bb in main origin/HEAD upstream/main refs/remotes/upstream/main estreito/main; do
+for bb in main origin/HEAD upstream/main refs/remotes/upstream/main estreito/main feature/main; do
   [ "$(base_do_e7 "$bb")" = "$atual" ] && passa "branch_base $bb mede contra a ponta atual do remoto" \
     || quebra "branch_base $bb mediu contra outra base (ref velha?)"
 done
@@ -253,7 +261,8 @@ bb_do_e7() { # <branch_base> — roda o trecho do E7 ate o calculo da base, impr
   sed -n '/^rb="\$remoto"/,/^base=/p' "$e7" | sed "s|<branch_base>|$1|" > "$aux/bb.sh"
   (cd "$aux/dev" && remoto=origin && . "$aux/bb.sh" >/dev/null 2>&1 && printf '%s' "$bb")
 }
-for par in 'origin/HEAD|padrao' 'refs/remotes/upstream/HEAD|padrao' 'main|main'; do
+for par in 'origin/HEAD|padrao' 'refs/remotes/upstream/HEAD|padrao' 'main|main' \
+           'feature/x|feature/x' 'refs/heads/feature/x|feature/x' 'refs/remotes/feature/main|main'; do
   r="$(bb_do_e7 "${par%%|*}")"
   [ "$r" = "${par#*|}" ] && passa "branch_base ${par%%|*} abre o PR contra '${par#*|}'" \
     || quebra "branch_base ${par%%|*} deu bb='$r', esperado '${par#*|}' (o gh pr create receberia isso)"
