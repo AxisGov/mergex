@@ -80,14 +80,15 @@ agora, no remoto, para o nome da branch padrão (`refs/heads/main` → `main`).
 
 Cada bloco de comandos deste reference roda numa chamada própria do shell, e variável de um
 bloco não chega ao seguinte: este bloco recalcula o `$remoto` e o `$publicado` dos
-pré-requisitos (a busca de lá já atualizou a ref remota, e a ponta continua tendo de ser o
-`HEAD`), e grava o `$bb` resolvido num arquivo de estado do Git, que o passo 2 lê. O estado só
+pré-requisitos — e busca a branch de novo, conferida, porque a ref remota pode ter andado
+desde aquela chamada; a ponta continua tendo de ser o `HEAD` —, e grava o `$bb` resolvido num arquivo de estado do Git, que o passo 2 lê. O estado só
 é gravado quando a medição sai `0`: reprovado (`1`) ou não medido (`2`), o arquivo fica ausente,
 e o passo 2 não tem base para abrir o PR:
 
 ```bash
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1
-remoto="${upstream%%/*}"
+remoto="${upstream%%/*}"; ref_remota="${upstream#*/}"
+git fetch "$remoto" "$ref_remota" || { echo "busca de $upstream falhou: o E7 não mede nem abre o PR"; exit 1; }
 publicado="$(git rev-parse --verify "refs/remotes/$upstream^{commit}")" || exit 1
 [ "$publicado" = "$(git rev-parse HEAD)" ] || { echo "a ponta remota ($publicado) não é o HEAD: o E7 não mede nem abre o PR"; exit 1; }
 estado_bb="$(git rev-parse --git-path mergex-e7-base)"; rm -f "$estado_bb"

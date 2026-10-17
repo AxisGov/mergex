@@ -335,6 +335,16 @@ saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" F
 [ "$rc" = 1 ] && [ ! -e "$estado" ] \
   && passa 'passo 1.5 reprovado (saida 1) nao deixa o estado da base para o passo 2' \
   || quebra "passo 1.5 reprovado: rc $rc, estado $( [ -e "$estado" ] && echo presente || echo ausente): $saida"
+# a branch remota anda entre a chamada dos pre-requisitos e a do passo 1.5: a ref de
+# rastreio local continua igual ao HEAD, e so uma busca nesta chamada mostra a ponta nova
+git clone -q -b feature/x "$aux/m2-remoto.git" "$aux/m2-outro" 2>/dev/null
+printf 'outro\n' > "$aux/m2-outro/b.md"
+git -C "$aux/m2-outro" add -A; git -C "$aux/m2-outro" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m b
+git -C "$aux/m2-outro" push -q origin feature/x 2>/dev/null
+saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *'não é o HEAD'*) true ;; *) false ;; esac \
+  && passa 'passo 1.5 busca o upstream de novo: ponta remota que andou para o E7' \
+  || quebra "passo 1.5 mediu a ref de rastreio velha (rc $rc): $saida"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
