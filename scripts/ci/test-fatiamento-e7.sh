@@ -138,6 +138,29 @@ printf 'nova %s\n' $(seq 1 300) >> "$tmp/src/q.md"; g add -A; g commit -q -m "pr
 saida="$(cd "$tmp" && FATIA_MAX_LINHAS_PR=250 FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" renomeia renomeia-pr 2>&1)" \
   && quebra 'renomeacao de fixtures/candidatos para src/ ficou fora da conta' \
   || { case "$saida" in *"F2:"*) passa 'renomeacao de fixtures/candidatos para src/ conta pelo destino (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
+# e no sentido contrario: codigo do produto movido PARA fixtures/candidatos/ com 450
+# linhas a menos (55% iguais: ainda e renomeacao) conta as linhas removidas
+g switch -q -c produto main
+mkdir -p "$tmp/src" "$tmp/fixtures/candidatos"
+printf 'linha %s\n' $(seq 1 1000) > "$tmp/src/p.md"; g add -A; g commit -q -m "produto"
+g switch -q -c produto-pr produto
+tail -n +451 "$tmp/src/p.md" > "$tmp/fixtures/candidatos/p.md"; rm "$tmp/src/p.md"
+g add -A; g commit -q -m "tira o produto para a fixture"
+saida="$(cd "$tmp" && unset FATIA_IGNORAR && bash "$script" produto produto-pr 2>&1)"
+case "$saida" in
+  *"PR com 450 linhas em 1 arquivo"*) passa 'renomeacao de src/ para fixtures/candidatos conta as linhas removidas (F2)' ;;
+  *) quebra "renomeacao de src/ para fixtures/candidatos escondeu as linhas removidas: $saida" ;;
+esac
+# controle: renomeacao entre dois caminhos gerados continua fora da conta
+g switch -q -c fixture-pr produto-pr
+mkdir -p "$tmp/fixtures/candidatos/y"
+tail -n +101 "$tmp/fixtures/candidatos/p.md" > "$tmp/fixtures/candidatos/y/p.md"; rm "$tmp/fixtures/candidatos/p.md"
+g add -A; g commit -q -m "regenera a fixture"
+saida="$(cd "$tmp" && unset FATIA_IGNORAR && bash "$script" produto-pr fixture-pr 2>&1)"
+case "$saida" in
+  *"PR com 0 linhas em 0 arquivo"*) passa 'renomeacao entre dois caminhos de fixtures/candidatos fica fora da conta' ;;
+  *) quebra "renomeacao entre dois caminhos gerados entrou na conta: $saida" ;;
+esac
 # caminho que so PARECE renomeacao (` => ` no nome) nao e cortado ate o FATIA_IGNORAR
 g switch -q -c seta main
 mkdir -p "$tmp/docs"
