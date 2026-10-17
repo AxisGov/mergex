@@ -185,10 +185,12 @@ if printf 'linha %s\n' $(seq 1 450) > "$tmp/docs/x => package-lock.json" 2>/dev/
 else
   passa "nome com ' => ': pulado, o sistema de arquivos nao aceita '>' (o CI em Linux cobre)"
 fi
-# o lock no padrao do script casa o nome inteiro: `package-lock.json.backup` conta
+# o lock no padrao do script casa o nome inteiro: `package-lock.json.backup` conta.
+# Tamanhos diferentes (lock 300, copia 450): so "450 em 1" prova que e a copia que conta
+# e o lock que sai; o inverso daria "300 em 1", os dois "750 em 2", nenhum "0 em 0".
 g switch -q -c lock-backup main
 mkdir -p "$tmp/web"
-printf 'linha %s\n' $(seq 1 450) > "$tmp/web/package-lock.json"
+printf 'linha %s\n' $(seq 1 300) > "$tmp/web/package-lock.json"
 printf 'linha %s\n' $(seq 1 450) > "$tmp/package-lock.json.backup"; g add -A; g commit -q -m "lock e copia do lock"
 saida="$(cd "$tmp" && unset FATIA_IGNORAR && FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main lock-backup 2>&1)"
 case "$saida" in
