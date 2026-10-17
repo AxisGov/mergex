@@ -149,6 +149,16 @@ if printf 'linha %s\n' $(seq 1 450) > "$tmp/docs/x => package-lock.json" 2>/dev/
 else
   passa "nome com ' => ': pulado, o sistema de arquivos nao aceita '>' (o CI em Linux cobre)"
 fi
+# o lock no padrao do script casa o nome inteiro: `package-lock.json.backup` conta
+g switch -q -c lock-backup main
+mkdir -p "$tmp/web"
+printf 'linha %s\n' $(seq 1 450) > "$tmp/web/package-lock.json"
+printf 'linha %s\n' $(seq 1 450) > "$tmp/package-lock.json.backup"; g add -A; g commit -q -m "lock e copia do lock"
+saida="$(cd "$tmp" && unset FATIA_IGNORAR && FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main lock-backup 2>&1)"
+case "$saida" in
+  *"PR com 450 linhas em 1 arquivo"*) passa 'o padrao do lock casa o nome inteiro: package-lock.json.backup conta, web/package-lock.json nao' ;;
+  *) quebra "package-lock.json.backup saiu da conta (ou o lock entrou): $saida" ;;
+esac
 # e a raiz de historia sem pai (merge de historia sem relacao) mede contra a arvore vazia
 g switch -q --orphan raiz-solta; printf 'linha\n%.0s' $(seq 1 350) > "$tmp/solta.md"; g add solta.md; g commit -q -m "raiz solta"
 g switch -q -c com-raiz main; g merge -q --allow-unrelated-histories -m "junta raiz" raiz-solta
