@@ -699,6 +699,31 @@ valor "subdiretorio do checkout"   "$(norm "$(expx_raiz "$RAIZ_T/src/sub")")" "$
 valor "worktree (.git arquivo)"    "$(norm "$(expx_raiz "$WT_T")")"           "$(norm "$WT_T")"
 valor "subdiretorio do worktree"   "$(norm "$(expx_raiz "$WT_T/sub")")"       "$(norm "$WT_T")"
 valor "fora de repositorio"        "$(norm "$(expx_raiz "$SEMGIT_T")")"       "$(norm "$SEMGIT_T")"
+# Caminho relativo no fallback: `dirname .` e `.`, e a subida por dirname nunca
+# chegava a `/` — laco infinito com cwd "." fora de repositorio (ou sem git). Cada
+# caso roda em segundo plano com prazo de 5 s: o codigo antigo nao trava a suite,
+# vira LACO e falha. <cwd> <arg> [sem-git]; imprime a raiz normalizada a partir de <cwd>.
+raiz_com_prazo() {
+  local saida="$SEMGIT_T.raiz" pid i
+  (
+    cd "$1" || exit 1
+    if [ "${3:-}" = sem-git ]; then git() { return 127; }; fi
+    expx_raiz "$2"
+  ) > "$saida" 2>/dev/null &
+  pid=$!
+  for i in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm -f "$saida"; printf 'LACO'; return 0
+  fi
+  wait "$pid" 2>/dev/null
+  (cd "$1" && norm "$(cat "$saida")"); rm -f "$saida"
+}
+mkdir -p "$SEMGIT_T/a/b"
+valor "cwd '.' fora de repositorio termina"         "$(raiz_com_prazo "$SEMGIT_T" .)"   "$(norm "$SEMGIT_T")"
+valor "cwd relativo 'a/b' fora de repositorio termina" "$(raiz_com_prazo "$SEMGIT_T" a/b)" "$(norm "$SEMGIT_T/a/b")"
+valor "sem git, cwd '.' no subdiretorio: sobe ate a raiz" "$(raiz_com_prazo "$RAIZ_T/src/sub" . sem-git)" "$(norm "$RAIZ_T")"
+valor "sem git, cwd relativo 'sub': sobe ate a raiz"   "$(raiz_com_prazo "$RAIZ_T/src" sub sem-git)"  "$(norm "$RAIZ_T")"
+rm -rf "$SEMGIT_T/a"
 
 echo
 echo "semantica de suite por task (sprintx: parcial na task, inteira ao fechar a sprint)"
