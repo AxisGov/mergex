@@ -281,5 +281,34 @@ for par in 'origin/HEAD|padrao' 'refs/remotes/upstream/HEAD|padrao' 'main|main' 
     || quebra "branch_base ${par%%|*} deu bb='$r', esperado '${par#*|}' (o gh pr create receberia isso)"
 done
 
+# cada bloco do E7 roda numa chamada propria do shell (conselho #204, rodada 3): o do
+# passo 1.5 nao herda $remoto nem $publicado dos pre-requisitos, e o do passo 2 nao herda
+# o $bb do passo 1.5. Os blocos reais, extraidos do reference, rodam cada um num bash novo
+bloco_do_e7() { # <trecho> — imprime o bloco cercado do E7 que contem o trecho
+  awk -v t="$1" '/^```/ { if (dentro) { if (achou) { printf "%s", buf; exit } dentro = 0; next }
+                          dentro = 1; buf = ""; achou = 0; next }
+                 dentro { buf = buf $0 "\n"; if (index($0, t)) achou = 1 }' "$e7"
+}
+git init -q --bare -b main "$aux/m2-remoto.git"
+git clone -q "$aux/m2-remoto.git" "$aux/m2-dev" 2>/dev/null
+d() { git -C "$aux/m2-dev" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+printf 'base\n' > "$aux/m2-dev/base.txt"; d add -A; d commit -q -m base; d push -q origin main 2>/dev/null
+d switch -q -c feature/x; printf 'linha\n' > "$aux/m2-dev/a.md"; d add -A; d commit -q -m a
+d push -q -u origin feature/x 2>/dev/null
+bloco_do_e7 'fatiamento-da-pr.sh "$base" "$publicado"' | sed "s|<branch_base>|main|" \
+  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' > "$aux/passo15.sh"
+saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
+[ "$rc" = 0 ] && passa 'o bloco do passo 1.5 roda sozinho, sem $remoto e $publicado de outra chamada' \
+  || quebra "o bloco do passo 1.5 depende de variavel de outra chamada (rc $rc): $saida"
+mkdir -p "$aux/bin"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$ARGS_GH"\n' > "$aux/bin/gh"; chmod +x "$aux/bin/gh"
+bloco_do_e7 'gh pr create' | sed 's|<título>|titulo simples|; s|<trabalho_id>|x|' > "$aux/passo2.sh"
+rm -f "$aux/args-gh"
+saida="$(cd "$aux/m2-dev" && env -u bb PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/passo2.sh" 2>&1)"; rc=$?
+args="$(tr '\n' ' ' 2>/dev/null < "$aux/args-gh")"
+[ "$rc" = 0 ] && case "$args" in *'--base main --head feature/x '*) true ;; *) false ;; esac \
+  && passa 'o bloco do gh pr create recebe a base do passo 1.5 e a branch, noutra chamada' \
+  || quebra "o bloco do gh pr create nao tem a base do passo 1.5 (rc $rc, args '$args'): $saida"
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
