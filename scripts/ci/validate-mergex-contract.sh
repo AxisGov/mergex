@@ -396,6 +396,12 @@ for f in "$atencao" "$agente_cl"; do
   [ "$(ordem_tabelas "$f") PADRAO" = "$ordem_script" ] \
     || fail "$f criteria tables are not in the classifier order ($(ordem_tabelas "$f"))"
 done
+# A ordem resumida em texto (a que se aplica à mão quando o classificador falha) também
+# leva O10: sem ele, um reconciliado pararia em L1 e sairia da faixa obrigatória.
+grep -Fq '(`classificar-atencao.sh --ordem`): O1–O10, L1–L4,' "$agente_cl" \
+  || fail 'revisor-diff summarizes the criteria order without O10'
+grep -Fq 'OLHO OBRIGATÓRIO (O1–O10)' "$atencao_cmd" \
+  || fail 'mergex-atencao summarizes the OLHO OBRIGATÓRIO criteria without O10'
 
 # L4 e D4: o critério é o mesmo texto no reference e no agente.
 criterio_de() { grep -E "^\| $2 \|" "$1" | head -1 | awk -F'|' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3 }'; }

@@ -55,7 +55,7 @@ OBRIGATÓRIO, e o revisor precisa saber disso antes de abrir o diff.
 ## Os critérios, na ordem
 
 Aplique nesta ordem e pare no primeiro que bater — a ordem já é a da rigidez.
-É a ordem do classificador (`classificar-atencao.sh --ordem`): O1–O9, L1–L4,
+É a ordem do classificador (`classificar-atencao.sh --ordem`): O1–O10, L1–L4,
 D1–D4, padrão.
 
 ### OLHO OBRIGATÓRIO — o revisor lê linha a linha
