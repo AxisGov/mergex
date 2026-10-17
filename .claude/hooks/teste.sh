@@ -241,6 +241,19 @@ AS="ASIA$(printf 'QWERTY7ZJ2KLMNPR')"
 caso "ASIA no comeco da linha: barra"      comum/sem-segredo.sh "$(write_json "$AS")" 2
 caso "ASIA depois de hifen: barra"         comum/sem-segredo.sh "$(write_json "id-$AS")" 2
 caso "ASIA dentro de identificador: passa" comum/sem-segredo.sh "$(write_json "x$AS")" 0
+# A chave da AWS tem exatamente 20 caracteres: seguida de mais alfanumericos e um
+# identificador mais longo, nao chave (sprintx#38). Fim de linha, espaco, aspas ou
+# virgula depois dela fecham a chave, e a mascara mostra so o fim da chave.
+caso "AKIA seguida de mais alfanumericos: passa" comum/sem-segredo.sh "$(write_json "${AK}X9")" 0
+caso "AKIA seguida de _: passa"                  comum/sem-segredo.sh "$(write_json "${AK}_v2")" 0
+caso "AKIA seguida de espaco: barra"             comum/sem-segredo.sh "$(write_json "$AK fim")" 2
+caso "AKIA seguida de aspas: barra"              comum/sem-segredo.sh "$(write_json "k=\"$AK\"")" 2
+caso "ASIA seguida de virgula: barra"            comum/sem-segredo.sh "$(write_json "$AS,outro")" 2
+mascara="$(write_json "k=\"$AK\",x" | bash "$H/comum/sem-segredo.sh" 2>&1)"
+case "$mascara" in
+  *"API: …MNPR (linha"*) OK=$((OK+1)); printf '  ok    %s\n' "AKIA com limite a direita: a mascara mostra so o fim da chave" ;;
+  *) FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "AKIA com limite a direita: a mascara nao e o fim da chave" ;;
+esac
 
 echo
 echo "git-perigoso — tem que BARRAR"
