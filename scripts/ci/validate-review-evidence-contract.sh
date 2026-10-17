@@ -122,6 +122,14 @@ grep -Fq '### Antes do impacto: PRs empilhados' "$review" \
 grep -Fq 'threads e findings relevantes; a base' "$review" \
   && grep -Fq '(HEAD, rascunho, CI, decisão de review, threads, base)' "$review" \
   || fail 'the pre-merge revalidation does not reread the base: a stacked PR can still land on its predecessor branch'
+# a revalidacao recalcula o gate R1-R6 inteiro, nao so o HEAD: --match-head-commit
+# prende o SHA, nao um finding novo de bot nem um check que muda no mesmo SHA
+grep -Fq 'A releitura **recalcula o gate R1–R6 inteiro**' "$review" \
+  && grep -Fq 'resultado do gate entre a releitura e o merge invalida a passagem** — mesmo a que não' "$review" \
+  && grep -Fq '**O resto do gate não tem amarra atômica**' "$review" \
+  && grep -Fq 'com o gate R1–R6 recalculado e igual ao confirmado' "$review" \
+  && grep -Fq '| Gate muda no mesmo HEAD (finding novo de bot, check não obrigatório que muda) |' "$review" \
+  || fail 'the pre-merge revalidation is tied only to the HEAD: a new bot finding or a check that changes on the same SHA still lets the merge through'
 # GitHub aceita as duas extensoes de workflow
 grep -Fq '`.github/workflows/*.yml` ou `*.yaml`' "$review" \
   || fail 'CI detection omits .github/workflows/*.yaml'

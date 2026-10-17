@@ -880,6 +880,14 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    (`baseRefName`; no GitLab, `target_branch`), que não pode ser a branch de um PR aberto nem a
    de um PR mergeado nesta passagem (ver "Antes do impacto: PRs empilhados", no passo 4). A
    confirmação humana final **não congela** o estado do PR.
+
+   A releitura **recalcula o gate R1–R6 inteiro**, com as mesmas regras e todas as páginas
+   (threads, reviews, comentários e checks, inclusive os não obrigatórios), e não só o HEAD:
+   o `--match-head-commit` abaixo prende o SHA, mas não um finding novo de bot nem um check
+   que muda no **mesmo** SHA. Compare o resultado com o que foi confirmado: os valores de
+   R1–R6, as seis contagens do bloco `Reviews` e os findings nomeados. **Qualquer mudança no
+   resultado do gate entre a releitura e o merge invalida a passagem** — mesmo a que não
+   chega a bloquear: não faça o merge, mostre o bloco recalculado e siga para o próximo PR.
    - **HEAD mudou** desde a confirmação: invalide todas as confirmações associadas ao estado
      anterior (Review Evidence, OLHO OBRIGATÓRIO e merge), recalcule o gate, e **não faça o
      merge nesta passagem**. Diga o SHA anterior e o novo, registre no rastro e siga para o
@@ -888,7 +896,11 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
      verde, pedido de mudança novo, finding novo ou reaberto, base que passou a ser a branch de
      outro PR aberto ou mergeado nesta passagem): não faça o merge; diga
      exatamente o que mudou.
-   - **Releitura impossível**: trate como mudança; não faça o merge.
+   - **HEAD igual e gate igual no bloqueio, mas resultado diferente** (contagem do bloco
+     `Reviews` mudou, finding novo já classificado, check novo verde): não faça o merge nesta
+     passagem; diga o que mudou.
+   - **Releitura impossível** (alguma página do gate não obtida): trate como mudança; não faça o
+     merge.
 
    **Merge atomicamente preso ao HEAD revalidado — obrigatório.** O merge só é executado com um
    mecanismo do serviço que faça a própria operação falhar se o HEAD do PR mudou depois da
@@ -899,6 +911,17 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    degrade para "reli e vou tentar rápido" — releitura sem amarra atômica não impede que um push
    entre a releitura e o merge integre código não revalidado. A confirmação humana específica
    do PR continua obrigatória e não substitui a garantia atômica.
+
+   **O resto do gate não tem amarra atômica** — nenhum dos serviços prende o merge às threads ou
+   aos checks não obrigatórios. Por isso: (a) o merge é a operação **seguinte** à releitura, sem
+   pergunta, outro PR ou trabalho entre as duas; (b) logo depois do merge, releia o gate do
+   mesmo HEAD mais uma vez. Finding, review ou check criado ou concluído antes do instante do
+   merge e ausente da releitura é mudança no resultado do gate entre a releitura e o merge: a
+   passagem fica invalidada — diga ao desenvolvedor exatamente o que mudou e que o merge já foi
+   feito, registre no rastro, **encerre a passagem** sem oferecer os PRs seguintes e nunca
+   reverta por conta própria (a decisão de reverter é humana). Check obrigatório e resolução
+   de conversa exigidos pela proteção da base o serviço já barra na própria operação; isso
+   reduz a janela, mas não dispensa (a) nem (b).
 6. Revalidado sem mudança **e com o merge atomicamente preso ao HEAD revalidado** (item 5), faça o merge com a estratégia que o repositório usa (detecte em `CONVENCOES.md` da stackx ou nos merges anteriores; na ausência, use o padrão do serviço). Nunca force, nunca reescreva histórico já enviado.
 7. Atualize `pr_estado: merged` no `ENTREGA.md` correspondente, quando ele existir localmente.
 
@@ -945,7 +968,8 @@ humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIF
 - [ ] A ordem vai do menor para o maior impacto, depois da ordem dos empilhados: nenhum PR empilhado foi oferecido antes da predecessora.
 - [ ] PRs com integração vermelha, rascunhos e `REVIEW EVIDENCE` diferente de `SATISFEITO` não foram oferecidos para merge.
 - [ ] Todo PR mostrou `Review Evidence: SATISFEITO | BLOQUEADO`, R1–R6 individuais e o bloco `Reviews` com as seis contagens.
-- [ ] Todo merge feito passou pela revalidação imediatamente anterior (HEAD, rascunho, CI, decisão de review, threads, base); HEAD alterado invalidou as confirmações e barrou o merge nesta passagem.
+- [ ] Todo merge feito passou pela revalidação imediatamente anterior (HEAD, rascunho, CI, decisão de review, threads, base), com o gate R1–R6 recalculado e igual ao confirmado; HEAD alterado invalidou as confirmações e barrou o merge nesta passagem, e qualquer mudança no resultado do gate entre a releitura e o merge invalidou a passagem.
+- [ ] Depois de cada merge, o gate do mesmo HEAD foi relido; mudança anterior ao instante do merge foi dita ao desenvolvedor, registrada no rastro e encerrou a passagem.
 - [ ] Toda escrita de review (resposta, resolução, comentário) foi contada só com ID/URL ou releitura devolvidos pela plataforma.
 - [ ] PR bloqueado mostrou os findings pendentes nomeados e o tipo de bloqueio.
 - [ ] PR com bloqueio confirmável só chegou à pergunta de merge depois das confirmações específicas e do gate recalculado `SATISFEITO`; as confirmações aparecem na saída e no rastro.
@@ -1027,6 +1051,7 @@ lista teve confirmação explícita daquele PR específico.
 | Plataforma não expõe quem resolveu ou quando | Thread resolvida antes da execução: R5 continua podendo ser `OK` se um rastro anterior da mergex comprovar evidência publicada e, depois, a resolução; R5 só é `NÃO VERIFICÁVEL` quando não há timestamp suficiente da plataforma nem rastro histórico suficiente. Proveniência da resolução indeterminável (conta que pode ser operador ou automação, sem rastro que prove a origem): R6 `NÃO VERIFICÁVEL`, nunca inferido pelo login. Ambos confirmáveis humanamente, com recálculo |
 | Serviço sem merge atômico preso ao HEAD (sem `--match-head-commit`, sem `sha` no merge, sem garantia equivalente comprovável) | Não executa o merge; informa que o serviço não oferece merge atômico seguro para a automação; mantém o PR aberto e registra no rastro |
 | Revalidação pré-merge detecta mudança ou não consegue reler | Não faz o merge nesta passagem; HEAD novo invalida as confirmações anteriores; diz o que mudou |
+| Gate muda no mesmo HEAD (finding novo de bot, check não obrigatório que muda) | Antes do merge: o gate R1–R6 recalculado na releitura difere do confirmado — não faz o merge nesta passagem. Depois do merge (a releitura posterior acha mudança anterior ao instante do merge): passagem invalidada; diz o que mudou e que o merge foi feito, registra no rastro, encerra a passagem e não reverte por conta própria |
 | Nenhum canal de escrita para publicar `REVIEW REMEDIATION` | Handoff `NÃO VERIFICÁVEL`, PR segue `BLOQUEADO`; informa o motivo literal e mostra o pacote completo na saída; nunca diz que persistiu |
 | Plataforma não expõe estado resolved/outdated de uma thread | Trata como fonte ausente para aquele campo; o finding correspondente não passa de `FIXED_AWAITING_EVIDENCE` — nunca vira `RESOLVED` sem confirmação verificável |
 | Usuário pede para resolver thread ou marcar finding sem evidência publicada | Recusa: sem R4/R5, o finding fica onde está; a mergex não maquia review encerrado |
