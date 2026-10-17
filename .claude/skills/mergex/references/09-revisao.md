@@ -138,18 +138,22 @@ equivalente em outro serviço.
   `merge-requests/<iid>/head` no GitLab) **no repositório base**, e confira que o SHA obtido é o
   autoritativo. O repositório base sai da URL do PR, nunca do nome do remoto: o remoto dele pode
   se chamar `upstream`, ou outro nome, e o `origin` ser o fork, que não tem essa ref. Vale o
-  remoto cuja URL configurada termina no `<host>/<dono>/<repo>` do PR (`https://`, `ssh://` ou
-  `git@<host>:`) — o host conta: o mesmo `<dono>/<repo>` noutro serviço é outro repositório —;
-  sem nenhum, a própria URL. No GitHub:
+  remoto cuja URL configurada tem o `<host>` do PR **como host** (a autoridade de `https://` ou
+  `ssh://`, ou o `<host>` de `git@<host>:`; nunca um pedaço do caminho) e o `<dono>/<repo>` do PR
+  como caminho inteiro — o mesmo `<dono>/<repo>` noutro serviço é outro repositório —; sem
+  nenhum, a própria URL. No GitHub:
 
 ```bash
 pr_url="$(gh pr view <n> --json url --jq .url)" || exit 1   # https://<host>/<dono>/<repo>/pull/<n>
 repo_url="${pr_url%/pull/*}"; alvo="${repo_url#*://}"       # <host>/<dono>/<repo>
 remoto_base="$(git config --get-regexp '^remote\..*\.url$' | awk -v h="${alvo%%/*}" -v r="${alvo#*/}" '
   { u = tolower($2); sub(/\/$/, "", u); sub(/\.git$/, "", u)
-    for (i = 1; i <= 2; i++) { c = tolower(h) (i == 1 ? "/" : ":") tolower(r); n = length(c)
-      if (substr(u, length(u) - n + 1) == c && (length(u) == n || substr(u, length(u) - n, 1) ~ /[\/@]/)) {
-        nome = $1; sub(/^remote\./, "", nome); sub(/\.url$/, "", nome); print nome; exit } } }')"
+    if (sub(/^[a-z][a-z0-9+.-]*:\/\//, "", u)) i = index(u, "/")   # https://, ssh://: autoridade até a 1ª /
+    else if (u ~ /^[^\/]*:/) i = index(u, ":")                      # git@<host>:<caminho>
+    else next                                                        # caminho local
+    host = substr(u, 1, i - 1); sub(/^.*@/, "", host); sub(/:[0-9]*$/, "", host)
+    if (i > 1 && host == tolower(h) && substr(u, i + 1) == tolower(r)) {
+      nome = $1; sub(/^remote\./, "", nome); sub(/\.url$/, "", nome); print nome; exit } }')"
 git fetch "${remoto_base:-$repo_url}" "pull/<n>/head" || exit 1
 cabeca="$(git rev-parse --verify 'FETCH_HEAD^{commit}')" || exit 1
 ```

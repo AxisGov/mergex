@@ -79,6 +79,15 @@ remoto "$aux/fork3" upstream https://github.com/dono/repo.git "$aux/dono/repo.gi
   && passa 'outro-dono/repo e gitlab.com/dono/repo nao passam por github.com/dono/repo' \
   || quebra 'o R4 tomou outro dono ou outro host pela base github.com/dono/repo'
 
+# o host e a autoridade da URL, nunca um pedaco do caminho: evil.example/github.com/...
+# termina igual, mas e outro servidor; a base de verdade vem por ssh:// com porta
+clone fork5
+remoto "$aux/fork5" a-evil https://evil.example/github.com/dono/repo.git "$aux/gitlab/dono/repo.git"
+remoto "$aux/fork5" upstream ssh://git@github.com:22/dono/repo.git "$aux/dono/repo.git"
+[ "$(roda_r4 "$aux/fork5" 'https://github.com/dono/repo/pull/7')" = "$cabeca_pr" ] \
+  && passa 'github.com no caminho de outro host nao passa pela base; ssh:// com porta passa' \
+  || quebra 'o R4 tomou evil.example/github.com/dono/repo pela base github.com/dono/repo'
+
 # nenhum remoto aponta para a base: busca pela propria URL do PR
 clone fork4
 [ "$(roda_r4 "$aux/fork4" "$aux/dono/repo.git/pull/7")" = "$cabeca_pr" ] \
