@@ -152,6 +152,12 @@ grep -Fq '`REVIEW_REQUIRED` não muda R2, mas o serviço recusaria o merge' "$re
 # remediacao"): o template tem de oferecer esse estado, nao so NAO PERSISTIDO
 grep -Fq 'NÃO PERSISTIDO (handoff NÃO VERIFICÁVEL;' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
   || fail 'TEMPLATE-revisao.md does not mark an unpersisted REVIEW REMEDIATION handoff as NAO VERIFICAVEL'
+# o PR empilhado e inelegivel com motivo proprio (DM-233): a lista de motivos do
+# template e a de inelegiveis do 09-revisao.md tem de nomea-lo, ou o relatorio
+# feito por elas nao tem onde registrar o `empilhado sobre #<n>`
+grep -F '{{motivo: rascunho,' .claude/skills/mergex/assets/TEMPLATE-revisao.md | grep -Fq '`empilhado sobre #<n>`' \
+  && grep -F 'PRs **inelegíveis para merge** — rascunho,' "$review" | grep -Fq '`empilhado sobre #<n>`' \
+  || fail 'the ineligibility reasons in TEMPLATE-revisao.md (or 09-revisao.md) omit the stacked PR (empilhado sobre #<n>)'
 # o bloco CONFLITO tem o campo da pergunta a quem decidir (analista-de-conflito
 # exige uma por trecho): sem ele, o relatorio feito pelo template a omite
 grep -Fq '  O que perguntar a quem decidir:' .claude/skills/mergex/assets/TEMPLATE-revisao.md \
