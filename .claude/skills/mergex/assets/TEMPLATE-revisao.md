@@ -93,6 +93,9 @@ CONFLITO — #{{n}} contra {{base | #n}}
   Por que se cruzaram:
     {{mesma função, mesma linha, ou mudanças adjacentes}}
 
+  O que perguntar a quem decidir:
+    {{pergunta}} — a que destrava a decisão, não a resposta; uma por trecho
+
   A mergex não resolve conflito. Resolver isto é decisão humana.
 ```
 

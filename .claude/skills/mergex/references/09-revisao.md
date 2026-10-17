@@ -782,13 +782,18 @@ CONFLITO — #482 contra main
     outro mudou a estrutura. As duas intenções são compatíveis; a junção não é
     automática porque tocam as mesmas linhas.
 
+  O que perguntar a quem decidir:
+    A nova fórmula do desconto deve ser aplicada antes ou depois do rateio por
+    item? A ordem muda o resultado quando o desconto é proporcional.
+
   A mergex não resolve conflito. Resolver isto é decisão humana: as duas
   intenções precisam coexistir no código final.
 ```
 
 **Nunca resolva.** Não escolha um lado, não sugira o texto final do arquivo, não faça checkout de versão, não rode `git checkout --ours/--theirs`, não peça ao versionador que decida. Relatar as duas intenções é o limite — e é o ponto (regra 17).
 
-Acrescente, por trecho, **o que perguntar a quem decidir**: a pergunta que
+Acrescente, por trecho, **o que perguntar a quem decidir** (campo obrigatório do
+bloco, também no `TEMPLATE-revisao.md`): a pergunta que
 destrava a decisão, não a resposta. É o que o `analista-de-conflito` devolve, e
 é o que faz a análise valer o tempo de quem lê — ela nomeia a decisão que só
 uma pessoa com contexto de negócio pode tomar.

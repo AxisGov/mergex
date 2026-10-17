@@ -90,6 +90,10 @@ CONFLITO — #482 contra main
     da estrutura nova. A junção não é automática porque os dois tocaram as mesmas
     linhas, não porque as mudanças se contradizem.
 
+  O que perguntar a quem decidir:
+    No helper novo do rateio, a subtração do desconto entra antes da aplicação
+    do MVA em cada item, ou uma vez só, sobre a base já rateada?
+
   A mergex não resolve conflito. Resolver isto é decisão humana: as duas intenções
   precisam coexistir no código final, e quem conhece a regra fiscal é quem deve
   decidir onde a subtração do desconto entra na estrutura nova.
