@@ -55,10 +55,11 @@ jobs:
   r1:
     name: r1 / reconciliacao-base
     runs-on: ubuntu-latest
-    # A bancada R1 leva ~17 min no Linux (`todos`): no job `hooks` ela estouraria
-    # os 20 min dele. Job proprio, sem matrix: um so `todos` usa o despacho da
-    # propria bancada (grupo novo entra sozinho) e da uma contagem unica.
-    timeout-minutes: 35
+    # A bancada R1 (`todos`) leva ~6 min no runner (1423 ok no PR que criou o
+    # job). Job proprio, em paralelo ao `hooks`, para nao somar ao tempo dele e
+    # dar sinal separado. Sem matrix: um so `todos` usa o despacho da propria
+    # bancada (grupo ou parte nova entra sozinho) e da uma contagem unica.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
