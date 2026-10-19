@@ -147,6 +147,16 @@ saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_CAPACIDADE_EXCLUIDO= bash "$
 [ "$rc" = 1 ] && case "$saida" in *"F2c:"*) true ;; *) false ;; esac \
   && passa 'F2c conta artefato de metodo quando FATIA_CAPACIDADE_EXCLUIDO e vazio' \
   || quebra "F2c com FATIA_CAPACIDADE_EXCLUIDO vazio nao contou os artefatos (rc $rc): $saida"
+# no projeto, fixtures/candidatos/ e codigo que o revisor ve: o trecho real do E7 nao o tira
+# da F2c (o padrao do script e o painel do ExpxDev), nem com F2 rebaixada por excecao
+g switch -q -c f2c-candidatos main
+mkdir -p "$tmp/fixtures/candidatos/z"; for i in $(seq 1 101); do printf 'x\n' > "$tmp/fixtures/candidatos/z/c$i.txt"; done
+g add -A; g commit -q -m f2c-candidatos
+saida="$(cd "$tmp" && unset FATIA_IGNORAR FATIA_CAPACIDADE_EXCLUIDO && FATIA_EXCECAO='lote' \
+  && base=main && publicado=f2c-candidatos && eval "$exc_trecho" 2>&1)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *"F2c:"*) true ;; *) false ;; esac \
+  && passa 'o E7 conta fixtures/candidatos na F2c do projeto (101 arquivos reprovam, mesmo com excecao)' \
+  || quebra "o E7 deixou fixtures/candidatos fora da F2c (rc $rc): $saida"
 # o padrao do projeto soma ao do E7: gerado/ e docs/entregas/ fora, app.ts conta
 g switch -q -c soma main
 mkdir -p "$tmp/gerado" "$tmp/docs/entregas/y"

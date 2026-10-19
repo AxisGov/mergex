@@ -115,6 +115,7 @@ base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
 e7_ignorar='(^|/)package-lock\.json$|^docs/(sprintx|entregas|eventos)/'
 FATIA_IGNORAR="${FATIA_IGNORAR:+$FATIA_IGNORAR|}$e7_ignorar" \
 FATIA_EXCECAO="${FATIA_EXCECAO:-}" \
+FATIA_CAPACIDADE_EXCLUIDO="${FATIA_CAPACIDADE_EXCLUIDO-^docs/(sprintx|entregas|eventos)/}" \
   bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 rc_fatia=$?; [ "$rc_fatia" = 0 ] && { printf '%s\n' "$bb" > "$estado_bb" || exit 1; }; exit "$rc_fatia"
 ```
@@ -123,7 +124,9 @@ O `FATIA_IGNORAR` vai explícito porque o padrão do script é o do ExpxDev, que
 `fixtures/candidatos/` da conta; no projeto do desenvolvedor esse caminho pode ser código
 revisado. Código gerado que o projeto exclui da revisão automática entra aqui só se o
 desenvolvedor declarar o padrão — e o padrão dele **soma** ao do E7, nunca o substitui: os artefatos de
-método saem da medida sempre.
+método saem da medida sempre. Pelo mesmo motivo vai explícito o `FATIA_CAPACIDADE_EXCLUIDO`
+(o que o painel do revisor não mostra, fora da F2c): só os artefatos de método; sem ele,
+`fixtures/candidatos/` ficaria fora do limite de 100 arquivos visíveis.
 
 Os **artefatos de método** — `docs/sprintx/`, `docs/entregas/`, `docs/eventos/`, o que a
 `sprintx` e esta skill gravam na branch — ficam fora da medida (exceção "artefato de método"
