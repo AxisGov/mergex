@@ -160,5 +160,95 @@ fi
 (cd "$tmp" && bash "$leitor" --nada >/dev/null 2>&1); rc=$?
 [ "$rc" = 64 ] && passa 'argumento desconhecido sai 64' || quebra "argumento desconhecido saiu $rc"
 
+# 12. revisao ou raiz que nao resolvem: sai 2, stdout vazio, nunca os padroes
+for opc in --rev --raiz; do # o valor vai como um argumento so: o TMPDIR pode ter espaco
+  [ "$opc" = --rev ] && val=nao-existe || val="$aux/nao-existe"
+  (cd "$tmp" && bash "$leitor" "$opc" "$val" > "$aux/out" 2>/dev/null); rc=$?
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && passa "$opc que nao resolve: sai 2" \
+    || quebra "$opc que nao resolve: rc $rc, stdout '$(cat "$aux/out")'"
+done
+
+# 13. leitor que nao imprime todas as chaves: sai 3 (expx update), nunca o que ele imprimiu
+if [ "$tem_node" = 1 ]; then
+  cp "$tmp/$nucleo_rel/expx-fatiamento.mjs" "$aux/leitor.mjs"
+  printf 'process.stdout.write("FATIA_MAX_LINHAS_PR=1\\nEXPX_FATIAMENTO_ORIGEM=projeto\\n")\n' > "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+  (cd "$tmp" && bash "$leitor" > "$aux/out" 2> "$aux/err"); rc=$?
+  cp "$aux/leitor.mjs" "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+  [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && grep -q 'expx update' "$aux/err" \
+    && passa 'leitor que nao imprime todas as chaves: sai 3' \
+    || quebra "leitor incompleto: rc $rc, stdout '$(cat "$aux/out")'"
+else
+  passa 'leitor que nao imprime todas as chaves: sai 3 (sem node)'
+fi
+
+# commit sobre o HEAD com uma entrada trocada por plumbing, sem depender do sistema de
+# arquivos (link, gitlink): commit_com <modo> <objeto> <caminho> [<removido antes>]
+commit_com() {
+  local idx="$aux/indice"; rm -f "$idx"
+  GIT_INDEX_FILE="$idx" g read-tree HEAD
+  [ -z "${4:-}" ] || GIT_INDEX_FILE="$idx" g rm -r -q --cached -- "$4"
+  GIT_INDEX_FILE="$idx" g update-index --add --cacheinfo "$1,$2,$3"
+  g commit-tree "$(GIT_INDEX_FILE="$idx" g write-tree)" -p HEAD -m "$3"
+}
+blob() { printf '%s' "$1" | g hash-object -w --stdin; }
+# 14. --rev com .expx/fatiamento.json que nao e arquivo no commit: presente e invalido (sai 1)
+if [ "$tem_node" = 1 ]; then
+  pasta="$(commit_com 100644 "$(blob "$conselho")" .expx/fatiamento.json/x .expx/fatiamento.json)"
+  link="$(commit_com 120000 "$(blob ../valido.json)" .expx/fatiamento.json)"
+  for caso in "pasta $pasta" "link $link"; do
+    (cd "$tmp" && bash "$leitor" --rev "${caso#* }" > "$aux/out" 2>/dev/null); rc=$?
+    [ "$rc" = 1 ] && [ ! -s "$aux/out" ] && passa "--rev com ${caso%% *} no lugar do arquivo: presente e invalido (sai 1)" \
+      || quebra "--rev com ${caso%% *} no lugar do arquivo: rc $rc, stdout '$(cat "$aux/out")'"
+  done
+else
+  passa '--rev com pasta ou link no lugar do arquivo (sem node)'
+fi
+
+# 15. o que o leitor do nucleo ve como presente (o lstat nao da ENOENT) nunca vira os
+# padroes: gitlink sem objeto no lugar do arquivo e `.expx` que nao e pasta (ENOTDIR)
+if [ "$tem_node" = 1 ]; then
+  gitlink="$(commit_com 160000 1111111111111111111111111111111111111111 .expx/fatiamento.json)"
+  expx_blob="$(commit_com 100644 "$(blob '{}')" .expx .expx)"
+  for caso in "gitlink $gitlink" ".expx-arquivo $expx_blob"; do
+    (cd "$tmp" && bash "$leitor" --rev "${caso#* }" > "$aux/out" 2>/dev/null); rc=$?
+    [ "$rc" = 1 ] && [ ! -s "$aux/out" ] && passa "--rev com ${caso%% *}: presente e invalido (sai 1)" \
+      || quebra "--rev com ${caso%% *}: rc $rc, stdout '$(cat "$aux/out")'"
+  done
+else
+  passa '--rev com gitlink ou .expx arquivo (sem node)'
+fi
+mkdir -p "$aux/expx-arquivo"; printf '{}\n' > "$aux/expx-arquivo/.expx"
+(bash "$leitor" --raiz "$aux/expx-arquivo" > "$aux/out" 2>/dev/null); rc=$?
+[ "$rc" = 3 ] && [ ! -s "$aux/out" ] && passa '.expx arquivo no disco: presente, sem leitor possivel (sai 3)' \
+  || quebra ".expx arquivo no disco: rc $rc, stdout '$(cat "$aux/out")'"
+
+# 16. leitor que o node nao carrega (sintaxe, modulo que falta) sai 1 como o arquivo
+# invalido, mas sem a linha `expx-fatiamento: ` do contrato do leitor: sai 3, nunca 1
+if [ "$tem_node" = 1 ]; then
+  cp "$tmp/$nucleo_rel/expx-fatiamento.mjs" "$aux/leitor.mjs"
+  for caso in 'sintaxe:syntax error(' 'modulo:import "node:nao-existe";'; do
+    printf '%s\n' "${caso#*:}" > "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+    (cd "$tmp" && bash "$leitor" > "$aux/out" 2> "$aux/err"); rc=$?
+    [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && grep -q 'expx update' "$aux/err" \
+      && passa "leitor que nao carrega (${caso%%:*}): sai 3" \
+      || quebra "leitor que nao carrega (${caso%%:*}): rc $rc, stderr '$(cat "$aux/err")'"
+  done
+  cp "$aux/leitor.mjs" "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+else
+  passa 'leitor que nao carrega: sai 3 (sem node)'
+fi
+
+# 17. `.expx` que nao se atravessa (sem permissao): o lstat do nucleo da EACCES, nao
+# ENOENT, e o arquivo e presente; nunca os padroes
+mkdir -p "$aux/fechada/.expx"; chmod 000 "$aux/fechada/.expx" 2>/dev/null
+if [ ! -x "$aux/fechada/.expx" ]; then
+  (bash "$leitor" --raiz "$aux/fechada" > "$aux/out" 2>/dev/null); rc=$?
+  [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && passa '.expx sem permissao de travessia: presente (sai 3)' \
+    || quebra ".expx sem permissao de travessia: rc $rc, stdout '$(cat "$aux/out")'"
+else
+  passa '.expx sem permissao: pulado, o sistema ou o root ignoram o chmod (o CI em Linux cobre)'
+fi
+chmod 755 "$aux/fechada/.expx" 2>/dev/null
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

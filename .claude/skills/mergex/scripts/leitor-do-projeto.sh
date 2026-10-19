@@ -14,8 +14,8 @@
 #   stdout repassado byte a byte. Roda sempre o instalado, nunca codigo do commit.
 #
 # Saidas: 0 leu; 1 arquivo invalido (stderr do leitor, stdout vazio); 2 a revisao ou a
-# raiz nao resolvem; 3 arquivo presente e leitor ou node ausente, ou leitor que nao
-# imprime todas as chaves; 64 uso. Fora do 0, nunca os padroes e nada no stdout.
+# raiz nao resolvem; 3 arquivo presente e leitor ou node ausente, leitor que o node nao
+# carrega, ou que nao imprime todas as chaves; 64 uso. Fora do 0, nunca os padroes e nada no stdout.
 #
 # Consumo: `fatia="$(bash leitor-do-projeto.sh ...)" || <falha>; set -a; eval "$fatia"; set +a`.
 # Nenhum `eval` aqui dentro.
@@ -41,14 +41,20 @@ if [ -n "$rev" ]; then
 fi
 
 config='.expx/fatiamento.json'
+# presente e qualquer entrada, como o `lstat` do leitor do nucleo: link quebrado, pasta e
+# gitlink sem objeto sao presentes (e invalidos); `.expx` que nao e pasta (ENOTDIR) ou
+# que nao se atravessa (EACCES) tambem
+expx_pasta=1
 if [ -n "$rev" ]; then
-  git -C "$raiz" cat-file -e "$commit:$config" 2>/dev/null && presente=1 || presente=0
+  entrada="$(git -C "$raiz" ls-tree --full-tree "$commit" -- "$config")" \
+    && e_expx="$(git -C "$raiz" ls-tree --full-tree "$commit" -- .expx)" || exit 2
+  case "$e_expx" in ''|'040000 '*) ;; *) expx_pasta=0 ;; esac
 else
-  # qualquer entrada conta, como o `lstat` do leitor: link quebrado e presente (e invalido)
-  { [ -e "$raiz/$config" ] || [ -L "$raiz/$config" ]; } && presente=1 || presente=0
+  entrada=''; { [ -e "$raiz/$config" ] || [ -L "$raiz/$config" ]; } && entrada=1
+  [ -e "$raiz/.expx" ] && { [ ! -d "$raiz/.expx" ] || [ ! -x "$raiz/.expx" ]; } && expx_pasta=0
 fi
 
-if [ "$presente" = 0 ]; then
+if [ -z "$entrada" ] && [ "$expx_pasta" = 1 ]; then
   # os padroes do leitor do nucleo; sem FATIA_MAX_*, para o E7 medir como sempre mediu.
   # EXPX_CAMINHOS_PROTEGIDOS vazio: com o merge automatico desligado a lista nao e lida
   cat <<'EOF'
@@ -75,20 +81,22 @@ tmp="$(mktemp -d)" || exit 2
 trap 'rm -rf "$tmp"' EXIT
 leia="$raiz"
 if [ -n "$rev" ]; then
-  # materializa o arquivo do commit; o que nao e blob (pasta, submodulo) vira pasta, que o
-  # leitor recusa como ilegivel. Link do commit vira o texto do alvo: JSON invalido
+  # materializa a entrada do commit: blob vira arquivo (de um link, o texto do alvo, JSON
+  # invalido); pasta, gitlink ou `.expx` que nao e pasta vira pasta, que o leitor recusa
+  # como ilegivel (um `.expx` arquivo nao serve: o lstat do Windows da ENOENT, nao ENOTDIR)
   leia="$tmp/raiz"; mkdir -p "$leia/.expx" || exit 2
-  if [ "$(git -C "$raiz" cat-file -t "$commit:$config")" = blob ]; then
-    git -C "$raiz" cat-file blob "$commit:$config" > "$leia/$config" || exit 2
-  else
-    mkdir "$leia/$config" || exit 2
-  fi
+  set -- $entrada # <modo> <tipo> <objeto> <caminho>; vazio com `.expx` que nao e pasta
+  if [ "${2:-}" = blob ]; then git -C "$raiz" cat-file blob "$3" > "$leia/$config" || exit 2
+  else mkdir "$leia/$config" || exit 2; fi
 fi
 # node nativo no Windows nao entende o caminho do MSYS
 if command -v cygpath >/dev/null 2>&1; then leia="$(cygpath -w "$leia")"; mjs="$(cygpath -w "$mjs")"; fi
 
 node "$mjs" --raiz "$leia" --formato env > "$tmp/env" 2> "$tmp/err"; rc=$?
-if [ "$rc" = 1 ]; then cat "$tmp/err" >&2; exit 1; fi
+# arquivo invalido e o 1 do leitor, que comeca o stderr com `expx-fatiamento: ` (o contrato
+# dele); o 1 do node que nao carregou o leitor (sintaxe, modulo) comeca com outra coisa
+IFS= read -r primeira < "$tmp/err"
+case "$rc:${primeira:-}" in 1:'expx-fatiamento: '*) cat "$tmp/err" >&2; exit 1 ;; esac
 [ "$rc" = 0 ] || { cat "$tmp/err" >&2; desatualizado "o leitor saiu $rc"; }
 grep -qx 'EXPX_FATIAMENTO_ORIGEM=projeto' "$tmp/env" || desatualizado 'o leitor nao confirmou a origem projeto'
 for k in FATIA_MAX_LINHAS_PR FATIA_MAX_ARQUIVOS FATIA_MAX_LINHAS_COMMIT FATIA_MAX_KB_ARQUIVO \

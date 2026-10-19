@@ -424,6 +424,11 @@ grep -Fq 'fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev
 grep -Fq 'leitor-do-projeto.sh' "$e7" && ! grep -Fq 'eval "$(' "$e7" \
   && passa 'nenhum eval "$(...)" direto no E7' \
   || quebra 'o E7 nao tem o leitor, ou avalia a saida dele direto (eval "$(...)")'
+# contrato: o unico eval do E7 e o do consumo do leitor; outro, solto, executaria o que nao
+# passou pelo leitor do nucleo
+soltos="$(tr -d '\r' < "$e7" | grep -w 'eval' | grep -vxF 'set -a; eval "$fatia"; set +a')"
+[ -z "$soltos" ] && passa 'nenhum eval solto no E7, fora do consumo do leitor' \
+  || quebra "eval solto no E7: $soltos"
 nucleo_rel='.expx/marketplace/plugins/expx/nucleo/scripts'
 cenario() { # <nome> [sem-nucleo] [config da base] — remoto e clone novos, base com o nucleo; fica em feature/x
   local dv="$aux/c-$1"
