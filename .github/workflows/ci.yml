@@ -103,6 +103,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-nucleo-expx.sh
 
+      - name: Test the project config reader (.expx/fatiamento.json)
+        shell: bash
+        run: bash scripts/ci/test-leitor-do-projeto.sh
+
       - name: Test E9 R4 PR head from the base repository
         shell: bash
         run: bash scripts/ci/test-r4-cabeca-do-pr.sh
