@@ -1,9 +1,7 @@
 # Decisões da mergex — revisão por task, entrega por sprint e merge automático
 
-Decisões a partir da DM-235, do desenho "revisão por task, PR por sprint e limites por projeto"
-(AxisGov/expxdev, `docs/superpowers/specs/2026-10-18-revisao-por-task-pr-por-sprint-design.md`).
-Ficam aqui, e não em `DECISOES-DA-SKILL.md`, para que o arquivo principal não cresça (F4 do
-contrato `expx-fatiamento`). A numeração `DM-NN` é uma só nos arquivos.
+Decisões a partir da DM-235, do desenho de 2026-10-18 no AxisGov/expxdev (revisão por task, PR por
+sprint e limites por projeto), fora de `DECISOES-DA-SKILL.md` para ele não crescer (F4).
 
 ## Fatiamento por projeto no E7
 
