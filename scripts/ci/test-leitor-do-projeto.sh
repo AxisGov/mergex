@@ -238,5 +238,17 @@ else
   passa 'leitor que nao carrega: sai 3 (sem node)'
 fi
 
+# 17. `.expx` que nao se atravessa (sem permissao): o lstat do nucleo da EACCES, nao
+# ENOENT, e o arquivo e presente; nunca os padroes
+mkdir -p "$aux/fechada/.expx"; chmod 000 "$aux/fechada/.expx" 2>/dev/null
+if [ ! -x "$aux/fechada/.expx" ]; then
+  (bash "$leitor" --raiz "$aux/fechada" > "$aux/out" 2>/dev/null); rc=$?
+  [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && passa '.expx sem permissao de travessia: presente (sai 3)' \
+    || quebra ".expx sem permissao de travessia: rc $rc, stdout '$(cat "$aux/out")'"
+else
+  passa '.expx sem permissao: pulado, o sistema ou o root ignoram o chmod (o CI em Linux cobre)'
+fi
+chmod 755 "$aux/fechada/.expx" 2>/dev/null
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

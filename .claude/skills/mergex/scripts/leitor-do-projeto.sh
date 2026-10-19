@@ -42,7 +42,8 @@ fi
 
 config='.expx/fatiamento.json'
 # presente e qualquer entrada, como o `lstat` do leitor do nucleo: link quebrado, pasta e
-# gitlink sem objeto sao presentes (e invalidos); `.expx` que nao e pasta tambem (ENOTDIR)
+# gitlink sem objeto sao presentes (e invalidos); `.expx` que nao e pasta (ENOTDIR) ou
+# que nao se atravessa (EACCES) tambem
 expx_pasta=1
 if [ -n "$rev" ]; then
   entrada="$(git -C "$raiz" ls-tree --full-tree "$commit" -- "$config")" \
@@ -50,7 +51,7 @@ if [ -n "$rev" ]; then
   case "$e_expx" in ''|'040000 '*) ;; *) expx_pasta=0 ;; esac
 else
   entrada=''; { [ -e "$raiz/$config" ] || [ -L "$raiz/$config" ]; } && entrada=1
-  [ -e "$raiz/.expx" ] && [ ! -d "$raiz/.expx" ] && expx_pasta=0
+  [ -e "$raiz/.expx" ] && { [ ! -d "$raiz/.expx" ] || [ ! -x "$raiz/.expx" ]; } && expx_pasta=0
 fi
 
 if [ -z "$entrada" ] && [ "$expx_pasta" = 1 ]; then
