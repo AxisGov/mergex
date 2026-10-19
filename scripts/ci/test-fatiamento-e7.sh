@@ -20,6 +20,20 @@ quebra() { falhou=$((falhou+1)); printf '  FALHA %s\n' "$1"; }
 grep -Fq 'COPIA, nao dependencia' "$script" \
   && passa 'o script declara que e copia do verificador do ExpxDev' \
   || quebra 'o script nao declara de onde vem'
+# identidade: o corpo (de `set -uo pipefail` ao fim) e o do verificador do expxdev, e o
+# cabecalho guarda o sha256 dele; com EXPXDEV_RAIZ, compara com o arquivo de la (pega deriva)
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
+corpo() { sed -n '/^set -uo pipefail$/,$p' "$1"; }
+[ "$(corpo "$script" | sha256)" = "$(sed -n 's/^# Corpo-sha256: //p' "$script")" ] \
+  && passa 'o corpo bate com o Corpo-sha256 do cabecalho' \
+  || quebra 'o corpo do script nao bate com o Corpo-sha256 do cabecalho'
+if [ -z "${EXPXDEV_RAIZ:-}" ]; then
+  passa 'corpo igual ao verificar-fatiamento.sh do expxdev: pulado (sem EXPXDEV_RAIZ)'
+elif [ -n "$(corpo "$script")" ] && [ "$(corpo "$script")" = "$(corpo "$EXPXDEV_RAIZ/scripts/verificar-fatiamento.sh")" ]; then
+  passa 'com EXPXDEV_RAIZ definido, o corpo e igual ao verificar-fatiamento.sh do expxdev'
+else
+  quebra "o corpo difere de $EXPXDEV_RAIZ/scripts/verificar-fatiamento.sh"
+fi
 
 l15="$(grep -n '^## Passo 1.5' "$e7" | head -1 | cut -d: -f1)"
 l2="$(grep -n '^## Passo 2 ' "$e7" | head -1 | cut -d: -f1)"
@@ -118,6 +132,38 @@ printf 'codigo\n%.0s' $(seq 1 400) > "$tmp/app2.ts"; g add -A; g commit -q -m co
 saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_MAX_LINHAS_COMMIT=9000 bash "$script" main metodo-e-codigo 2>&1)" \
   && quebra 'o codigo ao lado dos artefatos de metodo saiu da conta' \
   || { case "$saida" in *"F2:"*) passa 'o codigo ao lado dos artefatos de metodo continua contando (F2)' ;; *) quebra "reprovou, mas nao por F2: $saida" ;; esac; }
+# F2c: o revisor le no maximo 100 arquivos; nem F2 folgado nem excecao a rebaixam
+g switch -q -c f2c main
+mkdir -p "$tmp/muitos"; for i in $(seq 1 101); do printf 'x\n' > "$tmp/muitos/m$i.txt"; done
+g add -A; g commit -q -m f2c
+saida="$(cd "$tmp" && FATIA_MAX_ARQUIVOS=200 FATIA_EXCECAO='lote' bash "$script" main f2c 2>&1)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *"F2c:"*) true ;; *) false ;; esac \
+  && passa 'F2c: 101 arquivos visiveis reprovam mesmo com FATIA_MAX_ARQUIVOS=200 e FATIA_EXCECAO' \
+  || quebra "F2c: 101 arquivos visiveis (rc $rc): $saida"
+g switch -q -c f2c-metodo main
+mkdir -p "$tmp/docs/entregas/x"; for i in $(seq 1 101); do printf 'x\n' > "$tmp/docs/entregas/x/e$i.md"; done
+g add -A; g commit -q -m f2c-metodo
+saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_CAPACIDADE_EXCLUIDO= bash "$script" main f2c-metodo 2>&1)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *"F2c:"*) true ;; *) false ;; esac \
+  && passa 'F2c conta artefato de metodo quando FATIA_CAPACIDADE_EXCLUIDO e vazio' \
+  || quebra "F2c com FATIA_CAPACIDADE_EXCLUIDO vazio nao contou os artefatos (rc $rc): $saida"
+# o padrao do projeto soma ao do E7: gerado/ e docs/entregas/ fora, app.ts conta
+g switch -q -c soma main
+mkdir -p "$tmp/gerado" "$tmp/docs/entregas/y"
+printf 'linha\n%.0s' $(seq 1 450) > "$tmp/gerado/g.txt"
+printf 'linha\n%.0s' $(seq 1 300) > "$tmp/docs/entregas/y/ENTREGA.md"
+printf 'codigo\n%.0s' $(seq 1 50) > "$tmp/app.ts"; g add -A; g commit -q -m soma
+saida="$(cd "$tmp" && FATIA_IGNORAR="$ign_e7" FATIA_IGNORAR_PROJETO='^gerado/' FATIA_MAX_LINHAS_COMMIT=9000 \
+  bash "$script" main soma 2>&1)"
+case "$saida" in
+  *'PR com 50 linhas em 1 arquivo'*) passa 'FATIA_IGNORAR_PROJETO soma ao FATIA_IGNORAR do E7' ;;
+  *) quebra "FATIA_IGNORAR_PROJETO nao somou ao FATIA_IGNORAR do E7: $saida" ;;
+esac
+# capacidade nao se afrouxa: acima do teto e uso incorreto (saida 2)
+for par in 'FATIA_CAPACIDADE_ARQUIVOS=101' 'FATIA_MAX_LINHAS_ARQUIVO=5001'; do
+  (cd "$tmp" && env "$par" bash "$script" main pequeno >/dev/null 2>&1); rc=$?
+  [ "$rc" = 2 ] && passa "$par sai 2" || quebra "$par saiu $rc, esperado 2"
+done
 
 # medicao que falha nao e PR limpo: um objeto ausente faz o `git diff` falhar
 # depois de as refs resolverem, e o script sai 2 (nao mediu), nunca 0
