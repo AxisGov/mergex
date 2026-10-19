@@ -90,8 +90,10 @@ for i in 1 2 3; do printf 'linha\n%.0s' $(seq 1 200) > "$tmp/g$i.md"; g add -A; 
 if (cd "$tmp" && bash "$script" main grande >/dev/null 2>&1); then quebra 'PR de 600 linhas passou'; else passa 'PR de 600 linhas reprova (F2)'; fi
 # a excecao declarada pelo desenvolvedor chega ao script mesmo sem `export`: o
 # trecho real do E7, rodado com FATIA_EXCECAO so como variavel de shell
-exc_trecho="$(sed -n '/^e7_ignorar=/,/fatiamento-da-pr\.sh "\$base"/p' "$e7" \
-  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#')"
+leitor="$raiz/.claude/skills/mergex/scripts/leitor-do-projeto.sh"
+exc_trecho="$(sed -En '/^(fatia|e7_ignorar)=/,/fatiamento-da-pr\.sh "\$base"/p' "$e7" \
+  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' \
+  | sed "s#bash \.claude/skills/mergex/scripts/leitor-do-projeto\.sh#bash '$leitor'#")"
 saida="$(cd "$tmp" && unset FATIA_EXCECAO FATIA_IGNORAR && FATIA_EXCECAO='movimento mecanico' \
   && base=main && publicado=grande && eval "$exc_trecho" 2>&1)"; rc=$?
 [ "$rc" = 0 ] && case "$saida" in *"excecao declarada: movimento mecanico"*) true ;; *) false ;; esac \
@@ -352,7 +354,8 @@ printf 'base\n' > "$aux/m2-dev/base.txt"; d add -A; d commit -q -m base; d push 
 d switch -q -c feature/x; printf 'linha\n' > "$aux/m2-dev/a.md"; d add -A; d commit -q -m a
 d push -q -u origin feature/x 2>/dev/null
 bloco_do_e7 'fatiamento-da-pr.sh "$base" "$publicado"' | sed "s|<branch_base>|main|" \
-  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' > "$aux/passo15.sh"
+  | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' \
+  | sed "s#bash \.claude/skills/mergex/scripts/leitor-do-projeto\.sh#bash '$leitor'#" > "$aux/passo15.sh"
 saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
 [ "$rc" = 0 ] && passa 'o bloco do passo 1.5 roda sozinho, sem $remoto e $publicado de outra chamada' \
   || quebra "o bloco do passo 1.5 depende de variavel de outra chamada (rc $rc): $saida"
@@ -411,6 +414,87 @@ rm -f "$aux/args-gh"
 [ "$rc15" != 0 ] && [ ! -e "$estado" ] && [ "$rc2" != 0 ] && [ ! -e "$aux/args-gh" ] \
   && passa 'fetch do upstream que falha apaga o estado antigo: o passo 2 nao abre o PR' \
   || quebra "estado antigo sobreviveu a falha do passo 1.5 (rc $rc15, estado $( [ -e "$estado" ] && echo presente || echo ausente), passo 2 rc $rc2, gh $( [ -e "$aux/args-gh" ] && echo chamado || echo nao chamado))"
+
+# o passo 1.5 mede com os limites de .expx/fatiamento.json do SHA publicado, lidos pelo
+# leitor do projeto (que chama o nucleo do expx). Configuracao que nao se le e "nao mediu"
+grep -Fq 'fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev "$publicado")" || {' "$e7" \
+  && grep -Fxq 'set -a; eval "$fatia"; set +a' "$e7" \
+  && passa 'o E7 consome o leitor com set -a' \
+  || quebra 'o E7 nao le .expx/fatiamento.json pelo leitor do projeto, exportando com set -a'
+grep -Fq 'leitor-do-projeto.sh' "$e7" && ! grep -Fq 'eval "$(' "$e7" \
+  && passa 'nenhum eval "$(...)" direto no E7' \
+  || quebra 'o E7 nao tem o leitor, ou avalia a saida dele direto (eval "$(...)")'
+nucleo_rel='.expx/marketplace/plugins/expx/nucleo/scripts'
+cenario() { # <nome> [sem-nucleo] [config da base] — remoto e clone novos, base com o nucleo; fica em feature/x
+  local dv="$aux/c-$1"
+  git init -q --bare -b main "$aux/c-$1.git"; git clone -q "$aux/c-$1.git" "$dv" 2>/dev/null
+  mkdir -p "$dv/.expx"; [ -z "${3:-}" ] || printf '%s\n' "$3" > "$dv/.expx/fatiamento.json"
+  if [ "${2:-}" != sem-nucleo ]; then
+    mkdir -p "$dv/$nucleo_rel"
+    tr -d '\r' < "$raiz/scripts/ci/fixtures/candidatos/expx-nucleo/expx-fatiamento.mjs" > "$dv/$nucleo_rel/expx-fatiamento.mjs"
+  fi
+  printf 'base\n' > "$dv/base.txt"; c "$1" add -A; c "$1" commit -q -m base; c "$1" push -q origin main 2>/dev/null
+  c "$1" switch -q -c feature/x
+}
+c() { local n="$1"; shift; git -C "$aux/c-$n" -c core.autocrlf=false -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+config() { # <pr_linhas> [chaves extras]
+  printf '{ "expx_fatiamento": 1, "justificativa": "sprint revisada por task", "legibilidade": { "pr_linhas": %s }, "revisao_por_task": { "modo": "obrigatoria" }%s }\n' "$1" "${2:-}"
+}
+seiscentas() { # <nome> — tres commits de 200 linhas, publicados
+  for i in 1 2 3; do printf 'linha\n%.0s' $(seq 1 200) > "$aux/c-$1/g$i.md"; c "$1" add -A; c "$1" commit -q -m "parte $i"; done
+  c "$1" push -q -u origin feature/x 2>/dev/null
+}
+passo15() { # <nome> [VAR=valor...] — roda o bloco real do passo 1.5 no clone
+  local n="$1"; shift
+  (cd "$aux/c-$n" && env -u remoto -u publicado -u bb script="$script" "$@" bash "$aux/passo15.sh" 2>&1)
+}
+estado_de() { git -C "$aux/c-$1" rev-parse --path-format=absolute --git-path mergex-e7-base; }
+if command -v node >/dev/null 2>&1; then
+  cenario calibrado com-nucleo "$(config 2500)"; seiscentas calibrado
+  saida="$(passo15 calibrado)"; rc=$?
+  [ "$rc" = 0 ] && [ -s "$(estado_de calibrado)" ] \
+    && passa 'com pr_linhas 2500 no SHA publicado, PR de 600 linhas passa e grava o estado' \
+    || quebra "com pr_linhas 2500 no SHA publicado (rc $rc): $saida"
+  # o disco diz 500 e o commit 700: so medindo com o do commit as 600 linhas passam
+  cenario sujo com-nucleo "$(config 700)"; seiscentas sujo; config 500 > "$aux/c-sujo/.expx/fatiamento.json"
+  saida="$(passo15 sujo)"; rc=$?
+  [ "$rc" = 0 ] \
+    && passa 'bloco do passo 1.5 mede com o arquivo do SHA publicado, nao com o do disco' \
+    || quebra "o passo 1.5 nao mediu com o arquivo do SHA publicado (rc $rc): $saida"
+  cenario invalido; printf '{ "expx_fatiamento": 1, "entrega": "por_dia" }\n' > "$aux/c-invalido/.expx/fatiamento.json"
+  c invalido add -A; c invalido commit -q -m config; c invalido push -q -u origin feature/x 2>/dev/null
+  saida="$(passo15 invalido)"; rc=$?
+  [ "$rc" = 2 ] && [ ! -e "$(estado_de invalido)" ] && case "$saida" in *entrega*) true ;; *) false ;; esac \
+    && passa '.expx/fatiamento.json invalido: o bloco sai 2 e nao deixa o estado da base' \
+    || quebra ".expx/fatiamento.json invalido (rc $rc, estado $( [ -e "$(estado_de invalido)" ] && echo presente || echo ausente)): $saida"
+  cenario soma com-nucleo "$(config 400 ', "ignorar": ["^gerado/"]')"
+  mkdir -p "$aux/c-soma/gerado" "$aux/c-soma/docs/entregas/y"
+  printf 'linha\n%.0s' $(seq 1 250) > "$aux/c-soma/gerado/g.txt"; c soma add -A; c soma commit -q -m gerado
+  printf 'linha\n%.0s' $(seq 1 250) > "$aux/c-soma/docs/entregas/y/ENTREGA.md"; c soma add -A; c soma commit -q -m entrega
+  printf 'codigo\n%.0s' $(seq 1 50) > "$aux/c-soma/app.ts"; c soma add -A; c soma commit -q -m app
+  c soma push -q -u origin feature/x 2>/dev/null
+  saida="$(passo15 soma)"; rc=$?
+  [ "$rc" = 0 ] && case "$saida" in *'PR com 50 linhas em 1 arquivo'*) true ;; *) false ;; esac \
+    && passa 'ignorar do projeto soma: gerado/ fora, docs/entregas fora, app.ts conta' \
+    || quebra "o ignorar do projeto nao somou ao do E7 (rc $rc): $saida"
+else
+  passa 'limites de .expx/fatiamento.json no passo 1.5: pulado (sem node; o CI tem node)'
+fi
+cenario sem-leitor sem-nucleo "$(config 2500)"; c sem-leitor push -q -u origin feature/x 2>/dev/null
+saida="$(passo15 sem-leitor)"; rc=$?
+[ "$rc" = 2 ] && [ ! -e "$(estado_de sem-leitor)" ] && case "$saida" in *'expx update'*) true ;; *) false ;; esac \
+  && passa 'arquivo presente sem leitor: sai 2 e cita expx update' \
+  || quebra "arquivo presente sem leitor (rc $rc): $saida"
+# sem o arquivo, nada muda (nem chama node): 101 arquivos que o revisor ve reprovam (F2c),
+# inclusive em fixtures/candidatos/, que no projeto e codigo
+cenario sem-config; mkdir -p "$aux/c-sem-config/fixtures/candidatos"
+for i in $(seq 1 101); do printf 'x\n' > "$aux/c-sem-config/fixtures/candidatos/f$i.txt"; done
+c sem-config add -A; c sem-config commit -q -m muitos; c sem-config push -q -u origin feature/x 2>/dev/null
+mkdir -p "$aux/node-espia"; printf '#!/usr/bin/env bash\n: > "%s/node-chamado"\nexit 1\n' "$aux" > "$aux/node-espia/node"; chmod +x "$aux/node-espia/node"
+saida="$(passo15 sem-config PATH="$aux/node-espia:$PATH")"; rc=$?
+[ "$rc" = 1 ] && [ ! -e "$aux/node-chamado" ] && case "$saida" in *'F2c:'*) true ;; *) false ;; esac \
+  && passa 'sem arquivo: 101 arquivos visiveis reprovam (F2c) e nada chama node' \
+  || quebra "sem arquivo (rc $rc, node $( [ -e "$aux/node-chamado" ] && echo chamado || echo nao chamado)): $saida"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
