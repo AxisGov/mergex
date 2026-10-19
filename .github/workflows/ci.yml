@@ -52,6 +52,33 @@ jobs:
         shell: bash
         run: bash .claude/hooks/teste.sh
 
+  r1:
+    name: r1 / reconciliacao-base
+    runs-on: ubuntu-latest
+    # A bancada R1 leva ~17 min no Linux (`todos`): no job `hooks` ela estouraria
+    # os 20 min dele. Job proprio, sem matrix: um so `todos` usa o despacho da
+    # propria bancada (grupo novo entra sozinho) e da uma contagem unica.
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Ensure jq
+        shell: bash
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+      - name: Run R1 bench
+        shell: bash
+        run: bash scripts/ci/test-r1-reconciliacao-base.sh todos
+
   contract:
     name: contract
     runs-on: ubuntu-latest
