@@ -68,5 +68,16 @@ else
     || quebra "node nao rodou a copia (rc $rc): $saida"
 fi
 
+# 4. o atualizar nao diz que copiou quando nao conseguiu gravar a copia (destino e um arquivo)
+mkdir -p "$tmp/expx/nucleo/scripts" "$tmp/rep/scripts/ci/fixtures/candidatos"
+for f in expx-fatiamento.mjs expx-revisao.mjs; do printf 'x\n' > "$tmp/expx/nucleo/scripts/$f"; done
+e() { git -C "$tmp/expx" -c core.autocrlf=false -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+e init -q; e add -A; e commit -q -m nucleo
+cp "$raiz/scripts/ci/atualizar-nucleo-expx.sh" "$tmp/rep/scripts/ci/"
+printf 'nao e pasta\n' > "$tmp/rep/scripts/ci/fixtures/candidatos/expx-nucleo"
+bash "$tmp/rep/scripts/ci/atualizar-nucleo-expx.sh" "$tmp/expx" HEAD >/dev/null 2>&1; rc=$?
+[ "$rc" = 1 ] && passa 'atualizar-nucleo-expx sai 1 quando nao grava a copia' \
+  || quebra "atualizar-nucleo-expx saiu $rc sem conseguir gravar a copia"
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

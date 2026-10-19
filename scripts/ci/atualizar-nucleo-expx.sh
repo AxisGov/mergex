@@ -34,6 +34,8 @@ for f in $arquivos; do
   printf '%s  %s\n' "$(sha "$tmp/$f")" "$f" >> "$tmp/ORIGEM"
 done
 
-mkdir -p "$destino"
-for f in $arquivos ORIGEM; do cp "$tmp/$f" "$destino/$f"; done
+mkdir -p "$destino" || { echo "nao foi possivel criar $destino" >&2; exit 1; }
+for f in $arquivos ORIGEM; do
+  cp "$tmp/$f" "$destino/$f" || { echo "nao foi possivel gravar $destino/$f" >&2; exit 1; }
+done
 printf 'copia do nucleo: expxdev %s\n' "$sha_rev"
