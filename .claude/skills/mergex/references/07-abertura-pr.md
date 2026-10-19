@@ -112,10 +112,11 @@ if [ "$bb" = HEAD ]; then
 fi
 git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 1; }
 base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
+fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev "$publicado")" || { echo "configuração do projeto (.expx/fatiamento.json) não lida: o E7 não mede nem abre o PR"; exit 2; }
+set -a; eval "$fatia"; set +a
 e7_ignorar='(^|/)package-lock\.json$|^docs/(sprintx|entregas|eventos)/'
 FATIA_IGNORAR="${FATIA_IGNORAR:+$FATIA_IGNORAR|}$e7_ignorar" \
 FATIA_EXCECAO="${FATIA_EXCECAO:-}" \
-FATIA_CAPACIDADE_EXCLUIDO="${FATIA_CAPACIDADE_EXCLUIDO-^docs/(sprintx|entregas|eventos)/}" \
   bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
 rc_fatia=$?; [ "$rc_fatia" = 0 ] && { printf '%s\n' "$bb" > "$estado_bb" || exit 1; }; exit "$rc_fatia"
 ```
@@ -124,9 +125,18 @@ O `FATIA_IGNORAR` vai explícito porque o padrão do script é o do ExpxDev, que
 `fixtures/candidatos/` da conta; no projeto do desenvolvedor esse caminho pode ser código
 revisado. Código gerado que o projeto exclui da revisão automática entra aqui só se o
 desenvolvedor declarar o padrão — e o padrão dele **soma** ao do E7, nunca o substitui: os artefatos de
-método saem da medida sempre. Pelo mesmo motivo vai explícito o `FATIA_CAPACIDADE_EXCLUIDO`
-(o que o painel do revisor não mostra, fora da F2c): só os artefatos de método; sem ele,
-`fixtures/candidatos/` ficaria fora do limite de 100 arquivos visíveis.
+método saem da medida sempre.
+
+Os limites vêm de `.expx/fatiamento.json`, a configuração do projeto, lida pelo
+`leitor-do-projeto.sh` com o leitor do núcleo do expx — nunca o JSON cru. Sem o arquivo, o
+helper devolve os padrões sem chamar node, e o E7 mede como sempre mediu. Com ele, valem os
+limites de legibilidade calibrados pelo projeto e o `ignorar` dele (`FATIA_IGNORAR_PROJETO`,
+que também **soma**); a capacidade do revisor (F2c, 100 arquivos visíveis) nunca se afrouxa.
+O arquivo lido é o do **SHA publicado** (`--rev "$publicado"`), nunca o do disco: um arquivo
+sujo, diferente do commitado, não muda a medida do que o revisor vai ler. O
+`FATIA_CAPACIDADE_EXCLUIDO` (o que o painel do revisor não mostra, fora da F2c) também sai do
+leitor — no padrão, só os artefatos de método; sem ele, `fixtures/candidatos/` ficaria fora
+do limite de 100 arquivos visíveis. O `set -a` exporta o que o leitor imprimiu para o script.
 
 Os **artefatos de método** — `docs/sprintx/`, `docs/entregas/`, `docs/eventos/`, o que a
 `sprintx` e esta skill gravam na branch — ficam fora da medida (exceção "artefato de método"
@@ -151,7 +161,10 @@ vai explícita na chamada, como o `FATIA_IGNORAR`: declarada sem `export`, não 
 Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre o PR**. O script não conseguiu
 medir — ref inexistente, sem ancestral comum entre a base e o SHA publicado, `git diff` que
 falhou — e PR não medido não é PR dentro do limite. Registre o erro literal, deixe `pr_estado` em
-`null` e diga ao desenvolvedor o que impediu a medição; no passo 3 vale igual.
+`null` e diga ao desenvolvedor o que impediu a medição; no passo 3 vale igual. A configuração
+que não se lê também é saída `2`, nunca violação nem os padrões: `.expx/fatiamento.json`
+inválido (o leitor diz a chave) ou presente sem o leitor do núcleo ou sem node (atualize o
+expx: `expx update`). Medir com os padrões um projeto que declarou os seus seria medir outra coisa.
 
 ## Passo 2 — Abrir o PR
 
@@ -306,6 +319,7 @@ Siga para o E8.
 | Serviço não suportado | Passo 3 |
 | `fatiamento-da-pr.sh` saiu `1` (PR acima de F2, F3 ou F4) | O E7 **não abre o PR**: registra as violações, `pr_estado` fica `null`, e o desenvolvedor recebe como dividir |
 | `fatiamento-da-pr.sh` saiu `2` ou outro código (não mediu: ref inexistente, sem ancestral comum, `git diff` falhou) | O E7 **não abre o PR**: registra o erro literal, `pr_estado` fica `null`; não medido não é dentro do limite |
+| `leitor-do-projeto.sh` falhou (`.expx/fatiamento.json` inválido, ou presente sem o leitor do núcleo ou sem node): o bloco sai `2` | O E7 **não abre o PR**: registra o erro literal (a chave inválida, ou `expx update`), `pr_estado` fica `null`; nunca mede com os padrões |
 | Comando falhou por permissão | Passo 3, com o erro literal registrado |
 | PR já existe | Recupere a URL e registre; é retomada |
 | Sem push | O E7 não roda; siga para o E8 |

@@ -1,0 +1,14 @@
+# Decisões da mergex — revisão por task, entrega por sprint e merge automático
+
+Decisões a partir da DM-235, do desenho "revisão por task, PR por sprint e limites por projeto"
+(AxisGov/expxdev, `docs/superpowers/specs/2026-10-18-revisao-por-task-pr-por-sprint-design.md`).
+Ficam aqui, e não em `DECISOES-DA-SKILL.md`, para que o arquivo principal não cresça (F4 do
+contrato `expx-fatiamento`). A numeração `DM-NN` é uma só nos arquivos.
+
+## Fatiamento por projeto no E7
+
+| # | Situação | Decisão | Por quê |
+|---|---|---|---|
+| DM-235 | O E7 media todo PR com os limites fixos do contrato; o projeto que calibra a legibilidade (`.expx/fatiamento.json`, revisão por task obrigatória) teria o PR de sprint reprovado por um limite que ele não usa | **O E7 lê a configuração pelo `leitor-do-projeto.sh`**, do **SHA publicado** (`--rev "$publicado"`), nunca do disco, e exporta com `set -a` o que o leitor imprime. Sem o arquivo, os padrões, sem chamar node: o E7 mede como antes. Arquivo presente e inválido, ou presente sem o leitor do núcleo ou sem node, é saída `2` (não mediu, `expx update`), nunca violação nem os padrões. O helper é o único ponto da mergex que lê o arquivo, e sempre pelo núcleo do expx | Ler o JSON cru na mergex criaria um segundo intérprete do contrato, que divergiria do da sprintx e do doctor. O arquivo do disco pode estar sujo; o que o revisor lê é o commit publicado. Cair nos padrões quando a configuração existe e não se lê mediria outra coisa sem avisar |
+| DM-236 | O `fatiamento-da-pr.sh` era uma cópia do verificador do expxdev sem prova de identidade, e não tinha a medida de capacidade (F2c) nem tirava os artefatos de método no padrão | **O corpo é o do `verificar-fatiamento.sh` do expxdev, byte a byte**, com a origem e o `Corpo-sha256` no cabeçalho; o teste confere o sha256 e, com `EXPXDEV_RAIZ`, o arquivo de lá. A F2c (100 arquivos visíveis ao revisor) e a F4 nunca são rebaixadas, nem por exceção nem pela configuração do projeto; o `ignorar` do projeto soma ao do E7 | Uma cópia sem identidade deriva calada. A capacidade do revisor é limite da ferramenta, não preferência do projeto: PR acima dela não é revisado e parece revisado |
+| DM-237 | Os testes do E7 (e os da V12 e do E1) precisam do núcleo do expx num projeto temporário, e o núcleo é de outro repositório | **Cópia do núcleo em `scripts/ci/fixtures/candidatos/expx-nucleo/`**, com o `ORIGEM` (revisão do expxdev e sha256 de cada arquivo), regerada só por `scripts/ci/atualizar-nucleo-expx.sh <expxdev> <rev>`, em commit próprio com o comando no corpo. Fica fora da medida do fatiamento. Achado sobre a cópia se corrige na origem (expxdev) e volta pela regeração | Testar contra o leitor real evita um dublê que concorda com a mergex e discorda do núcleo. Artefato gerado com origem declarada é auditável e não se edita à mão |
