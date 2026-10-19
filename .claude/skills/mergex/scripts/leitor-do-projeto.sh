@@ -41,14 +41,19 @@ if [ -n "$rev" ]; then
 fi
 
 config='.expx/fatiamento.json'
+# presente e qualquer entrada, como o `lstat` do leitor do nucleo: link quebrado, pasta e
+# gitlink sem objeto sao presentes (e invalidos); `.expx` que nao e pasta tambem (ENOTDIR)
+expx_pasta=1
 if [ -n "$rev" ]; then
-  git -C "$raiz" cat-file -e "$commit:$config" 2>/dev/null && presente=1 || presente=0
+  entrada="$(git -C "$raiz" ls-tree --full-tree "$commit" -- "$config")" \
+    && e_expx="$(git -C "$raiz" ls-tree --full-tree "$commit" -- .expx)" || exit 2
+  case "$e_expx" in ''|'040000 '*) ;; *) expx_pasta=0 ;; esac
 else
-  # qualquer entrada conta, como o `lstat` do leitor: link quebrado e presente (e invalido)
-  { [ -e "$raiz/$config" ] || [ -L "$raiz/$config" ]; } && presente=1 || presente=0
+  entrada=''; { [ -e "$raiz/$config" ] || [ -L "$raiz/$config" ]; } && entrada=1
+  [ -e "$raiz/.expx" ] && [ ! -d "$raiz/.expx" ] && expx_pasta=0
 fi
 
-if [ "$presente" = 0 ]; then
+if [ -z "$entrada" ] && [ "$expx_pasta" = 1 ]; then
   # os padroes do leitor do nucleo; sem FATIA_MAX_*, para o E7 medir como sempre mediu.
   # EXPX_CAMINHOS_PROTEGIDOS vazio: com o merge automatico desligado a lista nao e lida
   cat <<'EOF'
@@ -75,14 +80,13 @@ tmp="$(mktemp -d)" || exit 2
 trap 'rm -rf "$tmp"' EXIT
 leia="$raiz"
 if [ -n "$rev" ]; then
-  # materializa o arquivo do commit; o que nao e blob (pasta, submodulo) vira pasta, que o
-  # leitor recusa como ilegivel. Link do commit vira o texto do alvo: JSON invalido
+  # materializa a entrada do commit: blob vira arquivo (de um link, o texto do alvo, JSON
+  # invalido); pasta, gitlink ou `.expx` que nao e pasta vira pasta, que o leitor recusa
+  # como ilegivel (um `.expx` arquivo nao serve: o lstat do Windows da ENOENT, nao ENOTDIR)
   leia="$tmp/raiz"; mkdir -p "$leia/.expx" || exit 2
-  if [ "$(git -C "$raiz" cat-file -t "$commit:$config")" = blob ]; then
-    git -C "$raiz" cat-file blob "$commit:$config" > "$leia/$config" || exit 2
-  else
-    mkdir "$leia/$config" || exit 2
-  fi
+  set -- $entrada # <modo> <tipo> <objeto> <caminho>; vazio com `.expx` que nao e pasta
+  if [ "${2:-}" = blob ]; then git -C "$raiz" cat-file blob "$3" > "$leia/$config" || exit 2
+  else mkdir "$leia/$config" || exit 2; fi
 fi
 # node nativo no Windows nao entende o caminho do MSYS
 if command -v cygpath >/dev/null 2>&1; then leia="$(cygpath -w "$leia")"; mjs="$(cygpath -w "$mjs")"; fi

@@ -203,5 +203,23 @@ else
   passa '--rev com pasta ou link no lugar do arquivo (sem node)'
 fi
 
+# 15. o que o leitor do nucleo ve como presente (o lstat nao da ENOENT) nunca vira os
+# padroes: gitlink sem objeto no lugar do arquivo e `.expx` que nao e pasta (ENOTDIR)
+if [ "$tem_node" = 1 ]; then
+  gitlink="$(commit_com 160000 1111111111111111111111111111111111111111 .expx/fatiamento.json)"
+  expx_blob="$(commit_com 100644 "$(blob '{}')" .expx .expx)"
+  for caso in "gitlink $gitlink" ".expx-arquivo $expx_blob"; do
+    (cd "$tmp" && bash "$leitor" --rev "${caso#* }" > "$aux/out" 2>/dev/null); rc=$?
+    [ "$rc" = 1 ] && [ ! -s "$aux/out" ] && passa "--rev com ${caso%% *}: presente e invalido (sai 1)" \
+      || quebra "--rev com ${caso%% *}: rc $rc, stdout '$(cat "$aux/out")'"
+  done
+else
+  passa '--rev com gitlink ou .expx arquivo (sem node)'
+fi
+mkdir -p "$aux/expx-arquivo"; printf '{}\n' > "$aux/expx-arquivo/.expx"
+(bash "$leitor" --raiz "$aux/expx-arquivo" > "$aux/out" 2>/dev/null); rc=$?
+[ "$rc" = 3 ] && [ ! -s "$aux/out" ] && passa '.expx arquivo no disco: presente, sem leitor possivel (sai 3)' \
+  || quebra ".expx arquivo no disco: rc $rc, stdout '$(cat "$aux/out")'"
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
