@@ -221,5 +221,21 @@ mkdir -p "$aux/expx-arquivo"; printf '{}\n' > "$aux/expx-arquivo/.expx"
 [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && passa '.expx arquivo no disco: presente, sem leitor possivel (sai 3)' \
   || quebra ".expx arquivo no disco: rc $rc, stdout '$(cat "$aux/out")'"
 
+# 16. leitor que o node nao carrega (sintaxe, modulo que falta) sai 1 como o arquivo
+# invalido, mas sem a linha `expx-fatiamento: ` do contrato do leitor: sai 3, nunca 1
+if [ "$tem_node" = 1 ]; then
+  cp "$tmp/$nucleo_rel/expx-fatiamento.mjs" "$aux/leitor.mjs"
+  for caso in 'sintaxe:syntax error(' 'modulo:import "node:nao-existe";'; do
+    printf '%s\n' "${caso#*:}" > "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+    (cd "$tmp" && bash "$leitor" > "$aux/out" 2> "$aux/err"); rc=$?
+    [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && grep -q 'expx update' "$aux/err" \
+      && passa "leitor que nao carrega (${caso%%:*}): sai 3" \
+      || quebra "leitor que nao carrega (${caso%%:*}): rc $rc, stderr '$(cat "$aux/err")'"
+  done
+  cp "$aux/leitor.mjs" "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+else
+  passa 'leitor que nao carrega: sai 3 (sem node)'
+fi
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

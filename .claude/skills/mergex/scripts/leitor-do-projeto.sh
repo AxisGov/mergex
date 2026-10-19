@@ -14,8 +14,8 @@
 #   stdout repassado byte a byte. Roda sempre o instalado, nunca codigo do commit.
 #
 # Saidas: 0 leu; 1 arquivo invalido (stderr do leitor, stdout vazio); 2 a revisao ou a
-# raiz nao resolvem; 3 arquivo presente e leitor ou node ausente, ou leitor que nao
-# imprime todas as chaves; 64 uso. Fora do 0, nunca os padroes e nada no stdout.
+# raiz nao resolvem; 3 arquivo presente e leitor ou node ausente, leitor que o node nao
+# carrega, ou que nao imprime todas as chaves; 64 uso. Fora do 0, nunca os padroes e nada no stdout.
 #
 # Consumo: `fatia="$(bash leitor-do-projeto.sh ...)" || <falha>; set -a; eval "$fatia"; set +a`.
 # Nenhum `eval` aqui dentro.
@@ -92,7 +92,10 @@ fi
 if command -v cygpath >/dev/null 2>&1; then leia="$(cygpath -w "$leia")"; mjs="$(cygpath -w "$mjs")"; fi
 
 node "$mjs" --raiz "$leia" --formato env > "$tmp/env" 2> "$tmp/err"; rc=$?
-if [ "$rc" = 1 ]; then cat "$tmp/err" >&2; exit 1; fi
+# arquivo invalido e o 1 do leitor, que comeca o stderr com `expx-fatiamento: ` (o contrato
+# dele); o 1 do node que nao carregou o leitor (sintaxe, modulo) comeca com outra coisa
+IFS= read -r primeira < "$tmp/err"
+case "$rc:${primeira:-}" in 1:'expx-fatiamento: '*) cat "$tmp/err" >&2; exit 1 ;; esac
 [ "$rc" = 0 ] || { cat "$tmp/err" >&2; desatualizado "o leitor saiu $rc"; }
 grep -qx 'EXPX_FATIAMENTO_ORIGEM=projeto' "$tmp/env" || desatualizado 'o leitor nao confirmou a origem projeto'
 for k in FATIA_MAX_LINHAS_PR FATIA_MAX_ARQUIVOS FATIA_MAX_LINHAS_COMMIT FATIA_MAX_KB_ARQUIVO \
