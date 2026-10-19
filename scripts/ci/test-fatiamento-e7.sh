@@ -450,15 +450,13 @@ passo15() { # <nome> [VAR=valor...] — roda o bloco real do passo 1.5 no clone
 }
 estado_de() { git -C "$aux/c-$1" rev-parse --path-format=absolute --git-path mergex-e7-base; }
 if command -v node >/dev/null 2>&1; then
-  cenario calibrado; config 2500 > "$aux/c-calibrado/.expx/fatiamento.json"; c calibrado add -A; c calibrado commit -q -m config
-  seiscentas calibrado
+  cenario calibrado com-nucleo "$(config 2500)"; seiscentas calibrado
   saida="$(passo15 calibrado)"; rc=$?
   [ "$rc" = 0 ] && [ -s "$(estado_de calibrado)" ] \
     && passa 'com pr_linhas 2500 no SHA publicado, PR de 600 linhas passa e grava o estado' \
     || quebra "com pr_linhas 2500 no SHA publicado (rc $rc): $saida"
   # o disco diz 500 e o commit 700: so medindo com o do commit as 600 linhas passam
-  cenario sujo; config 700 > "$aux/c-sujo/.expx/fatiamento.json"; c sujo add -A; c sujo commit -q -m config
-  seiscentas sujo; config 500 > "$aux/c-sujo/.expx/fatiamento.json"
+  cenario sujo com-nucleo "$(config 700)"; seiscentas sujo; config 500 > "$aux/c-sujo/.expx/fatiamento.json"
   saida="$(passo15 sujo)"; rc=$?
   [ "$rc" = 0 ] \
     && passa 'bloco do passo 1.5 mede com o arquivo do SHA publicado, nao com o do disco' \
@@ -482,8 +480,7 @@ if command -v node >/dev/null 2>&1; then
 else
   passa 'limites de .expx/fatiamento.json no passo 1.5: pulado (sem node; o CI tem node)'
 fi
-cenario sem-leitor sem-nucleo; config 2500 > "$aux/c-sem-leitor/.expx/fatiamento.json"
-c sem-leitor add -A; c sem-leitor commit -q -m config; c sem-leitor push -q -u origin feature/x 2>/dev/null
+cenario sem-leitor sem-nucleo "$(config 2500)"; c sem-leitor push -q -u origin feature/x 2>/dev/null
 saida="$(passo15 sem-leitor)"; rc=$?
 [ "$rc" = 2 ] && [ ! -e "$(estado_de sem-leitor)" ] && case "$saida" in *'expx update'*) true ;; *) false ;; esac \
   && passa 'arquivo presente sem leitor: sai 2 e cita expx update' \
@@ -493,8 +490,7 @@ saida="$(passo15 sem-leitor)"; rc=$?
 cenario sem-config; mkdir -p "$aux/c-sem-config/fixtures/candidatos"
 for i in $(seq 1 101); do printf 'x\n' > "$aux/c-sem-config/fixtures/candidatos/f$i.txt"; done
 c sem-config add -A; c sem-config commit -q -m muitos; c sem-config push -q -u origin feature/x 2>/dev/null
-mkdir -p "$aux/node-espia"; printf '#!/usr/bin/env bash\n: > "%s/node-chamado"\nexit 1\n' "$aux" > "$aux/node-espia/node"
-chmod +x "$aux/node-espia/node"
+mkdir -p "$aux/node-espia"; printf '#!/usr/bin/env bash\n: > "%s/node-chamado"\nexit 1\n' "$aux" > "$aux/node-espia/node"; chmod +x "$aux/node-espia/node"
 saida="$(passo15 sem-config PATH="$aux/node-espia:$PATH")"; rc=$?
 [ "$rc" = 1 ] && [ ! -e "$aux/node-chamado" ] && case "$saida" in *'F2c:'*) true ;; *) false ;; esac \
   && passa 'sem arquivo: 101 arquivos visiveis reprovam (F2c) e nada chama node' \
