@@ -24,14 +24,16 @@ sha() { tr -d '\r' < "$1" | if command -v sha256sum >/dev/null 2>&1; then sha256
 if [ ! -f "$copia/ORIGEM" ]; then
   quebra "ORIGEM ausente em $copia_rel"
 else
+  # sem CR, como a copia: num checkout com core.autocrlf=true o ORIGEM tambem chega com CRLF
+  origem="$(tr -d '\r' < "$copia/ORIGEM")"
   erros=''; n=0
-  head -1 "$copia/ORIGEM" | grep -Eq '^expxdev [0-9a-f]{7,40}$' || erros="$erros cabecalho"
+  printf '%s\n' "$origem" | head -1 | grep -Eq '^expxdev [0-9a-f]{7,40}$' || erros="$erros cabecalho"
   while read -r h f; do
     n=$((n + 1))
     [ -f "$copia/$f" ] && [ "$(sha "$copia/$f")" = "$h" ] || erros="$erros $f"
-  done < <(tail -n +2 "$copia/ORIGEM")
+  done < <(printf '%s\n' "$origem" | tail -n +2)
   for f in expx-fatiamento.mjs expx-revisao.mjs; do
-    grep -Eq "^[0-9a-f]{64}  $f\$" "$copia/ORIGEM" || erros="$erros sem:$f"
+    printf '%s\n' "$origem" | grep -Eq "^[0-9a-f]{64}  $f\$" || erros="$erros sem:$f"
   done
   [ -z "$erros" ] && [ "$n" -ge 2 ] && passa 'ORIGEM confere com o sha256 de cada copia' \
     || quebra "ORIGEM nao confere:$erros"
