@@ -113,13 +113,13 @@ if [ "$tem_node" = 1 ]; then
   [ "$rc" = 0 ] && case "$saida" in *'FATIA_MAX_LINHAS_PR=2500'*) true ;; *) false ;; esac \
     && passa '--rev le o arquivo do commit, nao o do disco' \
     || quebra "--rev leu o disco (rc $rc): $saida"
-  # e o leitor do nucleo tambem e o do commit: um leitor alterado no disco (ou no PR) nao decide
+  # leitor do disco diferente do versionado no commit: nenhum dos dois roda, sai 3
   cp "$tmp/$nucleo_rel/expx-fatiamento.mjs" "$aux/leitor.mjs"
   printf 'process.stdout.write("EXPX_FATIAMENTO_ORIGEM=padrao\\n")\n' > "$tmp/$nucleo_rel/expx-fatiamento.mjs"
   saida="$(cd "$tmp" && bash "$leitor" --rev HEAD 2>&1)"; rc=$?
   cp "$aux/leitor.mjs" "$tmp/$nucleo_rel/expx-fatiamento.mjs"
-  [ "$rc" = 0 ] && case "$saida" in *'FATIA_MAX_LINHAS_PR=2500'*) true ;; *) false ;; esac \
-    && passa '--rev roda o leitor do nucleo do commit, nao o do disco' || quebra "--rev rodou o leitor do disco (rc $rc): $saida"
+  [ "$rc" = 3 ] && case "$saida" in *'difere do instalado'*) true ;; *) false ;; esac \
+    && passa '--rev com leitor do commit diferente do instalado: sai 3' || quebra "--rev com leitores diferentes (rc $rc): $saida"
 else
   passa '--rev le o arquivo do commit (sem node)'
 fi

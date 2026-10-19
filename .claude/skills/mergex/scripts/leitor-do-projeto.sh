@@ -11,7 +11,7 @@
 # - Arquivo ausente (no commit, com --rev; no disco, sem): os padroes, sem chamar node.
 # - Arquivo presente: o leitor do nucleo,
 #   `<raiz>/.expx/marketplace/plugins/expx/nucleo/scripts/expx-fatiamento.mjs`, com o
-#   stdout repassado byte a byte. Com --rev, o leitor do commit quando ele o versiona.
+#   stdout repassado byte a byte. Roda sempre o instalado, nunca codigo do commit.
 #
 # Saidas: 0 leu; 1 arquivo invalido (stderr do leitor, stdout vazio); 2 a revisao ou a
 # raiz nao resolvem; 3 arquivo presente e leitor ou node ausente, ou leitor que nao
@@ -65,9 +65,10 @@ fi
 
 desatualizado() { echo "leitor-do-projeto: expx-fatiamento ausente ou incompleto: atualize o expx (expx update)${1:+ ($1)}" >&2; exit 3; }
 mjs_rel=".expx/marketplace/plugins/expx/nucleo/scripts/expx-fatiamento.mjs"; mjs="$raiz/$mjs_rel"
-# com --rev, o leitor tambem e o do commit quando ele o versiona: o do disco (ou o do PR) nao decide
-do_commit=0; [ -n "$rev" ] && [ "$(git -C "$raiz" cat-file -t "$commit:$mjs_rel" 2>/dev/null)" = blob ] && do_commit=1
-[ "$do_commit" = 1 ] || [ -f "$mjs" ] || desatualizado "sem $mjs"
+[ -f "$mjs" ] || desatualizado "sem $mjs"
+# com --rev, se o commit versiona um leitor diferente do instalado, nenhum dos dois decide
+if [ -n "$rev" ] && no_commit="$(git -C "$raiz" rev-parse --verify --quiet "$commit:$mjs_rel")" \
+   && [ "$no_commit" != "$(git -C "$raiz" hash-object -- "$mjs_rel")" ]; then desatualizado 'o leitor do commit difere do instalado'; fi
 command -v node >/dev/null 2>&1 || desatualizado 'node ausente'
 
 tmp="$(mktemp -d)" || exit 2
@@ -82,7 +83,6 @@ if [ -n "$rev" ]; then
   else
     mkdir "$leia/$config" || exit 2
   fi
-  if [ "$do_commit" = 1 ]; then mjs="$tmp/expx-fatiamento.mjs"; git -C "$raiz" cat-file blob "$commit:$mjs_rel" > "$mjs" || exit 2; fi
 fi
 # node nativo no Windows nao entende o caminho do MSYS
 if command -v cygpath >/dev/null 2>&1; then leia="$(cygpath -w "$leia")"; mjs="$(cygpath -w "$mjs")"; fi
