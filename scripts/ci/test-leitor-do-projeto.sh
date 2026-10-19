@@ -161,10 +161,11 @@ fi
 [ "$rc" = 64 ] && passa 'argumento desconhecido sai 64' || quebra "argumento desconhecido saiu $rc"
 
 # 12. revisao ou raiz que nao resolvem: sai 2, stdout vazio, nunca os padroes
-for args in '--rev nao-existe' "--raiz $aux/nao-existe"; do
-  (cd "$tmp" && bash "$leitor" $args > "$aux/out" 2>/dev/null); rc=$?
-  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && passa "${args%% *} que nao resolve: sai 2" \
-    || quebra "${args%% *} que nao resolve: rc $rc, stdout '$(cat "$aux/out")'"
+for opc in --rev --raiz; do # o valor vai como um argumento so: o TMPDIR pode ter espaco
+  [ "$opc" = --rev ] && val=nao-existe || val="$aux/nao-existe"
+  (cd "$tmp" && bash "$leitor" "$opc" "$val" > "$aux/out" 2>/dev/null); rc=$?
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && passa "$opc que nao resolve: sai 2" \
+    || quebra "$opc que nao resolve: rc $rc, stdout '$(cat "$aux/out")'"
 done
 
 # 13. leitor que nao imprime todas as chaves: sai 3 (expx update), nunca o que ele imprimiu
