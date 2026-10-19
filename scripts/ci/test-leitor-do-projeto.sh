@@ -160,5 +160,48 @@ fi
 (cd "$tmp" && bash "$leitor" --nada >/dev/null 2>&1); rc=$?
 [ "$rc" = 64 ] && passa 'argumento desconhecido sai 64' || quebra "argumento desconhecido saiu $rc"
 
+# 12. revisao ou raiz que nao resolvem: sai 2, stdout vazio, nunca os padroes
+for args in '--rev nao-existe' "--raiz $aux/nao-existe"; do
+  (cd "$tmp" && bash "$leitor" $args > "$aux/out" 2>/dev/null); rc=$?
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && passa "${args%% *} que nao resolve: sai 2" \
+    || quebra "${args%% *} que nao resolve: rc $rc, stdout '$(cat "$aux/out")'"
+done
+
+# 13. leitor que nao imprime todas as chaves: sai 3 (expx update), nunca o que ele imprimiu
+if [ "$tem_node" = 1 ]; then
+  cp "$tmp/$nucleo_rel/expx-fatiamento.mjs" "$aux/leitor.mjs"
+  printf 'process.stdout.write("FATIA_MAX_LINHAS_PR=1\\nEXPX_FATIAMENTO_ORIGEM=projeto\\n")\n' > "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+  (cd "$tmp" && bash "$leitor" > "$aux/out" 2> "$aux/err"); rc=$?
+  cp "$aux/leitor.mjs" "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+  [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && grep -q 'expx update' "$aux/err" \
+    && passa 'leitor que nao imprime todas as chaves: sai 3' \
+    || quebra "leitor incompleto: rc $rc, stdout '$(cat "$aux/out")'"
+else
+  passa 'leitor que nao imprime todas as chaves: sai 3 (sem node)'
+fi
+
+# commit sobre o HEAD com uma entrada trocada por plumbing, sem depender do sistema de
+# arquivos (link, gitlink): commit_com <modo> <objeto> <caminho> [<removido antes>]
+commit_com() {
+  local idx="$aux/indice"; rm -f "$idx"
+  GIT_INDEX_FILE="$idx" g read-tree HEAD
+  [ -z "${4:-}" ] || GIT_INDEX_FILE="$idx" g rm -r -q --cached -- "$4"
+  GIT_INDEX_FILE="$idx" g update-index --add --cacheinfo "$1,$2,$3"
+  g commit-tree "$(GIT_INDEX_FILE="$idx" g write-tree)" -p HEAD -m "$3"
+}
+blob() { printf '%s' "$1" | g hash-object -w --stdin; }
+# 14. --rev com .expx/fatiamento.json que nao e arquivo no commit: presente e invalido (sai 1)
+if [ "$tem_node" = 1 ]; then
+  pasta="$(commit_com 100644 "$(blob "$conselho")" .expx/fatiamento.json/x .expx/fatiamento.json)"
+  link="$(commit_com 120000 "$(blob ../valido.json)" .expx/fatiamento.json)"
+  for caso in "pasta $pasta" "link $link"; do
+    (cd "$tmp" && bash "$leitor" --rev "${caso#* }" > "$aux/out" 2>/dev/null); rc=$?
+    [ "$rc" = 1 ] && [ ! -s "$aux/out" ] && passa "--rev com ${caso%% *} no lugar do arquivo: presente e invalido (sai 1)" \
+      || quebra "--rev com ${caso%% *} no lugar do arquivo: rc $rc, stdout '$(cat "$aux/out")'"
+  done
+else
+  passa '--rev com pasta ou link no lugar do arquivo (sem node)'
+fi
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
