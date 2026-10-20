@@ -42,7 +42,7 @@ versionado: {{true | false}}
 branch: {{nome da branch | null}}
 branch_base: {{nome da base | null}}
 base_validada_sha: {{sha de 40 hex de git merge-base HEAD <branch_base>, gravado no E0 | null sem versionador}}
-origem_base: {{registrada_e0 | inferida_legado | null sem versionador}}
+origem_base: {{registrada_e0 | registrada_sprint | inferida_legado | null sem versionador}}
 reconciliacoes: []
 commits:
   - seq: {{ordem de registro do E1: 1, 2, 3...}}

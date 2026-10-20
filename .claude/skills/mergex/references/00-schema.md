@@ -72,7 +72,7 @@ Valem para todo arquivo que leva frontmatter:
 | `merge` (por item de `prs`) | `humano` \| `automatico` \| `null` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
 | `faixa` (por arquivo) | `alta` \| `media` \| `baixa` |
-| `origem_base` (no `entrega`) | `registrada_e0` \| `inferida_legado` \| `null` (sem versionador) |
+| `origem_base` (no `entrega`) | `registrada_e0` \| `registrada_sprint` \| `inferida_legado` \| `null` (sem versionador) |
 
 `expx_tool` fica como a skill de **origem** do trabalho (`sprintx` ou `runx`) — é ela que
 governa o trabalho. O campo `entregue_por: mergex` diz quem gravou este arquivo. Mudar o enum
@@ -161,7 +161,7 @@ entregue_em: 2026-08-29
 | `versionado` | `false` em repositório sem versionador |
 | `branch`, `branch_base` | `null` quando `versionado: false` |
 | `base_validada_sha` | SHA de 40 hex da base em que o trabalho foi validado; gravado no E0 (`git merge-base HEAD <branch_base>`); atualizado pelo `reconciliacao-base.sh --registrar` para o `b1_sha` registrado. Nunca nome de ref. `null` sem versionador |
-| `origem_base` | `registrada_e0` \| `inferida_legado` (gravado uma única vez, pela primeira reconciliação de uma entrega anterior a esta chave — DM-183) |
+| `origem_base` | `registrada_e0` \| `registrada_sprint` (a base reancorada pelo E0 na primeira retomada depois do PR de planejamento `merged`, sobre a main que contém o `merge_sha` — DM-261) \| `inferida_legado` (gravado uma única vez, pela primeira reconciliação de uma entrega anterior a esta chave — DM-183). Uma reconciliação aberta sobre uma base `registrada_sprint` grava no `RECONCILIACAO-BASE-001.md` `origem_base: registrada_e0`, como sobre qualquer base registrada |
 | `reconciliacoes` | Lista `{numero, arquivo, b1_sha, m_sha}`, na ordem da cadeia; `[]` sem reconciliação. Escrita só pelo `--registrar` |
 | `portao_sha` | SHA de 40 hex do `HEAD` que o E2 avaliou, gravado com `portao` só por `registrar-portao.sh`; `null` antes do E2 e depois de um `--registrar`. O `--resultado bloqueado` também grava `portao_sha` = `HEAD` avaliado, sem efeito na validade (`portao_nao_pronto` vem antes do SHA). O portão vale só para ele e para os commits de método `pre-e6`/`e8` de um pai que o seguem (DM-181) |
 | `commits` | Um item por task commitada, na ordem em que fecharam, cada um com a chave de ordem `seq`; `[]` sem versionador. Ver "A ordem de registro" |
@@ -213,8 +213,9 @@ prs:
 - Entrega anterior às chaves (sem `sprint_atual` nem `prs`) não é de planejamento.
 - **Ninguém relê estas chaves por conta própria.** O leitor único é
   `scripts/entrega-de-planejamento.sh --entrega <ENTREGA.md> [--rev <commit>]`, que imprime
-  `planejamento=sim|nao` (com `sim`, também `estado=` e `merge_sha=`) e sai 2 com a entrega
-  ilegível ou incoerente. E2, E7, E8 e E9 o consomem.
+  `planejamento=sim|nao` (com `sim`, também `estado=` e `merge_sha=`; com `nao` depois da
+  retomada, também `planejamento_merge_sha=`, DM-261) e sai 2 com a entrega ilegível ou
+  incoerente. E0, E2, E7, E8 e E9 o consomem.
 
 ## A ordem de registro — a chave `seq`
 

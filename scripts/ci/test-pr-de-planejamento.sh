@@ -105,8 +105,8 @@ confere 'planejamento merged: estado e merge_sha' $?
 
 entrega "$aux/retomada.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/^sprint_atual: planejamento/sprint_atual: null/; s/estado: null/estado: merged/; s/merge_sha: null/merge_sha: 0123456789abcdef0123456789abcdef01234567/; s/merge: null/merge: humano/')"
 le "$aux/retomada.md"
-[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = 'planejamento=nao' ]
-confere 'depois da retomada (sprint_atual null, planejamento merged): nao' $?
+[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=0123456789abcdef0123456789abcdef01234567')" ]
+confere 'depois da retomada (sprint_atual null, planejamento merged): nao, com o merge do planejamento' $?
 
 entrega "$aux/sem-chave.md" "$(printf '%s
 ' "$PLAN_ABERTO" | grep -v 'merge_sha')"
@@ -249,6 +249,129 @@ g -C "$aux/v9c" add -A; g -C "$aux/v9c" commit -q -m comum
 v9 "$aux/v9c" --planejamento
 [ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não é a de planejamento' "$aux/v9.out"
 confere 'V9 --planejamento numa entrega comum: v9_sem_prova (nao confia na opcao)' $?
+
+echo '== A primeira sprint depois do merge do planejamento (DM-261) =='
+
+# O bloco da retomada do E0 (pré-condições e a base nova), com a base `main`
+bloco "$ref/00-abertura.md" 'origem_base=registrada_sprint' \
+  | sed 's|<trabalho_id>|plan|g; s|<base>|main|g' \
+  | sed "s#bash \.claude/skills/mergex/scripts/entrega-de-planejamento\.sh#bash '$leitor'#" > "$aux/e0-retomada.sh"
+[ -s "$aux/e0-retomada.sh" ]; confere '00-abertura tem o bloco da retomada depois do planejamento' $?
+e0r() { (cd "$1" && bash "$aux/e0-retomada.sh") >"$aux/e0r.out" 2>"$aux/e0r.err"; rc=$?; }
+# reancora <dir> — aplica a saída do bloco como o E0 a grava (passo 5, caso 2) e commita
+reancora() {
+  local d="$1" e="$1/docs/entregas/plan/ENTREGA.md" nb
+  nb="$(sed -n 's/^base_validada_sha=//p' "$aux/e0r.out")"
+  sed "s/^sprint_atual: planejamento/sprint_atual: null/; s/^pr_url: .*/pr_url: null/; s/^pr_estado: .*/pr_estado: null/; s/^base_validada_sha: .*/base_validada_sha: $nb/; s/^origem_base: .*/origem_base: registrada_sprint/" "$e" > "$aux/e.tmp" \
+    && mv "$aux/e.tmp" "$e"
+  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): retomada da primeira sprint' -m 'Trabalho: plan'
+}
+# sprint1 <dir> — o código da task T-01.01 (src/b.ts, declarado no plano)
+sprint1() {
+  printf 'b\n' > "$1/src/b.ts"
+  g -C "$1" add -A; g -C "$1" commit -q -m 'feat: b' -m 'Trabalho: plan'
+}
+# repo_mergeado <dir> <merge|squash> — o planejamento mergeado na main (que andou
+# antes e depois), a branch atualizada a partir da main e o merge registrado (E9)
+repo_mergeado() {
+  local d="$1" m
+  repo_planejamento "$d"
+  g -C "$d" switch -q main
+  printf 'o\n' > "$d/src/o.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'outra coisa na main'
+  if [ "$2" = squash ]; then
+    g -C "$d" merge -q --squash feature/plan >/dev/null
+    g -C "$d" commit -q -m 'docs(sprintx): planejamento (#1)' -m 'Trabalho: plan'
+  else
+    g -C "$d" merge -q --no-ff --no-edit feature/plan
+  fi
+  m="$(git -C "$d" rev-parse HEAD)"
+  printf 'p\n' > "$d/src/p.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'main depois do planejamento'
+  g -C "$d" switch -q feature/plan
+  g -C "$d" merge -q --no-edit main
+  (cd "$d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m") >/dev/null 2>&1
+  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): merge do planejamento registrado' -m 'Trabalho: plan'
+}
+
+repo_mergeado "$aux/s1a" merge
+e0r "$aux/s1a"
+[ "$rc" = 0 ] && grep -qx 'origem_base=registrada_sprint' "$aux/e0r.out" \
+  && [ "$(sed -n 's/^base_validada_sha=//p' "$aux/e0r.out")" = "$(git -C "$aux/s1a" rev-parse main)" ]
+confere 'E0 da primeira sprint com o planejamento merged: a base nova e a da main atualizada' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/e0r.out" "$aux/e0r.err"
+reancora "$aux/s1a"; sprint1 "$aux/s1a"
+v9 "$aux/s1a"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out" && grep -qx 'origem_base=registrada_sprint' "$aux/v9.out" \
+  && grep -qx "base=$(git -C "$aux/s1a" rev-parse main)" "$aux/v9.out"
+confere 'V9 da primeira sprint depois do merge do planejamento: passa com a base nova' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+(cd "$aux/s1a" && bash "$leitor" --entrega docs/entregas/plan/ENTREGA.md) > "$aux/out" 2>&1
+[ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=%s' "$(git -C "$aux/s1a" rev-parse 'main~1')")" ]
+confere 'depois da reancoragem, o leitor diz nao com o merge do planejamento' $?
+# mais uma task depois: a V9 continua passando (a reancoragem é uma só)
+printf 'c\n' >> "$aux/s1a/src/b.ts"; g -C "$aux/s1a" add -A; g -C "$aux/s1a" commit -q -m 'feat: b2' -m 'Trabalho: plan'
+v9 "$aux/s1a"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+confere 'V9 da primeira sprint com mais commits: continua passando' $?
+# produto fora do plano na sprint continua v9
+printf 'z\n' > "$aux/s1a/src/z.ts"; g -C "$aux/s1a" add -A; g -C "$aux/s1a" commit -q -m 'feat: z' -m 'Trabalho: plan'
+v9 "$aux/s1a"
+[ "$rc" = 1 ] && grep -qx "$(printf 'fora_do_plano\tsrc/z.ts')" "$aux/v9.out" && ! grep -q 'src/[op]\.ts' "$aux/v9.out"
+confere 'V9 da primeira sprint: so o que a sprint mudou conta (src/z.ts fora; o que veio da main nao)' $?
+
+repo_mergeado "$aux/s1b" squash
+e0r "$aux/s1b"; reancora "$aux/s1b"; sprint1 "$aux/s1b"
+v9 "$aux/s1b"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out" && grep -qx 'origem_base=registrada_sprint' "$aux/v9.out"
+confere 'V9 da primeira sprint depois do planejamento mergeado por squash: passa' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
+# sem o merge registrado (o E9 não rodou): o E0 recusa e manda rodar o E9
+repo_planejamento "$aux/s1c"
+g -C "$aux/s1c" switch -q main; g -C "$aux/s1c" merge -q --no-ff --no-edit feature/plan
+g -C "$aux/s1c" switch -q feature/plan; g -C "$aux/s1c" merge -q --no-edit main
+e0r "$aux/s1c"
+[ "$rc" = 1 ] && grep -q 'E9' "$aux/e0r.err" && [ ! -s "$aux/e0r.out" ]
+confere 'E0 da primeira sprint sem o merge do planejamento registrado: recusa e manda rodar o E9' $?
+# a V9 nao aceita registrada_sprint sem o merge registrado na entrega de HEAD
+sed "s/^base_validada_sha: .*/base_validada_sha: $(git -C "$aux/s1c" rev-parse main)/; s/^origem_base: .*/origem_base: registrada_sprint/" \
+  "$aux/s1c/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" && mv "$aux/e.tmp" "$aux/s1c/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1c" add -A; g -C "$aux/s1c" commit -q -m forja; sprint1 "$aux/s1c"
+v9 "$aux/s1c"
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'registrada_sprint sem o merge do planejamento' "$aux/v9.out"
+confere 'V9 com registrada_sprint sem o merge do planejamento registrado: v9_sem_prova' $?
+
+# a branch sem a main: o E0 recusa
+repo_planejamento "$aux/s1d"
+g -C "$aux/s1d" switch -q main; g -C "$aux/s1d" merge -q --no-ff --no-edit feature/plan
+m_d="$(git -C "$aux/s1d" rev-parse HEAD)"
+g -C "$aux/s1d" switch -q feature/plan
+(cd "$aux/s1d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_d") >/dev/null 2>&1
+e0r "$aux/s1d"
+[ "$rc" = 1 ] && grep -q 'atualizada' "$aux/e0r.err" && [ ! -s "$aux/e0r.out" ]
+confere 'E0 da primeira sprint com a branch sem a main: recusa' $?
+
+# o trabalho levou produto antes do merge do planejamento: a base nova nao o esconde
+repo_planejamento "$aux/s1e"
+printf 'x\n' > "$aux/s1e/src/x.ts"; g -C "$aux/s1e" add -A; g -C "$aux/s1e" commit -q -m 'feat: x' -m 'Trabalho: plan'
+g -C "$aux/s1e" switch -q main; g -C "$aux/s1e" merge -q --no-ff --no-edit feature/plan
+m_e="$(git -C "$aux/s1e" rev-parse HEAD)"
+g -C "$aux/s1e" switch -q feature/plan; g -C "$aux/s1e" merge -q --no-edit main
+(cd "$aux/s1e" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_e") >/dev/null 2>&1
+g -C "$aux/s1e" add -A; g -C "$aux/s1e" commit -q -m registro
+e0r "$aux/s1e"; reancora "$aux/s1e"; sprint1 "$aux/s1e"
+v9 "$aux/s1e"
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'src/x.ts' "$aux/v9.out"
+confere 'V9 da primeira sprint com produto do trabalho antes do merge do planejamento: v9_sem_prova' $?
+
+# o merge_sha registrado fora da base nova: v9_sem_prova
+repo_mergeado "$aux/s1f" merge
+e0r "$aux/s1f"; reancora "$aux/s1f"
+sed "s/^base_validada_sha: .*/base_validada_sha: $(git -C "$aux/s1f" rev-parse 'main~2')/" \
+  "$aux/s1f/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" && mv "$aux/e.tmp" "$aux/s1f/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1f" add -A; g -C "$aux/s1f" commit -q --amend --no-edit; sprint1 "$aux/s1f"
+v9 "$aux/s1f"
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não contém o merge do planejamento' "$aux/v9.out"
+confere 'V9 com registrada_sprint e a base sem o merge do planejamento: v9_sem_prova' $?
 
 echo '== E8 e E9: o registro do PR de planejamento =='
 

@@ -22,13 +22,16 @@
 #
 # Saída (stdout):
 #   planejamento=nao
+#   [planejamento_merge_sha=<prs[0].merge_sha>]   (só depois da retomada)
 # ou
 #   planejamento=sim
 #   estado=<prs[0].estado>      (nulo sai como o texto `null`)
 #   merge_sha=<prs[0].merge_sha>
 #
 # Entrega sem `sprint_atual` nem `prs` (anterior às chaves) é `nao`. Depois da
-# retomada do E0 (`sprint_atual: null` com o planejamento `merged`) também.
+# retomada do E0 (`sprint_atual: null` com o planejamento `merged`) também, com
+# a segunda linha: o merge do planejamento que a base reancorada contém (a V9
+# tira dele o limite das guardas da base, DM-261).
 #
 # Códigos: 0 leu; 2 ilegível ou incoerente (motivo em stderr); 64 uso.
 #
@@ -214,6 +217,8 @@ fi
 if [ "$REGISTRAR" = 0 ]; then
   if [ "$PLANEJAMENTO" = sim ]; then
     printf 'planejamento=sim\nestado=%s\nmerge_sha=%s\n' "$p_estado" "$p_sha"
+  elif [ "$p_sprint" = planejamento ]; then
+    printf 'planejamento=nao\nplanejamento_merge_sha=%s\n' "$p_sha"
   else
     printf 'planejamento=nao\n'
   fi
