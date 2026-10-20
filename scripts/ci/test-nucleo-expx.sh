@@ -18,6 +18,8 @@ script="$raiz/.claude/skills/mergex/scripts/fatiamento-da-pr.sh"
 ok=0; falhou=0
 passa()  { ok=$((ok+1)); printf '  ok    %s\n' "$1"; }
 quebra() { falhou=$((falhou+1)); printf '  FALHA %s\n' "$1"; }
+# nenhuma FATIA_* herdada do shell de quem roda os testes muda o que se mede aqui
+for v in $(compgen -e); do case "$v" in FATIA_*) unset "$v" ;; esac; done
 # sem CR: num checkout com core.autocrlf=true a copia chega com CRLF; o ORIGEM e do commitado (LF)
 sha() { tr -d '\r' < "$1" | if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
 
