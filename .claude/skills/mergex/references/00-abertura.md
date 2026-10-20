@@ -88,7 +88,8 @@ Na mesma gravação, o E0 **reancora a base validada** (DM-261): `base_validada_
 que veio da main, e uma base nova sem a marca contém o commit do planejamento (a pasta do trabalho
 e o `Trabalho: <id>`), que a V9 recusa. Com `registrada_sprint`, a V9 lê o `merge_sha` da entrega
 e só desconta das guardas da base o que ele contém (`02-prontidao.md`, V9). Vale em `por_sprint`
-e em `por_trabalho`.
+e em `por_trabalho`. Entrega com `reconciliacoes` não vazio (a main entrou na branch do
+planejamento por reconciliação) não é reancorada: a base dela vem da cadeia, e o E0 recusa.
 
 As três pré-condições e a base nova, em toda retomada sem `--planejamento` (`<base>` é a base
 buscada, por exemplo `origin/main`). Saída 0 com as duas linhas: grave-as. Saída 0 sem nada: não
@@ -105,6 +106,12 @@ if [ "$estado" != merged ]; then
   printf 'mergex E0 BLOQUEADO — o merge do PR de planejamento não está registrado: rode o E9, que o lê no serviço e o registra\n' >&2
   exit 1
 fi
+# com reconciliação registrada, a base vem da cadeia: reancorar a deixaria sem âncora
+rec="$(awk 'NR == 1 { next } /^---/ { exit } /^reconciliacoes:/ { sub(/^reconciliacoes:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print "v=" $0; exit }' "docs/entregas/<trabalho_id>/ENTREGA.md")"
+case "$rec" in ''|'v=[]') ;; *)
+  printf 'mergex E0 BLOQUEADO — a entrega já tem reconciliacoes: a base da primeira sprint não é reancorada sobre uma cadeia de reconciliação\n' >&2
+  exit 1 ;;
+esac
 base_sha="$(git rev-parse --verify -q "<base>^{commit}")" || { printf 'mergex E0: base <base> inexistente\n' >&2; exit 2; }
 git merge-base --is-ancestor "$merge_sha" "$base_sha" 2>/dev/null || {
   printf 'mergex E0 BLOQUEADO — a base <base> não contém o merge do planejamento (%s): busque a base de novo\n' "$merge_sha" >&2

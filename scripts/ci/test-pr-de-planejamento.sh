@@ -385,6 +385,65 @@ v9 "$aux/s1f"
 [ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não contém o merge do planejamento' "$aux/v9.out"
 confere 'V9 com registrada_sprint e a base sem o merge do planejamento: v9_sem_prova' $?
 
+# com reconciliação já registrada, a reancoragem deixaria a cadeia sem âncora: o E0 recusa
+repo_mergeado "$aux/s1g" merge
+sed 's/^reconciliacoes: \[\]$/reconciliacoes:\
+  - arquivo: RECONCILIACAO-BASE-001.md/' "$aux/s1g/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/s1g/docs/entregas/plan/ENTREGA.md"
+e0r "$aux/s1g"
+[ "$rc" = 1 ] && grep -q 'reconcilia' "$aux/e0r.err" && [ ! -s "$aux/e0r.out" ]
+confere 'E0 da primeira sprint com reconciliacao ja registrada: recusa sem reancorar' $?
+
+# rebase-merge: P é o último commit reaplicado na main (não é merge) e a V9 passa
+repo_planejamento "$aux/s1h"
+g -C "$aux/s1h" switch -q main
+printf 'o\n' > "$aux/s1h/src/o.ts"; g -C "$aux/s1h" add -A; g -C "$aux/s1h" commit -q -m 'outra coisa na main'
+g -C "$aux/s1h" cherry-pick feature/plan >/dev/null
+m_h="$(git -C "$aux/s1h" rev-parse HEAD)"
+g -C "$aux/s1h" switch -q feature/plan; g -C "$aux/s1h" merge -q --no-edit main
+(cd "$aux/s1h" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_h") >/dev/null 2>&1
+g -C "$aux/s1h" add -A; g -C "$aux/s1h" commit -q -m registro
+e0r "$aux/s1h"; reancora "$aux/s1h"; sprint1 "$aux/s1h"
+v9 "$aux/s1h"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+confere 'V9 da primeira sprint depois do planejamento por rebase-merge: passa' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
+# o merge do planejamento traz produto sem a marca do trabalho: a diferença P^1..P o pega
+repo_planejamento "$aux/s1i"
+printf 'u\n' > "$aux/s1i/src/u.ts"; g -C "$aux/s1i" add -A; g -C "$aux/s1i" commit -q -m 'sem marca'
+g -C "$aux/s1i" switch -q main; g -C "$aux/s1i" merge -q --no-ff --no-edit feature/plan
+m_i="$(git -C "$aux/s1i" rev-parse HEAD)"
+g -C "$aux/s1i" switch -q feature/plan; g -C "$aux/s1i" merge -q --no-edit main
+(cd "$aux/s1i" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_i") >/dev/null 2>&1
+g -C "$aux/s1i" add -A; g -C "$aux/s1i" commit -q -m registro
+e0r "$aux/s1i"; reancora "$aux/s1i"; sprint1 "$aux/s1i"
+v9 "$aux/s1i"
+[ "$rc" = 3 ] && grep -q 'o merge do planejamento .* traz src/u.ts' "$aux/v9.out"
+confere 'V9 com produto sem marca dentro do merge do planejamento: v9_sem_prova' $?
+
+# âncora: uma versão volta à base anterior depois da reancoragem (rebaixamento)
+repo_mergeado "$aux/s1j" merge
+cp "$aux/s1j/docs/entregas/plan/ENTREGA.md" "$aux/s1j-antes.md"
+e0r "$aux/s1j"; reancora "$aux/s1j"
+cp "$aux/s1j/docs/entregas/plan/ENTREGA.md" "$aux/s1j-depois.md"
+cp "$aux/s1j-antes.md" "$aux/s1j/docs/entregas/plan/ENTREGA.md"; g -C "$aux/s1j" add -A; g -C "$aux/s1j" commit -q -m volta
+cp "$aux/s1j-depois.md" "$aux/s1j/docs/entregas/plan/ENTREGA.md"; g -C "$aux/s1j" add -A; g -C "$aux/s1j" commit -q -m de-novo
+sprint1 "$aux/s1j"
+v9 "$aux/s1j"
+[ "$rc" = 3 ] && grep -q 'rebaixamento' "$aux/v9.out"
+confere 'V9: versao registrada_e0 depois da reancoragem (rebaixamento): v9_sem_prova' $?
+
+# âncora: duas versões registrada_sprint com bases diferentes
+repo_mergeado "$aux/s1k" merge
+e0r "$aux/s1k"; reancora "$aux/s1k"
+sed "s/^base_validada_sha: .*/base_validada_sha: $(git -C "$aux/s1k" rev-parse 'main~1')/" \
+  "$aux/s1k/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" && mv "$aux/e.tmp" "$aux/s1k/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1k" add -A; g -C "$aux/s1k" commit -q -m outra-base; sprint1 "$aux/s1k"
+v9 "$aux/s1k"
+[ "$rc" = 3 ] && grep -q 'registrada_sprint com outra base' "$aux/v9.out"
+confere 'V9: duas versoes registrada_sprint com bases diferentes: v9_sem_prova' $?
+
 echo '== E8 e E9: o registro do PR de planejamento =='
 
 SHA_M=0123456789abcdef0123456789abcdef01234567

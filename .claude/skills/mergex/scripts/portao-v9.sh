@@ -71,7 +71,11 @@
 #      renomeação, e no caminho nunca houve outra versão;
 #    - merge do planejamento forjado: um merge_sha gravado na entrega que
 #      aponta para um commit sem marca do trabalho e com produto; as guardas
-#      não o distinguem de um merge da main;
+#      não o distinguem de um merge da main. Também: num rebase-merge ou ff,
+#      um commit de produto sem a marca e fora da pasta, anterior ao último
+#      (P), fica em `^P` sem ser conferido, como merges marcados que não são
+#      o próprio P; e a base reancorada pode ser qualquer descendente de P
+#      (o E0 a lê da ref buscada);
 #    - B1 lateral: com reconciliação, a cadeia nunca reconfere b1_sha contra a
 #      base real; um B1 forjado (descende de B0, traz produto, a ref movida no
 #      registro) desloca a base.
