@@ -444,6 +444,16 @@ v9 "$aux/s1k"
 [ "$rc" = 3 ] && grep -q 'registrada_sprint com outra base' "$aux/v9.out"
 confere 'V9: duas versoes registrada_sprint com bases diferentes: v9_sem_prova' $?
 
+# âncora: uma versão anterior com origem_base fora do enum não conta como anterior à reancoragem
+repo_mergeado "$aux/s1l" merge
+sed 's/^origem_base: .*/origem_base: lixo/' "$aux/s1l/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/s1l/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1l" add -A; g -C "$aux/s1l" commit -q -m lixo
+e0r "$aux/s1l"; reancora "$aux/s1l"; sprint1 "$aux/s1l"
+v9 "$aux/s1l"
+[ "$rc" = 3 ] && grep -q 'origem_base lixo' "$aux/v9.out"
+confere 'V9: versao anterior com origem_base fora do enum: v9_sem_prova' $?
+
 echo '== E8 e E9: o registro do PR de planejamento =='
 
 SHA_M=0123456789abcdef0123456789abcdef01234567

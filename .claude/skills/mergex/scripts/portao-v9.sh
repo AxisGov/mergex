@@ -372,6 +372,10 @@ if [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint
   awk -F'\t' -v b="$BASE" '$3 == "registrada_sprint" && $2 != b { print $1; exit }' "$TMP_DIR/versoes-info" > "$TMP_DIR/sprint-outra"
   [ ! -s "$TMP_DIR/sprint-outra" ] \
     || sem_prova "a versão de $ENTREGA em $(cat "$TMP_DIR/sprint-outra") é registrada_sprint com outra base que a de HEAD ($BASE)" # guarda:V9PLAN
+  # anterior é só registrada_e0 (ou sem a chave, como o E0 a lê): outra origem não vale
+  awk -F'\t' '$3 != "registrada_sprint" && $3 != "registrada_e0" && $3 != "" { print $1 "\t" $3; exit }' "$TMP_DIR/versoes-info" > "$TMP_DIR/origem-outra"
+  [ ! -s "$TMP_DIR/origem-outra" ] \
+    || sem_prova "a versão de $ENTREGA em $(cut -f1 "$TMP_DIR/origem-outra") tem origem_base $(cut -f2 "$TMP_DIR/origem-outra"), fora de registrada_e0|registrada_sprint" # guarda:V9PLAN
   awk -F'\t' '$3 != "registrada_sprint" { print $2 }' "$TMP_DIR/versoes-info" | LC_ALL=C sort -u > "$TMP_DIR/distintos"
   n="$(grep -c . "$TMP_DIR/distintos")"
   [ "$n" = 1 ] || sem_prova "as versões de $ENTREGA anteriores à reancoragem têm $n bases ($(tr '\n' ' ' < "$TMP_DIR/distintos")): a base anterior não é uma só" # guarda:V9PLAN
