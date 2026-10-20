@@ -31,6 +31,7 @@ confere_origem() {
   printf '%s\n' "$origem" | head -1 | grep -Eq '^expxdev [0-9a-f]{7,40}$' || erros="$erros cabecalho"
   while read -r h f; do
     n=$((n + 1))
+    printf '%s\n' "$origem" | tail -n +2 | cut -c67- | grep -cxF -- "$f" | grep -qx 1 || erros="$erros repetida:$f"
     printf '%s\n' "$h" | grep -Eq '^[0-9a-f]{64}$' && [ -f "$d/$f" ] && [ "$(sha "$d/$f")" = "$h" ] \
       || erros="$erros $f"
   done < <(printf '%s\n' "$origem" | tail -n +2)
@@ -53,15 +54,17 @@ done
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
 # 1b. ORIGEM lista todo arquivo da copia, e so eles: arquivo sem linha, ou linha sem arquivo, reprova
-mkdir -p "$tmp/sobra" "$tmp/falta"
-cp -R "$copia"/. "$tmp/sobra/"; cp -R "$copia"/. "$tmp/falta/"
+mkdir -p "$tmp/sobra" "$tmp/falta" "$tmp/repete"
+cp -R "$copia"/. "$tmp/sobra/"; cp -R "$copia"/. "$tmp/falta/"; cp -R "$copia"/. "$tmp/repete/"
+tr -d '\r' < "$copia/ORIGEM" | tail -1 >> "$tmp/repete/ORIGEM"
 mkdir -p "$tmp/sobra/perfis"; printf '{}\n' > "$tmp/sobra/perfis/a-mais.json"
 rm -f "$tmp/falta/expx-revisao.mjs"
-s="$(confere_origem "$tmp/sobra")"; fa="$(confere_origem "$tmp/falta")"
+s="$(confere_origem "$tmp/sobra")"; fa="$(confere_origem "$tmp/falta")"; r="$(confere_origem "$tmp/repete")"
 case "$s" in *'sem-linha:perfis/a-mais.json'*) true ;; *) false ;; esac \
   && case "$fa" in *' expx-revisao.mjs'*) true ;; *) false ;; esac \
-  && passa 'ORIGEM lista todo arquivo da copia, e so eles' \
-  || quebra "ORIGEM com arquivo a mais ou a menos passou: sobra[$s] falta[$fa]"
+  && case "$r" in *'repetida:'*) true ;; *) false ;; esac \
+  && passa 'ORIGEM lista todo arquivo da copia, uma vez, e so eles' \
+  || quebra "ORIGEM com arquivo a mais, a menos ou repetido passou: sobra[$s] falta[$fa] repete[$r]"
 
 # 2. a copia, num commit so dela, fica fora do F2 do proprio repositorio (padrao do script)
 g() { git -C "$tmp/f2" -c core.autocrlf=false -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
@@ -133,6 +136,14 @@ atualizar sem-nucleo; rc=$?
 [ "$rc" = 1 ] && [ "$(inventario "$dest")" = "$antes" ] && [ -z "$(vizinhos)" ] \
   && passa 'atualizar sem nucleo/scripts na revisao sai 1 e nao toca a copia' \
   || quebra "atualizar sem nucleo/scripts saiu $rc ou mexeu na copia"
+
+# 6b. outra atualizacao em curso (a trava ao lado do destino): sai 1, nao toca a copia nem a trava
+mkdir "$dest.trava"
+atualizar nucleo; rc=$?
+[ "$rc" = 1 ] && [ "$(inventario "$dest")" = "$antes" ] && [ -d "$dest.trava" ] \
+  && passa 'atualizar com outra atualizacao em curso sai 1 e nao toca a copia' \
+  || quebra "atualizar com a trava de outra atualizacao saiu $rc ou mexeu na copia"
+rmdir "$dest.trava"
 
 # 7. o atualizar nao diz que copiou quando nao conseguiu gravar a copia (destino e um arquivo)
 rm -rf "$dest"; printf 'nao e pasta\n' > "$dest"

@@ -12,6 +12,7 @@
 # commitado no expxdev, e o que saiu do nucleo sai da copia. A troca nunca deixa o
 # destino vazio: grava em <destino>.novo, poe a copia atual em <destino>.velho, poe
 # a nova no lugar e so entao apaga a velha; se a nova nao entra, a velha volta.
+# Uma atualizacao por vez: a trava <destino>.trava (mkdir) recusa a segunda, com saida 1.
 # A copia e artefato gerado: commit proprio, com este comando no corpo.
 # Saida: 0 copiou; 64 uso; 1 revisao ausente, revisao sem nucleo/scripts ou copia nao gravada.
 
@@ -23,7 +24,7 @@ if [ "$#" -ne 2 ]; then
 fi
 expx="$1"; rev="$2"
 destino="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixtures/candidatos/expx-nucleo"
-novo="$destino.novo"; velho="$destino.velho"
+novo="$destino.novo"; velho="$destino.velho"; trava="$destino.trava"
 
 sha_rev="$(git -C "$expx" rev-parse --verify --quiet "$rev^{commit}")" \
   || { echo "revisao inexistente em $expx: $rev" >&2; exit 1; }
@@ -32,13 +33,17 @@ sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasu
 if [ -e "$destino" ] && [ ! -d "$destino" ]; then
   echo "o destino existe e nao e pasta: $destino" >&2; exit 1
 fi
+mkdir -p "$(dirname "$destino")" || { echo "nao foi possivel criar $(dirname "$destino")" >&2; exit 1; }
+mkdir "$trava" 2>/dev/null \
+  || { echo "outra atualizacao em curso ($trava); se nenhuma roda, apague a pasta" >&2; exit 1; }
+tmp=''; trap 'rm -rf "${tmp:-}" "$novo"; rmdir "$trava"' EXIT
 if [ -e "$velho" ]; then
   # resto de uma troca interrompida: com o destino no lugar, a velha sobrou; sem ele, e a unica copia
   [ -d "$destino" ] || { echo "copia anterior so em $velho: confira e devolva-a a $destino" >&2; exit 1; }
   rm -rf "$velho" || { echo "nao foi possivel apagar $velho" >&2; exit 1; }
 fi
 
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp" "$novo"' EXIT
+tmp="$(mktemp -d)" || { echo "nao foi possivel criar a pasta temporaria" >&2; exit 1; }
 # sem conversao de fim de linha: a copia e o blob commitado (LF), em qualquer clone
 git -C "$expx" -c core.autocrlf=false archive --format=tar "$sha_rev" nucleo/scripts > "$tmp/nucleo.tar" 2>/dev/null \
   && mkdir -p "$tmp/x" && tar -xf "$tmp/nucleo.tar" -C "$tmp/x" 2>/dev/null \
@@ -50,8 +55,7 @@ if printf '%s\n' "$arquivos" | grep -qxF ORIGEM; then
   echo "nucleo/scripts de $sha_rev tem um arquivo ORIGEM, que a copia reserva" >&2; exit 1
 fi
 
-rm -rf "$novo" && mkdir -p "$(dirname "$destino")" \
-  && cp -R "$tmp/x/nucleo/scripts" "$novo" \
+rm -rf "$novo" && cp -R "$tmp/x/nucleo/scripts" "$novo" \
   || { echo "nao foi possivel gravar $novo" >&2; exit 1; }
 {
   printf 'expxdev %s\n' "$sha_rev"
