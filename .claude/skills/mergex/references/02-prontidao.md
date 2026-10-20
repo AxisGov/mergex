@@ -282,6 +282,8 @@ bash .claude/skills/mergex/scripts/portao-v12.sh --verificar \
   -- docs/sprintx/features/<slug>/sprint-*/tasks.md
 ```
 
+Os `tasks.md` são os do trabalho, os mesmos da V11, da pasta que o E0 encontrou: na sprintx, `docs/sprintx/features/<slug>/sprint-*/tasks.md` (canônico) ou `docs/<slug>/sprint-*/tasks.md` (formato antigo); na runx, `docs/manutencao/<OC-ID>-<slug>/sprint-*/tasks.md`. Um caminho que não existe não é ignorado: o script sai `V12=SEM_PROVA` (`plano-ilegivel`).
+
 O script não decide a regra: ele pergunta ao `conferir` do núcleo do expx instalado (`expx-revisao.mjs conferir --trabalho <trabalho_id> --modo <modo> --task <T>=<commit>…`), com o commit do **último** item de cada task `concluida` em `ENTREGA.commits`, e traduz a resposta (DM-238). A primeira linha é sempre `V12=OK|AVISO|FALHA|SEM_PROVA|n/a`; depois vêm as linhas do `conferir` como vieram (`T-NN.MM ok`, `T-NN.MM AVISO <motivo>`, `T-NN.MM FALHA <motivo>`) ou `motivo=`. Códigos: 0 (OK, AVISO, `n/a`), 1 (FALHA), 2 (SEM_PROVA), 64 (uso).
 
 O modo vem de `.expx/fatiamento.json` (`revisao_por_task`), lido pelo `leitor-do-projeto.sh --rev HEAD`.
