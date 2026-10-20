@@ -19,12 +19,25 @@ ok=0; falhou=0
 passa()  { ok=$((ok+1)); printf '  ok    %s\n' "$1"; }
 quebra() { falhou=$((falhou+1)); printf '  FALHA %s\n' "$1"; }
 
+# monta_nucleo <destino>: a copia inteira do nucleo (menos o ORIGEM), com as subpastas, sem CR
+# (num checkout com core.autocrlf=true a copia chega com CRLF)
+monta_nucleo() {
+  local f
+  while IFS= read -r f; do
+    mkdir -p "$1/$(dirname "$f")" && tr -d '\r' < "$copia/$f" > "$1/$f"
+  done < <(cd "$copia" && find . -type f ! -path ./ORIGEM | sed 's|^\./||')
+}
 tmp="$(mktemp -d)"; aux="$(mktemp -d)"; trap 'rm -rf "$tmp" "$aux"' EXIT
 g() { git -C "$tmp" -c core.autocrlf=false -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
 g init -q -b main
-mkdir -p "$tmp/$nucleo_rel"
-tr -d '\r' < "$copia/expx-fatiamento.mjs" > "$tmp/$nucleo_rel/expx-fatiamento.mjs"
+monta_nucleo "$tmp/$nucleo_rel"
 printf 'base\n' > "$tmp/base.txt"; g add -A; g commit -q -m base
+
+# 0. a montagem traz a copia inteira do nucleo (menos o ORIGEM), com as subpastas
+lista() { (cd "$1" && find . -type f ! -path ./ORIGEM | LC_ALL=C sort); }
+[ "$(lista "$copia")" = "$(lista "$tmp/$nucleo_rel")" ] \
+  && passa 'a montagem traz a copia inteira do nucleo' \
+  || quebra "a montagem nao traz a copia inteira: $(lista "$tmp/$nucleo_rel" | tr '\n' ' ')"
 
 # PATH sem node: um diretorio so com os comandos que o helper usa, cada um um
 # embrulho para o binario real (link simbolico nao e confiavel no Git Bash)
