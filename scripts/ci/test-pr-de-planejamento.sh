@@ -254,6 +254,16 @@ cp "$aux/antiga.md" "$aux/antiga-antes.md"
 bash "$leitor" --registrar-merge --entrega "$aux/antiga.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
 [ "$rc" = 1 ] && cmp -s "$aux/antiga.md" "$aux/antiga-antes.md"
 confere '--registrar-merge numa entrega comum: recusa sem escrever' $?
+# CRLF: o fim de linha de cada linha fica como estava (no Git Bash, o awk do MSYS
+# tira o CR na leitura sem BINMODE); o resto do arquivo fica byte a byte
+entrega "$aux/crlf.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
+sed 's/$/\r/' "$aux/crlf.md" > "$aux/crlf.tmp" && mv "$aux/crlf.tmp" "$aux/crlf.md"
+crs_antes="$(tr -cd '\r' < "$aux/crlf.md" | wc -c | tr -d ' ')"
+bash "$leitor" --registrar-merge --entrega "$aux/crlf.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+crs_depois="$(tr -cd '\r' < "$aux/crlf.md" | wc -c | tr -d ' ')"
+[ "$rc" = 0 ] && [ "$crs_antes" -gt 0 ] && [ "$crs_depois" = "$crs_antes" ] \
+  && [ "$(grep -c 'merged' "$aux/crlf.md")" = 2 ] && ! ls "$aux"/crlf.md.tmp.* >/dev/null 2>&1
+confere "--registrar-merge num arquivo CRLF mantem os CR ($crs_antes antes, $crs_depois depois) e nao deixa temporario" $?
 entrega "$aux/reg2.md" "$PLAN_ABERTO"
 bash "$leitor" --registrar-merge --entrega "$aux/reg2.md" --merge-sha 'nao-e-sha' >/dev/null 2>&1
 [ "$?" = 64 ]; confere '--registrar-merge com sha invalido: uso (64)' $?

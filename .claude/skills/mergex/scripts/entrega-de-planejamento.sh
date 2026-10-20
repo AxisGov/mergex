@@ -228,9 +228,12 @@ if [ "$p_estado" = merged ]; then
 fi
 hoje="$(date +%Y-%m-%d)" || ilegivel 'data do sistema indisponível'
 tmp="$ENTREGA.tmp.$$"
+trap 'rm -f "$tmp"' EXIT
+trap 'exit 2' HUP INT TERM
 # Só três linhas do primeiro item de `prs` e duas chaves de topo, no frontmatter;
-# o fim de linha de cada linha (CRLF ou LF) fica como estava.
-awk -v sha="$MERGE_SHA" -v hoje="$hoje" '
+# o fim de linha de cada linha (CRLF ou LF) fica como estava. BINMODE=3: o gawk
+# do Git para Windows (MSYS) tira o CR na leitura sem ele; os outros awk o ignoram.
+awk -v BINMODE=3 -v sha="$MERGE_SHA" -v hoje="$hoje" '
   function troca(l, chave, valor,   cr, ind) {
     cr = ""; if (l ~ /\r$/) { cr = "\r"; sub(/\r$/, "", l) }
     ind = l; sub(/[^ \t].*$/, "", ind)
