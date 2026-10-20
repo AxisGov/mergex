@@ -42,18 +42,31 @@ if [ -n "$l15" ] && [ -n "$l2" ] && [ "$l15" -lt "$l2" ]; then
 else
   quebra 'o Passo 1.5 nao existe ou nao vem antes da abertura'
 fi
-# o FATIA_IGNORAR que o E7 monta, avaliando o trecho real: sem padrao do projeto, e com um
-# (que soma ao do E7, nunca o substitui — os artefatos de metodo saem da medida sempre)
-ign_trecho="$(sed -n '/^e7_ignorar=/p; /^FATIA_IGNORAR=/{s/ \\$//;p;}' "$e7")"
-ign_e7="$(unset FATIA_IGNORAR; eval "$ign_trecho"; printf '%s' "${FATIA_IGNORAR:-}")"
-ign_proj="$(FATIA_IGNORAR='^extra/'; eval "$ign_trecho"; printf '%s' "$FATIA_IGNORAR")"
-case "$ign_proj" in
-  '^extra/|'*'docs/(sprintx|entregas|eventos)/'*) passa 'o FATIA_IGNORAR do projeto soma ao do E7, sem tirar os artefatos de metodo' ;;
-  *) quebra "o FATIA_IGNORAR do projeto substitui o do E7: '$ign_proj'" ;;
-esac
-[ -n "$ign_e7" ] && passa 'o E7 declara o FATIA_IGNORAR do projeto' \
-  || quebra 'o E7 herda o FATIA_IGNORAR do ExpxDev (fixtures/candidatos fora da conta)'
-grep -Fq 'fatiamento-da-pr.sh "$base" "$publicado"' "$e7" \
+# o bloco do passo 1.5 nao exporta nem passa FATIA_: nenhum limite nem exclusao vem do
+# ambiente (limites do CodeAnt, fixos). O texto pode citar FATIA_* ao explicar a saida 2
+bloco15="$(awk '/^```/ { if (dentro) { if (achou) { printf "%s", buf; exit } dentro = 0; next }
+                         dentro = 1; buf = ""; achou = 0; next }
+                dentro { buf = buf $0 "\n"; if (index($0, "fatiamento-da-pr.sh")) achou = 1 }' "$e7")"
+[ -n "$bloco15" ] && ! printf '%s\n' "$bloco15" | grep -q 'FATIA_' \
+  && passa 'o bloco do passo 1.5 nao exporta nem passa FATIA_' \
+  || quebra "o bloco do passo 1.5 ainda tem FATIA_: $(printf '%s\n' "$bloco15" | grep 'FATIA_')"
+# a exclusao do projeto (EXPX_EXCLUIR_DA_REVISAO, pastas separadas por |) vira um par
+# --excluir-da-revisao <pasta> por parte, inteira mesmo com espaco, sem glob; vazio nao gera
+# argumento, e parametro posicional herdado nao chega ao script. O trecho real, rodado
+args_trecho="$(printf '%s\n' "$bloco15" | sed -n '/^set --; set -f/,/^IFS="\$ifs_antes"; set +f$/p')"
+args_dir="$(mktemp -d)" && mkdir -p "$args_dir/^gl-1" # uma pasta que o glob ^gl-*/ casaria
+args_de() { # <EXPX_EXCLUIR_DA_REVISAO> — imprime os argumentos montados, um [arg] por linha
+  local excluir="$1"
+  (cd "$args_dir" && set -- herdado1 herdado2 && EXPX_EXCLUIR_DA_REVISAO="$excluir" \
+    && eval "$args_trecho" && { [ "$#" = 0 ] || printf '[%s]' "$@"; })
+}
+dois="$(args_de '^a/|^dados de teste/')"; vazio="$(args_de '')"; glob="$(args_de '^gl-*/')"
+rm -rf "$args_dir"
+[ -n "$args_trecho" ] && [ "$dois" = '[--excluir-da-revisao][^a/][--excluir-da-revisao][^dados de teste/]' ] \
+  && [ -z "$vazio" ] && [ "$glob" = '[--excluir-da-revisao][^gl-*/]' ] \
+  && passa 'dois padroes, um com espaco, e EXPX_EXCLUIR_DA_REVISAO vazio: um par por padrao, nenhum herdado, sem glob' \
+  || quebra "argumentos do E7: dois '$dois', vazio '$vazio', glob '$glob' (trecho: $args_trecho)"
+grep -Fq 'fatiamento-da-pr.sh "$@" "$base" "$publicado"' "$e7" \
   && passa 'o E7 mede o SHA publicado contra a base' \
   || quebra 'o E7 nao chama o script sobre o SHA publicado'
 grep -Fq 'o E7 **não abre o PR**' "$e7" \
@@ -277,7 +290,7 @@ d() { git -C "$aux/m2-dev" -c user.email=t@t -c user.name=t -c commit.gpgsign=fa
 printf 'base\n' > "$aux/m2-dev/base.txt"; d add -A; d commit -q -m base; d push -q origin main 2>/dev/null
 d switch -q -c feature/x; printf 'linha\n' > "$aux/m2-dev/a.md"; d add -A; d commit -q -m a
 d push -q -u origin feature/x 2>/dev/null
-bloco_do_e7 'fatiamento-da-pr.sh "$base" "$publicado"' | sed "s|<branch_base>|main|" \
+bloco_do_e7 'fatiamento-da-pr.sh "$@" "$base" "$publicado"' | sed "s|<branch_base>|main|" \
   | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' \
   | sed "s#bash \.claude/skills/mergex/scripts/leitor-do-projeto\.sh#bash '$leitor'#" > "$aux/passo15.sh"
 saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
@@ -310,14 +323,8 @@ for cmd in 'gh pr create' 'glab mr create'; do
     passa "$cmd: titulo com \$(...) e crases chega literal, sem executar nada"
   fi
 done
-# PR reprovado na medicao nao deixa base para o passo 2: o estado so nasce com saida 0
 estado="$(git -C "$aux/m2-dev" rev-parse --path-format=absolute --git-path mergex-e7-base)"
 [ -s "$estado" ] || quebra 'fixture: o passo 1.5 aprovado nao gravou o estado'
-saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" FATIA_MAX_LINHAS_PR=0 \
-  bash "$aux/passo15.sh" 2>&1)"; rc=$?
-[ "$rc" = 1 ] && [ ! -e "$estado" ] \
-  && passa 'passo 1.5 reprovado (saida 1) nao deixa o estado da base para o passo 2' \
-  || quebra "passo 1.5 reprovado: rc $rc, estado $( [ -e "$estado" ] && echo presente || echo ausente): $saida"
 # a branch remota anda entre a chamada dos pre-requisitos e a do passo 1.5: a ref de
 # rastreio local continua igual ao HEAD, e so uma busca nesta chamada mostra a ponta nova
 git clone -q -b feature/x "$aux/m2-remoto.git" "$aux/m2-outro" 2>/dev/null
@@ -374,12 +381,16 @@ cenario() { # <nome> [sem-nucleo] [config da base] — remoto e clone novos, bas
   c "$1" switch -q -c feature/x
 }
 c() { local n="$1"; shift; git -C "$aux/c-$n" -c core.autocrlf=false -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
-config() { # <pr_linhas> [chaves extras]
-  printf '{ "expx_fatiamento": 1, "justificativa": "sprint revisada por task", "legibilidade": { "pr_linhas": %s }, "revisao_por_task": { "modo": "obrigatoria" }%s }\n' "$1" "${2:-}"
+config() { # [padrao...] — .expx/fatiamento.json v2, com um item de excluir_da_revisao por padrao
+  local itens='' p
+  for p in "$@"; do
+    itens="${itens:+$itens, }{ \"padrao\": \"$p\", \"classe\": \"gerado\", \"origem\": \"scripts/gera.sh\", \"motivo\": \"gerado por script\" }"
+  done
+  printf '{ "expx_fatiamento": 2, "revisao_por_task": { "modo": "obrigatoria" }, "excluir_da_revisao": [ %s ] }\n' "$itens"
 }
-seiscentas() { # <nome> — tres commits de 200 linhas, publicados
-  for i in 1 2 3; do printf 'linha\n%.0s' $(seq 1 200) > "$aux/c-$1/g$i.md"; c "$1" add -A; c "$1" commit -q -m "parte $i"; done
-  c "$1" push -q -u origin feature/x 2>/dev/null
+publica() { c "$1" add -A; c "$1" commit -q -m "$2"; c "$1" push -q -u origin feature/x 2>/dev/null; }
+grande() { # <arquivo> — 5.001 linhas pela conta da CLI (wc -l 5.000, com quebra final)
+  mkdir -p "$(dirname "$1")"; awk 'BEGIN { for (i = 1; i <= 5000; i++) print "linha " i }' > "$1"
 }
 passo15() { # <nome> [VAR=valor...] — roda o bloco real do passo 1.5 no clone
   local n="$1"; shift
@@ -387,51 +398,63 @@ passo15() { # <nome> [VAR=valor...] — roda o bloco real do passo 1.5 no clone
 }
 estado_de() { git -C "$aux/c-$1" rev-parse --path-format=absolute --git-path mergex-e7-base; }
 if command -v node >/dev/null 2>&1; then
-  cenario calibrado com-nucleo "$(config 2500)"; seiscentas calibrado
-  saida="$(passo15 calibrado)"; rc=$?
-  [ "$rc" = 0 ] && [ -s "$(estado_de calibrado)" ] \
-    && passa 'com pr_linhas 2500 no SHA publicado, PR de 600 linhas passa e grava o estado' \
-    || quebra "com pr_linhas 2500 no SHA publicado (rc $rc): $saida"
-  # o disco diz 500 e o commit 700: so medindo com o do commit as 600 linhas passam
-  cenario sujo com-nucleo "$(config 700)"; seiscentas sujo; config 500 > "$aux/c-sujo/.expx/fatiamento.json"
-  saida="$(passo15 sujo)"; rc=$?
-  [ "$rc" = 0 ] \
-    && passa 'bloco do passo 1.5 mede com o arquivo do SHA publicado, nao com o do disco' \
-    || quebra "o passo 1.5 nao mediu com o arquivo do SHA publicado (rc $rc): $saida"
-  cenario invalido; printf '{ "expx_fatiamento": 1, "entrega": "por_dia" }\n' > "$aux/c-invalido/.expx/fatiamento.json"
-  c invalido add -A; c invalido commit -q -m config; c invalido push -q -u origin feature/x 2>/dev/null
+  # a exclusao do SHA publicado tira a pasta de L2; o disco com outro padrao nao muda a medida
+  cenario gerado com-nucleo "$(config '^gerado/')"; grande "$aux/c-gerado/gerado/a.js"; publica gerado gerado
+  config '^outro/' > "$aux/c-gerado/.expx/fatiamento.json"
+  saida="$(passo15 gerado)"; rc=$?
+  [ "$rc" = 0 ] && [ -s "$(estado_de gerado)" ] \
+    && passa 'excluir_da_revisao do SHA publicado tira a pasta de L2 (o disco nao muda a medida) e grava o estado' \
+    || quebra "excluir_da_revisao do SHA publicado (rc $rc): $saida"
+  cenario espaco com-nucleo "$(config '^dados de teste/')"; grande "$aux/c-espaco/dados de teste/a.js"; publica espaco espaco
+  saida="$(passo15 espaco)"; rc=$?
+  [ "$rc" = 0 ] && passa "padrao com espaco chega inteiro ('^dados de teste/' fora de L2)" \
+    || quebra "padrao com espaco (rc $rc): $saida"
+  # controle: sem a exclusao, o mesmo arquivo reprova em L2
+  cenario sem-exclusao com-nucleo "$(config)"; grande "$aux/c-sem-exclusao/gerado/a.js"; publica sem-exclusao grande
+  saida="$(passo15 sem-exclusao)"; rc=$?
+  [ "$rc" = 1 ] && [ ! -e "$(estado_de sem-exclusao)" ] && case "$saida" in *'VIOLACAO L2: gerado/a.js'*) true ;; *) false ;; esac \
+    && passa 'sem excluir_da_revisao, o arquivo de 5.001 linhas reprova em L2 e nao deixa o estado' \
+    || quebra "sem excluir_da_revisao (rc $rc): $saida"
+  cenario invalido; printf '{ "expx_fatiamento": 2, "entrega": "por_dia" }\n' > "$aux/c-invalido/.expx/fatiamento.json"
+  publica invalido config
   saida="$(passo15 invalido)"; rc=$?
   [ "$rc" = 2 ] && [ ! -e "$(estado_de invalido)" ] && case "$saida" in *entrega*) true ;; *) false ;; esac \
     && passa '.expx/fatiamento.json invalido: o bloco sai 2 e nao deixa o estado da base' \
     || quebra ".expx/fatiamento.json invalido (rc $rc, estado $( [ -e "$(estado_de invalido)" ] && echo presente || echo ausente)): $saida"
-  cenario soma com-nucleo "$(config 400 ', "ignorar": ["^gerado/"]')"
-  mkdir -p "$aux/c-soma/gerado" "$aux/c-soma/docs/entregas/y"
-  printf 'linha\n%.0s' $(seq 1 250) > "$aux/c-soma/gerado/g.txt"; c soma add -A; c soma commit -q -m gerado
-  printf 'linha\n%.0s' $(seq 1 250) > "$aux/c-soma/docs/entregas/y/ENTREGA.md"; c soma add -A; c soma commit -q -m entrega
-  printf 'codigo\n%.0s' $(seq 1 50) > "$aux/c-soma/app.ts"; c soma add -A; c soma commit -q -m app
-  c soma push -q -u origin feature/x 2>/dev/null
-  saida="$(passo15 soma)"; rc=$?
-  [ "$rc" = 0 ] && case "$saida" in *'PR com 50 linhas em 1 arquivo'*) true ;; *) false ;; esac \
-    && passa 'ignorar do projeto soma: gerado/ fora, docs/entregas fora, app.ts conta' \
-    || quebra "o ignorar do projeto nao somou ao do E7 (rc $rc): $saida"
+  cenario v1; printf '{ "expx_fatiamento": 1, "legibilidade": { "pr_linhas": 2500 } }\n' > "$aux/c-v1/.expx/fatiamento.json"
+  publica v1 config
+  saida="$(passo15 v1)"; rc=$?
+  [ "$rc" = 2 ] && [ ! -e "$(estado_de v1)" ] && case "$saida" in *'migre para 2'*) true ;; *) false ;; esac \
+    && passa '.expx/fatiamento.json v1 no SHA publicado: sai 2 e cita migre para 2' \
+    || quebra ".expx/fatiamento.json v1 (rc $rc): $saida"
 else
-  passa 'limites de .expx/fatiamento.json no passo 1.5: pulado (sem node; o CI tem node)'
+  passa 'excluir_da_revisao e configuracao no passo 1.5: pulado (sem node; o CI tem node)'
 fi
-cenario sem-leitor sem-nucleo "$(config 2500)"; c sem-leitor push -q -u origin feature/x 2>/dev/null
+cenario sem-leitor sem-nucleo "$(config)"; c sem-leitor push -q -u origin feature/x 2>/dev/null
 saida="$(passo15 sem-leitor)"; rc=$?
 [ "$rc" = 2 ] && [ ! -e "$(estado_de sem-leitor)" ] && case "$saida" in *'expx update'*) true ;; *) false ;; esac \
   && passa 'arquivo presente sem leitor: sai 2 e cita expx update' \
   || quebra "arquivo presente sem leitor (rc $rc): $saida"
-# sem o arquivo, nada muda (nem chama node): 101 arquivos que o revisor ve reprovam (F2c),
-# inclusive em fixtures/candidatos/, que no projeto e codigo
-cenario sem-config; mkdir -p "$aux/c-sem-config/fixtures/candidatos"
-for i in $(seq 1 101); do printf 'x\n' > "$aux/c-sem-config/fixtures/candidatos/f$i.txt"; done
-c sem-config add -A; c sem-config commit -q -m muitos; c sem-config push -q -u origin feature/x 2>/dev/null
+# sem o arquivo, nada chama node: 101 arquivos, contando fixtures/candidatos/ e docs/entregas/,
+# reprovam em L3, e o reprovado (saida 1) nao deixa o estado da base para o passo 2
+cenario sem-config; mkdir -p "$aux/c-sem-config/fixtures/candidatos" "$aux/c-sem-config/docs/entregas/x"
+for i in $(seq 1 100); do printf 'x\n' > "$aux/c-sem-config/fixtures/candidatos/f$i.txt"; done
+printf 'entrega\n' > "$aux/c-sem-config/docs/entregas/x/ENTREGA.md"; publica sem-config muitos
 mkdir -p "$aux/node-espia"; printf '#!/usr/bin/env bash\n: > "%s/node-chamado"\nexit 1\n' "$aux" > "$aux/node-espia/node"; chmod +x "$aux/node-espia/node"
 saida="$(passo15 sem-config PATH="$aux/node-espia:$PATH")"; rc=$?
-[ "$rc" = 1 ] && [ ! -e "$aux/node-chamado" ] && case "$saida" in *'F2c:'*) true ;; *) false ;; esac \
-  && passa 'sem arquivo: 101 arquivos visiveis reprovam (F2c) e nada chama node' \
+[ "$rc" = 1 ] && [ ! -e "$aux/node-chamado" ] && case "$saida" in *'VIOLACAO L3'*'101 arquivos'*) true ;; *) false ;; esac \
+  && passa 'sem arquivo: 101 arquivos (fixtures/candidatos/ e docs/entregas/ inclusive) reprovam (L3) e nada chama node' \
   || quebra "sem arquivo (rc $rc, node $( [ -e "$aux/node-chamado" ] && echo chamado || echo nao chamado)): $saida"
+[ "$rc" = 1 ] && [ ! -e "$(estado_de sem-config)" ] \
+  && passa 'passo 1.5 reprovado (saida 1) nao deixa o estado da base para o passo 2' \
+  || quebra "passo 1.5 reprovado: rc $rc, estado $( [ -e "$(estado_de sem-config)" ] && echo presente || echo ausente)"
+# FATIA_* esquecida no shell (definida e vazia): o bloco sai 2, mostra a mensagem e nao
+# deixa o estado; nunca mede ignorando a variavel
+cenario fatia; printf 'x\n' > "$aux/c-fatia/a.ts"; publica fatia a
+saida="$(passo15 fatia FATIA_IGNORAR=)"; rc=$?
+[ "$rc" = 2 ] && [ ! -e "$(estado_de fatia)" ] && case "$saida" in *'`FATIA_IGNORAR` não é mais lida'*'remova-a do ambiente'*) true ;; *) false ;; esac \
+  && passa 'FATIA_IGNORAR= no shell: o bloco sai 2, cita remova-a do ambiente e nao deixa o estado' \
+  || quebra "FATIA_IGNORAR= no shell (rc $rc, estado $( [ -e "$(estado_de fatia)" ] && echo presente || echo ausente)): $saida"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
