@@ -49,6 +49,9 @@ git -C "$expx" -c core.autocrlf=false archive --format=tar "$sha_rev" nucleo/scr
   && mkdir -p "$tmp/x" && tar -xf "$tmp/nucleo.tar" -C "$tmp/x" 2>/dev/null \
   && [ -d "$tmp/x/nucleo/scripts" ] \
   || { echo "revisao $sha_rev sem nucleo/scripts" >&2; exit 1; }
+# so arquivos e pastas: um link simbolico (ORIGEM ou outro) escreveria ou copiaria fora da copia
+outros="$(cd "$tmp/x/nucleo/scripts" && find . ! -type f ! -type d)"
+[ -z "$outros" ] || { echo "nucleo/scripts de $sha_rev tem o que nao e arquivo nem pasta: $outros" >&2; exit 1; }
 arquivos="$(cd "$tmp/x/nucleo/scripts" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)"
 [ -n "$arquivos" ] || { echo "revisao $sha_rev sem arquivo em nucleo/scripts" >&2; exit 1; }
 if printf '%s\n' "$arquivos" | grep -qxF ORIGEM; then

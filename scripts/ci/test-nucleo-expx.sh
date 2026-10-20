@@ -103,6 +103,11 @@ printf '{ "p": 1 }\n' > "$tmp/expx/nucleo/scripts/perfis/p.json"
 printf 'fora\n' > "$tmp/expx/outro/fora.txt"
 e init -q; e config core.autocrlf true; e add -A 2>/dev/null; e commit -q -m nucleo; e tag nucleo
 e rm -rq nucleo; e commit -q -m sem; e tag sem-nucleo
+# `ligacao`: nucleo/scripts com um link simbolico (modo 120000, pelo indice: vale sem symlink no disco)
+e checkout -q nucleo 2>/dev/null
+printf 'alvo\n' > "$tmp/alvo.txt"
+e update-index --add --cacheinfo "120000,$(printf '%s' "$tmp/alvo.txt" | e hash-object -w --stdin),nucleo/scripts/ORIGEM"
+e commit -q -m ligacao; e tag ligacao; e checkout -q sem-nucleo 2>/dev/null
 sha_nucleo="$(e rev-parse nucleo)"
 rep="$tmp/rep/scripts/ci"; dest="$rep/fixtures/candidatos/expx-nucleo"
 mkdir -p "$rep/fixtures/candidatos"
@@ -144,6 +149,14 @@ atualizar nucleo; rc=$?
   && passa 'atualizar com outra atualizacao em curso sai 1 e nao toca a copia' \
   || quebra "atualizar com a trava de outra atualizacao saiu $rc ou mexeu na copia"
 rmdir "$dest.trava"
+
+# 6c. revisao com link simbolico em nucleo/scripts (aqui, um ORIGEM que aponta para um arquivo fora): sai 1,
+# nao toca a copia nem o alvo do link
+atualizar ligacao; rc=$?
+[ "$rc" = 1 ] && [ "$(inventario "$dest")" = "$antes" ] && [ -z "$(vizinhos)" ] \
+  && [ "$(cat "$tmp/alvo.txt")" = alvo ] \
+  && passa 'atualizar com link simbolico no nucleo sai 1 e nao toca a copia' \
+  || quebra "atualizar com link simbolico no nucleo saiu $rc ou mexeu na copia"
 
 # 7. o atualizar nao diz que copiou quando nao conseguiu gravar a copia (destino e um arquivo)
 rm -rf "$dest"; printf 'nao e pasta\n' > "$dest"
