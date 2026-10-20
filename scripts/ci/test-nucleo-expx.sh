@@ -45,7 +45,7 @@ confere_origem() {
 # 1. ORIGEM: `expxdev <rev>` e uma linha `sha256  caminho` por arquivo da copia, que confere
 erros="$(confere_origem "$copia")"
 origem="$(tr -d '\r' < "$copia/ORIGEM" 2>/dev/null)"
-for f in expx-fatiamento.mjs expx-revisao.mjs; do
+for f in expx-fatiamento.mjs expx-limites.mjs expx-revisao.mjs perfis/codeant-app.json perfis/codeant-cli-0.5.14.json; do
   printf '%s\n' "$origem" | grep -Eq "^[0-9a-f]{64}  $f\$" || erros="$erros sem:$f"
 done
 [ -z "$erros" ] && passa 'ORIGEM confere com o sha256 de cada copia' \
@@ -66,32 +66,51 @@ case "$s" in *'sem-linha:perfis/a-mais.json'*) true ;; *) false ;; esac \
   && passa 'ORIGEM lista todo arquivo da copia, uma vez, e so eles' \
   || quebra "ORIGEM com arquivo a mais, a menos ou repetido passou: sobra[$s] falta[$fa] repete[$r]"
 
-# 2. a copia, num commit so dela, fica fora do F2 do proprio repositorio (padrao do script)
+# 2. a copia, num commit so dela, fica fora de L2 do proprio repositorio: o espelho com a
+# exclusao que o repositorio passa (--excluir-da-revisao); L3 conta todos os arquivos dela
 g() { git -C "$tmp/f2" -c core.autocrlf=false -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
 mkdir -p "$tmp/f2"; g init -q -b main
 printf 'base\n' > "$tmp/f2/base.txt"; g add -A; g commit -q -m base
 g switch -q -c copia
 mkdir -p "$tmp/f2/$copia_rel"
 cp -R "$copia"/. "$tmp/f2/$copia_rel/" 2>/dev/null
+n_copia="$(cd "$copia" && find . -type f | wc -l | tr -d ' ')"
 if g add -A && g commit -q -m copia >/dev/null 2>&1; then
-  saida="$(cd "$tmp/f2" && unset FATIA_IGNORAR FATIA_IGNORAR_PROJETO && bash "$script" main copia 2>&1)"
-  case "$saida" in
-    *'PR com 0 linhas em 0 arquivo'*) passa 'a copia fica fora do F2 do proprio repositorio' ;;
-    *) quebra "a copia entrou na medida do F2: $saida" ;;
-  esac
+  saida="$(cd "$tmp/f2" && bash "$script" --excluir-da-revisao '^scripts/ci/fixtures/candidatos/' main copia 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && case "$saida" in *"PR com $n_copia arquivo(s)"*) true ;; *) false ;; esac \
+    && passa "a copia fica fora de L2 do proprio repositorio ($n_copia arquivos em L3)" \
+    || quebra "a copia entrou em L2 ou nao contou em L3 (rc $rc): $saida"
 else
-  quebra 'a copia fica fora do F2: nao ha copia para commitar'
+  quebra 'a copia fica fora de L2: nao ha copia para commitar'
 fi
 
-# 3. node roda a copia: num projeto sem .expx/fatiamento.json, os padroes
+# 3. node roda a copia: num projeto sem .expx/fatiamento.json, os padroes com os numeros do
+# perfil e nenhuma FATIA_
 if ! command -v node >/dev/null 2>&1; then
-  passa 'node consegue rodar a copia (sem node)'
+  passa 'node roda a copia: padroes com os numeros do perfil (sem node)'
 else
   mkdir -p "$tmp/vazio"
   saida="$(node "$copia/expx-fatiamento.mjs" --raiz "$tmp/vazio" 2>&1)"; rc=$?
   [ "$rc" = 0 ] && case "$saida" in *'EXPX_FATIAMENTO_ORIGEM=padrao'*) true ;; *) false ;; esac \
-    && passa 'node consegue rodar a copia' \
-    || quebra "node nao rodou a copia (rc $rc): $saida"
+    && printf '%s\n' "$saida" | grep -qxF 'EXPX_L2_BYTES=204800' \
+    && ! printf '%s\n' "$saida" | grep -q 'FATIA_' \
+    && passa 'node roda a copia: padroes com os numeros do perfil' \
+    || quebra "node nao rodou a copia, ou os padroes nao sao os do perfil (rc $rc): $saida"
+fi
+
+# 3b. com EXPXDEV_RAIZ, a copia e a arvore nucleo/scripts da revisao do ORIGEM, blob a blob
+# (no CI, sem o expxdev, so o sha256 do ORIGEM confere)
+if [ -z "${EXPXDEV_RAIZ:-}" ]; then
+  passa 'copia igual a nucleo/scripts da revisao do ORIGEM: pulado (sem EXPXDEV_RAIZ)'
+else
+  rev_origem="$(tr -d '\r' < "$copia/ORIGEM" | head -1 | sed -n 's/^expxdev //p')"
+  arvore="$(git -C "$EXPXDEV_RAIZ" ls-tree -r --full-tree "$rev_origem" -- nucleo/scripts 2>/dev/null \
+    | awk -F '\t' '{ split($1, m, " "); sub("^nucleo/scripts/", "", $2); print m[3] " " $2 }' | LC_ALL=C sort)"
+  da_copia="$(cd "$copia" && find . -type f ! -path ./ORIGEM | sed 's|^\./||' | LC_ALL=C sort \
+    | while IFS= read -r f; do printf '%s %s\n' "$(tr -d '\r' < "$f" | git hash-object --stdin)" "$f"; done | LC_ALL=C sort)"
+  [ -n "$arvore" ] && [ "$arvore" = "$da_copia" ] \
+    && passa "com EXPXDEV_RAIZ, a copia e a arvore nucleo/scripts de $rev_origem" \
+    || quebra "a copia difere de nucleo/scripts de ${rev_origem:-?} em $EXPXDEV_RAIZ"
 fi
 
 # o atualizar contra um expxdev falso: `nucleo` tem a pasta com subpasta; `sem-nucleo` nao tem
