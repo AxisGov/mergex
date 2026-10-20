@@ -51,8 +51,8 @@ M6()  { troca "$PERSISTE" 'if [ "$MODO" = verificar ]; then' 'if [ "$MODO" = ver
   printf '\''ok=true\n'\''; exit 0 # mutante: barreira aceita metodo dirty'; }
 M7()  { remove_contendo "$CMD" '--checkpoint pre-e6'; }
 M8()  { troca "$CATALOGO" '  printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md"' '  [ "$checkpoint" = e8 ] || printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md" # mutante: E8 deixa terminal dirty'; }
-M9()  { troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \' '  git commit --allow-empty -qm '\''mutante: segundo E1'\'' # mutante: recovery cria commit
-  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \'; }
+M9()  { troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$(revisao_da_task "$task" "$sha")" 2>&1)" \' '  git commit --allow-empty -qm '\''mutante: segundo E1'\'' # mutante: recovery cria commit
+  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$(revisao_da_task "$task" "$sha")" 2>&1)" \'; }
 M10() { troca "$FECHA" "  printf '%s\\n' \"\$sha\" | grep -Eq '^[0-9A-Fa-f]{40}\$' \\" "  printf '%s\\n' \"\$sha\" | grep -Eq '^[0-9A-Fa-f]{7,40}\$' \\"; }
 M11() { troca "$FECHA" '  git merge-base --is-ancestor "$sha" HEAD >/dev/null 2>&1 \' '  true # mutante: ignora alcançabilidade
   true \'; }
@@ -64,7 +64,7 @@ M15() { troca "$FECHA" '  sha="$(printf '\''%s'\'' "$sha" | tr '\''A-F'\'' '\''a
 M16() { troca "$FECHA" '  confere_stage_de_entrada' '  git reset -q # mutante: limpa stage alheio
   confere_stage_de_entrada'; }
 M17() { troca "$FECHA" '  abre_secao "recovery:$task"          # mesma trava C5, antes de qualquer prova mutável' '  : # mutante: recovery ignora a trava C5'; }
-M18() { troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \' '  saida='\''seq=1'\''; true # mutante: reporta sucesso sem registrar, V11 continua falhando
+M18() { troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$(revisao_da_task "$task" "$sha")" 2>&1)" \' '  saida='\''seq=1'\''; true # mutante: reporta sucesso sem registrar, V11 continua falhando
   true \'; }
 
 LISTA='M1|integration|omite pre-e2 do fluxo
