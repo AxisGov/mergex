@@ -162,6 +162,8 @@ case "$TRABALHO" in
   ''|*[!A-Za-z0-9._-]*|.*|sprintx|manutencao|entregas|eventos|relatorios|legado|stack|projeto)
     uso "trabalho inválido: ${TRABALHO:-ausente}" ;;
 esac
+# o PR de planejamento é da SprintX (fim da F5); a RunX não tem planejamento
+[ "$PLANEJAMENTO" = 0 ] || [ "$ORIGEM" = sprintx ] || uso '--planejamento só com --origem sprintx (a runx não tem PR de planejamento)'
 case "$ENTREGA" in ./*) ENTREGA="${ENTREGA#./}" ;; esac
 [ "$ENTREGA" = "docs/entregas/$TRABALHO/ENTREGA.md" ] || uso "--entrega deve ser docs/entregas/$TRABALHO/ENTREGA.md"
 

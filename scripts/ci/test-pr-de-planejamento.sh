@@ -150,16 +150,21 @@ git init -q -b main "$aux/e0"
 mkdir -p "$aux/e0/docs/sprintx/features/plan"
 printf 'plano\n' > "$aux/e0/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
 g -C "$aux/e0" add -A; g -C "$aux/e0" commit -q -m plano
-(cd "$aux/e0" && bash "$aux/e0-pre.sh") >/dev/null 2>&1
-[ "$?" = 0 ]; confere 'E0 --planejamento com o planejamento commitado: segue' $?
+# e0_escreve <dir> — o bloco e, só se ele passar, a primeira escrita do E0 (a pasta da entrega)
+e0_escreve() { (cd "$1" && bash "$aux/e0-pre.sh" && mkdir -p docs/entregas/plan) >/dev/null 2>"$aux/err"; rc=$?; }
+e0_escreve "$aux/e0"
+[ "$rc" = 0 ] && [ -d "$aux/e0/docs/entregas/plan" ]
+confere 'E0 --planejamento com o planejamento commitado: segue e escreve' $?
+rm -rf "$aux/e0/docs/entregas"
 printf 'mais\n' >> "$aux/e0/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
-(cd "$aux/e0" && bash "$aux/e0-pre.sh") >/dev/null 2>"$aux/err"; rc=$?
+e0_escreve "$aux/e0"
 [ "$rc" = 1 ] && grep -q '00-PLANEJAMENTO.md' "$aux/err" && [ ! -e "$aux/e0/docs/entregas" ]
 confere 'E0 --planejamento com artefato do planejamento sujo: recusa sem escrever' $?
 g -C "$aux/e0" checkout -q -- .
 printf 'novo\n' > "$aux/e0/docs/sprintx/features/plan/01-tasks.md"
-(cd "$aux/e0" && bash "$aux/e0-pre.sh") >/dev/null 2>&1
-[ "$?" = 1 ]; confere 'E0 --planejamento com artefato do planejamento fora do indice: recusa' $?
+e0_escreve "$aux/e0"
+[ "$rc" = 1 ] && grep -q '01-tasks.md' "$aux/err" && [ ! -e "$aux/e0/docs/entregas" ]
+confere 'E0 --planejamento com artefato do planejamento fora do indice: recusa sem escrever' $?
 # so a pasta canonica serve: com so a pasta antiga (docs/<slug>/), suja ou nao, recusa
 git init -q -b main "$aux/e0-legado"
 mkdir -p "$aux/e0-legado/docs/plan"; printf 'plano\n' > "$aux/e0-legado/docs/plan/ORQUESTRADOR.md"
@@ -251,6 +256,11 @@ g -C "$aux/v9c" add -A; g -C "$aux/v9c" commit -q -m comum
 v9 "$aux/v9c" --planejamento
 [ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não é a de planejamento' "$aux/v9.out"
 confere 'V9 --planejamento numa entrega comum: v9_sem_prova (nao confia na opcao)' $?
+# --planejamento so existe na SprintX: a RunX nao tem PR de planejamento
+(cd "$aux/v9a" && bash "$scripts/portao-v9.sh" --verificar --planejamento --entrega docs/entregas/plan/ENTREGA.md \
+  --origem runx --trabalho plan) >"$aux/v9.out" 2>"$aux/v9.err"; rc=$?
+[ "$rc" = 64 ] && grep -q 'runx' "$aux/v9.err"
+confere 'V9 --planejamento com --origem runx: uso (64)' $?
 
 echo '== A primeira sprint depois do merge do planejamento (DM-261) =='
 
@@ -469,6 +479,14 @@ e9 "$aux/e9g" GLAB_RESPOSTA="{\"iid\": 9, \"state\": \"merged\", \"merge_commit_
 [ "$rc" = 0 ] && grep -qx "merge_sha=$SHA_M" "$aux/out" \
   && grep -q 'api projects/:id/merge_requests/9' "$aux/gh-chamadas" && ! grep -q '^pr view' "$aux/gh-chamadas"
 confere 'E9 no GitLab: o MR de planejamento mergeado e lido pelo glab e registrado' $?
+# pr_url entre aspas (YAML valido): o servico recebe a URL sem elas
+repo_e9 "$aux/e9q"
+sed 's#^pr_url: \(.*\)$#pr_url: "\1"#' "$aux/e9q/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/e9q/docs/entregas/login/ENTREGA.md"
+: > "$aux/gh-chamadas"
+e9 "$aux/e9q" GH_RESPOSTA="MERGED $SHA_M"
+[ "$rc" = 0 ] && grep -q '^pr view https://github.com/dono/repo/pull/9 ' "$aux/gh-chamadas"
+confere 'E9 com pr_url entre aspas: le o PR pela URL sem as aspas' $?
 (cd "$aux/e9b" && env PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin" bash -c 'command -v gh' >/dev/null 2>&1) \
   || { e9 "$aux/e9b" PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin"
        cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]

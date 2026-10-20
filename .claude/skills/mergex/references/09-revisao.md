@@ -98,7 +98,7 @@ entrega="docs/entregas/<trabalho_id>/ENTREGA.md"
 planejamento="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2
 case "$planejamento" in planejamento=sim*) ;; *) exit 0 ;; esac
 case "$planejamento" in *estado=merged*) exit 0 ;; esac
-pr_url="$(awk 'NR == 1 { next } /^---/ { exit } /^pr_url:/ { sub(/^pr_url:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit }' "$entrega")"
+pr_url="$(awk 'NR == 1 { next } /^---/ { exit } /^pr_url:/ { sub(/^pr_url:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); if ($0 ~ /^".*"$/ || $0 ~ /^\047.*\047$/) $0 = substr($0, 2, length($0) - 2); print; exit }' "$entrega")"
 case "$pr_url" in ''|null) echo "PR de planejamento sem pr_url: nada a ler no serviço"; exit 0 ;; esac
 case "$pr_url" in
   */-/merge_requests/*)   # GitLab: a API do projeto do remoto, como no passo 1
