@@ -227,6 +227,20 @@ perfil_a_mais="$(commit_com 100644 "$(blob '{}')" "$nucleo_rel/perfis/codeant-cl
 [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && grep -q 'difere do instalado' "$aux/err" \
   && passa '--rev com um arquivo a mais em perfis/ no commit: sai 3' \
   || quebra "--rev com arquivo a mais em perfis/: rc $rc, stdout '$(cat "$aux/out")', stderr '$(cat "$aux/err")'"
+# blob versionado com CRLF (commitado com autocrlf=false) e o mesmo arquivo instalado, num
+# clone com core.autocrlf=true: o git o ve igual (status limpo), e o helper tambem, nunca 3
+if [ "$tem_node" = 1 ]; then
+  perfil="$nucleo_rel/perfis/codeant-app.json"; cp "$tmp/$perfil" "$aux/perfil.json"
+  sed 's/$/\r/' "$aux/perfil.json" > "$tmp/$perfil"
+  perfil_crlf="$(commit_com 100644 "$(g hash-object -w --no-filters -- "$perfil")" "$perfil")"
+  g config core.autocrlf true
+  (cd "$tmp" && bash "$leitor" --rev "$perfil_crlf" > "$aux/out" 2> "$aux/err"); rc=$?
+  g config --unset core.autocrlf; cp "$aux/perfil.json" "$tmp/$perfil"
+  [ "$rc" = 0 ] && passa '--rev com blob CRLF no commit e o mesmo arquivo instalado (autocrlf=true): le' \
+    || quebra "--rev com blob CRLF igual ao instalado: rc $rc, stderr '$(cat "$aux/err")'"
+else
+  passa '--rev com blob CRLF igual ao instalado (sem node)'
+fi
 # e o inverso: arquivo instalado que o commit nao tem
 printf '{}\n' > "$tmp/$nucleo_rel/perfis/codeant-cli-9.9.9.json"
 (cd "$tmp" && bash "$leitor" --rev HEAD > "$aux/out" 2> "$aux/err"); rc=$?

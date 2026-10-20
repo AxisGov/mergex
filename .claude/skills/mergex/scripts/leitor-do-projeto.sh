@@ -106,13 +106,15 @@ mjs="$nucleo/expx-fatiamento.mjs"
 if [ -n "$rev" ]; then
   no_commit="$(git -C "$raiz" -c core.quotepath=off ls-tree -r --full-tree "$commit" -- "$nucleo_rel")" || exit 2
   if [ -n "$no_commit" ]; then
+    # cada arquivo do commit e igual ao instalado se o blob e o do arquivo pelo filtro de fim de
+    # linha (blob LF, checkout CRLF com autocrlf) ou byte a byte (blob versionado com CRLF)
     versionado="$(printf '%s\n' "$no_commit" | while IFS="$(printf '\t')" read -r meta caminho; do
-                    set -- $meta; printf '%s %s\n' "$3" "${caminho#"$nucleo_rel"/}"
+                    set -- $meta; f="${caminho#"$nucleo_rel"/}"
+                    h="$(git -C "$raiz" hash-object -- "$nucleo_rel/$f" 2>/dev/null)" || h=ilegivel
+                    b="$(git -C "$raiz" hash-object --no-filters -- "$nucleo_rel/$f" 2>/dev/null)" || b=ilegivel
+                    if [ "$3" = "$h" ] || [ "$3" = "$b" ]; then printf '%s\n' "$f"; else printf '%s (difere)\n' "$f"; fi
                   done | LC_ALL=C sort)"
-    instalado="$(cd "$nucleo" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do
-                   h="$(git -C "$raiz" hash-object -- "$nucleo_rel/$f" 2>/dev/null)" || h=ilegivel
-                   printf '%s %s\n' "$h" "$f"
-                 done | LC_ALL=C sort)"
+    instalado="$(cd "$nucleo" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)"
     [ "$versionado" = "$instalado" ] || desatualizado 'o nucleo do commit difere do instalado'
   fi
 fi
