@@ -593,6 +593,14 @@ evidencia_de_revisao() {
   nome_de_evidencia "${1#"$pasta"}" && [ -f "$1" ] && [ ! -L "$1" ]
 }
 
+# evidencia_no_indice <caminho> — a entrada do índice é arquivo comum (100644/100755)
+evidencia_no_indice() {
+  case "$(GIT_LITERAL_PATHSPECS=1 git ls-files -s -- "$1" 2>/dev/null)" in
+    100644\ *|100755\ *) return 0 ;;
+  esac
+  return 1
+}
+
 # separa_evidencia <task> — tira de PRODUTO as evidências deste trabalho; a da task
 # atual vai para EVIDENCIA (entra no commit), as das outras ficam na árvore.
 EVIDENCIA=""
@@ -707,6 +715,12 @@ EOF
   git add -- "${alvos[@]}" \
     || para 4 'PARADO — o staging da task falhou' \
       'Nenhum commit foi criado. O índice ficou como o versionador o deixou.'
+  # o que entrou no índice é o que vai ao commit: a evidência trocada por um link
+  # depois da conferência da árvore para aqui
+  [ -z "$EVIDENCIA" ] || evidencia_no_indice "$EVIDENCIA" \
+    || para 4 'PARADO — a evidência de revisão entrou no índice como algo que não é arquivo comum' \
+      "Caminho: $EVIDENCIA" \
+      'Nenhum commit foi criado e nada foi limpo: o stage ficou para diagnóstico.'
   [ -n "$(stage_atual)" ] \
     || para 4 'PARADO — nada entrou em stage' \
       'Os caminhos declarados não têm alteração a commitar.'
@@ -896,7 +910,7 @@ case "$ACAO" in
     while IFS= read -r caminho_preparado; do
       [ -n "$caminho_preparado" ] || continue
       if [ "$caminho_preparado" = "$(pasta_de_revisao)$TASK.json" ] \
-        && evidencia_de_revisao "$caminho_preparado"; then
+        && nome_de_evidencia "$TASK.json" && evidencia_no_indice "$caminho_preparado"; then
         continue
       fi
       ESTAGIO_PRODUTO+=("$caminho_preparado")
