@@ -100,17 +100,28 @@ case "$planejamento" in planejamento=sim*) ;; *) exit 0 ;; esac
 case "$planejamento" in *estado=merged*) exit 0 ;; esac
 pr_url="$(awk 'NR == 1 { next } /^---/ { exit } /^pr_url:/ { sub(/^pr_url:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit }' "$entrega")"
 case "$pr_url" in ''|null) echo "PR de planejamento sem pr_url: nada a ler no serviço"; exit 0 ;; esac
-command -v gh >/dev/null 2>&1 || { echo "sem gh: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
-resposta="$(gh pr view "$pr_url" --json state,mergeCommit --jq '[.state, (.mergeCommit.oid // "")] | join(" ")')" \
-  || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; }
+case "$pr_url" in
+  */-/merge_requests/*)   # GitLab: a API do projeto do remoto, como no passo 1
+    iid="${pr_url##*/-/merge_requests/}"; iid="${iid%%[!0-9]*}"
+    [ -n "$iid" ] || { echo "pr_url do GitLab sem número de MR: nada gravado"; exit 3; }
+    command -v glab >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+      || { echo "sem glab ou jq: o merge do MR de planejamento não foi lido, nada gravado"; exit 3; }
+    resposta="$(glab api "projects/:id/merge_requests/$iid" | jq -r '[(.state // "" | ascii_upcase), (.merge_commit_sha // .squash_commit_sha // "")] | join(" ")')" \
+      || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; } ;;
+  *)
+    command -v gh >/dev/null 2>&1 || { echo "sem gh: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
+    resposta="$(gh pr view "$pr_url" --json state,mergeCommit --jq '[.state, (.mergeCommit.oid // "")] | join(" ")')" \
+      || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; } ;;
+esac
 estado_pr="${resposta%% *}"; merge_sha="${resposta#* }"
 [ "$estado_pr" = MERGED ] || { echo "PR de planejamento ainda não mergeado (${estado_pr:-sem estado}): nada gravado"; exit 0; }
 [ -n "$merge_sha" ] && [ "$merge_sha" != "$resposta" ] || { echo "MERGED sem commit de merge: nada gravado"; exit 3; }
 bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega "$entrega" --merge-sha "$merge_sha"
 ```
 
-No GitLab, o equivalente é `glab mr view <n> --output json` (`state: merged` e
-`merge_commit_sha`). O registro é o do passo 7, item 7: no primeiro item de `prs`,
+No GitLab (`pr_url` com `/-/merge_requests/`), o bloco lê o MR pela API do projeto
+(`glab api "projects/:id/merge_requests/<iid>"`: `state: merged` e `merge_commit_sha`, ou
+`squash_commit_sha` no squash). O registro é o do passo 7, item 7: no primeiro item de `prs`,
 `estado: merged`, `merge_sha` e `merge: humano`, e `pr_estado: merged` no topo — o script grava
 só isso e confere a gravação. **Sem ferramenta, sem resposta ou sem o commit de merge, não grava
 nada** e diz o motivo; PR ainda aberto também não grava. O E0 da primeira sprint depende desse

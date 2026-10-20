@@ -321,6 +321,18 @@ confere 'PR de planejamento ainda aberto: nao grava' $?
 e9 "$aux/e9b" GH_RESPOSTA="MERGED "
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
 confere 'MERGED sem mergeCommit: nao grava' $?
+# GitLab: o MR do planejamento lido com o glab (API do projeto), nunca com o gh
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\n[ -z "${GLAB_RESPOSTA:-}" ] || printf "%%s\\n" "$GLAB_RESPOSTA"\nexit "${GLAB_RC:-0}"\n' > "$aux/gh-falso/glab"
+chmod +x "$aux/gh-falso/glab"
+repo_e9 "$aux/e9g"
+sed 's#https://github.com/dono/repo/pull/9#https://gitlab.com/dono/repo/-/merge_requests/9#' "$aux/e9g/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/e9g/docs/entregas/login/ENTREGA.md"
+: > "$aux/gh-chamadas"
+e9 "$aux/e9g" GLAB_RESPOSTA="{\"iid\": 9, \"state\": \"merged\", \"merge_commit_sha\": \"$SHA_M\"}"
+(cd "$aux/e9g" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
+[ "$rc" = 0 ] && grep -qx "merge_sha=$SHA_M" "$aux/out" \
+  && grep -q 'api projects/:id/merge_requests/9' "$aux/gh-chamadas" && ! grep -q '^pr view' "$aux/gh-chamadas"
+confere 'E9 no GitLab: o MR de planejamento mergeado e lido pelo glab e registrado' $?
 (cd "$aux/e9b" && env PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin" bash -c 'command -v gh' >/dev/null 2>&1) \
   || { e9 "$aux/e9b" PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin"
        cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
