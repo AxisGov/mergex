@@ -30,14 +30,19 @@ leva só os artefatos de método do planejamento (tudo sob `^docs/(sprintx|entre
 aberto no fim da F5, antes da primeira sprint, com merge do desenvolvedor, nunca automático. Vale
 em `por_sprint` e em `por_trabalho`. A sprintx chama E0–E8 com `--planejamento` no fim da F5
 (`references/integracao/sprintx.md`). Só a pasta canônica (`docs/sprintx/features/<slug>/`) serve:
-a pasta antiga (`docs/<slug>/`) fica fora dos artefatos de método do PR de planejamento.
+a pasta antiga (`docs/<slug>/`) fica fora dos artefatos de método do PR de planejamento, e o E0
+`--planejamento` **recusa** o trabalho que só tem a pasta antiga (migrar é decisão do usuário).
 
-**Pré-condição, antes de qualquer escrita:** o planejamento já está commitado. Nada sujo nem fora
-do índice sob a pasta do trabalho — quem commita o planejamento é a sprintx, antes de chamar o E0;
-a mergex não amplia o catálogo de método para isso:
+**Pré-condição, antes de qualquer escrita:** a pasta canônica existe e o planejamento já está
+commitado. Nada sujo nem fora do índice sob a pasta do trabalho — quem commita o planejamento é a
+sprintx, antes de chamar o E0; a mergex não amplia o catálogo de método para isso:
 
 ```bash
 # E0 --planejamento: o planejamento tem de estar commitado (<slug> = o trabalho)
+[ -d "docs/sprintx/features/<slug>" ] || {
+  printf 'mergex E0 BLOQUEADO — planejamento não commitado: o PR de planejamento só leva a pasta canônica docs/sprintx/features/<slug>/\n' >&2
+  exit 1
+}
 sujo="$(git status --porcelain --untracked-files=all -- "docs/sprintx/features/<slug>/")" || exit 2
 if [ -n "$sujo" ]; then
   printf 'mergex E0 BLOQUEADO — planejamento não commitado:\n%s\n' "$sujo" >&2

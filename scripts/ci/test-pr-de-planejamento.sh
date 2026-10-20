@@ -160,6 +160,14 @@ g -C "$aux/e0" checkout -q -- .
 printf 'novo\n' > "$aux/e0/docs/sprintx/features/plan/01-tasks.md"
 (cd "$aux/e0" && bash "$aux/e0-pre.sh") >/dev/null 2>&1
 [ "$?" = 1 ]; confere 'E0 --planejamento com artefato do planejamento fora do indice: recusa' $?
+# so a pasta canonica serve: com so a pasta antiga (docs/<slug>/), suja ou nao, recusa
+git init -q -b main "$aux/e0-legado"
+mkdir -p "$aux/e0-legado/docs/plan"; printf 'plano\n' > "$aux/e0-legado/docs/plan/ORQUESTRADOR.md"
+g -C "$aux/e0-legado" add -A; g -C "$aux/e0-legado" commit -q -m plano
+printf 'sujo\n' >> "$aux/e0-legado/docs/plan/ORQUESTRADOR.md"
+(cd "$aux/e0-legado" && bash "$aux/e0-pre.sh") >/dev/null 2>"$aux/err"; rc=$?
+[ "$rc" = 1 ] && grep -q 'docs/sprintx/features/plan' "$aux/err"
+confere 'E0 --planejamento so com a pasta antiga docs/<slug>/: recusa' $?
 
 grep -q -- '--planejamento' "$ref/00-abertura.md" \
   && grep -q 'sprint: planejamento' "$ref/00-abertura.md" \
