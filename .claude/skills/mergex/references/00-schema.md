@@ -507,9 +507,10 @@ falha consequência da outra:
   que não chegou ao E4 da runx (V5 é sintoma da V1). A `v11` vem depois das cinco porque a prova de
   E1 que falta é a **última** coisa que a execução registra sobre uma task: com a execução
   interrompida antes (V1), ou com o commit abortado por segredo (V10), a ausência da prova é
-  consequência, não causa. A `v12` vem depois dela: sem o commit da task não há evidência de
-  revisão para conferir, então a revisão reprovada de uma task sem prova de E1 (V11) ou não
-  concluída (V1) é consequência daquelas (DM-239).
+  consequência, não causa. A `v12` vem depois dela: ela só confere tasks concluídas e com commit
+  registrado, e a evidência de revisão é do commit da task; enquanto a execução não terminou
+  (V1) ou o registro do E1 falta (V11), o commit que a revisão tem de cobrir ainda pode mudar, e a
+  correção começa por elas (DM-239).
 
 Exemplo: `falhas_portao: [v1, v7]` → `causa: bloqueio_aberto`. `[v1, v2]` →
 `tarefa_nao_concluida`. `[v7, v10_sem_prova]` → `indeterminada`. `[v11]` →

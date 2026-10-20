@@ -132,7 +132,7 @@ M10() { troca "$CAUSA_SH" '      [ "$t" = "$v" ] && { causa_de "$v"; return 0; }
 M11() { troca "$CAUSA_SH" '      [ "$causa" != null ]      || { ERRO="estado bloqueado exige causa não nula"; return 1; }' \
   '      [ "$causa" = null ] && { printf '"'"'causa=null\n'"'"'; return 0; }'; }
 M12() { troca "$CAUSA_SH" '    if [ "$historico" = 1 ]; then' '    if true; then'; }
-M13() { troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11'" "ORDEM='v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11'"; }
+M13() { troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11 v12'" "ORDEM='v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12'"; }
 M14() { troca "$CAUSA_SH" '      [ "$t" = "${v}_sem_prova" ] && { printf '"'"'%s\n'"'"' "$INDETERMINADA"; return 0; }' \
   '      [ "$t" = "${v}_sem_prova" ] && { causa_de "$v"; return 0; }'; }
 M15() { troca "$CAUSA_SH" "      printf 'causa=ausente\n'; return 0" '      ERRO="legado"; return 1'; }
@@ -170,12 +170,11 @@ M25a() { apaga "$PRONTIDAO" '### V11 — Task concluída'; }
 M25b() { apaga "$TEMPLATE_PRONTIDAO" '| V11 |'; }
 M25c() { apaga "$CHECK_CMD" '| V11 |'; }
 M26a() { # a falha V11 deixa de ter causa própria: vira a causa da V1
-  # A linha fecha a string CAUSAS; a aspa faz parte dela.
-  troca "$CAUSA_SH" "v11|commit_nao_registrado'" "v11|tarefa_nao_concluida'"
+  troca "$CAUSA_SH" 'v11|commit_nao_registrado' 'v11|tarefa_nao_concluida'
 }
 M26b() { # a V11 passa a vencer até a V10, e o estado terminal deixa de refletir a falha
-  troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11'" \
-    "ORDEM='v11 v10 v6 v7 v8 v9 v1 v2 v3 v4 v5'"
+  troca "$CAUSA_SH" "ORDEM='v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11 v12'" \
+    "ORDEM='v11 v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v12'"
 }
 M26c() { troca "$SCHEMA" '| 11 | `v11` | `commit_nao_registrado` |' '| 11 | `v11` | `falha_tecnica` |'; }
 

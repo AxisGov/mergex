@@ -811,7 +811,8 @@ e2_fixture_completo() {
   [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'V11=OK' || return 1
   printf 'V11=OK\n'
   out="$(bash "$S/portao-v12.sh" --verificar --entrega "$FX_PRE_ENTREGA" --trabalho ft-pre -- "$tasks")"; rc=$?
-  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'V12=n/a' || return 1
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'V12=n/a' \
+    && printf '%s\n' "$out" | grep -Fxq 'motivo=sem-fatiamento-json' || return 1
   printf 'V12=n/a\n'
 }
 

@@ -552,7 +552,7 @@ cmp -s "$check_cmd" "$check_oc" || fail 'OpenCode mergex-check command diverges 
 # que precisa citar a forma antiga para poder proibi-la. `-i` porque a contagem
 # aparece no começo de frase ("Onze verificações") e no badge ("11 verificacoes").
 if grep -rIl -i --exclude-dir=.git -e 'dez verifica' -e '10 verifica' -e 'V1\.\.V10)' -e 'as dez linhas' \
-     -e 'onze verifica' -e '11 verifica' -e 'V1\.\.V11)' -e 'V1–V11' -e 'as onze linhas' . \
+     -e 'onze verifica' -e '11 verifica' -e 'V1\.\.V11' -e 'V1–V11' -e 'V1-V11' -e 'as onze linhas' . \
    | grep -v -e '^\./scripts/ci/fixtures/' -e '^\./docs/superpowers/' -e '^\./scripts/ci/validate-mergex-contract\.sh$' \
    | grep -q .; then
   fail 'the gate is still described as ten or eleven checks somewhere'
@@ -562,6 +562,8 @@ grep -Fq '12 verificacoes' .github/assets/badge-portao.svg || fail 'gate badge d
 grep -Fq '## As doze verificações' "$prontidao" || fail 'E2 no longer announces twelve checks'
 grep -Fq 'a tabela das doze verificações' "$prontidao" || fail 'E2 output table is not twelve rows'
 grep -Fq 'As doze linhas da tabela' "$template_prontidao" || fail 'readiness template is not twelve rows'
+grep -Fq '| V11 |' "$template_prontidao" || fail 'readiness template has no V11 row'
+grep -Fq '| V11 |' "$check_cmd" || fail 'E2 command has no V11 row'
 grep -Fq '| V12 |' "$template_prontidao" || fail 'readiness template has no V12 row'
 grep -Fq '| V12 |' "$check_cmd" || fail 'E2 command has no V12 row'
 grep -Fq 'doze verificações (V1..V12)' "$hook_pr" || fail 'PR hook does not announce twelve checks'
@@ -1475,7 +1477,7 @@ grep -Fq '(`pre-e2`, `pre-e6`' "$hooks_readme" \
   && fail 'hooks README ainda dá o enum antigo de checkpoints'
 grep -Fq "$enum_cp" "$hooks_readme" || fail 'hooks README sem o enum de checkpoints novo'
 
-# E2: ordem reconciliação → V1..V11 (V9 por script) → gravação com portao_sha
+# E2: ordem reconciliação → V1..V12 (V9 por script) → gravação com portao_sha
 grep -Fq 'portao-v9.sh' "$prontidao" || fail "02-prontidao não manda rodar portao-v9.sh"
 grep -Fq 'portao_sha' "$prontidao" || fail "02-prontidao não grava portao_sha"
 grep -Fq 'validade-do-portao.sh' "$prontidao" || fail '02-prontidao não cita validade-do-portao.sh'

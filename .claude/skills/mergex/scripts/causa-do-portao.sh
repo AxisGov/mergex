@@ -12,8 +12,8 @@
 #   1. Cada verificação tem UMA causa (tabela CAUSAS). Nenhum outro valor existe.
 #   2. Várias falhas: vence a primeira da ORDEM — V10; depois V6..V9; depois
 #      V1..V5, V11 e V12, cada grupo na numeração do portão. A V12 vem por
-#      último: sem commit de task não há evidência para conferir, e a falha
-#      dela é consequência da V11 e da V1 quando elas também falham (DM-239).
+#      último: ela só confere tasks concluídas e com commit, e enquanto a V1
+#      ou a V11 falham o commit que a revisão cobre ainda pode mudar (DM-239).
 #   3. `vN_sem_prova` é a verificação que não pôde rodar (FALHA por ausência de
 #      prova). Se ela aparece antes de qualquer falha provada, a causa é
 #      `indeterminada`: a mergex não sabe, e não inventa.

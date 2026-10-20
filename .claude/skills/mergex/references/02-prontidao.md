@@ -284,14 +284,17 @@ bash .claude/skills/mergex/scripts/portao-v12.sh --verificar \
 
 O script não decide a regra: ele pergunta ao `conferir` do núcleo do expx instalado (`expx-revisao.mjs conferir --trabalho <trabalho_id> --modo <modo> --task <T>=<commit>…`), com o commit do **último** item de cada task `concluida` em `ENTREGA.commits`, e traduz a resposta (DM-238). A primeira linha é sempre `V12=OK|AVISO|FALHA|SEM_PROVA|n/a`; depois vêm as linhas do `conferir` como vieram (`T-NN.MM ok`, `T-NN.MM AVISO <motivo>`, `T-NN.MM FALHA <motivo>`) ou `motivo=`. Códigos: 0 (OK, AVISO, `n/a`), 1 (FALHA), 2 (SEM_PROVA), 64 (uso).
 
-O modo vem de `.expx/fatiamento.json` (`revisao_por_task`), lido pelo `leitor-do-projeto.sh --rev HEAD`:
+O modo vem de `.expx/fatiamento.json` (`revisao_por_task`), lido pelo `leitor-do-projeto.sh --rev HEAD`. As linhas valem na ordem do script: a entrega de planejamento primeiro, depois a leitura do modo, depois as tasks:
 
 | Situação | `obrigatoria` | `se_disponivel` | `desligada` |
 |---|---|---|---|
 | sem `.expx/fatiamento.json` | `n/a`, sem node | `n/a`, sem node | `n/a`, sem node |
 | entrega de planejamento (`entrega-de-planejamento.sh`) | `n/a` | `n/a` | `n/a` |
-| modo `desligada`; `versionado: false`; nenhuma task concluída com commit | — | — | `n/a` |
-| configuração inválida, `FATIA_*` no ambiente, leitor ausente, núcleo antigo ou node ausente (o modo não pode ser lido) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
+| modo `desligada` | — | — | `n/a`, sem chamar o `conferir` |
+| `versionado: false`; nenhuma task concluída; nenhuma task concluída com item em `ENTREGA.commits` | `n/a` | `n/a` | `n/a` |
+| fora de um repositório Git (sem `--raiz`) | `n/a` com `versionado: false`; SEM_PROVA com `versionado: true` | idem | idem |
+| configuração inválida, `FATIA_*` no ambiente (mesmo sem `.expx/fatiamento.json`), leitor ausente, núcleo antigo ou node ausente (o modo não pode ser lido) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
+| `revisao_por_task` fora dos três modos; `tasks.md` ou `ENTREGA.commits` ilegível; último item da task sem commit válido (a V12 nunca volta a um item anterior) | SEM_PROVA | SEM_PROVA | — |
 | `entrega-de-planejamento.sh` sai ≠ 0 (entrega incoerente) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
 | núcleo instalado sem `expx-revisao.mjs` | SEM_PROVA | AVISO `revisao-nao-conferida:<motivo>` | — |
 | `conferir` 0 / 3 / 1 | OK / AVISO / FALHA | OK / AVISO / FALHA | — |
@@ -419,13 +422,13 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | `tasks.md` sem frontmatter | Leia da prosa e registre o aviso; se não for possível determinar o status, é `FALHA` em V1 |
 | `QA.md` ausente em trabalho da runx | `FALHA` em V5 — a entrega ainda não passou pelo E4 da runx |
 | `PERFIL.md` ausente | V8 inteira é `n/a`; não invente modo legado |
-| Sem versionador | `portao-v9.sh` exige Git: fora de um repositório ele sai `v9_sem_prova` com o motivo `fora de um repositório Git` (código `3`). Por isso, com `versionado: false`, não o rode: V9 e V10 seguem a regra em prosa sobre os arquivos declarados nas tasks e a árvore de trabalho ("Repositório sem versionador", na V10); as demais não mudam. A prova do `pre-push` é dispensada **só** fora de um repositório Git real (DM-186), nunca pelo campo `versionado` |
+| Sem versionador | `portao-v9.sh` exige Git: fora de um repositório ele sai `v9_sem_prova` com o motivo `fora de um repositório Git` (código `3`). Por isso, com `versionado: false`, não o rode: V9 e V10 seguem a regra em prosa sobre os arquivos declarados nas tasks e a árvore de trabalho ("Repositório sem versionador", na V10); a V12 é `n/a` (`motivo=sem-versionador`); as demais não mudam. A prova do `pre-push` é dispensada **só** fora de um repositório Git real (DM-186), nunca pelo campo `versionado` |
 | Branch base indisponível para o diff da V10 | Use `git diff HEAD~<n>..HEAD` sobre os commits do trabalho registrados no `ENTREGA.md`; registre a imprecisão como aviso. A V9 não usa o nome da base: o que ela não consegue provar é `v9_sem_prova` |
 | `portao-v9.sh` devolve `v9_sem_prova` (código `3`) | `FALHA` em V9, registrada como `v9_sem_prova`, com os `motivo` do script. Raso: `git fetch --unshallow` e o E2 de novo |
 | Barreira `reconciliacao-base` reprovada | E2 não emite `PRONTO`; relate os `motivo`; persistência pendente se resolve com o checkpoint explícito `reconciliacao-base`, fora do portão |
 | Verificação impossível de rodar | Marque `FALHA`, nunca `OK`, e registre `vN_sem_prova` em `falhas_portao`. Ausência de prova não é prova |
 | Task `concluida` sem item em `ENTREGA.commits` | `FALHA` em V11. Sem commit existente: E1 tardio normal. Com commit existente e append perdido: `--registrar-existente`, nunca um segundo commit. |
 | `ENTREGA.md` sem a chave `commits`, ou ilegível | `FALHA` em V11, registrada como `v11_sem_prova` |
-| `portao-v12.sh` devolve `V12=FALHA` (código `1`) | `FALHA` em V12, com as linhas `T-… FALHA <motivo>` do `conferir`. `evidencia-ausente`: revisar a task e commitar a evidência com ela; `incompleta:L1`: dividir a task; `incompleta:L2`: uma task anterior divide o arquivo; `achados-abertos:<n>`: corrigir ou o desenvolvedor rejeitar cada achado |
+| `portao-v12.sh` devolve `V12=FALHA` (código `1`) | `FALHA` em V12, com as linhas `T-… FALHA <motivo>` do `conferir`. `evidencia-ausente`: revisar a task e commitar a evidência com ela; `incompleta:L1`: dividir a task; `incompleta:L2`: uma task anterior divide o arquivo; `incompleta:<outro>` (`lote-falhou`, `perfil`, `pulado`…): revisar a task de novo, com a rota do contrato `expx-revisao`; `indisponivel:<motivo>`: a CLI de revisão não rodou, revisar de novo quando estiver disponível; `achados-abertos:<n>`: corrigir ou o desenvolvedor rejeitar cada achado; `evidencia-invalida:*`, `evidencia-nao-bate:*` ou `commit-inexistente:*`: a evidência no commit não prova a revisão daquele código, revisar a task de novo e registrar o commit novo (nunca editar a evidência à mão) |
 | `portao-v12.sh` devolve `V12=SEM_PROVA` (código `2`) | `FALHA` em V12, registrada como `v12_sem_prova`, com o `motivo=` do script (núcleo, node ou configuração que não lê; saída do `conferir` fora da forma) |
 | `ORQUESTRADOR.md` ou `tasks.md` ausente | `BLOQUEADO`: V1 não tem como determinar status — `v1_sem_prova` —, e as demais que dependem do plano também entram `_sem_prova` |

@@ -19,7 +19,8 @@
 #      inválida, `FATIA_*` no ambiente, núcleo ausente ou antigo, node ausente):
 #      SEM_PROVA em qualquer modo, porque o modo não pode ser lido.
 #   5. `desligada`, `versionado: false`, nenhuma task concluída ou nenhuma com commit:
-#      `n/a`, sem chamar o `conferir`.
+#      `n/a`, sem chamar o `conferir`. Fora de um repositório Git (sem `--raiz`), só
+#      `versionado: false` é `n/a`; o resto é SEM_PROVA (não há HEAD para ler o modo).
 #   6. Núcleo sem `expx-revisao.mjs`: SEM_PROVA em `obrigatoria`, AVISO
 #      `revisao-nao-conferida` em `se_disponivel`.
 #   7. `conferir` 0 / 3 / 1: OK / AVISO / FALHA (o modo já está no veredito de cada
@@ -85,9 +86,18 @@ case "$marca" in
   *) repassa; sem_prova 'entrega-de-planejamento-ilegivel' ;;
 esac
 
-# 2. o modo, pelo leitor do projeto, do commit (HEAD)
+# o leitor único de `commits` (sequencia-de-commits.sh, por prova-de-commit.sh); daqui só
+# `escalar` e `limpa`, como na V11
+# shellcheck source=sequencia-de-commits.sh
+. "$AQUI/sequencia-de-commits.sh"
+
+# 2. o modo, pelo leitor do projeto, do commit (HEAD). Fora de um repositório Git não há
+# HEAD a ler: com `versionado: false` a V12 é `n/a` (não há commit de task), senão SEM_PROVA.
 if [ -z "$RAIZ" ]; then
-  RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || sem_prova 'fora-de-um-repositorio-git'
+  RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    [ "$(limpa "$(escalar "$ENTREGA" versionado)")" != false ] || na 'sem-versionador'
+    sem_prova 'fora-de-um-repositorio-git'
+  }
 fi
 # absoluta: o node roda de dentro dela, e uma relativa seria resolvida duas vezes
 RAIZ="$(cd "$RAIZ" 2>/dev/null && pwd)" || sem_prova 'raiz-inexistente'
@@ -103,10 +113,7 @@ case "$MODO" in
   *) sem_prova "modo-desconhecido:$MODO" ;;
 esac
 
-# 3. versionado e as tasks: o leitor único de `commits` (sequencia-de-commits.sh, por
-# prova-de-commit.sh); daqui só `escalar` e `limpa`, como na V11
-# shellcheck source=sequencia-de-commits.sh
-. "$AQUI/sequencia-de-commits.sh"
+# 3. versionado e as tasks
 [ "$(limpa "$(escalar "$ENTREGA" versionado)")" != false ] || na 'sem-versionador'
 
 concluidas="$("$SH" "$AQUI/prova-de-commit.sh" --concluidas "$@" 2> "$tmp/err")" \

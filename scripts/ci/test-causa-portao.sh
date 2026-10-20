@@ -272,7 +272,7 @@ echo "11. registrar-portao grava a V12 pela lista do causa-do-portao"
 # ---------------------------------------------------------------------------
 REG="$(dirname "$CAUSA")/registrar-portao.sh"
 G="$(mktemp -d)"; TMPS="$TMPS $G"
-git -C "$G" init -q . && git -C "$G" config user.email teste@expx.local && git -C "$G" config user.name Teste && git -C "$G" config core.autocrlf false
+git -C "$G" init -q . && git -C "$G" config user.email teste@expx.local && git -C "$G" config user.name Teste && git -C "$G" config core.autocrlf false && git -C "$G" config commit.gpgsign false
 mkdir -p "$G/docs/entregas/ft-v12"
 entrega "$G/docs/entregas/ft-v12/ENTREGA.md" aberto null '[]' null
 sed 's/ft-teste/ft-v12/g' "$G/docs/entregas/ft-v12/ENTREGA.md" > "$G/e" && mv "$G/e" "$G/docs/entregas/ft-v12/ENTREGA.md"
