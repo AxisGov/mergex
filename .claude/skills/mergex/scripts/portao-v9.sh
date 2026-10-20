@@ -14,6 +14,8 @@
 # é só `^docs/(sprintx|entregas|eventos)/` (nem a união das tasks, nem os
 # cobertos, nem submódulo); cada desvio sai `fora_do_planejamento<TAB><caminho>`.
 # Com --no-renames, a origem de uma renomeação para docs/ conta como desvio.
+# A opção não é confiada: o ENTREGA.md de HEAD tem de ser a entrega de
+# planejamento (entrega-de-planejamento.sh); senão, v9_sem_prova.
 #
 # Só leitura: não grava no repositório, não adquire a trava C5, não exige
 # stage vazio; os temporários (fora do repositório) saem em toda saída.
@@ -96,6 +98,7 @@ ARTEFATO_SH="$AQUI/reconciliacao-artefato.sh"
 RB_SH="$AQUI/reconciliacao-base.sh"
 ARVORE_SH="$AQUI/reconciliacao-arvore.sh"
 PREDECESSORES_SH="$AQUI/predecessores-sprintx.sh"
+PLANEJAMENTO_SH="$AQUI/entrega-de-planejamento.sh"
 g() { git -c core.quotepath=false "$@"; }
 
 NL='
@@ -145,7 +148,7 @@ esac
 case "$ENTREGA" in ./*) ENTREGA="${ENTREGA#./}" ;; esac
 [ "$ENTREGA" = "docs/entregas/$TRABALHO/ENTREGA.md" ] || uso "--entrega deve ser docs/entregas/$TRABALHO/ENTREGA.md"
 
-for dependencia in "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH" "$RB_SH" "$ARVORE_SH" "$PREDECESSORES_SH"; do
+for dependencia in "$CATALOGO_SH" "$OWNERSHIP_SH" "$ARTEFATO_SH" "$RB_SH" "$ARVORE_SH" "$PREDECESSORES_SH" "$PLANEJAMENTO_SH"; do
   [ -r "$dependencia" ] || sem_prova "dependência indisponível: $dependencia"
 done
 # shellcheck source=catalogo-de-metodo.sh
@@ -185,6 +188,14 @@ esac
 [ "$(catalogo_fm "$ENTREGA_H" kind)" = entrega ] || sem_prova "$ENTREGA de HEAD não declara kind: entrega"
 [ "$(catalogo_fm "$ENTREGA_H" trabalho_id)" = "$TRABALHO" ] || sem_prova 'trabalho explícito diverge de ENTREGA.trabalho_id em HEAD'
 [ "$(catalogo_fm "$ENTREGA_H" expx_tool)" = "$ORIGEM" ] || sem_prova 'origem explícita diverge de ENTREGA.expx_tool em HEAD'
+# --planejamento não é confiado: a entrega de HEAD tem de ser a de planejamento
+if [ "$PLANEJAMENTO" = 1 ]; then
+  MARCA="$(bash "$PLANEJAMENTO_SH" --entrega "$ENTREGA_H" 2>&1)" || sem_prova "entrega de HEAD ilegível para entrega-de-planejamento.sh: $MARCA"
+  case "$MARCA" in
+    planejamento=sim*) ;;
+    *) sem_prova '--planejamento numa entrega que não é a de planejamento (entrega-de-planejamento.sh em HEAD)' ;;
+  esac
+fi
 
 # ---------------------------------------------------------------------------
 # A cadeia de reconciliação: `reconciliacao-base.sh --verificar`, com o

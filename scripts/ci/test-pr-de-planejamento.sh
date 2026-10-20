@@ -232,6 +232,16 @@ v9 "$aux/v9b" --planejamento
 [ "$rc" = 1 ] && grep -qx "$(printf 'fora_do_planejamento\tsrc/a.ts')" "$aux/v9.out"
 confere 'V9 de planejamento: renomeacao de src/a.ts para docs/sprintx/ reprova pela origem' $?
 
+# --planejamento numa entrega comum: a V9 nao confia na opcao, confere a marca de HEAD
+repo_planejamento "$aux/v9c"
+sed '/^sprint_atual:/,/^    merge: null$/d' "$aux/v9c/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/v9c/docs/entregas/plan/ENTREGA.md"
+mkdir -p "$aux/v9c/docs/sprintx/features/plan"; printf 'x\n' > "$aux/v9c/docs/sprintx/features/plan/nota.md"
+g -C "$aux/v9c" add -A; g -C "$aux/v9c" commit -q -m comum
+v9 "$aux/v9c" --planejamento
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não é a de planejamento' "$aux/v9.out"
+confere 'V9 --planejamento numa entrega comum: v9_sem_prova (nao confia na opcao)' $?
+
 echo '== E8 e E9: o registro do PR de planejamento =='
 
 SHA_M=0123456789abcdef0123456789abcdef01234567
