@@ -430,13 +430,21 @@ soltos="$(tr -d '\r' < "$e7" | grep -w 'eval' | grep -vxF 'set -a; eval "$fatia"
 [ -z "$soltos" ] && passa 'nenhum eval solto no E7, fora do consumo do leitor' \
   || quebra "eval solto no E7: $soltos"
 nucleo_rel='.expx/marketplace/plugins/expx/nucleo/scripts'
+copia_nucleo="$raiz/scripts/ci/fixtures/candidatos/expx-nucleo"
+# monta_nucleo <destino>: a copia inteira do nucleo (menos o ORIGEM), com as subpastas, sem CR
+# (num checkout com core.autocrlf=true a copia chega com CRLF)
+monta_nucleo() {
+  local f
+  while IFS= read -r f; do
+    mkdir -p "$1/$(dirname "$f")" && tr -d '\r' < "$copia_nucleo/$f" > "$1/$f"
+  done < <(cd "$copia_nucleo" && find . -type f ! -path ./ORIGEM | sed 's|^\./||')
+}
 cenario() { # <nome> [sem-nucleo] [config da base] — remoto e clone novos, base com o nucleo; fica em feature/x
   local dv="$aux/c-$1"
   git init -q --bare -b main "$aux/c-$1.git"; git clone -q "$aux/c-$1.git" "$dv" 2>/dev/null
   mkdir -p "$dv/.expx"; [ -z "${3:-}" ] || printf '%s\n' "$3" > "$dv/.expx/fatiamento.json"
   if [ "${2:-}" != sem-nucleo ]; then
-    mkdir -p "$dv/$nucleo_rel"
-    tr -d '\r' < "$raiz/scripts/ci/fixtures/candidatos/expx-nucleo/expx-fatiamento.mjs" > "$dv/$nucleo_rel/expx-fatiamento.mjs"
+    monta_nucleo "$dv/$nucleo_rel"
   fi
   printf 'base\n' > "$dv/base.txt"; c "$1" add -A; c "$1" commit -q -m base; c "$1" push -q origin main 2>/dev/null
   c "$1" switch -q -c feature/x
