@@ -61,9 +61,9 @@ Serviço sem ferramenta conhecida (Bitbucket, Azure DevOps, Gitea, servidor inte
 
 ## Passo 1.5 — O PR cabe numa revisão (`expx-fatiamento`)
 
-Antes de abrir — pelo passo 2 **ou** pelo passo 3, que manda abrir à mão —, meça o PR contra F2,
-F3 e F4 do contrato `expx-fatiamento` do ExpxDev. A base é a `branch_base` do `ENTREGA.md` **no
-mesmo remoto do upstream** (`$remoto`, dos pré-requisitos), buscada agora e conferida; uma ref
+Antes de abrir — pelo passo 2 **ou** pelo passo 3, que manda abrir à mão —, meça o PR contra os
+limites do revisor automático, L2 e L3 do contrato `expx-fatiamento` do ExpxDev. A base é a
+`branch_base` do `ENTREGA.md` **no mesmo remoto do upstream** (`$remoto`, dos pré-requisitos), buscada agora e conferida; uma ref
 local antiga, ou de outro remoto (fork), mediria o PR contra a base errada. A exceção é a
 `branch_base` que já nomeia o remoto (`upstream/main`, `refs/remotes/upstream/main`, como a base
 informada pelo chamador no E0 pode vir): aí vale o remoto dela, e só o nome da branch vai para o
@@ -114,57 +114,63 @@ git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem 
 base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
 fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev "$publicado")" || { echo "configuração do projeto (.expx/fatiamento.json) não lida: o E7 não mede nem abre o PR"; exit 2; }
 set -a; eval "$fatia"; set +a
-e7_ignorar='(^|/)package-lock\.json$|^docs/(sprintx|entregas|eventos)/'
-FATIA_IGNORAR="${FATIA_IGNORAR:+$FATIA_IGNORAR|}$e7_ignorar" \
-FATIA_EXCECAO="${FATIA_EXCECAO:-}" \
-  bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$base" "$publicado"
+set --; set -f; ifs_antes="$IFS"; IFS='|'
+for parte in $EXPX_EXCLUIR_DA_REVISAO; do [ -n "$parte" ] && set -- "$@" --excluir-da-revisao "$parte"; done
+IFS="$ifs_antes"; set +f
+bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$@" "$base" "$publicado"
 rc_fatia=$?; [ "$rc_fatia" = 0 ] && { printf '%s\n' "$bb" > "$estado_bb" || exit 1; }; exit "$rc_fatia"
 ```
 
-O `FATIA_IGNORAR` vai explícito porque o padrão do script é o do ExpxDev, que também tira
-`fixtures/candidatos/` da conta; no projeto do desenvolvedor esse caminho pode ser código
-revisado. Código gerado que o projeto exclui da revisão automática entra aqui só se o
-desenvolvedor declarar o padrão — e o padrão dele **soma** ao do E7, nunca o substitui: os artefatos de
-método saem da medida sempre.
+Os limites são os do CodeAnt, **fixos**: vêm dos perfis do núcleo do expx, e nenhum projeto os
+calibra, nem para afrouxar nem para apertar.
 
-Os limites vêm de `.expx/fatiamento.json`, a configuração do projeto, lida pelo
-`leitor-do-projeto.sh` com o leitor do núcleo do expx — nunca o JSON cru. Sem o arquivo, o
-helper devolve os padrões sem chamar node, e o E7 mede como sempre mediu. Com ele, valem os
-limites de legibilidade calibrados pelo projeto e o `ignorar` dele (`FATIA_IGNORAR_PROJETO`,
-que também **soma**); a capacidade do revisor (F2c, 100 arquivos visíveis) nunca se afrouxa.
-O arquivo lido é o do **SHA publicado** (`--rev "$publicado"`), nunca o do disco: um arquivo
-sujo, diferente do commitado, não muda a medida do que o revisor vai ler. O
-`FATIA_CAPACIDADE_EXCLUIDO` (o que o painel do revisor não mostra, fora da F2c) também sai do
-leitor — no padrão, só os artefatos de método; sem ele, `fixtures/candidatos/` ficaria fora
-do limite de 100 arquivos visíveis. O `set -a` exporta o que o leitor imprimiu para o script.
+- **L2 — arquivo:** cada arquivo revisável alterado ou criado tem no máximo 5.000 linhas e
+  204.800 bytes no SHA publicado, contados como a CLI do revisor conta (quebras de linha + 1;
+  vale o maior entre o blob e o arquivo do checkout). Acima disso, o arquivo é pulado pela
+  revisão, não revisado.
+- **L3 — PR:** no máximo 100 arquivos alterados, **todos** contados, como o `changed_files` do
+  serviço: código, lock, gerados e artefatos de método. O app do CodeAnt pula a revisão de PR
+  com mais de 100 arquivos.
+
+Não há limite de linhas por PR nem por commit. Nenhum limite nem exclusão vem do ambiente:
+variável `FATIA_*` no shell, mesmo vazia, faz o leitor e o script falharem, e o bloco sai `2`.
+
+A configuração do projeto, `.expx/fatiamento.json`, é lida pelo `leitor-do-projeto.sh` com o
+leitor do núcleo do expx — nunca o JSON cru —, e o arquivo lido é o do **SHA publicado**
+(`--rev "$publicado"`), nunca o do disco: um arquivo sujo, diferente do commitado, não muda a
+medida do que o revisor vai ler. Sem o arquivo, o helper devolve os padrões sem chamar node. O
+`set -a` exporta o que o leitor imprimiu. O `excluir_da_revisao` do projeto
+(`EXPX_EXCLUIR_DA_REVISAO`, pastas literais separadas por `|`) vira argumento: um
+`--excluir-da-revisao <pasta>` por pasta, inteira mesmo com espaço no nome, sem expansão de
+glob; vazio não gera argumento, e o `set --` garante que nenhum parâmetro posicional herdado
+chega ao script. A exclusão só tira a pasta de L2, **nunca de L3**.
 
 Os **artefatos de método** — `docs/sprintx/`, `docs/entregas/`, `docs/eventos/`, o que a
-`sprintx` e esta skill gravam na branch — ficam fora da medida (exceção "artefato de método"
-do F6 do `expx-fatiamento`). Eles entram no PR para rastreabilidade, mas o planejamento de uma
-feature sozinho passa de centenas de arquivos e dezenas de milhares de linhas: medi-los
-reprovaria todo PR, e o que o revisor precisa ler é o código. Fora da medida também deve ser
-fora da revisão automática: no CodeAnt, os mesmos três caminhos vão na exclusão de arquivos
-do painel do projeto (Code Review → Configuration → Exclusions → Exclude Files). A mergex
-não enxerga o painel: quando o PR leva artefatos de método, o relato do E7 ao desenvolvedor
-lembra os três padrões a excluir lá — o `PR.md` não, que sai do E4 sem essa entrada.
+`sprintx` e esta skill gravam na branch — ficam fora de L2 pelo próprio script e **contam** em
+L3. No CodeAnt, os mesmos três caminhos vão na exclusão de arquivos do painel do projeto (Code
+Review → Configuration → Exclusions → Exclude Files), que os tira da revisão do app, mas não da
+conta dos 100: o app conta todos os arquivos alterados. A mergex não enxerga o painel: quando o
+PR leva artefatos de método, o relato do E7 ao desenvolvedor lembra os três padrões a excluir
+lá — o `PR.md` não, que sai do E4 sem essa entrada.
 
-Saída `0`: siga para o passo 2 (ou 3, sem ferramenta); avisos (arquivo perto do limite) vão para a seção de atenção do
-`PR.md`, sem impedir. Saída `1`: o E7 **não abre o PR**. Um PR acima do limite não recebe
-revisão automática (o CodeAnt pula PR com mais de 100 arquivos e documenta 5.000 linhas por
-arquivo), e PR sem revisão que parece revisado é pior que PR não aberto. Registre o motivo com a
-lista de violações, deixe `pr_estado` em `null` e diga ao desenvolvedor como dividir: por
-assunto (F1), um PR por fatia, na ordem das tasks. No passo 3 vale igual: o `PR.md` não manda
-abrir à mão um PR que reprovou aqui. A exceção de movimento mecânico (F6) só vale
-quando **o desenvolvedor** a declara (`FATIA_EXCECAO=<motivo>`), nunca por decisão do E7. Ela
-vai explícita na chamada, como o `FATIA_IGNORAR`: declarada sem `export`, não chegaria ao script.
+Saída `0`: siga para o passo 2 (ou 3, sem ferramenta). Saída `1`: o E7 **não abre o PR**. Um PR
+acima do limite não recebe revisão automática, e PR sem revisão que parece revisado é pior que
+PR não aberto. Registre o motivo com a lista de violações, deixe `pr_estado` em `null` e diga ao
+desenvolvedor como resolver: em L2, uma task anterior divide o arquivo, deixando o original e as
+partes abaixo do limite; em L3, divida a sprint (`entrega: por_sprint`) ou o trabalho
+(`por_trabalho`). Nunca force a revisão do app nem abra à mão: no passo 3 vale igual, o `PR.md`
+não manda abrir à mão um PR que reprovou aqui.
 
 Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre o PR**. O script não conseguiu
-medir — ref inexistente, sem ancestral comum entre a base e o SHA publicado, `git diff` que
-falhou — e PR não medido não é PR dentro do limite. Registre o erro literal, deixe `pr_estado` em
-`null` e diga ao desenvolvedor o que impediu a medição; no passo 3 vale igual. A configuração
-que não se lê também é saída `2`, nunca violação nem os padrões: `.expx/fatiamento.json`
-inválido (o leitor diz a chave) ou presente sem o leitor do núcleo ou sem node (atualize o
-expx: `expx update`). Medir com os padrões um projeto que declarou os seus seria medir outra coisa.
+medir — ref inexistente, sem ancestral comum entre a base e o SHA publicado, objeto ausente,
+`git diff` que falhou — e PR não medido não é PR dentro do limite. Registre o erro literal,
+deixe `pr_estado` em `null` e diga ao desenvolvedor o que impediu a medição; no passo 3 vale
+igual. Também é saída `2`, nunca violação nem os padrões: variável `FATIA_*` no ambiente
+(remova-a: os limites são fixos), `.expx/fatiamento.json` inválido (o leitor diz a chave; a
+versão 1 pede a migração para a 2), ou presente sem o leitor do núcleo, com o núcleo antigo (sem
+`expx-limites.mjs` ou sem `perfis/`), com o núcleo versionado no commit diferente do instalado,
+ou sem node (atualize o expx: `expx update`). Medir com os padrões um projeto que declarou os
+seus seria medir outra coisa.
 
 ## Passo 2 — Abrir o PR
 
@@ -317,9 +323,9 @@ Siga para o E8.
 | Ferramenta não instalada | Passo 3. Não é erro |
 | Ferramenta não autenticada | Passo 3. **Nunca** rode `gh auth login` nem equivalente |
 | Serviço não suportado | Passo 3 |
-| `fatiamento-da-pr.sh` saiu `1` (PR acima de F2, F3 ou F4) | O E7 **não abre o PR**: registra as violações, `pr_estado` fica `null`, e o desenvolvedor recebe como dividir |
-| `fatiamento-da-pr.sh` saiu `2` ou outro código (não mediu: ref inexistente, sem ancestral comum, `git diff` falhou) | O E7 **não abre o PR**: registra o erro literal, `pr_estado` fica `null`; não medido não é dentro do limite |
-| `leitor-do-projeto.sh` falhou (`.expx/fatiamento.json` inválido, ou presente sem o leitor do núcleo ou sem node): o bloco sai `2` | O E7 **não abre o PR**: registra o erro literal (a chave inválida, ou `expx update`), `pr_estado` fica `null`; nunca mede com os padrões |
+| `fatiamento-da-pr.sh` saiu `1` (L2: arquivo revisável acima de 5.000 linhas ou 204.800 bytes; L3: mais de 100 arquivos) | O E7 **não abre o PR**: registra as violações, `pr_estado` fica `null`, e o desenvolvedor recebe como dividir (L2: uma task anterior divide o arquivo; L3: dividir a sprint ou o trabalho); nunca força a revisão do app |
+| `fatiamento-da-pr.sh` saiu `2` ou outro código (não mediu: ref inexistente, sem ancestral comum, objeto ausente, `git diff` falhou; ou `FATIA_*` no ambiente) | O E7 **não abre o PR**: registra o erro literal, `pr_estado` fica `null`; não medido não é dentro do limite. Com `FATIA_*` no ambiente, o desenvolvedor remove a variável |
+| `leitor-do-projeto.sh` falhou (`FATIA_*` no ambiente, `.expx/fatiamento.json` inválido ou na versão 1, ou presente sem o leitor do núcleo, com núcleo antigo — sem `expx-limites.mjs` ou `perfis/` —, com o núcleo do commit diferente do instalado, ou sem node): o bloco sai `2` | O E7 **não abre o PR**: registra o erro literal (a variável a remover, a chave inválida, ou `expx update`), `pr_estado` fica `null`; nunca mede com os padrões |
 | Comando falhou por permissão | Passo 3, com o erro literal registrado |
 | PR já existe | Recupere a URL e registre; é retomada |
 | Sem push | O E7 não roda; siga para o E8 |
