@@ -146,6 +146,12 @@ g switch -q -c l2-4999 main; linhas 4999 "$tmp/grande.ts"; g add -A; g commit -q
 saida="$(mede main l2-4999)"; rc=$?
 [ "$rc" = 0 ] && passa 'L2: 4.999 linhas com quebra final passa' \
   || quebra "L2: 4.999 linhas com quebra final (rc $rc): $saida"
+# nome que comeca com hifen: o checkout e medido como arquivo, nunca lido como opcao
+g switch -q -c l2-hifen main; linhas 5000 "$tmp/-n.md"; g add -A; g commit -q -m l2-hifen
+saida="$(mede main l2-hifen)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *'VIOLACAO L2: -n.md tem 5001 linhas'*) true ;; *) false ;; esac \
+  && passa 'L2: arquivo -n.md medido pelo espelho (blob e checkout)' \
+  || quebra "L2: arquivo -n.md (rc $rc): $saida"
 # a exclusao chega por argumento, inteira, mesmo com espaco no nome da pasta; so tira de L2
 g switch -q -c l2-espaco main; linhas 5000 "$tmp/dados de teste/g.txt"; g add -A; g commit -q -m l2-espaco
 saida="$(mede --excluir-da-revisao '^dados de teste/' main l2-espaco)"; rc=$?

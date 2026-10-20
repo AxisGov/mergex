@@ -45,7 +45,7 @@ o que segue é o que você precisa para gravar. As regras universais valem todas
 | `estado` | `aberto` \| `entregue` \| `bloqueado` |
 | `portao` | `pronto` \| `bloqueado` \| `null` (ainda não rodou) |
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
-| `origem_base` | `registrada_e0` \| `inferida_legado` \| `null` (sem versionador) |
+| `origem_base` | `registrada_e0` \| `registrada_sprint` (DM-261) \| `inferida_legado` \| `null` (sem versionador) |
 | `tipo_trabalho` | `feature` \| `ocorrencia` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
 | `causa` | as dez causas de `references/00-schema.md` \| `indeterminada` \| `null` |

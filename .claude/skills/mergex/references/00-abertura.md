@@ -82,6 +82,48 @@ recusa e manda rodar o E9, que lê o PR no serviço e registra o merge, inclusiv
 do serviço (`09-revisao.md`). O E0 nunca consulta o serviço. Branch sem a main: recusa, e a
 sprintx atualiza a branch antes de chamar de novo.
 
+Na mesma gravação, o E0 **reancora a base validada** (DM-261): `base_validada_sha` passa a ser
+`git merge-base HEAD <base>` (a main atualizada, que contém o `merge_sha`) e `origem_base` passa a
+`registrada_sprint`. Sem isso, a V9 da primeira sprint não tem base: a antiga traz no diff tudo o
+que veio da main, e uma base nova sem a marca contém o commit do planejamento (a pasta do trabalho
+e o `Trabalho: <id>`), que a V9 recusa. Com `registrada_sprint`, a V9 lê o `merge_sha` da entrega
+e só desconta das guardas da base o que ele contém (`02-prontidao.md`, V9). Vale em `por_sprint`
+e em `por_trabalho`. Entrega com `reconciliacoes` não vazio (a main entrou na branch do
+planejamento por reconciliação) não é reancorada: a base dela vem da cadeia, e o E0 recusa.
+
+As três pré-condições e a base nova, em toda retomada sem `--planejamento` (`<base>` é a base
+buscada, por exemplo `origin/main`). Saída 0 com as duas linhas: grave-as. Saída 0 sem nada: não
+é a primeira sprint depois do planejamento, e a base fica como está. Saída 1: recusa, sem escrever
+nada. Saída 2: entrega ilegível ou base inexistente; relate o motivo.
+
+```bash
+# E0, retomada sem --planejamento: a base da primeira sprint depois do planejamento
+marca="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "docs/entregas/<trabalho_id>/ENTREGA.md")" || exit 2
+case "$marca" in planejamento=sim*) ;; *) exit 0 ;; esac
+estado="$(printf '%s\n' "$marca" | sed -n 's/^estado=//p')"
+merge_sha="$(printf '%s\n' "$marca" | sed -n 's/^merge_sha=//p')"
+if [ "$estado" != merged ]; then
+  printf 'mergex E0 BLOQUEADO — o merge do PR de planejamento não está registrado: rode o E9, que o lê no serviço e o registra\n' >&2
+  exit 1
+fi
+# com reconciliação registrada, a base vem da cadeia: reancorar a deixaria sem âncora
+rec="$(awk 'NR == 1 { next } /^---/ { exit } /^reconciliacoes:/ { sub(/^reconciliacoes:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print "v=" $0; exit }' "docs/entregas/<trabalho_id>/ENTREGA.md")"
+case "$rec" in ''|'v=[]') ;; *)
+  printf 'mergex E0 BLOQUEADO — a entrega já tem reconciliacoes: a base da primeira sprint não é reancorada sobre uma cadeia de reconciliação\n' >&2
+  exit 1 ;;
+esac
+base_sha="$(git rev-parse --verify -q "<base>^{commit}")" || { printf 'mergex E0: base <base> inexistente\n' >&2; exit 2; }
+git merge-base --is-ancestor "$merge_sha" "$base_sha" 2>/dev/null || {
+  printf 'mergex E0 BLOQUEADO — a base <base> não contém o merge do planejamento (%s): busque a base de novo\n' "$merge_sha" >&2
+  exit 1
+}
+git merge-base --is-ancestor "$base_sha" HEAD 2>/dev/null || {
+  printf 'mergex E0 BLOQUEADO — a branch não foi atualizada a partir de <base> depois do merge do planejamento\n' >&2
+  exit 1
+}
+printf 'base_validada_sha=%s\norigem_base=registrada_sprint\n' "$(git merge-base HEAD "$base_sha")"
+```
+
 ## Passo 1 — Detectar se o repositório usa versionamento
 
 ```
@@ -298,7 +340,7 @@ Atualize **somente o necessário** para abrir uma nova tentativa de entrega:
 | `branch`, `branch_base` | coerentes com a branch adotada e com a base efetiva do passo 3 |
 | `sprint_atual`, `prs` | **preservados**, com uma exceção: a primeira retomada sem `--planejamento` depois do PR de planejamento `merged` grava `sprint_atual: null` e volta `pr_url`/`pr_estado` a `null` ("Retomada depois do PR de planejamento"). Com `--planejamento`, o item de planejamento fica como está. Arquivo anterior às chaves ganha `sprint_atual: null` e `prs: []` |
 | `portao_sha` | volta para `null`, junto com `portao` |
-| `base_validada_sha`, `origem_base` | **preservados como estão.** O E0 de retomada **nunca acrescenta nem troca `base_validada_sha`** num `ENTREGA.md` existente: a base validada só muda pelo `reconciliacao-base.sh --registrar`, e uma entrega legada sem a chave só a ganha, uma única vez, na primeira reconciliação (`origem_base: inferida_legado`, `references/11-reconciliacao-base.md`) |
+| `base_validada_sha`, `origem_base` | **preservados como estão.** O E0 de retomada **nunca acrescenta nem troca `base_validada_sha`** num `ENTREGA.md` existente, com uma única exceção: a primeira retomada sem `--planejamento` depois do PR de planejamento `merged` os reancora na main atualizada, com `origem_base: registrada_sprint` ("Retomada depois do PR de planejamento", DM-261). Fora dela, a base validada só muda pelo `reconciliacao-base.sh --registrar`, e uma entrega legada sem a chave só a ganha, uma única vez, na primeira reconciliação (`origem_base: inferida_legado`, `references/11-reconciliacao-base.md`) |
 | `reconciliacoes` | preservado — a cadeia de reconciliações é histórico da entrega |
 | `atualizado_em` | a data de hoje |
 | prosa | acrescente que **esta é uma retomada** — e, quando for o caso, que a tentativa anterior parou no portão |
@@ -364,7 +406,7 @@ O E0 terminou quando **todas** são verdade:
 - [ ] `git status --porcelain` estava vazio na hora de criar ou trocar a branch (ou o repositório não é versionado, ou a branch foi adotada sem troca).
 - [ ] `ORQUESTRADOR.md` tem a linha da branch.
 - [ ] `docs/entregas/<trabalho_id>/ENTREGA.md` existe com `estado: aberto` e frontmatter válido.
-- [ ] Numa entrega nova, `base_validada_sha` é um SHA de 40 hex com `origem_base: registrada_e0`; numa retomada, os dois estão exatamente como estavam.
+- [ ] Numa entrega nova, `base_validada_sha` é um SHA de 40 hex com `origem_base: registrada_e0`; numa retomada, os dois estão exatamente como estavam, salvo a primeira depois do PR de planejamento `merged`, que os grava com a saída do bloco da retomada (`origem_base: registrada_sprint`).
 - [ ] O `pre-push` efetivo está ativo: `ativacao-pre-push.sh --instalar` saiu `0` (chamador gerenciado instalado ou já presente, ou integração externa válida), sem alterar `core.hooksPath` nem hook de terceiro — ou o repositório não é versionado.
 - [ ] `.expx/estado.json` tem `branch` e `pr_estado: null` — **ou** `.expx/` não existe, ou o repositório não é versionado, e nesses casos nada foi gravado. Este item nunca reprova o E0.
 

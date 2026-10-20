@@ -291,6 +291,10 @@ preserva `commits`, `criado_em`, `pr_url`, `pr_estado`, `desvios`. `base_validad
 
 - **Execução nova:** o E0 grava `base_validada_sha = git merge-base HEAD <branch_base>` e
   `origem_base: registrada_e0` (`references/00-abertura.md`).
+- **Primeira sprint depois do PR de planejamento:** a retomada do E0 reancora a base com
+  `origem_base: registrada_sprint` (DM-261). Uma reconciliação sobre ela abre a cadeia como sobre
+  qualquer base registrada: o `001` grava `origem_base: registrada_e0`. O E0 não reancora uma
+  entrega que já tem `reconciliacoes`.
 - **Entrega anterior a esta versão** (sem `base_validada_sha`): na primeira reconciliação, e só
   nela, o `--registrar` infere `B0 = git merge-base P1 B1` e grava `origem_base: inferida_legado`
   no `ENTREGA.md` e no artefato `001`. A inferência falha fechada (código `6`) quando:
