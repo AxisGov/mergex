@@ -42,7 +42,7 @@
 # e no topo `pr_estado: merged` e `atualizado_em` (a data do sistema); o resto do
 # arquivo fica byte a byte. Imprime `registrado=merged` e `merge_sha=<sha>`.
 # Já `merged` com o mesmo sha: não escreve e sai 0; com outro: 1. Entrega que não
-# é de planejamento: 1. Ilegível: 2. sha fora de 40 ou 64 hex minúsculos: 64.
+# é de planejamento, ou ENTREGA.md que é link simbólico: 1. Ilegível: 2. sha fora de 40 ou 64 hex minúsculos: 64.
 #
 # Bash 3.2 (macOS): nada de mapfile, arrays associativos ou ${v,,}.
 
@@ -226,6 +226,8 @@ if [ "$REGISTRAR" = 0 ]; then
 fi
 
 # --registrar-merge
+# o `mv` do temporário trocaria o link por um arquivo e deixaria o alvo velho
+[ ! -L "$ENTREGA" ] || recusa "$ENTREGA é link simbólico: o registro só grava um arquivo regular"
 [ "$PLANEJAMENTO" = sim ] || recusa 'a entrega não é a do PR de planejamento: nada a registrar'
 if [ "$p_estado" = merged ]; then
   [ "$p_sha" = "$MERGE_SHA" ] || recusa "o planejamento já está merged com outro merge_sha ($p_sha)"

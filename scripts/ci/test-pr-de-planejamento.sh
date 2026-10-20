@@ -182,6 +182,8 @@ awk '/^## Entrega de planejamento/ { d = 1; next } d && /^## / { exit } d' "$ref
 grep -q 'V1, V2, V3 e V11' "$aux/e2.txt" && grep -q 'planejamento: nenhuma task executada' "$aux/e2.txt" \
   && grep -q 'entrega-de-planejamento.sh' "$aux/e2.txt" && grep -q -- '--planejamento' "$aux/e2.txt"
 confere '02-prontidao marca V1, V2, V3 e V11 n/a na entrega de planejamento' $?
+grep -q 'Saída:.*fora_do_planejamento' "$ref/02-prontidao.md"
+confere '02-prontidao: a Saida da V9 cita fora_do_planejamento' $?
 
 # A V9 de planejamento numa entrega de verdade: base por SHA, diff --no-renames
 v9() { # <repo> [--planejamento] — saída em $aux/v9.out, código em $rc
@@ -395,6 +397,17 @@ cp "$aux/antiga.md" "$aux/antiga-antes.md"
 bash "$leitor" --registrar-merge --entrega "$aux/antiga.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
 [ "$rc" = 1 ] && cmp -s "$aux/antiga.md" "$aux/antiga-antes.md"
 confere '--registrar-merge numa entrega comum: recusa sem escrever' $?
+# ENTREGA.md que e link simbolico: recusa sem tocar o alvo (no Windows o link pode nao ser criavel)
+entrega "$aux/alvo.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
+cp "$aux/alvo.md" "$aux/alvo-antes.md"
+ln -s "$aux/alvo.md" "$aux/link.md" 2>/dev/null
+if [ -L "$aux/link.md" ]; then
+  bash "$leitor" --registrar-merge --entrega "$aux/link.md" --merge-sha "$SHA_M" >/dev/null 2>"$aux/err"; rc=$?
+  [ "$rc" = 1 ] && [ -L "$aux/link.md" ] && cmp -s "$aux/alvo.md" "$aux/alvo-antes.md" && grep -q 'link simbólico' "$aux/err"
+  confere '--registrar-merge num ENTREGA.md que e link simbolico: recusa sem tocar o alvo' $?
+else
+  passa '--registrar-merge num ENTREGA.md que e link simbolico: pulado (link simbolico nao criavel aqui)'
+fi
 # CRLF: o fim de linha de cada linha fica como estava (no Git Bash, o awk do MSYS
 # tira o CR na leitura sem BINMODE); o resto do arquivo fica byte a byte
 entrega "$aux/crlf.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
