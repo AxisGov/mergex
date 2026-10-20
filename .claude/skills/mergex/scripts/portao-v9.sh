@@ -6,8 +6,14 @@
 # seção 10; references/02-prontidao.md, V9.
 #
 # Uso:
-#   portao-v9.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md \
+#   portao-v9.sh --verificar [--planejamento] --entrega docs/entregas/<id>/ENTREGA.md \
 #     --origem <sprintx|runx> --trabalho <id>
+#
+# --planejamento (a entrega do PR de planejamento, DM-259; quem decide é
+# entrega-de-planejamento.sh): mesma base e mesmo diff, mas o conjunto aceito
+# é só `^docs/(sprintx|entregas|eventos)/` (nem a união das tasks, nem os
+# cobertos, nem submódulo); cada desvio sai `fora_do_planejamento<TAB><caminho>`.
+# Com --no-renames, a origem de uma renomeação para docs/ conta como desvio.
 #
 # Só leitura: não grava no repositório, não adquire a trava C5, não exige
 # stage vazio; os temporários (fora do repositório) saem em toda saída.
@@ -71,7 +77,8 @@
 #   origem_base=<registrada_e0|inferida_legado|reconciliacao|inferida_leitura>
 #   aviso<TAB><texto>                  (zero ou mais)
 #   resultado=<ok|v9>
-#   fora_do_plano<TAB><caminho>        (um por desvio, em ordem de byte)
+#   fora_do_plano<TAB><caminho>        (um por desvio, em ordem de byte;
+#                                       fora_do_planejamento com --planejamento)
 # ou, sem prova:
 #   resultado=v9_sem_prova
 #   motivo<TAB><texto>                 (um ou mais; com ok=false, seguido das
@@ -97,7 +104,7 @@ TAB='	'
 
 uso() {
   [ -z "${1:-}" ] || printf 'portao-v9: %s\n' "$1" >&2
-  printf '%s\n' 'uso: portao-v9.sh --verificar --entrega docs/entregas/<id>/ENTREGA.md --origem <sprintx|runx> --trabalho <id>' >&2
+  printf '%s\n' 'uso: portao-v9.sh --verificar [--planejamento] --entrega docs/entregas/<id>/ENTREGA.md --origem <sprintx|runx> --trabalho <id>' >&2
   exit 64
 }
 
@@ -118,10 +125,11 @@ sem_prova() {
   exit 3
 }
 
-MODO=""; ENTREGA=""; ORIGEM=""; TRABALHO=""
+MODO=""; ENTREGA=""; ORIGEM=""; TRABALHO=""; PLANEJAMENTO=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --verificar) [ -z "$MODO" ] || uso; MODO=verificar; shift ;;
+    --planejamento) [ "$PLANEJAMENTO" = 0 ] || uso; PLANEJAMENTO=1; shift ;;
     --entrega) [ "$#" -ge 2 ] && [ -z "$ENTREGA" ] || uso; ENTREGA="$2"; shift 2 ;;
     --origem) [ "$#" -ge 2 ] && [ -z "$ORIGEM" ] || uso; ORIGEM="$2"; shift 2 ;;
     --trabalho) [ "$#" -ge 2 ] && [ -z "$TRABALHO" ] || uso; TRABALHO="$2"; shift 2 ;;
@@ -333,7 +341,9 @@ PASTA="$ARVORE_PASTA"
 # história — e esta guarda é sobre a história.
 c="$(g rev-list -n1 --full-history "$BASE" -- "$PASTA" "$DIR_E" 2>/dev/null)" || sem_prova "histórico da base $BASE ilegível" # guarda:V9FULL
 [ -z "$c" ] || sem_prova "a base $BASE contém o commit $c, que toca a pasta do trabalho ou a entrega: a base contém o trabalho" # guarda:V9SHA
-bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 2> "$TMP_DIR/uniao.err" \
+# O planejamento não aceita pela união: nada de produto entra nele.
+: > "$TMP_DIR/uniao"
+[ "$PLANEJAMENTO" = 1 ] || bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 2> "$TMP_DIR/uniao.err" \
   || sem_prova "união das tasks de HEAD não calculável: $(tr '\n' ' ' < "$TMP_DIR/uniao.err")" # guarda:V9UNIAO
 
 # ---------------------------------------------------------------------------
@@ -343,7 +353,7 @@ bash "$OWNERSHIP_SH" --uniao "$RAIZ_H" "$ORIGEM" "$TRABALHO" > "$TMP_DIR/uniao" 
 : > "$TMP_DIR/predecessores-aceitos"
 : > "$TMP_DIR/predecessores-vistos"
 : > "$TMP_DIR/predecessores-fora"
-if [ "$ORIGEM" = sprintx ]; then
+if [ "$ORIGEM" = sprintx ] && [ "$PLANEJAMENTO" = 0 ]; then
   bash "$PREDECESSORES_SH" --verificar --rev "$HEAD_SHA" --trabalho "$TRABALHO" \
     > "$TMP_DIR/predecessores.out" 2> "$TMP_DIR/predecessores.err"
   RC_PRE=$?
@@ -399,11 +409,19 @@ fi
 g diff --raw -z --no-abbrev --no-renames --ignore-submodules=none "$BASE...$HEAD_SHA" > "$TMP_DIR/diff" 2>/dev/null \
   || sem_prova "diff $BASE...HEAD não calculável" # guarda:SUB
 contem() { grep -Fxq -e "$2" "$1"; }
+DESVIO=fora_do_plano; [ "$PLANEJAMENTO" = 0 ] || DESVIO=fora_do_planejamento
 : > "$TMP_DIR/fora"
 while IFS= read -r -d '' cab <&3 && IFS= read -r -d '' p <&3; do
   case "$p" in
-    *"$NL"*|*"$TAB"*) printf 'fora_do_plano\t%s\n' "$(printf '%s' "$p" | tr '\t\n' '??')" >> "$TMP_DIR/fora"; continue ;;
+    *"$NL"*|*"$TAB"*) printf '%s\t%s\n' "$DESVIO" "$(printf '%s' "$p" | tr '\t\n' '??')" >> "$TMP_DIR/fora"; continue ;;
   esac
+  if [ "$PLANEJAMENTO" = 1 ]; then
+    # só os artefatos de método; submódulo nunca, nem sob docs/
+    case "$cab" in ':160000 '*|':'*' 160000 '*) printf '%s\t%s\n' "$DESVIO" "$p" >> "$TMP_DIR/fora"; continue ;; esac
+    case "$p" in docs/sprintx/*|docs/entregas/*|docs/eventos/*) continue ;; esac
+    printf '%s\t%s\n' "$DESVIO" "$p" >> "$TMP_DIR/fora"
+    continue
+  fi
   contem "$TMP_DIR/uniao" "$p" && continue
   contem "$TMP_DIR/predecessores-aceitos" "$p" && continue
   if awk -F'\t' -v p="$p" '$1 == "fora_do_plano" && $2 == p { achou=1 } END { exit !achou }' "$TMP_DIR/predecessores-fora"; then

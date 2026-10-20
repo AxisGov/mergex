@@ -23,6 +23,60 @@ O canônico da sprintx é `docs/sprintx/features/<slug>/`; `docs/<slug>/` é o f
 
 Se nenhum deles existe, não há trabalho para abrir. Diga que a mergex precisa de um trabalho planejado (F4 da sprintx ou E2 da runx) e encerre sem criar nada.
 
+## A entrega de planejamento (`--planejamento`)
+
+O chamador pode pedir ao E0 a **entrega de planejamento** com `--planejamento` (DM-259): o PR que
+leva só os artefatos de método do planejamento (tudo sob `^docs/(sprintx|entregas|eventos)/`),
+aberto no fim da F5, antes da primeira sprint, com merge do desenvolvedor, nunca automático. Vale
+em `por_sprint` e em `por_trabalho`. A sprintx chama E0–E8 com `--planejamento` no fim da F5
+(`references/integracao/sprintx.md`). Só a pasta canônica (`docs/sprintx/features/<slug>/`) serve:
+a pasta antiga (`docs/<slug>/`) fica fora dos artefatos de método do PR de planejamento.
+
+**Pré-condição, antes de qualquer escrita:** o planejamento já está commitado. Nada sujo nem fora
+do índice sob a pasta do trabalho — quem commita o planejamento é a sprintx, antes de chamar o E0;
+a mergex não amplia o catálogo de método para isso:
+
+```bash
+# E0 --planejamento: o planejamento tem de estar commitado (<slug> = o trabalho)
+sujo="$(git status --porcelain --untracked-files=all -- "docs/sprintx/features/<slug>/")" || exit 2
+if [ -n "$sujo" ]; then
+  printf 'mergex E0 BLOQUEADO — planejamento não commitado:\n%s\n' "$sujo" >&2
+  exit 1
+fi
+```
+
+Saída diferente de zero: `mergex E0 BLOQUEADO — planejamento não commitado`, com a lista. O E0
+encerra sem escrever nada (nem `ORQUESTRADOR.md`, nem `ENTREGA.md`, nem o `pre-push`).
+
+**Recusas, também antes de escrever:**
+
+- `--planejamento` numa entrega com `commits` não vazio: o trabalho já executou tasks, e o
+  planejamento não é mais a primeira entrega.
+- `--planejamento` numa entrega cujo planejamento já `merged` (`entrega-de-planejamento.sh`
+  diz `estado=merged`, ou a retomada já o fechou): o PR de planejamento é um só.
+- Entrega ilegível para `scripts/entrega-de-planejamento.sh` (saída 2): relate o motivo.
+
+Com `--planejamento`, o passo 5 grava as chaves da marca (caso 1); na retomada do próprio
+planejamento (caso 2 com `--planejamento`), preserva o item de `prs` como está.
+
+### Retomada depois do PR de planejamento
+
+A F6 da primeira sprint chama o E0 **sem** `--planejamento` numa entrega cujo primeiro item de
+`prs` é o planejamento. O E0 só segue com estas pré-condições, conferidas antes de qualquer
+escrita:
+
+1. `entrega-de-planejamento.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md` diz
+   `planejamento=sim` com `estado=merged` e um `merge_sha` (o item de `prs` com `estado: merged`);
+2. o `merge_sha` é ancestral da base buscada (`git fetch` da base;
+   `git merge-base --is-ancestor <merge_sha> <base>`);
+3. a base buscada é ancestral do `HEAD` (a branch foi atualizada a partir da main depois do merge).
+
+Então grava `sprint_atual: null` e volta `pr_url`/`pr_estado` a `null`; o item de planejamento
+fica em `prs` como histórico. **Sem o registro do merge** (`estado` diferente de `merged`), o E0
+recusa e manda rodar o E9, que lê o PR no serviço e registra o merge, inclusive o feito pelo botão
+do serviço (`09-revisao.md`). O E0 nunca consulta o serviço. Branch sem a main: recusa, e a
+sprintx atualiza a branch antes de chamar de novo.
+
 ## Passo 1 — Detectar se o repositório usa versionamento
 
 ```
@@ -210,6 +264,12 @@ replanejamento (portão bloqueado → replaneja → F3/F4/F5 → F6 de novo → 
 - `base_validada_sha` com o SHA completo (40 hex) de `git merge-base HEAD <branch_base>`, e `origem_base: registrada_e0` — a base em que o trabalho é validado, fixada por SHA, nunca por nome de ref
 - `reconciliacoes: []` e `portao_sha: null` — a lista só cresce pelo `reconciliacao-base.sh --registrar`, e `portao_sha` só é gravado pelo E2 (`registrar-portao.sh`)
 - `criado_em` e `atualizado_em` com a data de hoje
+- `sprint_atual` e `prs`: sem `--planejamento`, `sprint_atual: null` e `prs: []`. **Com
+  `--planejamento`**, `sprint_atual: planejamento` e `prs` em YAML de bloco com um item só —
+  `sprint: planejamento`, `url: null`, `estado: null`, `merge_sha: null`, `merge: null`
+  (`00-schema.md`, "A entrega de planejamento"). Confira a gravação com
+  `entrega-de-planejamento.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md`: tem de dizer
+  `planejamento=sim`
 
 Repositório sem versionador (passo 1): `base_validada_sha` e `origem_base` ficam `null`, como `branch` e `branch_base`.
 
@@ -231,6 +291,7 @@ Atualize **somente o necessário** para abrir uma nova tentativa de entrega:
 | `desvios` | preservado enquanto continuar verdadeiro |
 | `pr_url`, `pr_estado` | **preservados como estão.** O E0 não verifica e não afirma que aquele PR ainda vale; quem confirma é o E7, que já trata "PR já existe" como retomada. **Nunca abra um segundo PR e nunca recrie a branch** |
 | `branch`, `branch_base` | coerentes com a branch adotada e com a base efetiva do passo 3 |
+| `sprint_atual`, `prs` | **preservados**, com uma exceção: a primeira retomada sem `--planejamento` depois do PR de planejamento `merged` grava `sprint_atual: null` e volta `pr_url`/`pr_estado` a `null` ("Retomada depois do PR de planejamento"). Com `--planejamento`, o item de planejamento fica como está. Arquivo anterior às chaves ganha `sprint_atual: null` e `prs: []` |
 | `portao_sha` | volta para `null`, junto com `portao` |
 | `base_validada_sha`, `origem_base` | **preservados como estão.** O E0 de retomada **nunca acrescenta nem troca `base_validada_sha`** num `ENTREGA.md` existente: a base validada só muda pelo `reconciliacao-base.sh --registrar`, e uma entrega legada sem a chave só a ganha, uma única vez, na primeira reconciliação (`origem_base: inferida_legado`, `references/11-reconciliacao-base.md`) |
 | `reconciliacoes` | preservado — a cadeia de reconciliações é histórico da entrega |

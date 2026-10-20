@@ -133,5 +133,104 @@ bash "$scripts/causa-do-portao.sh" --validar "$aux/aberto.md" >/dev/null 2>&1 \
   && bash "$scripts/sequencia-de-commits.sh" --validar "$aux/aberto.md" >/dev/null 2>&1
 confere 'causa-do-portao --validar e sequencia-de-commits --validar aceitam a entrega com prs' $?
 
+echo '== E0 e V9 de planejamento =='
+
+ref="$raiz/.claude/skills/mergex/references"
+# bloco <arquivo> <marca> — o bloco cercado do reference que contém a marca
+bloco() {
+  awk -v m="$2" '/^```/ { if (dentro) { if (achou) { printf "%s", buf; exit } dentro = 0; next }
+                  dentro = 1; buf = ""; achou = 0; next }
+       dentro { buf = buf $0 "\n"; if (index($0, m)) achou = 1 }' "$1"
+}
+
+# O E0 --planejamento não escreve com artefato do planejamento sujo
+bloco "$ref/00-abertura.md" 'planejamento não commitado' | sed 's|<slug>|plan|g' > "$aux/e0-pre.sh"
+[ -s "$aux/e0-pre.sh" ]; confere '00-abertura tem o bloco da pre-condicao do E0 --planejamento' $?
+git init -q -b main "$aux/e0"
+mkdir -p "$aux/e0/docs/sprintx/features/plan"
+printf 'plano\n' > "$aux/e0/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
+g -C "$aux/e0" add -A; g -C "$aux/e0" commit -q -m plano
+(cd "$aux/e0" && bash "$aux/e0-pre.sh") >/dev/null 2>&1
+[ "$?" = 0 ]; confere 'E0 --planejamento com o planejamento commitado: segue' $?
+printf 'mais\n' >> "$aux/e0/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
+(cd "$aux/e0" && bash "$aux/e0-pre.sh") >/dev/null 2>"$aux/err"; rc=$?
+[ "$rc" = 1 ] && grep -q '00-PLANEJAMENTO.md' "$aux/err" && [ ! -e "$aux/e0/docs/entregas" ]
+confere 'E0 --planejamento com artefato do planejamento sujo: recusa sem escrever' $?
+g -C "$aux/e0" checkout -q -- .
+printf 'novo\n' > "$aux/e0/docs/sprintx/features/plan/01-tasks.md"
+(cd "$aux/e0" && bash "$aux/e0-pre.sh") >/dev/null 2>&1
+[ "$?" = 1 ]; confere 'E0 --planejamento com artefato do planejamento fora do indice: recusa' $?
+
+grep -q -- '--planejamento' "$ref/00-abertura.md" \
+  && grep -q 'sprint: planejamento' "$ref/00-abertura.md" \
+  && grep -q '`commits` não vazio' "$ref/00-abertura.md" \
+  && grep -q 'já `merged`' "$ref/00-abertura.md"
+confere '00-abertura nomeia --planejamento, o item prs e as recusas' $?
+awk '/^### Retomada depois do PR de planejamento/ { d = 1 } d' "$ref/00-abertura.md" > "$aux/retomada.txt"
+grep -q 'estado: merged' "$aux/retomada.txt" && grep -q 'merge_sha' "$aux/retomada.txt" \
+  && grep -q 'ancestral' "$aux/retomada.txt" && grep -q 'E9' "$aux/retomada.txt"
+confere 'a retomada sem --planejamento exige o planejamento merged' $?
+awk '/^## Entrega de planejamento/ { d = 1; next } d && /^## / { exit } d' "$ref/02-prontidao.md" > "$aux/e2.txt"
+grep -q 'V1, V2, V3 e V11' "$aux/e2.txt" && grep -q 'planejamento: nenhuma task executada' "$aux/e2.txt" \
+  && grep -q 'entrega-de-planejamento.sh' "$aux/e2.txt" && grep -q -- '--planejamento' "$aux/e2.txt"
+confere '02-prontidao marca V1, V2, V3 e V11 n/a na entrega de planejamento' $?
+
+# A V9 de planejamento numa entrega de verdade: base por SHA, diff --no-renames
+v9() { # <repo> [--planejamento] — saída em $aux/v9.out, código em $rc
+  local r="$1"; shift
+  (cd "$r" && bash "$scripts/portao-v9.sh" --verificar "$@" --entrega docs/entregas/plan/ENTREGA.md \
+    --origem sprintx --trabalho plan) >"$aux/v9.out" 2>"$aux/v9.err"; rc=$?
+}
+repo_planejamento() { # <dir> — main com src/a.ts; a branch com o planejamento e a entrega commitados
+  local d="$1" b
+  git init -q -b main "$d"
+  git -C "$d" config core.autocrlf false
+  mkdir -p "$d/src"; printf 'a\n' > "$d/src/a.ts"
+  g -C "$d" add -A; g -C "$d" commit -q -m base
+  b="$(git -C "$d" rev-parse HEAD)"
+  git -C "$d" switch -q -c feature/plan
+  mkdir -p "$d/docs/sprintx/features/plan/sprint-01" "$d/docs/eventos"
+  printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: planejamento' 'trabalho_id: plan' \
+    '---' > "$d/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
+  printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
+    'tasks:' '  - id: T-01.01' '    status: pendente' '    arquivos:' '      cria: [src/b.ts]' \
+    '      altera: []' '---' > "$d/docs/sprintx/features/plan/sprint-01/tasks.md"
+  printf 'evento\n' > "$d/docs/eventos/plan.md"
+  entrega "$d/docs/entregas/plan/ENTREGA.md" "base_validada_sha: $b
+origem_base: registrada_e0
+reconciliacoes: []
+branch: feature/plan
+branch_base: main
+$PLAN_ABERTO"
+  sed 's/^trabalho_id: login$/trabalho_id: plan/' "$d/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+    && mv "$aux/e.tmp" "$d/docs/entregas/plan/ENTREGA.md"
+  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(sprintx): planejamento' -m 'Trabalho: plan'
+}
+
+repo_planejamento "$aux/v9a"
+v9 "$aux/v9a" --planejamento
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+confere 'V9 de planejamento: so docs/sprintx, docs/entregas e docs/eventos passa' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
+v9 "$aux/v9a"
+[ "$rc" = 1 ] && grep -qx "$(printf 'fora_do_plano\tdocs/eventos/plan.md')" "$aux/v9.out" \
+  && ! grep -q 'fora_do_planejamento' "$aux/v9.out"
+confere 'V9 sem --planejamento nao muda (docs/eventos continua fora do plano)' $?
+
+printf 'b\n' > "$aux/v9a/src/b.ts"
+g -C "$aux/v9a" add -A; g -C "$aux/v9a" commit -q -m codigo
+v9 "$aux/v9a" --planejamento
+[ "$rc" = 1 ] && grep -qx 'resultado=v9' "$aux/v9.out" \
+  && grep -qx "$(printf 'fora_do_planejamento\tsrc/b.ts')" "$aux/v9.out"
+confere 'V9 de planejamento: src/b.ts (mesmo declarado numa task) e fora_do_planejamento' $?
+
+repo_planejamento "$aux/v9b"
+git -C "$aux/v9b" mv src/a.ts docs/sprintx/features/plan/a.ts
+g -C "$aux/v9b" commit -q -m move
+v9 "$aux/v9b" --planejamento
+[ "$rc" = 1 ] && grep -qx "$(printf 'fora_do_planejamento\tsrc/a.ts')" "$aux/v9.out"
+confere 'V9 de planejamento: renomeacao de src/a.ts para docs/sprintx/ reprova pela origem' $?
+
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

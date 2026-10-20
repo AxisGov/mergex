@@ -49,6 +49,29 @@ Só com as barreiras aprovadas o portão roda V1–V11.
 - O `ORQUESTRADOR.md` e o `tasks.md` do trabalho existem. Sem eles não há o que verificar: relate que o trabalho não está planejado e encerre `BLOQUEADO`.
 - A pasta do trabalho é a **mesma** que o E0 encontrou: na sprintx, `docs/sprintx/features/<slug>/` (canônico) e, só quando ele não existe, `docs/<slug>/` (formato antigo); na runx, `docs/manutencao/<OC-ID>-<slug>/`. Nunca misture as duas pastas da sprintx na mesma verificação.
 
+## Entrega de planejamento
+
+Quem diz se a entrega é a do PR de planejamento (DM-259) é o leitor único da marca, nunca a
+leitura do YAML à mão:
+
+```bash
+bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md --rev HEAD
+```
+
+Saída 2 (entrega ilegível ou incoerente): o E2 não emite `PRONTO`; relate o motivo. Com
+`planejamento=sim`, nenhuma task foi executada, e o portão muda assim:
+
+- **V1, V2, V3 e V11: `n/a`**, com o motivo `planejamento: nenhuma task executada`. A V12, quando
+  existir, também.
+- **V9 com `--planejamento`:** `portao-v9.sh --verificar --planejamento …`, a mesma base e o mesmo
+  diff, mas o conjunto aceito é só `^docs/(sprintx|entregas|eventos)/`. Cada arquivo fora disso,
+  código ou não, é `fora_do_planejamento<TAB><caminho>` e reprova a V9 (`v9`). Uma renomeação de
+  `src/a.ts` para `docs/sprintx/...` reprova pela origem, porque o diff é lido com `--no-renames`.
+- **V4–V8 e V10 como sempre.**
+
+Com `planejamento=nao`, o portão é o de sempre.
+
 ## As onze verificações
 
 Rode **todas**, sempre, mesmo depois de a primeira falhar. O usuário precisa da lista completa do que falta, não do primeiro erro. Verificação que não se aplica ao trabalho é marcada `n/a`, nunca omitida.
@@ -163,6 +186,7 @@ bash .claude/skills/mergex/scripts/portao-v9.sh --verificar \
 
 - **Base do diff por SHA, não por nome.** A base `B` é o `b1_sha` da última reconciliação, ou o `base_validada_sha` da entrega quando não há reconciliação; o conjunto é `git diff --name-only --no-renames B...HEAD`. Mover a ref local da base não muda o resultado. Entrega legada (nenhuma versão do `ENTREGA.md` com `base_validada_sha`) lê o merge-base único com `branch_base`, sem gravar nada.
 - **Conjunto aceito,** nesta ordem: a união das tasks do plano de `HEAD`; os artefatos de método do trabalho (abaixo); e os caminhos `coberto` de `reconciliacao-base.sh --verificar`, só quando ela devolve `ok=true`.
+- **Entrega de planejamento:** com `--planejamento` (só quando `entrega-de-planejamento.sh` diz `planejamento=sim`; seção "Entrega de planejamento"), o conjunto aceito é só `^docs/(sprintx|entregas|eventos)/`, e o desvio sai `fora_do_planejamento<TAB><caminho>`.
 - **Saída:** `resultado=ok`, ou `resultado=v9` com uma linha `fora_do_plano<TAB><caminho>` por desvio, ou `resultado=v9_sem_prova` com os `motivo`. Códigos: `0` ok; `1` `v9`; `3` `v9_sem_prova`; `64` uso. Nenhuma opção de força.
 - **`v9_sem_prova`** (verificação da reconciliação com `ok=false`, âncora da base inconsistente, base que já contém o trabalho, repositório raso ou objeto Git ausente) é `FALHA` registrada como `v9_sem_prova`. No clone raso, o diagnóstico manda rodar `git fetch --unshallow`.
 
