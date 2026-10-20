@@ -76,6 +76,10 @@ else
   [ -z "$MERGE_SHA" ] || uso '--merge-sha só com --registrar-merge'
 fi
 
+# antes de ler: um link quebrado também é link, e a recusa é a mesma
+if [ "$REGISTRAR" = 1 ] && [ -L "$ENTREGA" ]; then
+  recusa "$ENTREGA é link simbólico: o registro só grava um arquivo regular"
+fi
 if [ "$TEM_REV" = 1 ]; then
   case "$ENTREGA" in /*|?:*) ilegivel "--rev exige caminho relativo: $ENTREGA" ;; esac
   conteudo="$(git show "${REV}:./${ENTREGA#./}" 2>/dev/null)" \

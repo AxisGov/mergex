@@ -484,6 +484,10 @@ if [ -L "$aux/link.md" ]; then
   bash "$leitor" --registrar-merge --entrega "$aux/link.md" --merge-sha "$SHA_M" >/dev/null 2>"$aux/err"; rc=$?
   [ "$rc" = 1 ] && [ -L "$aux/link.md" ] && cmp -s "$aux/alvo.md" "$aux/alvo-antes.md" && grep -q 'link simbólico' "$aux/err"
   confere '--registrar-merge num ENTREGA.md que e link simbolico: recusa sem tocar o alvo' $?
+  ln -s "$aux/nao-existe.md" "$aux/link-quebrado.md"
+  bash "$leitor" --registrar-merge --entrega "$aux/link-quebrado.md" --merge-sha "$SHA_M" >/dev/null 2>"$aux/err"; rc=$?
+  [ "$rc" = 1 ] && [ -L "$aux/link-quebrado.md" ] && [ ! -e "$aux/nao-existe.md" ] && grep -q 'link simbólico' "$aux/err"
+  confere '--registrar-merge num link simbolico quebrado: a mesma recusa (1), sem criar o alvo' $?
 else
   passa '--registrar-merge num ENTREGA.md que e link simbolico: pulado (link simbolico nao criavel aqui)'
 fi
