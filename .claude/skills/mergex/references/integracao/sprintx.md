@@ -108,7 +108,7 @@ Vale em `por_sprint` e em `por_trabalho` (DM-259). Com o plano aprovado na F5:
 1. A sprintx **commita o planejamento** (a pasta `docs/sprintx/features/<slug>/`) antes de chamar
    o E0: o E0 `--planejamento` recusa com artefato do planejamento sujo ou fora do índice, e a
    mergex não amplia o catálogo de método para isso.
-2. A sprintx chama E0–E8 com `--planejamento`. O E2 marca V1, V2, V3 e V11 `n/a` e roda a V9 com
+2. A sprintx chama E0–E8 com `--planejamento`. O E2 marca V1, V2, V3, V11 e V12 `n/a` e roda a V9 com
    `--planejamento`; o E7 recusa qualquer arquivo fora de `^docs/(sprintx|entregas|eventos)/` e não
    mede L3 (`references/07-abertura-pr.md`); o E8 grava o PR no item de planejamento de `prs`.
 3. A sprintx registra o bloqueio `aguardando_merge` até o desenvolvedor mergear. **Nunca há merge

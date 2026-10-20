@@ -734,7 +734,7 @@ grupo_contrato() {
       || falha "$f não publica o contrato completo de predecessores"
   done
   for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md; do
-    grep -Fq 'todas as V1–V11' "$REPO/$f" \
+    grep -Fq 'todas as V1–V12' "$REPO/$f" \
       && ok "$f exige o E2 completo depois da retomada" \
       || falha "$f reduz a retomada a uma verificação parcial"
   done
@@ -810,6 +810,9 @@ e2_fixture_completo() {
   out="$(bash "$S/prova-de-commit.sh" --verificar "$FX_PRE_ENTREGA" "$tasks")"; rc=$?
   [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'V11=OK' || return 1
   printf 'V11=OK\n'
+  out="$(bash "$S/portao-v12.sh" --verificar --entrega "$FX_PRE_ENTREGA" --trabalho ft-pre -- "$tasks")"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -Fxq 'V12=n/a' || return 1
+  printf 'V12=n/a\n'
 }
 
 grupo_mp27b() {
@@ -851,9 +854,9 @@ grupo_mp27b() {
   [ "$paths" = "$FX_PRE_ENTREGA" ] && ok 'checkpoint da retomada toca somente ENTREGA.md' \
     || falha "checkpoint da retomada tocou: $paths"
   out="$(e2_fixture_completo)"; rc=$?
-  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | grep -c '^V\([1-9]\|10\|11\)=')" = 11 ] \
+  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | grep -c '^V\([1-9]\|10\|11\|12\)=')" = 12 ] \
     && printf '%s\n' "$out" | grep -Fxq 'V9=OK' \
-    && ok 'E2 completo V1–V11 roda novamente' || falha "E2 pós-retomada incompleto — rc=$rc, saída=$out"
+    && ok 'E2 completo V1–V12 roda novamente' || falha "E2 pós-retomada incompleto — rc=$rc, saída=$out"
   [ "$(git rev-parse "HEAD:docs/sprintx/features/ft-pre/sprint-01/tasks.md")" = "$tasks_antes" ] \
     && [ "$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n '/^commits:/,/^[A-Za-z_][A-Za-z0-9_]*:/p')" = "$commits_antes" ] \
     && [ "$(git show "HEAD:$FX_PRE_ENTREGA" | sed -n 's/^base_validada_sha:[[:space:]]*//p')" = "$base_antes" ] \

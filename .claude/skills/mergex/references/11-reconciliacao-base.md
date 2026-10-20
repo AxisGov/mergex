@@ -317,7 +317,7 @@ preserva `commits`, `criado_em`, `pr_url`, `pr_estado`, `desvios`. `base_validad
 3. Gate completo do repositório (o do `ORQUESTRADOR.md`) sobre `HEAD`.
 4. `reconciliacao-base.sh --registrar` com os caminhos ajustados.
 5. Checkpoint `reconciliacao-base`.
-6. E2 completo: barreira `reconciliacao-base` + V1–V11 com a V9 executável + `pre-push` da MergeX
+6. E2 completo: barreira `reconciliacao-base` + V1–V12 com a V9 executável + `pre-push` da MergeX
    comprovadamente ativo; grava `portao` e `portao_sha`. `BLOQUEADO` encerra como sempre (E8
    bloqueado, sem push).
 7. E3 sobre o delta, com O10 para os reconciliados.

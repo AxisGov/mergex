@@ -43,7 +43,7 @@ Exige `ok=true`: a cadeia `RECONCILIACAO-BASE-NNN.md` recalculada do Git (assina
 
 **A ordem é fechada:** reconciliação verificada → validade do portão → autorização do push. Esta barreira prova a reconciliação, e a V9 executável consome os `coberto` dela; o portão aprovado grava `portao_sha`; depois disso, `validade-do-portao.sh` prova que nada fora do permitido mudou, e é sobre ela que o `pre-push` autoriza o push. O push nunca reexecuta a reconciliação.
 
-Só com as barreiras aprovadas o portão roda V1–V11.
+Só com as barreiras aprovadas o portão roda V1–V12.
 
 - `docs/entregas/<trabalho_id>/ENTREGA.md` existe (o E0 rodou). Se não existir, rode o E0 primeiro (`references/00-abertura.md`) — a branch pode não ter nascido, e o portão precisa saber o que foi commitado.
 - O `ORQUESTRADOR.md` e o `tasks.md` do trabalho existem. Sem eles não há o que verificar: relate que o trabalho não está planejado e encerre `BLOQUEADO`.
@@ -62,8 +62,8 @@ bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh \
 Saída 2 (entrega ilegível ou incoerente): o E2 não emite `PRONTO`; relate o motivo. Com
 `planejamento=sim`, nenhuma task foi executada, e o portão muda assim:
 
-- **V1, V2, V3 e V11: `n/a`**, com o motivo `planejamento: nenhuma task executada`. A V12, quando
-  existir, também.
+- **V1, V2, V3, V11 e V12: `n/a`**, com o motivo `planejamento: nenhuma task executada` (o
+  `portao-v12.sh` sai `n/a` sozinho, sem chamar o `conferir`).
 - **V9 com `--planejamento`:** `portao-v9.sh --verificar --planejamento …`, a mesma base e o mesmo
   diff, mas o conjunto aceito é só `^docs/(sprintx|entregas|eventos)/`. Cada arquivo fora disso,
   código ou não, é `fora_do_planejamento<TAB><caminho>` e reprova a V9 (`v9`). Uma renomeação de
@@ -72,7 +72,7 @@ Saída 2 (entrega ilegível ou incoerente): o E2 não emite `PRONTO`; relate o m
 
 Com `planejamento=nao`, o portão é o de sempre.
 
-## As onze verificações
+## As doze verificações
 
 Rode **todas**, sempre, mesmo depois de a primeira falhar. O usuário precisa da lista completa do que falta, não do primeiro erro. Verificação que não se aplica ao trabalho é marcada `n/a`, nunca omitida.
 
@@ -80,7 +80,7 @@ Rode **todas**, sempre, mesmo depois de a primeira falhar. O usuário precisa da
 
 Leia o frontmatter de todo `sprint-NN/tasks.md` do trabalho. Toda task tem que estar `concluida`.
 
-**Os dois formatos de sprint da sprintx valem em V1, V2, V3, V9 e V11.** As tasks vêm sempre da chave `tasks`, no `kind: plano` (condensado) e no `kind: tasks` (três arquivos) — regra única em `references/integracao/sprintx.md`, "Como ler uma sprint da sprintx". O formato nunca muda quais campos existem nem quanto rigor se cobra.
+**Os dois formatos de sprint da sprintx valem em V1, V2, V3, V9, V11 e V12.** As tasks vêm sempre da chave `tasks`, no `kind: plano` (condensado) e no `kind: tasks` (três arquivos) — regra única em `references/integracao/sprintx.md`, "Como ler uma sprint da sprintx". O formato nunca muda quais campos existem nem quanto rigor se cobra.
 
 Falha: qualquer task em `pendente`, `em_andamento` ou `bloqueada`. Nomeie cada uma (id e título) e o status atual. Task `bloqueada` aponta o `B-NN` correspondente em `BLOQUEIOS.md`.
 
@@ -270,6 +270,41 @@ Na recuperação, essas provas adicionais pertencem ao escritor `--registrar-exi
 
 **Leitura histórica × entrega nova.** Uma `ENTREGA.md` anterior a este contrato pode ter task concluída sem o item correspondente. Ler esse snapshot continua possível. Numa entrega nova a inconsistência barra. Se nenhum commit de produto existe, faça o E1 tardio normal; se o commit já existe e só o registro falhou, use `fechamento-do-e1.sh --registrar-existente` com o SHA completo. Nunca crie um segundo commit para recuperar apenas o registro.
 
+### V12 — Task concluída sem revisão por task aprovada
+
+A revisão por task (contrato `expx-revisao` v2 do expxdev) grava, antes do commit de cada task, a evidência de que o revisor viu **todos** os arquivos revisáveis dela e de que nenhum achado ficou aberto em linha alterada. Sem a V12, uma task podia fechar sem revisão, ou com uma revisão incompleta, e o PR abria igual.
+
+**A pergunta da V12 é uma só:** cada task `concluida` do escopo tem evidência de revisão aprovada **no commit dela**?
+
+```
+bash .claude/skills/mergex/scripts/portao-v12.sh --verificar \
+  --entrega docs/entregas/<trabalho_id>/ENTREGA.md --trabalho <trabalho_id> \
+  -- docs/sprintx/features/<slug>/sprint-*/tasks.md
+```
+
+O script não decide a regra: ele pergunta ao `conferir` do núcleo do expx instalado (`expx-revisao.mjs conferir --trabalho <trabalho_id> --modo <modo> --task <T>=<commit>…`), com o commit do **último** item de cada task `concluida` em `ENTREGA.commits`, e traduz a resposta (DM-238). A primeira linha é sempre `V12=OK|AVISO|FALHA|SEM_PROVA|n/a`; depois vêm as linhas do `conferir` como vieram (`T-NN.MM ok`, `T-NN.MM AVISO <motivo>`, `T-NN.MM FALHA <motivo>`) ou `motivo=`. Códigos: 0 (OK, AVISO, `n/a`), 1 (FALHA), 2 (SEM_PROVA), 64 (uso).
+
+O modo vem de `.expx/fatiamento.json` (`revisao_por_task`), lido pelo `leitor-do-projeto.sh --rev HEAD`:
+
+| Situação | `obrigatoria` | `se_disponivel` | `desligada` |
+|---|---|---|---|
+| sem `.expx/fatiamento.json` | `n/a`, sem node | `n/a`, sem node | `n/a`, sem node |
+| entrega de planejamento (`entrega-de-planejamento.sh`) | `n/a` | `n/a` | `n/a` |
+| modo `desligada`; `versionado: false`; nenhuma task concluída com commit | — | — | `n/a` |
+| configuração inválida, `FATIA_*` no ambiente, leitor ausente, núcleo antigo ou node ausente (o modo não pode ser lido) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
+| `entrega-de-planejamento.sh` sai ≠ 0 (entrega incoerente) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
+| núcleo instalado sem `expx-revisao.mjs` | SEM_PROVA | AVISO `revisao-nao-conferida:<motivo>` | — |
+| `conferir` 0 / 3 / 1 | OK / AVISO / FALHA | OK / AVISO / FALHA | — |
+| `conferir` 64, outro código, ou saída sem exatamente uma linha `T-… ok\|AVISO …\|FALHA …` por task pedida (inclusive o node que não carrega o núcleo) | SEM_PROVA | SEM_PROVA | — |
+
+Na tabela do portão, `V12=OK` é `OK`, `V12=AVISO` é `AVISO` (vai para a seção de avisos, sem alterar o resultado), `V12=n/a` é `n/a` com o `motivo=`, `V12=FALHA` é `FALHA` registrada como `v12`, e `V12=SEM_PROVA` é `FALHA` registrada como **`v12_sem_prova`**: ausência de prova não é prova. Nomeie cada task que falhou, com o motivo do `conferir`.
+
+**`incompleta` é FALHA nos dois modos.** `FALHA incompleta:<motivo>` (a revisão não cobriu todos os arquivos revisáveis: `L1`, `L2`, `lote-falhou`, `pulado`, `faltante`…) reprova em `obrigatoria` e em `se_disponivel`: rejeitar achado não cobre o que o revisor não viu. Quem decide isso é o núcleo; a V12 só repassa. `indisponivel` e `evidencia-ausente` dependem do modo (FALHA em `obrigatoria`, AVISO em `se_disponivel`).
+
+**A V12 não lê `revisao:` de `ENTREGA.commits`, nem a evidência.** A mergex não conhece a forma da evidência: quem a grava é o `revisar` do núcleo e quem a lê é o `conferir`, sempre no commit da task (`git show <commit>:…`), nunca no disco. Evidência editada depois do commit não muda o veredito.
+
+**A V12 não duplica a razão de outra verificação.** Task não concluída é da V1; task concluída sem item em `ENTREGA.commits` não é alvo da V12, é da V11. Por isso, na precedência da causa, a `v12` vem depois da `v11` (DM-239): sem o commit da task não há evidência para conferir.
+
 ## Formato exato da saída
 
 Use `assets/TEMPLATE-prontidao.md`. Grave em `docs/entregas/<trabalho_id>/` **não** é obrigatório — a saída do portão é para a tela e para o campo `portao` do `ENTREGA.md`.
@@ -289,7 +324,7 @@ ou
 RESULTADO: BLOQUEADO
 ```
 
-Depois, a tabela das onze verificações, todas as linhas, sempre:
+Depois, a tabela das doze verificações, todas as linhas, sempre:
 
 ```
 | # | Verificação | Resultado |
@@ -298,6 +333,7 @@ Depois, a tabela das onze verificações, todas as linhas, sempre:
 | V2 | Registro de suíte por task | FALHA |
 ...
 | V11 | Commit do E1 por task concluída | OK |
+| V12 | Revisão por task aprovada | OK |
 ```
 
 Resultado por verificação: `OK`, `FALHA`, `AVISO` ou `n/a`.
@@ -317,7 +353,7 @@ Avisos vão numa seção própria no fim, sem alterar o resultado.
 
 O portão grava no `ENTREGA.md`, **junto com `portao`**, a lista das verificações que deram `FALHA` — a chave `falhas_portao` (`references/00-schema.md`, "A causa do bloqueio"). É dela, e só dela, que o E8 deriva a `causa` do bloqueio.
 
-- Um item por linha `FALHA` da tabela, com o número da verificação em minúscula: `v1` … `v11`.
+- Um item por linha `FALHA` da tabela, com o número da verificação em minúscula: `v1` … `v12`.
 - Verificação que **não pôde rodar** — marcada `FALHA` porque ausência de prova não é prova — entra como `vN_sem_prova`, nunca como `vN`. É o que impede que um "não consegui verificar" seja lido depois como um defeito provado.
 - `AVISO` e `n/a` não entram. `PRONTO` grava `falhas_portao: []`.
 - Na numeração do portão, uma linha só. Monte a lista com o script, que também recusa item desconhecido ou repetido:
@@ -371,7 +407,7 @@ antes do planejamento, a única retomada admitida é a de
 `references/13-predecessores-sprintx.md`. Depois dos checkpoints
 `predecessores` e `retomar-v9-predecessores`, recomece pela barreira
 `bash .claude/skills/mergex/scripts/persistir-metodo.sh --verificar --entrega docs/entregas/<trabalho>/ENTREGA.md --origem sprintx --trabalho <trabalho> --checkpoint pre-e2`
-e rode **todas** as V1–V11.
+e rode **todas** as V1–V12.
 A retomada nunca reutiliza o resultado anterior e nunca salta diretamente para E3.
 
 O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito, nada é descartado, nada é maquiado.
@@ -390,4 +426,6 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | Verificação impossível de rodar | Marque `FALHA`, nunca `OK`, e registre `vN_sem_prova` em `falhas_portao`. Ausência de prova não é prova |
 | Task `concluida` sem item em `ENTREGA.commits` | `FALHA` em V11. Sem commit existente: E1 tardio normal. Com commit existente e append perdido: `--registrar-existente`, nunca um segundo commit. |
 | `ENTREGA.md` sem a chave `commits`, ou ilegível | `FALHA` em V11, registrada como `v11_sem_prova` |
+| `portao-v12.sh` devolve `V12=FALHA` (código `1`) | `FALHA` em V12, com as linhas `T-… FALHA <motivo>` do `conferir`. `evidencia-ausente`: revisar a task e commitar a evidência com ela; `incompleta:L1`: dividir a task; `incompleta:L2`: uma task anterior divide o arquivo; `achados-abertos:<n>`: corrigir ou o desenvolvedor rejeitar cada achado |
+| `portao-v12.sh` devolve `V12=SEM_PROVA` (código `2`) | `FALHA` em V12, registrada como `v12_sem_prova`, com o `motivo=` do script (núcleo, node ou configuração que não lê; saída do `conferir` fora da forma) |
 | `ORQUESTRADOR.md` ou `tasks.md` ausente | `BLOQUEADO`: V1 não tem como determinar status — `v1_sem_prova` —, e as demais que dependem do plano também entram `_sem_prova` |

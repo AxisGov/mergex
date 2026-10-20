@@ -546,23 +546,34 @@ done
 # O espelho OpenCode do comando do portão nunca diverge.
 cmp -s "$check_cmd" "$check_oc" || fail 'OpenCode mergex-check command diverges from Claude Code'
 
-# São ONZE verificações, e a contagem antiga não pode voltar em lugar nenhum.
-# A varredura ignora as fixtures (snapshots congelados) e este próprio arquivo,
+# São DOZE verificações, e as contagens antigas não podem voltar em lugar nenhum.
+# A varredura ignora as fixtures (snapshots congelados), os planos e desenhos
+# datados de docs/superpowers/ (registro histórico) e este próprio arquivo,
 # que precisa citar a forma antiga para poder proibi-la. `-i` porque a contagem
-# aparece no começo de frase ("Dez verificações") e no badge ("10 verificacoes").
-if grep -rIl -i --exclude-dir=.git -e 'dez verifica' -e '10 verifica' -e 'V1\.\.V10)' -e 'as dez linhas' . \
-   | grep -v -e '^\./scripts/ci/fixtures/' -e '^\./scripts/ci/validate-mergex-contract\.sh$' \
+# aparece no começo de frase ("Onze verificações") e no badge ("11 verificacoes").
+if grep -rIl -i --exclude-dir=.git -e 'dez verifica' -e '10 verifica' -e 'V1\.\.V10)' -e 'as dez linhas' \
+     -e 'onze verifica' -e '11 verifica' -e 'V1\.\.V11)' -e 'V1–V11' -e 'as onze linhas' . \
+   | grep -v -e '^\./scripts/ci/fixtures/' -e '^\./docs/superpowers/' -e '^\./scripts/ci/validate-mergex-contract\.sh$' \
    | grep -q .; then
-  fail 'the gate is still described as ten checks somewhere'
+  fail 'the gate is still described as ten or eleven checks somewhere'
 fi
-grep -Fq 'Onze verificações' "$readme" || fail 'README no longer announces eleven checks'
-grep -Fq '11 verificacoes' .github/assets/badge-portao.svg || fail 'gate badge still shows ten checks'
-grep -Fq '## As onze verificações' "$prontidao" || fail 'E2 no longer announces eleven checks'
-grep -Fq 'a tabela das onze verificações' "$prontidao" || fail 'E2 output table is not eleven rows'
-grep -Fq 'As onze linhas da tabela' "$template_prontidao" || fail 'readiness template is not eleven rows'
-grep -Fq '| V11 |' "$template_prontidao" || fail 'readiness template has no V11 row'
-grep -Fq '| V11 |' "$check_cmd" || fail 'E2 command has no V11 row'
-grep -Fq 'onze verificações (V1..V11)' "$hook_pr" || fail 'PR hook still announces ten checks'
+grep -Fq 'Doze verificações' "$readme" || fail 'README no longer announces twelve checks'
+grep -Fq '12 verificacoes' .github/assets/badge-portao.svg || fail 'gate badge does not show twelve checks'
+grep -Fq '## As doze verificações' "$prontidao" || fail 'E2 no longer announces twelve checks'
+grep -Fq 'a tabela das doze verificações' "$prontidao" || fail 'E2 output table is not twelve rows'
+grep -Fq 'As doze linhas da tabela' "$template_prontidao" || fail 'readiness template is not twelve rows'
+grep -Fq '| V12 |' "$template_prontidao" || fail 'readiness template has no V12 row'
+grep -Fq '| V12 |' "$check_cmd" || fail 'E2 command has no V12 row'
+grep -Fq 'doze verificações (V1..V12)' "$hook_pr" || fail 'PR hook does not announce twelve checks'
+
+# A V12 existe, chama o portao-v12.sh e não lê a evidência por conta própria.
+grep -Fq '### V12 — Task concluída sem revisão por task aprovada' "$prontidao" \
+  || fail 'E2 has no V12 section'
+grep -Fq 'portao-v12.sh' "$prontidao" || fail 'E2 does not call the V12 script'
+grep -Fq 'portao-v12.sh' "$check_cmd" || fail 'E2 command does not call the V12 script'
+grep -Fq '`v12_sem_prova`' "$prontidao" || fail 'V12 without proof is not registered as v12_sem_prova'
+grep -Fq 'A V12 não lê `revisao:`' "$prontidao" || fail 'V12 reads revisao: from ENTREGA.commits'
+grep -Fq '`incompleta` é FALHA nos dois modos' "$prontidao" || fail 'V12 section does not fail incompleta in both modes'
 
 # A V11 existe, é própria, e não é uma V1/V2 ampliada.
 grep -Fq '### V11 — Task concluída sem commit do E1 correspondente' "$prontidao" \
