@@ -132,7 +132,20 @@ entregue_em: 2026-08-29
 | `push_feito` | Durante o E6, `true` afirma que a publicação executada até ali está sincronizada. **Ao encerrar o E8, `true` afirma que o HEAD final — o commit que carrega este registro — está em `origin/<branch>`**, e o E8 revalida isso; falhou a publicação final, vira `false` (ver "O que `push_feito` afirma") |
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
 | `pr_estado` | `rascunho` na abertura normal; `aberto` quando o QA já aprovou; `merged`/`fechado` quando o E9 ou uma pessoa atualizarem |
+| `sprint_atual`, `prs` | Ver abaixo, "O PR de planejamento". Fora dele, o E8 não as toca |
 | `entregue_em` | A data em que o fluxo completou; `null` enquanto `estado` não for `entregue` |
+
+### O PR de planejamento
+
+Quando `entrega-de-planejamento.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md` diz
+`planejamento=sim` (DM-259), o E8 grava, além de `pr_url` e `pr_estado` de topo, o mesmo PR em
+`prs` (o primeiro item, o de planejamento): `url` = a `pr_url` do E7 (`null` quando o PR não foi
+aberto ou o E7 o recusou) e `estado` = o `pr_estado` do E7 (`rascunho`, `aberto` ou `null`), ou
+`aguardando_merge` quando o PR já está pronto para revisão e só espera o merge do
+desenvolvedor. `sprint`, `merge_sha` e `merge` ficam como o E0 gravou (`planejamento`, `null`,
+`null`): quem registra o merge é só o E9 (`09-revisao.md`, DM-260). O E8 nunca muda
+`sprint_atual`. Depois de gravar, confira com o mesmo script: tem de continuar dizendo
+`planejamento=sim`; saída 2 é gravação errada, corrija antes do commit final.
 
 ## A prosa
 

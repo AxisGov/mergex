@@ -232,5 +232,78 @@ v9 "$aux/v9b" --planejamento
 [ "$rc" = 1 ] && grep -qx "$(printf 'fora_do_planejamento\tsrc/a.ts')" "$aux/v9.out"
 confere 'V9 de planejamento: renomeacao de src/a.ts para docs/sprintx/ reprova pela origem' $?
 
+echo '== E8 e E9: o registro do PR de planejamento =='
+
+SHA_M=0123456789abcdef0123456789abcdef01234567
+# --registrar-merge: só o item de planejamento ainda não merged
+entrega "$aux/reg.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
+bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+le "$aux/reg.md"
+[ "$rc" = 0 ] && grep -qx 'estado=merged' "$aux/out" && grep -qx "merge_sha=$SHA_M" "$aux/out" \
+  && grep -qx '    merge: humano' "$aux/reg.md" && grep -qx 'pr_estado: merged' "$aux/reg.md" \
+  && grep -qx 'trabalho_id: login' "$aux/reg.md" && grep -qx '# Entrega' "$aux/reg.md"
+confere '--registrar-merge grava prs[0] merged, merge humano e pr_estado merged, sem tocar o resto' $?
+cp "$aux/reg.md" "$aux/reg-antes.md"
+bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && cmp -s "$aux/reg.md" "$aux/reg-antes.md"
+confere '--registrar-merge de novo com o mesmo sha: nada muda' $?
+bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "fedcba9876543210fedcba9876543210fedcba98" >/dev/null 2>&1; rc=$?
+[ "$rc" = 1 ] && cmp -s "$aux/reg.md" "$aux/reg-antes.md"
+confere '--registrar-merge com outro sha num planejamento ja merged: recusa sem escrever' $?
+cp "$aux/antiga.md" "$aux/antiga-antes.md"
+bash "$leitor" --registrar-merge --entrega "$aux/antiga.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+[ "$rc" = 1 ] && cmp -s "$aux/antiga.md" "$aux/antiga-antes.md"
+confere '--registrar-merge numa entrega comum: recusa sem escrever' $?
+entrega "$aux/reg2.md" "$PLAN_ABERTO"
+bash "$leitor" --registrar-merge --entrega "$aux/reg2.md" --merge-sha 'nao-e-sha' >/dev/null 2>&1
+[ "$?" = 64 ]; confere '--registrar-merge com sha invalido: uso (64)' $?
+
+# O bloco real do E9, com um `gh` falso no PATH (nunca o serviço)
+bloco "$ref/09-revisao.md" 'gh pr view "$pr_url" --json state,mergeCommit' \
+  | sed 's|<trabalho_id>|login|g' \
+  | sed "s#bash \.claude/skills/mergex/scripts/entrega-de-planejamento\.sh#bash '$leitor'#" > "$aux/e9.sh"
+[ -s "$aux/e9.sh" ]; confere '09-revisao tem o bloco que le o PR de planejamento no servico' $?
+mkdir -p "$aux/gh-falso"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\n[ -z "${GH_RESPOSTA:-}" ] || printf "%%s\\n" "$GH_RESPOSTA"\nexit "${GH_RC:-0}"\n' > "$aux/gh-falso/gh"
+chmod +x "$aux/gh-falso/gh"
+repo_e9() { # <dir> — a entrega de planejamento com o PR aberto
+  mkdir -p "$1"
+  entrega "$1/docs/entregas/login/ENTREGA.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's#    url: null#    url: https://github.com/dono/repo/pull/9#; s/estado: null/estado: aberto/')"
+  sed 's#^pr_url: null#pr_url: https://github.com/dono/repo/pull/9#' "$1/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
+    && mv "$aux/e.tmp" "$1/docs/entregas/login/ENTREGA.md"
+}
+e9() { # <dir> [VAR=valor...]
+  local d="$1"; shift
+  (cd "$d" && env PATH="$aux/gh-falso:$PATH" GH_CHAMADAS="$aux/gh-chamadas" "$@" bash "$aux/e9.sh") >"$aux/e9.out" 2>&1; rc=$?
+}
+repo_e9 "$aux/e9a"
+: > "$aux/gh-chamadas"
+e9 "$aux/e9a" GH_RESPOSTA="MERGED $SHA_M"
+(cd "$aux/e9a" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
+[ "$rc" = 0 ] && grep -qx 'estado=merged' "$aux/out" && grep -qx "merge_sha=$SHA_M" "$aux/out" \
+  && grep -q 'pr view https://github.com/dono/repo/pull/9' "$aux/gh-chamadas"
+confere 'E9 com o PR de planejamento mergeado pelo servico: grava prs[0] merged com o mergeCommit' $?
+repo_e9 "$aux/e9b"; cp "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md"
+e9 "$aux/e9b" GH_RC=1
+cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
+confere 'gh sem resposta: nao grava' $?
+e9 "$aux/e9b" GH_RESPOSTA="OPEN "
+cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" = 0 ]
+confere 'PR de planejamento ainda aberto: nao grava' $?
+e9 "$aux/e9b" GH_RESPOSTA="MERGED "
+cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
+confere 'MERGED sem mergeCommit: nao grava' $?
+(cd "$aux/e9b" && env PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin" bash -c 'command -v gh' >/dev/null 2>&1) \
+  || { e9 "$aux/e9b" PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin"
+       cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
+       confere 'sem ferramenta do servico: nao grava' $?; }
+
+grep -q 'prs` (o primeiro item' "$ref/08-registro.md" && grep -q 'entrega-de-planejamento.sh' "$ref/08-registro.md"
+confere '08-registro grava prs[0]' $?
+grep -q 'O PR de planejamento nunca tem merge automático' "$ref/09-revisao.md"
+confere '09-revisao diz que o PR de planejamento nunca tem merge automatico' $?
+grep -q 'pulou a revisão por passar de 100 arquivos não é finding nem pendência' "$ref/09-revisao.md"
+confere '09-revisao diz que o pulo do app por mais de 100 arquivos nao e pendencia' $?
+
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

@@ -85,6 +85,42 @@ Nunca decida o trabalho atual por:
 - o `ENTREGA.md` modificado mais recentemente;
 - o PR que está sendo revisado.
 
+### O PR de planejamento do trabalho atual
+
+O E9 é o **único** que registra o merge do PR de planejamento (DM-260), inclusive o feito fora
+dele, pelo botão do serviço. Com trabalho atual, quando `entrega-de-planejamento.sh` diz
+`planejamento=sim` com o item ainda não `merged` e a `pr_url` preenchida, o E9 lê esse PR no
+serviço e, se ele já foi mergeado, grava o registro com `merge_sha` = o commit de merge:
+
+```bash
+# E9: o merge do PR de planejamento do trabalho atual (DM-260)
+entrega="docs/entregas/<trabalho_id>/ENTREGA.md"
+planejamento="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2
+case "$planejamento" in planejamento=sim*) ;; *) exit 0 ;; esac
+case "$planejamento" in *estado=merged*) exit 0 ;; esac
+pr_url="$(awk 'NR == 1 { next } /^---/ { exit } /^pr_url:/ { sub(/^pr_url:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit }' "$entrega")"
+case "$pr_url" in ''|null) echo "PR de planejamento sem pr_url: nada a ler no serviço"; exit 0 ;; esac
+command -v gh >/dev/null 2>&1 || { echo "sem gh: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
+resposta="$(gh pr view "$pr_url" --json state,mergeCommit --jq '[.state, (.mergeCommit.oid // "")] | join(" ")')" \
+  || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; }
+estado_pr="${resposta%% *}"; merge_sha="${resposta#* }"
+[ "$estado_pr" = MERGED ] || { echo "PR de planejamento ainda não mergeado (${estado_pr:-sem estado}): nada gravado"; exit 0; }
+[ -n "$merge_sha" ] && [ "$merge_sha" != "$resposta" ] || { echo "MERGED sem commit de merge: nada gravado"; exit 3; }
+bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega "$entrega" --merge-sha "$merge_sha"
+```
+
+No GitLab, o equivalente é `glab mr view <n> --output json` (`state: merged` e
+`merge_commit_sha`). O registro é o do passo 7, item 7: no primeiro item de `prs`,
+`estado: merged`, `merge_sha` e `merge: humano`, e `pr_estado: merged` no topo — o script grava
+só isso e confere a gravação. **Sem ferramenta, sem resposta ou sem o commit de merge, não grava
+nada** e diz o motivo; PR ainda aberto também não grava. O E0 da primeira sprint depende desse
+registro (`00-abertura.md`, "Retomada depois do PR de planejamento"), e nunca consulta o serviço.
+
+**O PR de planejamento nunca tem merge automático**, com qualquer configuração: o merge é do
+desenvolvedor, no serviço ou confirmado aqui no passo 7. E o aviso do app de revisão de que
+pulou a revisão por passar de 100 arquivos não é finding nem pendência: os artefatos de método
+ficam fora da revisão por desenho e são conferidos pelos portões das skills.
+
 ### A marcação de trabalho próprio
 
 Se o PR foi aberto pela mergex **na mesma máquina** — a `pr_url` de algum `ENTREGA.md` local casa com a URL do PR —, marque-o na lista:
@@ -959,6 +995,11 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    reduz a janela, mas não dispensa (a) nem (b).
 6. Revalidado sem mudança **e com o merge atomicamente preso ao HEAD revalidado** (item 5), faça o merge com a estratégia que o repositório usa (detecte em `CONVENCOES.md` da stackx ou nos merges anteriores; na ausência, use o padrão do serviço). Nunca force, nunca reescreva histórico já enviado.
 7. Atualize `pr_estado: merged` no `ENTREGA.md` correspondente, quando ele existir localmente.
+   Se esse `ENTREGA.md` é a entrega de planejamento (`entrega-de-planejamento.sh` diz
+   `planejamento=sim`), o registro é o do script, que grava também o primeiro item de `prs`
+   (`estado: merged`, `merge_sha` = o commit de merge, `merge: humano`):
+   `entrega-de-planejamento.sh --registrar-merge --entrega <ENTREGA.md> --merge-sha <commit de merge>`
+   ("O PR de planejamento do trabalho atual", no passo 2).
 
    **E, somente se o PR mergeado for o do trabalho atual**, grave `pr_estado: merged`
    também em `.expx/estado.json`. O E9 percorre PRs de vários trabalhos e de outras
