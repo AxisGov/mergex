@@ -320,7 +320,9 @@ revisao_do_item() { # <valor>
 
 acrescentar() {
   local arq="$1" task="$2" commit="$3" revisao seq tmp
-  revisao="$(revisao_do_item "${4-null}")" || return 1
+  # fora de subshell primeiro, para o ERRO chegar a quem chamou
+  revisao_do_item "${4-null}" >/dev/null || return 1
+  revisao="$(revisao_do_item "${4-null}")"
   [ "$arq" != - ] || { ERRO="--acrescentar precisa de um arquivo, não de stdin"; return 1; }
   legivel "$arq" || return 1
   [ -w "$arq" ] || { ERRO="arquivo sem permissão de escrita: $arq"; return 1; }

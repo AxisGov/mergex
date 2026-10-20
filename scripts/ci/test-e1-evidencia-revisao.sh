@@ -103,6 +103,11 @@ x'; do
 done
 [ "$todos" = 0 ] || ok 'valor fora da gramatica nao grava (codigo 1, arquivo intocado)'
 
+erro="$(bash "$SEQ" --acrescentar "$E" T-01.06 fedcba9 'ok:x' 2>&1 >/dev/null)"
+[ "$erro" = 'sequencia-de-commits: revisao fora da gramática: ok:x' ] \
+  && ok 'valor fora da gramatica: o --acrescentar diz o motivo' \
+  || falha "valor fora da gramatica: o --acrescentar diz o motivo — stderr='$erro'"
+
 [ "$(bash "$SEQ" --revisao 'incompleta:L2:src/a.ts' 2>&1)" = 'incompleta:L2' ] \
   && ! bash "$SEQ" --revisao 'ok:x' >/dev/null 2>&1 \
   && ok '--revisao diz o valor como o --acrescentar o gravaria' \
@@ -346,6 +351,27 @@ if ln -s ../ENTREGA.md "$R/$REVISAO_REL/T-01.01.json" 2>/dev/null && [ -L "$R/$R
   [ "$RC" = 10 ] && ok 'link simbolico com o nome da evidencia e desvio' || falha "link simbolico — rc=$RC saida=$SAIDA"
 else
   ok 'link simbolico com o nome da evidencia e desvio (sem link simbolico aqui; o CI em Linux cobre)'
+fi
+
+# a evidência trocada por um link entre a conferência e o `git add` (corrida): o E1 confere
+# o modo do que entrou no índice e para antes do commit
+R="$D/troca"; repo "$R"
+printf 'png\n' > "$R/img/logo.png"
+revisa "$R" T-01.01 img/logo.png
+mkdir -p "$D/git-troca"
+GIT_REAL="$(command -v git)"
+printf '#!%s\nif [ "${1:-}" = add ] && [ -f "%s" ] && [ ! -L "%s" ]; then rm -f "%s"; ln -s ../ENTREGA.md "%s"; fi\nexec "%s" "$@"\n' \
+  "$BASH" "$R/$REVISAO_REL/T-01.01.json" "$R/$REVISAO_REL/T-01.01.json" "$R/$REVISAO_REL/T-01.01.json" \
+  "$R/$REVISAO_REL/T-01.01.json" "$GIT_REAL" > "$D/git-troca/git"
+chmod +x "$D/git-troca/git"
+if ln -s x "$D/link-teste" 2>/dev/null && [ -L "$D/link-teste" ]; then
+  fechar "$R" PATH="$D/git-troca:$PATH" -- img/logo.png
+  [ "$RC" = 4 ] && [ "$(git -C "$R" rev-list --count HEAD)" = 1 ] \
+    && case "$SAIDA" in *"$REVISAO_REL/T-01.01.json"*) true ;; *) false ;; esac \
+    && ok 'evidencia trocada por link antes do git add: para antes do commit' \
+    || falha "evidencia trocada por link — rc=$RC commits=$(git -C "$R" rev-list --count HEAD) saida=$SAIDA"
+else
+  ok 'evidencia trocada por link antes do git add: para antes do commit (sem link simbolico aqui; o CI em Linux cobre)'
 fi
 
 R="$D/preparar"; repo "$R"
