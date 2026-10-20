@@ -284,18 +284,23 @@ bash .claude/skills/mergex/scripts/portao-v12.sh --verificar \
 
 O script não decide a regra: ele pergunta ao `conferir` do núcleo do expx instalado (`expx-revisao.mjs conferir --trabalho <trabalho_id> --modo <modo> --task <T>=<commit>…`), com o commit do **último** item de cada task `concluida` em `ENTREGA.commits`, e traduz a resposta (DM-238). A primeira linha é sempre `V12=OK|AVISO|FALHA|SEM_PROVA|n/a`; depois vêm as linhas do `conferir` como vieram (`T-NN.MM ok`, `T-NN.MM AVISO <motivo>`, `T-NN.MM FALHA <motivo>`) ou `motivo=`. Códigos: 0 (OK, AVISO, `n/a`), 1 (FALHA), 2 (SEM_PROVA), 64 (uso).
 
-O modo vem de `.expx/fatiamento.json` (`revisao_por_task`), lido pelo `leitor-do-projeto.sh --rev HEAD`. As linhas valem na ordem do script: a entrega de planejamento primeiro, depois a leitura do modo, depois as tasks:
+O modo vem de `.expx/fatiamento.json` (`revisao_por_task`), lido pelo `leitor-do-projeto.sh --rev HEAD`.
+As linhas estão na ordem do script, e a primeira que casa decide (por isso uma configuração que não lê é SEM_PROVA mesmo com `versionado: false`):
 
 | Situação | `obrigatoria` | `se_disponivel` | `desligada` |
 |---|---|---|---|
-| sem `.expx/fatiamento.json` | `n/a`, sem node | `n/a`, sem node | `n/a`, sem node |
 | entrega de planejamento (`entrega-de-planejamento.sh`) | `n/a` | `n/a` | `n/a` |
-| modo `desligada` | — | — | `n/a`, sem chamar o `conferir` |
-| `versionado: false`; nenhuma task concluída; nenhuma task concluída com item em `ENTREGA.commits` | `n/a` | `n/a` | `n/a` |
-| fora de um repositório Git (sem `--raiz`) | `n/a` com `versionado: false`; SEM_PROVA com `versionado: true` | idem | idem |
-| configuração inválida, `FATIA_*` no ambiente (mesmo sem `.expx/fatiamento.json`), leitor ausente, núcleo antigo ou node ausente (o modo não pode ser lido) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
-| `revisao_por_task` fora dos três modos; `tasks.md` ou `ENTREGA.commits` ilegível; último item da task sem commit válido (a V12 nunca volta a um item anterior) | SEM_PROVA | SEM_PROVA | — |
 | `entrega-de-planejamento.sh` sai ≠ 0 (entrega incoerente) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
+| fora de um repositório Git (sem `--raiz`) | `n/a` com `versionado: false`; SEM_PROVA com `versionado: true` ou quando o Git falha por outro motivo | idem | idem |
+| configuração inválida, `FATIA_*` no ambiente (mesmo sem `.expx/fatiamento.json`), leitor ausente, núcleo antigo ou node ausente (o modo não pode ser lido) | SEM_PROVA | SEM_PROVA | SEM_PROVA |
+| sem `.expx/fatiamento.json` | `n/a`, sem node | `n/a`, sem node | `n/a`, sem node |
+| modo `desligada` | — | — | `n/a`, sem chamar o `conferir` |
+| `revisao_por_task` fora dos três modos | SEM_PROVA | SEM_PROVA | — |
+| `versionado: false` | `n/a` | `n/a` | — |
+| `tasks.md` ilegível | SEM_PROVA | SEM_PROVA | — |
+| nenhuma task concluída | `n/a` | `n/a` | — |
+| `ENTREGA.commits` ilegível, ou último item de uma task concluída sem commit válido (a V12 nunca volta a um item anterior) | SEM_PROVA | SEM_PROVA | — |
+| nenhuma task concluída com item em `ENTREGA.commits` | `n/a` | `n/a` | — |
 | núcleo instalado sem `expx-revisao.mjs` | SEM_PROVA | AVISO `revisao-nao-conferida:<motivo>` | — |
 | `conferir` 0 / 3 / 1 | OK / AVISO / FALHA | OK / AVISO / FALHA | — |
 | `conferir` 64, outro código, ou saída sem exatamente uma linha `T-… ok\|AVISO …\|FALHA …` por task pedida (inclusive o node que não carrega o núcleo) | SEM_PROVA | SEM_PROVA | — |

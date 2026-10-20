@@ -551,8 +551,10 @@ cmp -s "$check_cmd" "$check_oc" || fail 'OpenCode mergex-check command diverges 
 # datados de docs/superpowers/ (registro histórico) e este próprio arquivo,
 # que precisa citar a forma antiga para poder proibi-la. `-i` porque a contagem
 # aparece no começo de frase ("Onze verificações") e no badge ("11 verificacoes").
+# `V1..V10)`/`V1..V11)` exigem o parêntese: "V1–V10 OK e só a V11 falha" é uma faixa
+# legítima (test-portao-v11.sh, DM-111, DM-118), não a contagem do portão.
 if grep -rIl -i --exclude-dir=.git -e 'dez verifica' -e '10 verifica' -e 'V1\.\.V10)' -e 'as dez linhas' \
-     -e 'onze verifica' -e '11 verifica' -e 'V1\.\.V11' -e 'V1–V11' -e 'V1-V11' -e 'as onze linhas' . \
+     -e 'onze verifica' -e '11 verifica' -e 'V1\.\.V11)' -e 'V1–V11' -e 'as onze linhas' . \
    | grep -v -e '^\./scripts/ci/fixtures/' -e '^\./docs/superpowers/' -e '^\./scripts/ci/validate-mergex-contract\.sh$' \
    | grep -q .; then
   fail 'the gate is still described as ten or eleven checks somewhere'
@@ -1522,6 +1524,7 @@ fn_sem_git() { awk '/^sem_repositorio_git\(\) \{/,/^}$/' "$1"; }
 [ -n "$(fn_sem_git "$registrar_sh")" ] || fail 'registrar-portao.sh sem sem_repositorio_git() (DM-186, rodada 1)'
 [ -n "$(fn_sem_git "$ativacao_sh")" ] || fail 'ativacao-pre-push.sh sem sem_repositorio_git() (DM-186, rodada 1)'
 [ "$(fn_sem_git "$registrar_sh")" = "$(fn_sem_git "$ativacao_sh")" ] || fail 'sem_repositorio_git() diverge entre registrar-portao.sh e ativacao-pre-push.sh'
+[ "$(fn_sem_git "$registrar_sh")" = "$(fn_sem_git .claude/skills/mergex/scripts/portao-v12.sh)" ] || fail 'sem_repositorio_git() diverge entre registrar-portao.sh e portao-v12.sh'
 for s in 'GIT_DIR' 'not a git repository' '/.git'; do
   fn_sem_git "$registrar_sh" | grep -Fq -- "$s" || fail "sem_repositorio_git() não confere: $s"
 done

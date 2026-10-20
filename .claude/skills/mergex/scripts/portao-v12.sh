@@ -91,10 +91,35 @@ esac
 # shellcheck source=sequencia-de-commits.sh
 . "$AQUI/sequencia-de-commits.sh"
 
+# sem_repositorio_git — fora de QUALQUER repositório Git, pelo próprio Git (DM-186): a
+# mesma função, byte a byte, de registrar-portao.sh e ativacao-pre-push.sh (o validador do
+# contrato confere). Qualquer outra falha do Git (GIT_DIR inválido, dubious ownership,
+# repositório corrompido) não é "sem Git".
+sem_repositorio_git() {
+  local p saida
+  SEM_GIT_ERRO=""
+  if [ -n "${GIT_DIR:-}${GIT_WORK_TREE:-}${GIT_COMMON_DIR:-}" ]; then
+    SEM_GIT_ERRO="GIT_DIR, GIT_WORK_TREE ou GIT_COMMON_DIR está definido e o Git não resolveu a árvore de trabalho"; return 1
+  fi
+  p="$PWD"
+  while :; do
+    if [ -e "${p%/}/.git" ]; then SEM_GIT_ERRO="há um .git em ${p%/}/ e o Git não resolveu a árvore de trabalho"; return 1; fi
+    case "$p" in ''|/) break ;; esac
+    p="${p%/*}"; [ -n "$p" ] || p=/
+  done
+  if saida="$(LC_ALL=C git rev-parse --git-dir 2>&1)"; then
+    SEM_GIT_ERRO="o Git acha um repositório ($saida) mas não resolve a árvore de trabalho"; return 1
+  fi
+  case "$saida" in *'not a git repository'*) return 0 ;; esac
+  SEM_GIT_ERRO="o Git falhou: $saida"; return 1
+}
+
 # 2. o modo, pelo leitor do projeto, do commit (HEAD). Fora de um repositório Git não há
 # HEAD a ler: com `versionado: false` a V12 é `n/a` (não há commit de task), senão SEM_PROVA.
+# O Git que falha por outro motivo é sempre SEM_PROVA.
 if [ -z "$RAIZ" ]; then
   RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    sem_repositorio_git || { printf 'portao-v12: %s\n' "$SEM_GIT_ERRO" >&2; sem_prova 'git-falhou'; }
     [ "$(limpa "$(escalar "$ENTREGA" versionado)")" != false ] || na 'sem-versionador'
     sem_prova 'fora-de-um-repositorio-git'
   }

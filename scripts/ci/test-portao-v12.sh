@@ -166,6 +166,13 @@ for v in false true; do
       || quebra "fora do Git, versionado true: $(mostra)"
   fi
 done
+# o Git falhou por outro motivo (aqui, GIT_DIR inválido): não é "sem repositório", mesmo com versionado: false
+entrega false; rm -f "$aux/node.log"
+(cd "$fora" && env GIT_CEILING_DIRECTORIES="$aux" GIT_DIR="$aux/nao-existe" PATH="$aux/sem-node" "$BASH" "$V12" --verificar \
+   --entrega "$aux/ENTREGA.md" --trabalho w -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=git-falhou' \
+  && passa 'GIT_DIR invalido com versionado: false: SEM_PROVA, nunca n/a' \
+  || quebra "GIT_DIR invalido, versionado false: $(mostra)"
 
 # sem .expx/fatiamento.json: n/a sem node
 projeto sem-arquivo -; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
