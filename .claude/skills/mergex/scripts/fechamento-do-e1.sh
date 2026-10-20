@@ -296,10 +296,13 @@ registra_existente() { # <entrega> <origem> <trabalho> <task> <sha completo>
         caminhos+=("$origem_nome" "$destino_nome") ;;
       *)
         IFS= read -r -d '' caminho <&3 || para 4 'PARADO — entrada de diff sem path'
-        # a evidência de revisão da task, criada ou alterada, não é produto (DM-240)
+        # a evidência de revisão da task, criada ou alterada como arquivo comum
+        # (nunca link: modo 100644/100755 no commit), não é produto (DM-240)
         case "$status" in
           A|M) if [ "$caminho" = "$(pasta_de_revisao)$task.json" ] && nome_de_evidencia "$task.json"; then
-                 continue
+                 case "$(GIT_LITERAL_PATHSPECS=1 git ls-tree "$sha" -- "$caminho" 2>/dev/null)" in
+                   100644\ *|100755\ *) continue ;;
+                 esac
                fi ;;
         esac
         caminhos+=("$caminho") ;;

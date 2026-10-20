@@ -371,6 +371,20 @@ SAIDA="$(cd "$R" && bash "$FECHA" --registrar-existente --entrega "$ENTREGA_REL"
   && ok '--registrar-existente tambem registra a revisao do commit' \
   || falha "--registrar-existente — rc=$RC item=$(ultimo "$R") saida=$SAIDA"
 
+# um link simbólico com o nome da evidência, no commit recuperado (modo 120000, montado
+# direto no índice): é produto, como no --fechar
+R="$D/existente-link"; repo "$R"
+printf 'png\n' > "$R/img/logo.png"
+git -C "$R" add img/logo.png
+blob="$(printf '../ENTREGA.md' | git -C "$R" hash-object -w --stdin)"
+git -C "$R" update-index --add --cacheinfo "120000,$blob,$REVISAO_REL/T-01.01.json" && git -C "$R" commit -q -F "$MSG"
+sha="$(git -C "$R" rev-parse HEAD)"
+SAIDA="$(cd "$R" && bash "$FECHA" --registrar-existente --entrega "$ENTREGA_REL" --origem sprintx \
+  --trabalho ft-r --task T-01.01 --sha "$sha" 2>&1)"; RC=$?
+[ "$RC" = 10 ] && case "$SAIDA" in *"$REVISAO_REL/T-01.01.json"*) true ;; *) false ;; esac \
+  && ok '--registrar-existente: link simbolico com o nome da evidencia e desvio' \
+  || falha "--registrar-existente com link — rc=$RC saida=$SAIDA"
+
 # o hook, em bloqueio: a evidência da task atual no stage não é mistura nem desvio
 R="$D/hook"; repo "$R"
 printf '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"bloqueio"}}}\n' > "$R/.expx/hooks.json"
