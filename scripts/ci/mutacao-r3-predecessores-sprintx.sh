@@ -146,7 +146,7 @@ aplica() { # <dir> <id>; imprime override PREDS, se houver
       troca_linha "$ret" '[ -z "$(git status --porcelain=v1 --untracked-files=all' '  : \' ;;
     E2SOMENTEV9)
       troca_linha "$d/.claude/commands/mergex-check.md" \
-        'depois rode novamente todas as V1–V11' \
+        'depois rode novamente todas as V1–V12' \
         'depois rode novamente somente V9.' ;;
     E2PARCIAL)
       troca_linha "$d/.claude/skills/mergex/references/integracao/sprintx.md" \

@@ -184,9 +184,9 @@ grep -q 'estado: merged' "$aux/retomada.txt" && grep -q 'merge_sha' "$aux/retoma
   && grep -q 'ancestral' "$aux/retomada.txt" && grep -q 'E9' "$aux/retomada.txt"
 confere 'a retomada sem --planejamento exige o planejamento merged' $?
 awk '/^## Entrega de planejamento/ { d = 1; next } d && /^## / { exit } d' "$ref/02-prontidao.md" > "$aux/e2.txt"
-grep -q 'V1, V2, V3 e V11' "$aux/e2.txt" && grep -q 'planejamento: nenhuma task executada' "$aux/e2.txt" \
+grep -q 'V1, V2, V3, V11 e V12' "$aux/e2.txt" && grep -q 'planejamento: nenhuma task executada' "$aux/e2.txt" \
   && grep -q 'entrega-de-planejamento.sh' "$aux/e2.txt" && grep -q -- '--planejamento' "$aux/e2.txt"
-confere '02-prontidao marca V1, V2, V3 e V11 n/a na entrega de planejamento' $?
+confere '02-prontidao marca V1, V2, V3, V11 e V12 n/a na entrega de planejamento' $?
 grep -q 'Saída:.*fora_do_planejamento' "$ref/02-prontidao.md"
 confere '02-prontidao: a Saida da V9 cita fora_do_planejamento' $?
 

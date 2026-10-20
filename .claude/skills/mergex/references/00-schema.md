@@ -64,7 +64,7 @@ Valem para todo arquivo que leva frontmatter:
 | `tipo_trabalho` | `feature` \| `ocorrencia` |
 | `estado` | `aberto` \| `entregue` \| `bloqueado` |
 | `portao` | `pronto` \| `bloqueado` \| `null` (ainda não rodou) |
-| `falhas_portao` (por item) | `v1` … `v11` \| `v1_sem_prova` … `v11_sem_prova` |
+| `falhas_portao` (por item) | `v1` … `v12` \| `v1_sem_prova` … `v12_sem_prova` |
 | `causa` | ver "A causa do bloqueio" \| `null` (não bloqueado) |
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
 | `sprint_atual` | `planejamento` \| `null` |
@@ -483,6 +483,7 @@ interpreta a narrativa de quem executou e não conhece as classes de pendência 
 | 9 | `v4` | `regressao_nao_declarada` |
 | 10 | `v5` | `qa_nao_aprovado` |
 | 11 | `v11` | `commit_nao_registrado` |
+| 12 | `v12` | `revisao_reprovada` |
 
 E um valor a mais, que não é causa de trabalho nenhum: **`indeterminada`** — a mergex não
 conseguiu provar a causa. Nenhum outro valor existe. `falha_tecnica`, `decisao_humana` ou qualquer
@@ -500,23 +501,33 @@ falha consequência da outra:
 - `v6` a `v9` em seguida, na numeração: são **fatos que existem independentemente de a execução
   ter terminado** — o veredito da auditoria (que devolve o plano à F3 e invalida as verificações
   medidas contra ele), o `B-NN` registrado, as pré-condições do modo legado, o arquivo no diff.
-- `v1` a `v5` e `v11` por último, na numeração: leem o **registro da execução**, que fica
+- `v1` a `v5`, `v11` e `v12` por último, na numeração: leem o **registro da execução**, que fica
   incompleto justamente quando um daqueles fatos parou o trabalho. O próprio contrato do E2 diz
   isso: task `bloqueada` aponta o `B-NN` (V1 é sintoma da V7), e o QA da runx ausente é o fluxo
-  que não chegou ao E4 da runx (V5 é sintoma da V1). A `v11` fecha esse grupo porque a prova de
+  que não chegou ao E4 da runx (V5 é sintoma da V1). A `v11` vem depois das cinco porque a prova de
   E1 que falta é a **última** coisa que a execução registra sobre uma task: com a execução
   interrompida antes (V1), ou com o commit abortado por segredo (V10), a ausência da prova é
-  consequência, não causa.
+  consequência, não causa. A `v12` vem depois dela: ela só confere tasks concluídas e com commit
+  registrado, e a evidência de revisão é do commit da task; enquanto a execução não terminou
+  (V1) ou o registro do E1 falta (V11), o commit que a revisão tem de cobrir ainda pode mudar, e a
+  correção começa por elas (DM-239).
 
 Exemplo: `falhas_portao: [v1, v7]` → `causa: bloqueio_aberto`. `[v1, v2]` →
 `tarefa_nao_concluida`. `[v7, v10_sem_prova]` → `indeterminada`. `[v11]` →
-`commit_nao_registrado`.
+`commit_nao_registrado`. `[v11, v12]` → `commit_nao_registrado`. `[v12]` → `revisao_reprovada`.
+`[v12_sem_prova]` → `indeterminada`.
 
 **`commit_nao_registrado` não é `tarefa_nao_concluida`.** A task da V11 **está** `concluida` —
 o que falta é a prova de E1 dela em `commits`. Quem lê `tarefa_nao_concluida` vai ao `tasks.md`
 procurar status; quem lê `commit_nao_registrado` vai à lista `commits` deste mesmo arquivo
 procurar o item que falta. Duas evidências diferentes, dois lugares diferentes de correção:
 uma causa só para as duas apagaria a diferença justamente onde ela é acionável.
+
+**`revisao_reprovada` não é `commit_nao_registrado`.** A task da V12 está `concluida` e tem o
+commit registrado; o que falta é a revisão por task aprovada **no commit dela**, conferida pelo
+`conferir` do núcleo (`references/02-prontidao.md`, V12). Quem lê `revisao_reprovada` vai à
+evidência de revisão da task (revisar de novo, dividir a task, resolver o achado), não à lista
+`commits`.
 
 ### Por estado
 

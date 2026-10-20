@@ -292,8 +292,8 @@ echo "18. A V11 no enum do portão: falha própria, causa própria"
   && ok "V11 sozinha → commit_nao_registrado" || falha "V11 sozinha → $(bash "$CAUSA" --derivar v11 2>&1)"
 [ "$(bash "$CAUSA" --lista v11 v1)" = '[v1, v11]' ] \
   && ok "--lista grava v11 na numeração do portão" || falha "--lista: $(bash "$CAUSA" --lista v11 v1 2>&1)"
-[ "$(bash "$CAUSA" --ordem)" = 'v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11' ] \
-  && ok "V11 entra por último no grupo que lê o registro da execução" \
+[ "$(bash "$CAUSA" --ordem)" = 'v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11 v12' ] \
+  && ok "V11 entra no fim do grupo que lê o registro da execução, antes só da V12" \
   || falha "ordem: $(bash "$CAUSA" --ordem)"
 [ "$(bash "$CAUSA" --derivar v1 v11)" = tarefa_nao_concluida ] \
   && ok "V1 + V11 → tarefa_nao_concluida (a execução não terminou)" \

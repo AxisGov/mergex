@@ -150,6 +150,30 @@ echo '== V12: uso e casos sem revisao =='
 (cd "$aux" && "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w > "$aux/out" 2> "$aux/err"); rc=$?
 [ "$rc" = 64 ] && passa 'sem tasks.md: 64' || quebra "sem tasks.md: $(mostra)"
 
+# fora de um repositório Git: `versionado: false` é n/a (DM-238), sem node; `versionado: true` é SEM_PROVA
+fora="$aux/fora-do-git"; mkdir -p "$fora"; ITENS=""; tarefas T-01.01:concluida
+for v in false true; do
+  entrega "$v"; rm -f "$aux/node.log"
+  (cd "$fora" && env GIT_CEILING_DIRECTORIES="$aux" PATH="$aux/sem-node" "$BASH" "$V12" --verificar \
+     --entrega "$aux/ENTREGA.md" --trabalho w -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
+  if [ "$v" = false ]; then
+    [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-versionador' && ! chamou_node \
+      && passa 'fora de um repositorio Git com versionado: false: n/a sem node' \
+      || quebra "fora do Git, versionado false: $(mostra)"
+  else
+    [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=fora-de-um-repositorio-git' \
+      && passa 'fora de um repositorio Git com versionado: true: SEM_PROVA' \
+      || quebra "fora do Git, versionado true: $(mostra)"
+  fi
+done
+# o Git falhou por outro motivo (aqui, GIT_DIR inválido): não é "sem repositório", mesmo com versionado: false
+entrega false; rm -f "$aux/node.log"
+(cd "$fora" && env GIT_CEILING_DIRECTORIES="$aux" GIT_DIR="$aux/nao-existe" PATH="$aux/sem-node" "$BASH" "$V12" --verificar \
+   --entrega "$aux/ENTREGA.md" --trabalho w -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=git-falhou' \
+  && passa 'GIT_DIR invalido com versionado: false: SEM_PROVA, nunca n/a' \
+  || quebra "GIT_DIR invalido, versionado false: $(mostra)"
+
 # sem .expx/fatiamento.json: n/a sem node
 projeto sem-arquivo -; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
 roda PATH="$aux/sem-node"

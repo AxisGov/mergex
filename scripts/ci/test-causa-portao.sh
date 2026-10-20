@@ -109,14 +109,15 @@ deriva legado_incompleto       "V8 sozinha"  v8
 deriva arquivo_fora_do_plano   "V9 sozinha"  v9
 deriva segredo_no_diff         "V10 sozinha" v10
 deriva commit_nao_registrado   "V11 sozinha" v11
+deriva revisao_reprovada       "V12 sozinha" v12
 entrega "$E" bloqueado bloqueado '[v9]' arquivo_fora_do_plano; aceita --validar "bloqueado por V9" "$E" 'causa=arquivo_fora_do_plano'
 entrega "$E" bloqueado bloqueado '[v9]' tarefa_nao_concluida;  reprova --validar "causa do enum, mas não a derivada" "$E" "não é a derivada"
 
 # ---------------------------------------------------------------------------
 echo
-echo "4. Várias falhas: precedência V10; V6..V9; V1..V5 e V11"
+echo "4. Várias falhas: precedência V10; V6..V9; V1..V5, V11 e V12"
 # ---------------------------------------------------------------------------
-[ "$(bash "$CAUSA" --ordem)" = 'v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11' ] && ok "ordem declarada" || falha "ordem alterada: $(bash "$CAUSA" --ordem)"
+[ "$(bash "$CAUSA" --ordem)" = 'v10 v6 v7 v8 v9 v1 v2 v3 v4 v5 v11 v12' ] && ok "ordem declarada termina em v11 v12" || falha "ordem alterada: $(bash "$CAUSA" --ordem)"
 deriva bloqueio_aberto       "V1 + V7: task bloqueada é sintoma do B-NN" v1 v7
 deriva tarefa_nao_concluida  "V1 + V5: QA ausente é sintoma da execução" v1 v5
 deriva tarefa_nao_concluida  "V1 + V2 + V3" v1 v2 v3
@@ -128,9 +129,14 @@ deriva segredo_no_diff       "V10 vence tudo" v1 v6 v7 v9 v10
 deriva tarefa_nao_concluida  "V1 + V11: a execução nem terminou" v1 v11
 deriva bloqueio_aberto       "V7 + V11: o B-NN parou o trabalho" v7 v11
 deriva commit_nao_registrado "V11 sozinha entre as que leem a execução" v11
+deriva commit_nao_registrado "V11 + V12: sem commit da task não há evidência a conferir" v11 v12
+deriva tarefa_nao_concluida  "V1 + V12: a execução nem terminou" v1 v12
+deriva bloqueio_aberto       "V7 + V12" v7 v12
 entrega "$E" bloqueado bloqueado '[v1, v2, v9]' arquivo_fora_do_plano; aceita --validar "bloqueado com três falhas" "$E" 'causa=arquivo_fora_do_plano'
 entrega "$E" bloqueado bloqueado '[v7, v1]' bloqueio_aberto;           reprova --validar "lista fora da numeração do portão" "$E" 'fora da numeração'
 [ "$(bash "$CAUSA" --lista v9 v1 v10_sem_prova)" = '[v1, v9, v10_sem_prova]' ] && ok "--lista grava na numeração do portão" || falha "--lista: $(bash "$CAUSA" --lista v9 v1 v10_sem_prova)"
+[ "$(bash "$CAUSA" --lista v12 v1)" = '[v1, v12]' ] && ok "--lista v12 v1 → [v1, v12]" || falha "--lista v12 v1: $(bash "$CAUSA" --lista v12 v1 2>&1)"
+entrega "$E" bloqueado bloqueado '[v11, v12]' commit_nao_registrado; aceita --validar "bloqueado por V11 e V12" "$E" 'causa=commit_nao_registrado'
 
 # ---------------------------------------------------------------------------
 echo
@@ -160,7 +166,9 @@ echo "7. Causa ou falha fora do enum reprova"
 entrega "$E" bloqueado bloqueado '[v1, v7]' falha_tecnica;  reprova --validar "falha_tecnica" "$E" "causa fora do enum: 'falha_tecnica'"
 entrega "$E" bloqueado bloqueado '[v7]' decisao_humana;     reprova --validar "classe da buildx como causa" "$E" 'causa fora do enum'
 entrega "$E" bloqueado bloqueado '[v7]' Bloqueio_Aberto;    reprova --validar "enum com maiúscula" "$E" 'causa fora do enum'
-entrega "$E" bloqueado bloqueado '[v12]' bloqueio_aberto;   reprova --validar "falha v12" "$E" 'falha desconhecida'
+entrega "$E" bloqueado bloqueado '[v13]' bloqueio_aberto;   reprova --validar "falha v13" "$E" 'falha desconhecida'
+entrega "$E" bloqueado bloqueado '[v12]' revisao_reprovada; aceita --validar "bloqueado por V12" "$E" 'causa=revisao_reprovada'
+entrega "$E" bloqueado bloqueado '[v12, v12_sem_prova]' revisao_reprovada; reprova --validar "v12 e v12_sem_prova juntos" "$E" 'registrada duas vezes'
 entrega "$E" bloqueado bloqueado '[v11]' commit_nao_registrado; aceita --validar "bloqueado por V11" "$E" 'causa=commit_nao_registrado'
 entrega "$E" bloqueado bloqueado '[v7, v7_sem_prova]' bloqueio_aberto; reprova --validar "vN e vN_sem_prova juntos" "$E" 'registrada duas vezes'
 entrega "$E" bloqueado bloqueado 'v7' bloqueio_aberto;      reprova --validar "falhas_portao fora de lista" "$E" 'não é lista'
@@ -193,6 +201,9 @@ deriva indeterminada   "V9 sem prova antes da V1 provada"            v1 v9_sem_p
 deriva bloqueio_aberto "V7 provada antes da V9 sem prova"            v7 v9_sem_prova
 deriva indeterminada   "V11 sem prova sozinha (sem ENTREGA legível)"  v11_sem_prova
 deriva tarefa_nao_concluida "V1 provada antes da V11 sem prova"       v1 v11_sem_prova
+deriva indeterminada   "V12 sem prova sozinha (conferir sem prova)"  v12_sem_prova
+deriva commit_nao_registrado "V11 provada antes da V12 sem prova"    v11 v12_sem_prova
+entrega "$E" bloqueado bloqueado '[v12_sem_prova]' indeterminada;      aceita  --validar "bloqueado por V12 sem prova" "$E" 'causa=indeterminada'
 entrega "$E" bloqueado bloqueado '[v1, v10_sem_prova]' indeterminada;   aceita  --validar "bloqueado indeterminado" "$E" 'causa=indeterminada'
 entrega "$E" bloqueado bloqueado '[v1, v10_sem_prova]' tarefa_nao_concluida; reprova --validar "escolher a causa provada mais baixa" "$E" 'não é a derivada'
 entrega "$E" bloqueado bloqueado '[v7]' indeterminada;                  reprova --validar "indeterminada com causa provada" "$E" 'não é a derivada'
@@ -254,6 +265,27 @@ case "$LIDO" in *falha_tecnica*) falha "o piloto virou falha_tecnica" ;; *) ok "
 # O texto do B-01 não muda a causa: outro motivo, mesma evidência de portão.
 sed 's/precisa alterar arquivo fora do ownership da feature/dependencia externa indisponivel/' "$W/00-BLOQUEIOS.md" > "$W/b" && mv "$W/b" "$W/00-BLOQUEIOS.md"
 [ "$(bash "$CAUSA" --derivar v1 v7)" = "$CAUSA_PILOTO" ] && ok "narrativa do B-NN não altera a causa" || falha "a causa dependeu da narrativa"
+
+# ---------------------------------------------------------------------------
+echo
+echo "11. registrar-portao grava a V12 pela lista do causa-do-portao"
+# ---------------------------------------------------------------------------
+REG="$(dirname "$CAUSA")/registrar-portao.sh"
+G="$(mktemp -d)"; TMPS="$TMPS $G"
+git -C "$G" init -q . && git -C "$G" config user.email teste@expx.local && git -C "$G" config user.name Teste && git -C "$G" config core.autocrlf false && git -C "$G" config commit.gpgsign false
+mkdir -p "$G/docs/entregas/ft-v12"
+entrega "$G/docs/entregas/ft-v12/ENTREGA.md" aberto null '[]' null
+sed 's/ft-teste/ft-v12/g' "$G/docs/entregas/ft-v12/ENTREGA.md" > "$G/e" && mv "$G/e" "$G/docs/entregas/ft-v12/ENTREGA.md"
+git -C "$G" add docs && git -C "$G" commit -qm base
+# --resultado bloqueado não exige a prova do pre-push: nenhum hook é instalado aqui.
+for falhas in 'v12' 'v12 v1'; do
+  esperado='[v12]'; [ "$falhas" = v12 ] || esperado='[v1, v12]'
+  # shellcheck disable=SC2086
+  saida="$(cd "$G" && bash "$REG" --entrega docs/entregas/ft-v12/ENTREGA.md --origem sprintx --trabalho ft-v12 --resultado bloqueado --falhas $falhas 2>&1)"; rc=$?
+  gravado="$(awk '/^falhas_portao:/ { sub(/^falhas_portao:[[:space:]]*/, ""); print; exit }' "$G/docs/entregas/ft-v12/ENTREGA.md")"
+  if [ "$rc" = 0 ] && [ "$gravado" = "$esperado" ]; then ok "registrar-portao --falhas $falhas grava falhas_portao: $gravado"
+  else falha "registrar-portao --falhas $falhas: rc=$rc, gravado '$gravado', esperava '$esperado' ($saida)"; fi
+done
 
 echo
 echo "---------------------------------------------"
