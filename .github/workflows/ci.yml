@@ -135,6 +135,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-leitor-do-projeto.sh
 
+      - name: Test E2 V12
+        shell: bash
+        run: bash scripts/ci/test-portao-v12.sh
+
       - name: Test E9 R4 PR head from the base repository
         shell: bash
         run: bash scripts/ci/test-r4-cabeca-do-pr.sh
