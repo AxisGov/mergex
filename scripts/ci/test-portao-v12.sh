@@ -74,7 +74,11 @@ printf '#!%s\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$BASH" "$aux/node
 # corta: o conferir de verdade, com a última linha do stdout a menos e o mesmo código
 printf '#!%s\nif [ "${2:-}" = conferir ]; then out="$("%s" "$@")"; rc=$?; printf "%%s\\n" "$out" | sed "\\$d"; exit $rc; fi\nexec "%s" "$@"\n' \
   "$BASH" "$NODE_REAL" "$NODE_REAL" > "$aux/corta/node"
-chmod +x "$aux/espia/node" "$aux/corta/node"
+# troca: no lugar do conferir, o stdout de $aux/troca.out (byte a byte) e o codigo de $aux/troca.rc
+mkdir -p "$aux/troca"
+printf '#!%s\nif [ "${2:-}" = conferir ]; then cat "%s"; exit "$(cat "%s")"; fi\nexec "%s" "$@"\n' \
+  "$BASH" "$aux/troca.out" "$aux/troca.rc" "$NODE_REAL" > "$aux/troca/node"
+chmod +x "$aux/espia/node" "$aux/corta/node" "$aux/troca/node"
 
 # --- o projeto temporário --------------------------------------------------------------------
 # projeto <nome> <modo|-> — repositório com o núcleo versionado e `.expx/fatiamento.json`
@@ -162,8 +166,8 @@ roda PATH="$aux/espia:$PATH"
 for m in obrigatoria se_disponivel desligada; do
   projeto "sem-node-$m" "$m"; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
   roda PATH="$aux/sem-node"
-  [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && grep -q '^motivo=configuracao-nao-lida' "$aux/out" \
-    && passa "node ausente ($m): SEM_PROVA" || quebra "node ausente ($m): $(mostra)"
+  [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && grep -q '^motivo=configuracao-nao-lida:3$' "$aux/out" \
+    && grep -q 'node ausente' "$aux/err" && passa "node ausente ($m): SEM_PROVA" || quebra "node ausente ($m): $(mostra)"
 done
 
 # FATIA_X no ambiente: SEM_PROVA, com a mensagem da emenda, sem conferir
@@ -271,6 +275,24 @@ roda PATH="$aux/corta:$PATH"
 [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=conferir-saida-fora-da-forma' \
   && passa 'conferir com uma linha a menos: SEM_PROVA' || quebra "conferir com uma linha a menos: $(mostra)"
 
+# linha a mais sem fim de linha, e motivo em branco: SEM_PROVA
+projeto troca obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+printf 'T-01.01 FALHA evidencia-ausente\nlixo' > "$aux/troca.out"; echo 1 > "$aux/troca.rc"
+roda PATH="$aux/troca:$PATH"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=conferir-saida-fora-da-forma' \
+  && passa 'conferir com uma linha a mais sem fim de linha: SEM_PROVA' || quebra "linha a mais sem fim de linha: $(mostra)"
+printf 'T-01.01 AVISO  \n' > "$aux/troca.out"; echo 3 > "$aux/troca.rc"
+roda PATH="$aux/troca:$PATH"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=conferir-saida-fora-da-forma' \
+  && passa 'conferir com motivo em branco: SEM_PROVA' || quebra "motivo em branco: $(mostra)"
+
+# --raiz relativa ao diretorio de quem chama
+projeto relativa obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+(cd "$aux" && "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w --raiz relativa \
+   -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' \
+  && passa '--raiz relativa: conferida' || quebra "--raiz relativa: $(mostra)"
+
 # 41 arquivos revisáveis: incompleta:L1:41 (antes da CLI), FALHA em se_disponivel também
 projeto l1 se_disponivel
 lista=""; for i in $(seq 1 41); do escreve "src/f$i.ts"; lista="$lista${lista:+,}src/f$i.ts"; done
@@ -294,6 +316,13 @@ revisa T-01.01 "$lista"; commita T-01.01; entrega; tarefas T-01.01:concluida
 roda
 [ "$rc" = 1 ] && tem 'T-01.01 FALHA incompleta:L1:41' && [ "$(linhas)" = 2 ] \
   && passa 'task com dois itens em commits: confere o ultimo' || quebra "dois itens: $(mostra)"
+
+# ultimo item da task com commit invalido: SEM_PROVA, nunca o commit de um item anterior
+projeto ultimo-invalido obrigatoria; escreve src/a.ts; commita T-01.01; ITENS="$ITENS T-01.01:null"
+entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=commit-invalido:T-01.01' \
+  && passa 'ultimo item da task com commit invalido: SEM_PROVA' || quebra "ultimo item com commit invalido: $(mostra)"
 
 # evidência de versão antiga (expx_revisao 1) no commit: FALHA evidencia-invalida:versao
 projeto v1 obrigatoria

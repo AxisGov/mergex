@@ -9,8 +9,9 @@
 #      do núcleo do expx, quem lê é o `conferir` dele, e a V12 só traduz o que o
 #      `conferir` responde. A evidência lida é a do commit da task, nunca a do disco.
 #   2. O commit da task é o do ÚLTIMO item dela em `ENTREGA.commits`, na ordem efetiva
-#      (a do arquivo), lido por `prova-de-commit.sh --commits`: nunca um segundo parser.
-#      Task concluída sem item não é alvo (é da V11).
+#      (a do arquivo), lido por `sequencia-de-commits.sh --ler`: nunca um segundo parser.
+#      Task concluída sem item não é alvo (é da V11); último item sem commit válido é
+#      SEM_PROVA (nunca o commit de um item anterior).
 #   3. A entrega de planejamento (`entrega-de-planejamento.sh`, antes de tudo) não tem
 #      task executada: `n/a`. Entrega incoerente: SEM_PROVA.
 #   4. O modo vem de `leitor-do-projeto.sh --rev HEAD` (consumo com `set -a`). Sem
@@ -88,6 +89,8 @@ esac
 if [ -z "$RAIZ" ]; then
   RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || sem_prova 'fora-de-um-repositorio-git'
 fi
+# absoluta: o node roda de dentro dela, e uma relativa seria resolvida duas vezes
+RAIZ="$(cd "$RAIZ" 2>/dev/null && pwd)" || sem_prova 'raiz-inexistente'
 EXPX_REVISAO_POR_TASK=""; EXPX_FATIAMENTO_ORIGEM=""
 fatia="$("$SH" "$AQUI/leitor-do-projeto.sh" --raiz "$RAIZ" --rev HEAD 2> "$tmp/err")" \
   || { rc=$?; repassa; sem_prova "configuracao-nao-lida:$rc"; }
@@ -109,18 +112,30 @@ esac
 concluidas="$("$SH" "$AQUI/prova-de-commit.sh" --concluidas "$@" 2> "$tmp/err")" \
   || { repassa; sem_prova 'plano-ilegivel'; }
 [ -n "$concluidas" ] || na 'nenhuma-task-concluida'
-commits="$("$SH" "$AQUI/prova-de-commit.sh" --commits "$ENTREGA" 2> "$tmp/err")" \
+commits="$("$SH" "$AQUI/sequencia-de-commits.sh" --ler "$ENTREGA" 2> "$tmp/err")" \
   || { repassa; sem_prova 'commits-ilegivel'; }
 
-# alvos: cada task concluída (uma vez só) com o commit do ÚLTIMO item dela
+# alvos: cada task concluída (uma vez só) com o commit do ÚLTIMO item dela, na ordem
+# efetiva (a do arquivo). A leitura é a crua (`--ler`, todos os itens): se o último item
+# da task não tem commit válido, a V12 não volta a um item anterior, que provaria um
+# commit que já não é o da task — SEM_PROVA.
 ALVOS=""; VISTAS=""
 while IFS="$(printf '\t')" read -r id _; do
   [ -n "$id" ] || continue
   printf '%s' "$VISTAS" | grep -Fxq -- "$id" && continue
   VISTAS="$VISTAS$id
 "
-  sha="$(printf '%s\n' "$commits" | awk -F '\t' -v t="$id" '$1 == t { s = $2 } END { print s }')"
-  [ -n "$sha" ] || continue
+  tem_item=0; sha=""
+  while IFS= read -r item; do
+    [ -n "$item" ] || continue
+    campos "$item"
+    [ "$(limpa "$CAMPO3")" = "$id" ] || continue
+    tem_item=1; sha="$(limpa "$CAMPO4")"
+  done <<EOI
+$commits
+EOI
+  [ "$tem_item" = 1 ] || continue
+  sha_valido "$sha" || sem_prova "commit-invalido:$id"
   ALVOS="$ALVOS$id=$sha
 "
 done <<EOF
@@ -160,14 +175,16 @@ while IFS= read -r task; do
   IFS= read -r linha <&3 || fora 'conferir-saida-fora-da-forma'
   case "$linha" in
     "$task ok") ;;
-    "$task AVISO "?*) n_aviso=$((n_aviso + 1)) ;;
-    "$task FALHA "?*) n_falha=$((n_falha + 1)) ;;
+    "$task AVISO "[![:space:]]*) n_aviso=$((n_aviso + 1)) ;;
+    "$task FALHA "[![:space:]]*) n_falha=$((n_falha + 1)) ;;
     *) fora 'conferir-saida-fora-da-forma' ;;
   esac
 done <<EOF
 $esperadas
 EOF
-! IFS= read -r linha <&3 || fora 'conferir-saida-fora-da-forma'
+# nada depois, nem uma linha sem o fim de linha (o `read` sai 1, mas preenche `linha`)
+linha=''
+if IFS= read -r linha <&3 || [ -n "$linha" ]; then fora 'conferir-saida-fora-da-forma'; fi
 exec 3<&-
 
 case "$rc:$n_falha:$n_aviso" in
