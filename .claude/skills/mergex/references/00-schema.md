@@ -67,6 +67,9 @@ Valem para todo arquivo que leva frontmatter:
 | `falhas_portao` (por item) | `v1` … `v11` \| `v1_sem_prova` … `v11_sem_prova` |
 | `causa` | ver "A causa do bloqueio" \| `null` (não bloqueado) |
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
+| `sprint_atual` | `planejamento` \| `null` |
+| `estado` (por item de `prs`) | `aberto` \| `rascunho` \| `aguardando_merge` \| `merged` \| `fechado` \| `null` |
+| `merge` (por item de `prs`) | `humano` \| `automatico` \| `null` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
 | `faixa` (por arquivo) | `alta` \| `media` \| `baixa` |
 | `origem_base` (no `entrega`) | `registrada_e0` \| `inferida_legado` \| `null` (sem versionador) |
@@ -139,6 +142,8 @@ desvios: []
 push_feito: true
 pr_url: https://github.com/<org>/<repo>/pull/482
 pr_estado: rascunho
+sprint_atual: null
+prs: []
 criado_em: 2026-08-27
 atualizado_em: 2026-08-29
 entregue_em: 2026-08-29
@@ -172,7 +177,44 @@ entregue_em: 2026-08-29
 | `push_feito` | `true` só quando o E6 confirmou que o remoto tem o mesmo commit |
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
 | `pr_estado` | `rascunho` na abertura normal; `aberto` quando o QA já aprovou; `merged`/`fechado` quando o E9 ou uma pessoa atualizarem |
+| `sprint_atual` | `planejamento` enquanto a entrega atual é o PR de planejamento; `null` fora dele. Ver "A entrega de planejamento" |
+| `prs` | Os PRs do trabalho, um item `{sprint, url, estado, merge_sha, merge}` por PR, em YAML de bloco; `[]` sem PR registrado. O de planejamento é sempre o primeiro. `pr_url`/`pr_estado` de topo são os da entrega atual. Ver "A entrega de planejamento" |
 | `entregue_em` | A data em que o fluxo completou; `null` enquanto `estado` não for `entregue` |
+
+## A entrega de planejamento — `sprint_atual` e `prs`
+
+O PR de planejamento (DM-259) leva só os artefatos de método do planejamento (tudo sob
+`^docs/(sprintx|entregas|eventos)/`), abre no fim da F5 e tem merge do desenvolvedor, nunca
+automático. A entrega dele é marcada por **duas** chaves coerentes, gravadas pelo E0
+`--planejamento`:
+
+```yaml
+sprint_atual: planejamento
+prs:
+  - sprint: planejamento
+    url: null
+    estado: null
+    merge_sha: null
+    merge: null
+```
+
+| Campo do item | Regra |
+|---|---|
+| `sprint` | `planejamento` só no **primeiro** item |
+| `url` | A URL do PR, gravada pelo E8; `null` antes do E7 |
+| `estado` | O enum da tabela; o E8 grava o do E7, o E9 grava `merged` |
+| `merge_sha` | O commit de merge, só com `estado: merged`; `null` antes |
+| `merge` | `humano` quando o E9 registra o merge; **nunca** `automatico` no planejamento |
+
+- `prs` é sempre YAML de bloco; a forma em fluxo (`prs: [{...}]`) é ilegível. Lista vazia é `prs: []`.
+- Uma chave sem a outra é incoerente: `sprint_atual: planejamento` sem o item, ou o item sem
+  `sprint_atual`. A exceção é a retomada do E0 depois do merge: `sprint_atual: null` com o
+  item `merged`.
+- Entrega anterior às chaves (sem `sprint_atual` nem `prs`) não é de planejamento.
+- **Ninguém relê estas chaves por conta própria.** O leitor único é
+  `scripts/entrega-de-planejamento.sh --entrega <ENTREGA.md> [--rev <commit>]`, que imprime
+  `planejamento=sim|nao` (com `sim`, também `estado=` e `merge_sha=`) e sai 2 com a entrega
+  ilegível ou incoerente. E2, E7, E8 e E9 o consomem.
 
 ## A ordem de registro — a chave `seq`
 
