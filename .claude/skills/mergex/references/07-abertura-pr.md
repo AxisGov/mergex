@@ -112,11 +112,13 @@ if [ "$bb" = HEAD ]; then
 fi
 git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 1; }
 base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 1
+planejamento="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "docs/entregas/<trabalho_id>/ENTREGA.md" --rev "$publicado")" || { echo "ENTREGA.md ilegível ou incoerente no SHA publicado: o E7 não mede nem abre o PR"; exit 2; }
 fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev "$publicado")" || { echo "configuração do projeto (.expx/fatiamento.json) não lida: o E7 não mede nem abre o PR"; exit 2; }
 set -a; eval "$fatia"; set +a
 set --; set -f; ifs_antes="$IFS"; IFS='|'
 for parte in $EXPX_EXCLUIR_DA_REVISAO; do [ -n "$parte" ] && set -- "$@" --excluir-da-revisao "$parte"; done
 IFS="$ifs_antes"; set +f
+case "$planejamento" in planejamento=sim*) set -- --planejamento "$@" ;; esac
 bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$@" "$base" "$publicado"
 rc_fatia=$?; [ "$rc_fatia" = 0 ] && { printf '%s\n' "$bb" > "$estado_bb" || exit 1; }; exit "$rc_fatia"
 ```
@@ -152,6 +154,19 @@ Review → Configuration → Exclusions → Exclude Files), que os tira da revis
 conta dos 100: o app conta todos os arquivos alterados. A mergex não enxerga o painel: quando o
 PR leva artefatos de método, o relato do E7 ao desenvolvedor lembra os três padrões a excluir
 lá — o `PR.md` não, que sai do E4 sem essa entrada.
+
+**O PR de planejamento** (DM-259). Antes de medir, o bloco pergunta a
+`entrega-de-planejamento.sh` se o `ENTREGA.md` **do SHA publicado** é a entrega de planejamento
+(nunca o do disco). Com `planejamento=sim`, o script recebe `--planejamento` e confere de novo os
+caminhos: o PR só leva `docs/sprintx/`, `docs/entregas/` e `docs/eventos/`. L3 **não se mede**
+nele — se passar de 100 arquivos, o app pula a revisão, e isso é aceito: esses caminhos ficam
+fora da revisão por desenho —, e L2 não se aplica, porque nada nele é revisável. Saída `1` com
+`--planejamento` é a **recusa**: o E7 não abre o PR, registra a lista das linhas
+`VIOLACAO planejamento` e diz ao desenvolvedor que o PR de planejamento só leva `docs/sprintx/`,
+`docs/entregas/` e `docs/eventos/` — o código vai nos PRs das sprints, depois do merge dele. Uma
+renomeação de `src/a.ts` para `docs/sprintx/...` também é recusada: a origem conta. Entrega
+ilegível ou incoerente no SHA publicado: o bloco sai `2`. Numa entrega comum, nada muda: o
+script mede L2 e L3 sem `--planejamento`.
 
 Saída `0`: siga para o passo 2 (ou 3, sem ferramenta). Saída `1`: o E7 **não abre o PR**. Um PR
 acima do limite não recebe revisão automática, e PR sem revisão que parece revisado é pior que
@@ -326,6 +341,8 @@ Siga para o E8.
 | `fatiamento-da-pr.sh` saiu `1` (L2: arquivo revisável acima de 5.000 linhas ou 204.800 bytes; L3: mais de 100 arquivos) | O E7 **não abre o PR**: registra as violações, `pr_estado` fica `null`, e o desenvolvedor recebe como dividir (L2: uma task anterior divide o arquivo; L3: dividir a sprint ou o trabalho); nunca força a revisão do app |
 | `fatiamento-da-pr.sh` saiu `2` ou outro código (não mediu: ref inexistente, sem ancestral comum, objeto ausente, `git diff` falhou; ou `FATIA_*` no ambiente) | O E7 **não abre o PR**: registra o erro literal, `pr_estado` fica `null`; não medido não é dentro do limite. Com `FATIA_*` no ambiente, o desenvolvedor remove a variável |
 | `leitor-do-projeto.sh` falhou (`FATIA_*` no ambiente, `.expx/fatiamento.json` inválido ou na versão 1, ou presente sem o leitor do núcleo, com núcleo antigo — sem `expx-limites.mjs` ou `perfis/` —, com o núcleo do commit diferente do instalado, ou sem node): o bloco sai `2` | O E7 **não abre o PR**: registra o erro literal (a variável a remover, a chave inválida, ou `expx update`), `pr_estado` fica `null`; nunca mede com os padrões |
+| PR de planejamento com arquivo fora de `docs/sprintx/`, `docs/entregas/` e `docs/eventos/` (`fatiamento-da-pr.sh --planejamento` saiu `1`, linhas `VIOLACAO planejamento`) | O E7 **recusa**: não abre o PR, registra a lista, `pr_estado` fica `null`, e diz que o PR de planejamento só leva os artefatos de método; L3 não se mede nele |
+| `entrega-de-planejamento.sh` falhou no SHA publicado (`ENTREGA.md` ausente, ilegível ou com `sprint_atual` e `prs` incoerentes): o bloco sai `2` | O E7 **não abre o PR**: registra o motivo, `pr_estado` fica `null` |
 | Comando falhou por permissão | Passo 3, com o erro literal registrado |
 | PR já existe | Recupere a URL e registre; é retomada |
 | Sem push | O E7 não roda; siga para o E8 |

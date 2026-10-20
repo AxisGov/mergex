@@ -28,6 +28,7 @@ A mergex procura **o canônico primeiro e o antigo como fallback**, em todas as 
 
 | Momento na sprintx | Etapa da mergex | O que acontece |
 |---|---|---|
+| Fim da F5, com o plano aprovado e **commitado** | **E0–E8 com `--planejamento`** | O PR de planejamento: só os artefatos de método (`^docs/(sprintx\|entregas\|eventos)/`), merge do desenvolvedor. A F6 espera o merge ("PR de planejamento — no fim da F5") |
 | Início da F6, **antes da primeira task** | **E0 ABERTURA** | Adota `feature/<slug>` e o worktree da F1 (ou cria a branch, se ela não existir), registra no `ORQUESTRADOR.md` e cria `docs/entregas/<slug>/ENTREGA.md` |
 | Ao fechar **cada** task (status `concluida`, `suite: parcial` ou `verde`) | **E1 COMMIT** | Um commit por task, com a mensagem no formato da mergex |
 | Fim da F6, com todas as tasks executadas | **pre-e2 → E2 → E8** | `persistir-metodo pre-e2`, portão, classificação, descrição do PR, pacote de QA, `pre-e6`, push, abertura do PR e `e8` |
@@ -99,6 +100,26 @@ fechamento bloqueado — registro persistido por commit, branch **não** publica
 sprintx com o que falta. Se a feature for replanejada e a F6 rodar de novo, o E0 **retoma** o
 `ENTREGA.md` que já existe em vez de recriá-lo, preservando `commits` e `criado_em`
 (`references/00-abertura.md`).
+
+### PR de planejamento — no fim da F5
+
+Vale em `por_sprint` e em `por_trabalho` (DM-259). Com o plano aprovado na F5:
+
+1. A sprintx **commita o planejamento** (a pasta `docs/sprintx/features/<slug>/`) antes de chamar
+   o E0: o E0 `--planejamento` recusa com artefato do planejamento sujo ou fora do índice, e a
+   mergex não amplia o catálogo de método para isso.
+2. A sprintx chama E0–E8 com `--planejamento`. O E2 marca V1, V2, V3 e V11 `n/a` e roda a V9 com
+   `--planejamento`; o E7 recusa qualquer arquivo fora de `^docs/(sprintx|entregas|eventos)/` e não
+   mede L3 (`references/07-abertura-pr.md`); o E8 grava o PR no item de planejamento de `prs`.
+3. A sprintx registra o bloqueio `aguardando_merge` até o desenvolvedor mergear. **Nunca há merge
+   automático do PR de planejamento.** Se ele passar de 100 arquivos, o app de revisão pula a
+   revisão, e isso não é pendência.
+4. Depois do merge, o E9 registra o merge (`estado: merged`, `merge_sha`, `merge: humano`),
+   inclusive o feito pelo botão do serviço.
+5. A F6 da primeira sprint só começa depois disso, com a branch **atualizada a partir da main**, e
+   chama o E0 **sem** `--planejamento`: ele confere o merge registrado e a base, e volta
+   `sprint_atual` a `null` (`references/00-abertura.md`, "Retomada depois do PR de planejamento").
+   Nada de código entra antes disso.
 
 ### E0 — no início da F6
 

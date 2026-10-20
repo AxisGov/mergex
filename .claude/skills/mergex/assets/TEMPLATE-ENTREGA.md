@@ -66,6 +66,8 @@ desvios: []
 push_feito: {{true | false}}
 pr_url: {{url | null}}
 pr_estado: {{rascunho | aberto | merged | fechado | null}}
+sprint_atual: {{planejamento, so no E0 --planejamento | null}}
+prs: {{[] | a lista em bloco com o item de planejamento, so no E0 --planejamento (references/00-schema.md)}}
 criado_em: {{AAAA-MM-DD}}
 atualizado_em: {{AAAA-MM-DD}}
 entregue_em: {{AAAA-MM-DD | null}}

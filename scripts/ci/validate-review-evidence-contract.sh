@@ -52,6 +52,16 @@ cmp -s "$claude_cmd" "$opencode_cmd" \
 grep -Fq 'nunca invoca `mergex-revisar`' "$readme" \
   || fail 'README no longer preserves the BuildX -> no mergex-revisar boundary'
 
+# O PR de planejamento (DM-260): nunca merge automatico, o pulo do app por mais de
+# 100 arquivos nao e pendencia, e so o E9 registra o merge dele, lido no servico
+grep -Fq '**O PR de planejamento nunca tem merge automático**' "$review" \
+  || fail '09-revisao.md no longer says the planning PR never has automatic merge'
+grep -Fq 'pulou a revisão por passar de 100 arquivos não é finding nem pendência' "$review" \
+  || fail '09-revisao.md no longer says the app skipping a planning PR over 100 files is not pending'
+grep -Fq 'gh pr view "$pr_url" --json state,mergeCommit' "$review" \
+  && grep -Fq 'entrega-de-planejamento.sh --registrar-merge' "$review" \
+  || fail '09-revisao.md no longer records the planning PR merge read from the service'
+
 # R1-R6 are canonical and each criterion remains present exactly once in the normative table.
 for n in 1 2 3 4 5 6; do
   count="$(grep -Fc "| R${n} |" "$review" || true)"

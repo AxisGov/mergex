@@ -287,10 +287,16 @@ bloco_do_e7() { # <trecho> — imprime o bloco cercado do E7 que contem o trecho
 git init -q --bare -b main "$aux/m2-remoto.git"
 git clone -q "$aux/m2-remoto.git" "$aux/m2-dev" 2>/dev/null
 d() { git -C "$aux/m2-dev" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
-printf 'base\n' > "$aux/m2-dev/base.txt"; d add -A; d commit -q -m base; d push -q origin main 2>/dev/null
+entrega_comum() { # <raiz> — o ENTREGA.md de docs/entregas/x/ de uma entrega comum (sem planejamento)
+  mkdir -p "$1/docs/entregas/x"
+  printf '%s\n' '---' 'kind: entrega' 'trabalho_id: x' 'sprint_atual: null' 'prs: []' '---' > "$1/docs/entregas/x/ENTREGA.md"
+}
+printf 'base\n' > "$aux/m2-dev/base.txt"; entrega_comum "$aux/m2-dev"
+d add -A; d commit -q -m base; d push -q origin main 2>/dev/null
 d switch -q -c feature/x; printf 'linha\n' > "$aux/m2-dev/a.md"; d add -A; d commit -q -m a
 d push -q -u origin feature/x 2>/dev/null
-bloco_do_e7 'fatiamento-da-pr.sh "$@" "$base" "$publicado"' | sed "s|<branch_base>|main|" \
+bloco_do_e7 'fatiamento-da-pr.sh "$@" "$base" "$publicado"' | sed "s|<branch_base>|main|; s|<trabalho_id>|x|g" \
+  | sed "s#bash \.claude/skills/mergex/scripts/entrega-de-planejamento\.sh#bash '$raiz/.claude/skills/mergex/scripts/entrega-de-planejamento.sh'#" \
   | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' \
   | sed "s#bash \.claude/skills/mergex/scripts/leitor-do-projeto\.sh#bash '$leitor'#" > "$aux/passo15.sh"
 saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
@@ -377,7 +383,8 @@ cenario() { # <nome> [sem-nucleo] [config da base] — remoto e clone novos, bas
   if [ "${2:-}" != sem-nucleo ]; then
     monta_nucleo "$dv/$nucleo_rel"
   fi
-  printf 'base\n' > "$dv/base.txt"; c "$1" add -A; c "$1" commit -q -m base; c "$1" push -q origin main 2>/dev/null
+  printf 'base\n' > "$dv/base.txt"; entrega_comum "$dv"
+  c "$1" add -A; c "$1" commit -q -m base; c "$1" push -q origin main 2>/dev/null
   c "$1" switch -q -c feature/x
 }
 c() { local n="$1"; shift; git -C "$aux/c-$n" -c core.autocrlf=false -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
@@ -439,7 +446,7 @@ saida="$(passo15 sem-leitor)"; rc=$?
 # reprovam em L3, e o reprovado (saida 1) nao deixa o estado da base para o passo 2
 cenario sem-config; mkdir -p "$aux/c-sem-config/fixtures/candidatos" "$aux/c-sem-config/docs/entregas/x"
 for i in $(seq 1 100); do printf 'x\n' > "$aux/c-sem-config/fixtures/candidatos/f$i.txt"; done
-printf 'entrega\n' > "$aux/c-sem-config/docs/entregas/x/ENTREGA.md"; publica sem-config muitos
+printf 'pr\n' > "$aux/c-sem-config/docs/entregas/x/PR.md"; publica sem-config muitos
 mkdir -p "$aux/node-espia"; printf '#!/usr/bin/env bash\n: > "%s/node-chamado"\nexit 1\n' "$aux" > "$aux/node-espia/node"; chmod +x "$aux/node-espia/node"
 saida="$(passo15 sem-config PATH="$aux/node-espia:$PATH")"; rc=$?
 [ "$rc" = 1 ] && [ ! -e "$aux/node-chamado" ] && case "$saida" in *'VIOLACAO L3'*'101 arquivos'*) true ;; *) false ;; esac \
@@ -455,6 +462,53 @@ saida="$(passo15 fatia FATIA_IGNORAR=)"; rc=$?
 [ "$rc" = 2 ] && [ ! -e "$(estado_de fatia)" ] && case "$saida" in *'`FATIA_IGNORAR` não é mais lida'*'remova-a do ambiente'*) true ;; *) false ;; esac \
   && passa 'FATIA_IGNORAR= no shell: o bloco sai 2, cita remova-a do ambiente e nao deixa o estado' \
   || quebra "FATIA_IGNORAR= no shell (rc $rc, estado $( [ -e "$(estado_de fatia)" ] && echo presente || echo ausente)): $saida"
+
+# O PR de planejamento (DM-259): o bloco pergunta a entrega-de-planejamento.sh, no SHA
+# publicado, e so entao passa --planejamento ao espelho (sem L3, so artefatos de metodo)
+grep -Fq 'entrega-de-planejamento.sh --entrega "docs/entregas/<trabalho_id>/ENTREGA.md" --rev "$publicado"' "$e7" \
+  && passa 'o bloco do passo 1.5 le a entrega de planejamento do SHA publicado' \
+  || quebra 'o bloco do passo 1.5 nao pergunta a entrega-de-planejamento.sh com --rev "$publicado"'
+entrega_planejamento() { # <nome> [incoerente] — o ENTREGA.md do planejamento aberto
+  mkdir -p "$aux/c-$1/docs/entregas/x"
+  if [ "${2:-}" = incoerente ]; then
+    printf '%s\n' '---' 'kind: entrega' 'trabalho_id: x' 'sprint_atual: planejamento' '---'
+  else
+    printf '%s\n' '---' 'kind: entrega' 'trabalho_id: x' 'sprint_atual: planejamento' 'prs:' \
+      '  - sprint: planejamento' '    url: null' '    estado: null' '    merge_sha: null' '    merge: null' '---'
+  fi > "$aux/c-$1/docs/entregas/x/ENTREGA.md"
+}
+cenario plan150; entrega_planejamento plan150
+mkdir -p "$aux/c-plan150/docs/sprintx/features/x"
+for i in $(seq 1 150); do printf 'm %s\n' "$i" > "$aux/c-plan150/docs/sprintx/features/x/m$i.md"; done
+publica plan150 planejamento
+saida="$(passo15 plan150)"; rc=$?
+[ "$rc" = 0 ] && [ -s "$(estado_de plan150)" ] && case "$saida" in *'PR de planejamento com 151 arquivo(s)'*) true ;; *) false ;; esac \
+  && passa 'entrega de planejamento com 150 arquivos de metodo: o bloco sai 0 (sem L3) e grava o estado' \
+  || quebra "entrega de planejamento com 150 arquivos de metodo (rc $rc): $saida"
+cenario plansrc; entrega_planejamento plansrc
+mkdir -p "$aux/c-plansrc/docs/sprintx/features/x" "$aux/c-plansrc/src"
+printf 'p\n' > "$aux/c-plansrc/docs/sprintx/features/x/00-PLANEJAMENTO.md"; printf 'x\n' > "$aux/c-plansrc/src/a.ts"
+publica plansrc codigo
+saida="$(passo15 plansrc)"; rc=$?
+[ "$rc" = 1 ] && [ ! -e "$(estado_de plansrc)" ] && case "$saida" in *'VIOLACAO planejamento: src/a.ts'*) true ;; *) false ;; esac \
+  && passa 'entrega de planejamento com src/a.ts: sai 1, lista o arquivo e nao deixa o estado' \
+  || quebra "entrega de planejamento com src/a.ts (rc $rc): $saida"
+cenario planinc; entrega_planejamento planinc incoerente; publica planinc incoerente
+saida="$(passo15 planinc)"; rc=$?
+[ "$rc" = 2 ] && [ ! -e "$(estado_de planinc)" ] \
+  && passa 'ENTREGA incoerente no SHA publicado: o bloco sai 2 e nao deixa o estado' \
+  || quebra "ENTREGA incoerente no SHA publicado (rc $rc): $saida"
+# o disco nao conta: planejamento so no disco, entrega comum publicada
+cenario plandisco; mkdir -p "$aux/c-plandisco/src"; printf 'x\n' > "$aux/c-plandisco/src/a.ts"; publica plandisco a
+entrega_planejamento plandisco
+saida="$(passo15 plandisco)"; rc=$?
+[ "$rc" = 0 ] && case "$saida" in *'PR de planejamento'*) false ;; *) true ;; esac \
+  && passa 'a marca do planejamento vem do SHA publicado, nao do disco' \
+  || quebra "a marca do planejamento veio do disco (rc $rc): $saida"
+saida="$(passo15 sem-config)"; rc=$?
+[ "$rc" = 1 ] && case "$saida" in *'PR de planejamento'*) false ;; *'VIOLACAO L3'*) true ;; *) false ;; esac \
+  && passa 'entrega comum: o bloco nao passa --planejamento (101 arquivos ainda reprovam em L3)' \
+  || quebra "entrega comum com 101 arquivos (rc $rc): $saida"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
