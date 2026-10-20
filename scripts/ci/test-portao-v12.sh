@@ -1,0 +1,366 @@
+#!/usr/bin/env bash
+#
+# Bancada da V12 — task concluída sem revisão por task aprovada (portao-v12.sh).
+#
+# A V12 pergunta ao `conferir` do núcleo do expx se cada task `concluida` com commit
+# registrado tem evidência de revisão aprovada NO COMMIT dela (o do último item da task em
+# `ENTREGA.commits`). A mergex nunca lê nem escreve a evidência: quem grava é o `revisar`
+# do núcleo (aqui, com a CLI falsa de `codeant-falsa.sh`), quem lê é o `conferir`.
+# Mapeamento: DM-238; plano 2026-10-20-mergex-limites-do-codeant-parte-2.md, B1 emendado.
+#
+# Os únicos casos que mexem numa evidência são os que provam que a forma antiga não passa:
+# tiram `chamada.issues` ou trocam uma issue de uma evidência gravada pelo `revisar`, ou
+# trocam a versão.
+#
+# No Git Bash do Windows os casos que precisam da CLI falsa saem com `ok` e a nota
+# "(o CI em Linux cobre)": sem link simbólico confiável, o núcleo não acha o pacote.
+#
+# Uso: bash scripts/ci/test-portao-v12.sh
+#      V12=<outro script> bash scripts/ci/test-portao-v12.sh
+
+set -uo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+V12="${V12:-$REPO/.claude/skills/mergex/scripts/portao-v12.sh}"
+copia="$REPO/scripts/ci/fixtures/candidatos/expx-nucleo"
+nucleo_rel='.expx/marketplace/plugins/expx/nucleo/scripts'
+# shellcheck source=codeant-falsa.sh
+. "$REPO/scripts/ci/codeant-falsa.sh"
+
+# nenhuma FATIA_* herdada do shell de quem roda os testes muda o que se mede aqui
+for v in $(compgen -e); do case "$v" in FATIA_*) unset "$v" ;; esac; done
+
+OK=0; FALHOU=0
+passa()  { OK=$((OK+1)); printf '  ok    %s\n' "$1"; }
+quebra() { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; }
+aux="$(mktemp -d)"; trap 'rm -rf "$aux"' EXIT
+
+NODE_REAL="$(command -v node 2>/dev/null || true)"
+[ -n "$NODE_REAL" ] || { echo 'test-portao-v12: node ausente (o conferir do nucleo e node)' >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo 'test-portao-v12: jq ausente' >&2; exit 1; }
+FALSA=0; codeant_falsa_suportada && FALSA=1
+so_linux() { passa "$1 (o CI em Linux cobre)"; }
+# no Git Bash o node nativo não entende o caminho do MSYS
+nativo() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
+
+# --- o núcleo montado (menos o ORIGEM), sem CR, com o perfil da CLI falsa no Linux -------
+monta_nucleo() {
+  local f
+  while IFS= read -r f; do
+    mkdir -p "$1/$(dirname "$f")" && tr -d '\r' < "$copia/$f" > "$1/$f"
+  done < <(cd "$copia" && find . -type f ! -path ./ORIGEM | sed 's|^\./||')
+}
+resposta() { # <arquivo> [<issues JSON>]
+  printf '{"issues":%s,"meta":{"reviewed_files":"__include__","total_changed":0,"skipped":[],"capped":false,"max_files":40},"error":null,"noFiles":false}\n' \
+    "${2:-[]}" > "$1"
+}
+resposta "$aux/resp-ok.json"
+resposta "$aux/resp-achado.json" '[{"issue_content":"variavel nunca usada","relevant_file":"src/a.ts","start_line":1,"label":"bug"}]'
+monta_nucleo "$aux/nucleo"
+if [ "$FALSA" = 1 ]; then
+  instala_codeant_falsa "$aux/falsa" "$aux/resp-ok.json" && nucleo_com_falsa "$aux/nucleo" "$aux/falsa" \
+    || { echo 'test-portao-v12: nao montou a CLI falsa' >&2; exit 1; }
+fi
+
+# --- PATHs de teste ------------------------------------------------------------------------
+# sem node: só os comandos que os scripts usam, cada um um embrulho (link não é confiável no Git Bash)
+mkdir -p "$aux/sem-node" "$aux/espia" "$aux/corta"
+for c in bash git mktemp rm mkdir cat grep cygpath find sort sed awk cut tr dirname uname head wc env ls cp mv; do
+  p="$(command -v "$c" 2>/dev/null)" || continue
+  printf '#!%s\nexec "%s" "$@"\n' "$BASH" "$p" > "$aux/sem-node/$c"; chmod +x "$aux/sem-node/$c"
+done
+# espia: registra cada chamada ao node e segue para o real
+printf '#!%s\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$BASH" "$aux/node.log" "$NODE_REAL" > "$aux/espia/node"
+# corta: o conferir de verdade, com a última linha do stdout a menos e o mesmo código
+printf '#!%s\nif [ "${2:-}" = conferir ]; then out="$("%s" "$@")"; rc=$?; printf "%%s\\n" "$out" | sed "\\$d"; exit $rc; fi\nexec "%s" "$@"\n' \
+  "$BASH" "$NODE_REAL" "$NODE_REAL" > "$aux/corta/node"
+chmod +x "$aux/espia/node" "$aux/corta/node"
+
+# --- o projeto temporário --------------------------------------------------------------------
+# projeto <nome> <modo|-> — repositório com o núcleo versionado e `.expx/fatiamento.json`
+# (sem ele com `-`); ENTREGA.md e tasks.md ficam fora, em $aux. ITENS: `task:sha` na ordem do E1.
+g() { git -C "$P" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+projeto() {
+  P="$aux/$1"; ITENS=""
+  mkdir -p "$P/$nucleo_rel" && cp -R "$aux/nucleo/." "$P/$nucleo_rel/"
+  g init -q -b main && g config core.autocrlf false
+  if [ "$2" != - ]; then
+    printf '{"expx_fatiamento": 2, "revisao_por_task": {"modo": "%s"}}\n' "$2" > "$P/.expx/fatiamento.json"
+  fi
+  printf 'base\n' > "$P/base.txt"; g add -A; g commit -q -m base
+}
+escreve() { local f; for f in "$@"; do mkdir -p "$P/$(dirname "$f")"; printf 'const %s = 1;\n' "x$RANDOM" > "$P/$f"; done; }
+# revisa <task> <a,b,...> [<resposta> [<stderr>]] — o `revisar` do núcleo, com a falsa no PATH
+revisa() {
+  [ -z "${3:-}" ] || instala_codeant_falsa "$aux/falsa" "$3" "${4:-}"
+  (cd "$P" && PATH="$aux/falsa/bin:$PATH" node "$(nativo "$P/$nucleo_rel/expx-revisao.mjs")" revisar \
+     --trabalho w --task "$1" --arquivos "$2" > "$aux/revisar.out" 2>&1)
+  local rc=$?
+  [ -z "${3:-}" ] || instala_codeant_falsa "$aux/falsa" "$aux/resp-ok.json"
+  return "$rc"
+}
+evidencia() { printf '%s\n' "$P/docs/entregas/w/revisao/$1.json"; }
+commita() { g add -A && g commit -q -m "feat: $1" && ITENS="$ITENS $1:$(g rev-parse --short HEAD)"; }
+# entrega [<versionado>] [<linhas extras>] — $aux/ENTREGA.md com os ITENS
+entrega() {
+  local par
+  {
+    printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: entrega\ntrabalho_id: w\n'
+    printf 'entregue_por: mergex\nestado: aberto\nversionado: %s\nbranch: feature/w\nbranch_base: main\n' "${1:-true}"
+    if [ -z "$ITENS" ]; then printf 'commits: []\n'; else
+      printf 'commits:\n'
+      for par in $ITENS; do printf -- '  - task: %s\n    commit: %s\n' "${par%%:*}" "${par#*:}"; done
+    fi
+    printf 'portao: null\nfalhas_portao: []\ncausa: null\npr_url: null\npr_estado: null\n'
+    [ -z "${2:-}" ] || printf '%s\n' "$2"
+    printf -- '---\n\n# Entrega\n'
+  } > "$aux/ENTREGA.md"
+}
+# tarefas <id:status>... — $aux/tasks.md (kind: tasks, formato da sprintx)
+tarefas() {
+  local par
+  {
+    printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: tasks\ntrabalho_id: w\ntasks:\n'
+    for par in "$@"; do printf -- '  - id: %s\n    titulo: Task\n    status: %s\n' "${par%%:*}" "${par##*:}"; done
+    printf -- '---\n\n# Tasks\n'
+  } > "$aux/tasks.md"
+}
+# roda [VAR=valor...] — a V12 no projeto atual; saída em $aux/out e $aux/err, código em $rc
+roda() {
+  rm -f "$aux/node.log"
+  (cd "$P" && env "$@" "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w --raiz "$P" \
+     -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
+}
+primeira() { head -n 1 "$aux/out"; }
+tem() { grep -qxF -- "$1" "$aux/out"; }
+linhas() { wc -l < "$aux/out" | tr -d ' '; }
+conferiu() { [ -f "$aux/node.log" ] && grep -q ' conferir ' "$aux/node.log"; }
+chamou_node() { [ -s "$aux/node.log" ]; }
+mostra() { printf '(rc %s) %s | err: %s' "$rc" "$(tr '\n' '|' < "$aux/out")" "$(tr '\n' '|' < "$aux/err" | cut -c1-300)"; }
+
+echo '== V12: uso e casos sem revisao =='
+
+# uso
+(cd "$aux" && "$BASH" "$V12" > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 64 ] && passa 'sem argumentos: 64' || quebra "sem argumentos: $(mostra)"
+(cd "$aux" && "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 64 ] && passa 'sem tasks.md: 64' || quebra "sem tasks.md: $(mostra)"
+
+# sem .expx/fatiamento.json: n/a sem node
+projeto sem-arquivo -; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda PATH="$aux/sem-node"
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-fatiamento-json' \
+  && passa 'sem .expx/fatiamento.json: n/a sem node' || quebra "sem .expx/fatiamento.json: $(mostra)"
+
+# desligada: n/a sem conferir (o leitor roda, com node)
+projeto desligada desligada; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda PATH="$aux/espia:$PATH"
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=revisao-por-task-desligada' && chamou_node && ! conferiu \
+  && passa 'desligada: n/a sem conferir' || quebra "desligada: $(mostra)"
+
+# node ausente com .expx/fatiamento.json: SEM_PROVA em qualquer modo
+for m in obrigatoria se_disponivel desligada; do
+  projeto "sem-node-$m" "$m"; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+  roda PATH="$aux/sem-node"
+  [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && grep -q '^motivo=configuracao-nao-lida' "$aux/out" \
+    && passa "node ausente ($m): SEM_PROVA" || quebra "node ausente ($m): $(mostra)"
+done
+
+# FATIA_X no ambiente: SEM_PROVA, com a mensagem da emenda, sem conferir
+projeto fatia obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda FATIA_X=1 PATH="$aux/espia:$PATH"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && ! conferiu \
+  && grep -qF '`FATIA_X` não é mais lida (limites do CodeAnt, fixos: emenda de 2026-10-19); remova-a do ambiente' "$aux/err" \
+  && passa 'FATIA_X no ambiente: SEM_PROVA' || quebra "FATIA_X no ambiente: $(mostra)"
+# definida e vazia também, e mesmo sem .expx/fatiamento.json
+projeto fatia-sem-arquivo -; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda FATIA_IGNORAR=
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] \
+  && passa 'FATIA_IGNORAR vazia, sem .expx/fatiamento.json: SEM_PROVA' || quebra "FATIA_IGNORAR vazia: $(mostra)"
+
+# núcleo antigo (sem expx-limites.mjs), versionado assim: SEM_PROVA
+projeto antigo obrigatoria; g rm -q "$nucleo_rel/expx-limites.mjs"; g commit -q -m 'nucleo antigo'
+escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda PATH="$aux/espia:$PATH"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && ! conferiu && grep -q 'nucleo antigo' "$aux/err" \
+  && passa 'nucleo sem expx-limites.mjs: SEM_PROVA' || quebra "nucleo sem expx-limites.mjs: $(mostra)"
+
+# núcleo sem expx-revisao.mjs: AVISO em se_disponivel (código 0), SEM_PROVA em obrigatoria
+for m in se_disponivel obrigatoria; do
+  projeto "sem-revisao-$m" "$m"; g rm -q "$nucleo_rel/expx-revisao.mjs"; g commit -q -m 'sem revisao'
+  escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+  roda
+  if [ "$m" = se_disponivel ]; then
+    [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=AVISO' ] && tem 'motivo=revisao-nao-conferida:nucleo-sem-expx-revisao' \
+      && passa 'se_disponivel sem expx-revisao.mjs: AVISO revisao-nao-conferida, codigo 0' || quebra "se_disponivel sem expx-revisao.mjs: $(mostra)"
+  else
+    [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=nucleo-sem-expx-revisao' \
+      && passa 'obrigatoria sem expx-revisao.mjs: SEM_PROVA' || quebra "obrigatoria sem expx-revisao.mjs: $(mostra)"
+  fi
+done
+
+# entrega de planejamento: n/a sem chamar o conferir
+PLAN='sprint_atual: planejamento
+prs:
+  - sprint: planejamento
+    url: null
+    estado: null
+    merge_sha: null
+    merge: null'
+projeto planejamento obrigatoria; escreve src/a.ts; commita T-01.01; entrega true "$PLAN"; tarefas T-01.01:concluida
+roda PATH="$aux/espia:$PATH"
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=planejamento: nenhuma task executada' && ! chamou_node \
+  && passa 'entrega de planejamento: n/a sem chamar o conferir' || quebra "entrega de planejamento: $(mostra)"
+# incoerente: sprint_atual sem prs
+entrega true 'sprint_atual: planejamento'
+roda PATH="$aux/espia:$PATH"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && grep -q '^motivo=entrega-de-planejamento' "$aux/out" && ! conferiu \
+  && passa 'entrega incoerente: SEM_PROVA' || quebra "entrega incoerente: $(mostra)"
+
+# versionado: false e nenhuma task concluída: n/a sem conferir
+projeto n-a obrigatoria; escreve src/a.ts; commita T-01.01; entrega false; tarefas T-01.01:concluida
+roda PATH="$aux/espia:$PATH"
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-versionador' && ! conferiu \
+  && passa 'versionado false: n/a' || quebra "versionado false: $(mostra)"
+entrega; tarefas T-01.01:em_andamento
+roda PATH="$aux/espia:$PATH"
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=nenhuma-task-concluida' && ! conferiu \
+  && passa 'nenhuma task concluida: n/a' || quebra "nenhuma task concluida: $(mostra)"
+
+echo '== V12: o conferir do nucleo =='
+
+# sem evidência: FALHA em obrigatoria, AVISO (código 0) em se_disponivel
+projeto sem-ev obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && [ "$(primeira)" = 'V12=FALHA' ] && tem 'T-01.01 FALHA evidencia-ausente' && [ "$(linhas)" = 2 ] \
+  && passa 'obrigatoria sem evidencia: FALHA evidencia-ausente' || quebra "obrigatoria sem evidencia: $(mostra)"
+projeto sem-ev-sd se_disponivel; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=AVISO' ] && tem 'T-01.01 AVISO evidencia-ausente' \
+  && passa 'se_disponivel sem evidencia: AVISO, codigo 0' || quebra "se_disponivel sem evidencia: $(mostra)"
+
+# id com ponto e legado: os dois conferidos de verdade (o conferir respondeu pelos dois)
+projeto ponto obrigatoria; escreve src/a.ts; commita T-01.03; escreve src/b.ts; commita T-7; entrega
+tarefas T-01.03:concluida T-7:concluida
+roda
+[ "$rc" = 1 ] && tem 'T-01.03 FALHA evidencia-ausente' && tem 'T-7 FALHA evidencia-ausente' && [ "$(linhas)" = 3 ] \
+  && passa 'id com ponto (T-01.03) e legado (T-7) conferidos' || quebra "id com ponto: $(mostra)"
+
+# task concluída sem item em commits não é alvo (é da V11)
+projeto sem-item obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida T-01.02:concluida
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' && ! grep -q '^T-01.02' "$aux/out" && [ "$(linhas)" = 2 ] \
+  && passa 'task sem item em commits nao e alvo' || quebra "task sem item em commits: $(mostra)"
+tarefas T-01.02:concluida
+roda PATH="$aux/espia:$PATH"
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=nenhuma-task-com-commit' && ! conferiu \
+  && passa 'so tasks sem item em commits: n/a' || quebra "so tasks sem item: $(mostra)"
+
+# conferir que sai 64 (id fora da forma, que o núcleo recusa): SEM_PROVA em qualquer modo
+for m in obrigatoria se_disponivel; do
+  projeto "c64-$m" "$m"; escreve src/a.ts; commita T-1.3; entrega; tarefas T-1.3:concluida
+  roda
+  [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=conferir-saiu-64' \
+    && passa "conferir 64 ($m): SEM_PROVA" || quebra "conferir 64 ($m): $(mostra)"
+done
+
+# conferir que sai com uma linha a menos: SEM_PROVA
+projeto curta obrigatoria; escreve src/a.ts; commita T-01.01; escreve src/b.ts; commita T-01.02; entrega
+tarefas T-01.01:concluida T-01.02:concluida
+roda PATH="$aux/corta:$PATH"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=conferir-saida-fora-da-forma' \
+  && passa 'conferir com uma linha a menos: SEM_PROVA' || quebra "conferir com uma linha a menos: $(mostra)"
+
+# 41 arquivos revisáveis: incompleta:L1:41 (antes da CLI), FALHA em se_disponivel também
+projeto l1 se_disponivel
+lista=""; for i in $(seq 1 41); do escreve "src/f$i.ts"; lista="$lista${lista:+,}src/f$i.ts"; done
+revisa T-01.01 "$lista"; rr=$?
+commita T-01.01; entrega; tarefas T-01.01:concluida
+roda
+[ "$rr" = 3 ] && [ "$rc" = 1 ] && [ "$(primeira)" = 'V12=FALHA' ] && tem 'T-01.01 FALHA incompleta:L1:41' \
+  && passa 'task com 41 arquivos revisaveis: incompleta:L1:41, V12=FALHA em se_disponivel tambem' \
+  || quebra "41 revisaveis (revisar $rr): $(mostra)"
+
+# a evidência editada no disco depois do commit não muda o veredito
+jq '.resultado = "ok" | del(.motivo)' "$(evidencia T-01.01)" > "$aux/ed.json" && cp "$aux/ed.json" "$(evidencia T-01.01)"
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA incompleta:L1:41' \
+  && passa 'evidencia editada no disco depois do commit nao muda o veredito' || quebra "evidencia editada no disco: $(mostra)"
+
+# task com dois itens em commits: confere o commit do último
+projeto dois obrigatoria; escreve src/a.ts; commita T-01.01
+lista=""; for i in $(seq 1 41); do escreve "src/f$i.ts"; lista="$lista${lista:+,}src/f$i.ts"; done
+revisa T-01.01 "$lista"; commita T-01.01; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA incompleta:L1:41' && [ "$(linhas)" = 2 ] \
+  && passa 'task com dois itens em commits: confere o ultimo' || quebra "dois itens: $(mostra)"
+
+# evidência de versão antiga (expx_revisao 1) no commit: FALHA evidencia-invalida:versao
+projeto v1 obrigatoria
+lista=""; for i in $(seq 1 41); do escreve "src/f$i.ts"; lista="$lista${lista:+,}src/f$i.ts"; done
+revisa T-01.01 "$lista"
+jq '.expx_revisao = 1' "$(evidencia T-01.01)" > "$aux/ed.json" && cp "$aux/ed.json" "$(evidencia T-01.01)"
+commita T-01.01; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-invalida:versao' \
+  && passa 'evidencia de versao antiga (expx_revisao 1) no commit: FALHA evidencia-invalida:versao' || quebra "versao antiga: $(mostra)"
+
+echo '== V12: evidencias gravadas pela CLI falsa =='
+
+if [ "$FALSA" = 0 ]; then
+  for c in 'obrigatoria com evidencia ok: OK' 'achado aberto: FALHA achados-abertos:1' \
+           'CLI falsa com "[error] Failed to review" no stderr: FALHA incompleta:lote-falhou' \
+           'evidencia v2 sem chamada.issues: FALHA evidencia-invalida:chamada' \
+           'issues com achado trocado: FALHA evidencia-invalida:achados' \
+           'task com dois itens em commits: o ultimo, com a evidencia ok do primeiro'; do
+    so_linux "$c"
+  done
+else
+  # ok
+  projeto ok obrigatoria; escreve src/a.ts src/b.ts; revisa T-01.01 src/a.ts,src/b.ts; rr=$?
+  commita T-01.01; entrega; tarefas T-01.01:concluida
+  roda
+  [ "$rr" = 0 ] && [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=OK' ] && tem 'T-01.01 ok' && [ "$(linhas)" = 2 ] \
+    && passa 'obrigatoria com evidencia ok: OK' || quebra "evidencia ok (revisar $rr: $(cat "$aux/revisar.out")): $(mostra)"
+
+  # dois itens: o primeiro com a evidência ok; o segundo muda o arquivo sem revisar de novo
+  escreve src/a.ts; commita T-01.01; entrega
+  roda
+  [ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-nao-bate:src/a.ts' \
+    && passa 'task com dois itens em commits: o ultimo, com a evidencia ok do primeiro' || quebra "dois itens, ok no primeiro: $(mostra)"
+
+  # achado aberto
+  projeto achado obrigatoria; escreve src/a.ts; revisa T-01.01 src/a.ts "$aux/resp-achado.json"; rr=$?
+  commita T-01.01; entrega; tarefas T-01.01:concluida
+  roda
+  [ "$rr" = 1 ] && [ "$rc" = 1 ] && tem 'T-01.01 FALHA achados-abertos:1' \
+    && passa 'achado aberto: FALHA achados-abertos:1' || quebra "achado aberto (revisar $rr): $(mostra)"
+
+  # falha de lote no stderr
+  projeto lote se_disponivel; escreve src/a.ts
+  revisa T-01.01 src/a.ts "$aux/resp-ok.json" '[error] Failed to review src/a.ts: 500'; rr=$?
+  commita T-01.01; entrega; tarefas T-01.01:concluida
+  roda
+  [ "$rr" = 3 ] && [ "$rc" = 1 ] && tem 'T-01.01 FALHA incompleta:lote-falhou' \
+    && passa 'CLI falsa com "[error] Failed to review" no stderr: FALHA incompleta:lote-falhou' || quebra "lote-falhou (revisar $rr): $(mostra)"
+
+  # v2 gravada antes da #69 (sem chamada.issues)
+  projeto sem-issues obrigatoria; escreve src/a.ts; revisa T-01.01 src/a.ts
+  jq 'del(.chamada.issues)' "$(evidencia T-01.01)" > "$aux/ed.json" && cp "$aux/ed.json" "$(evidencia T-01.01)"
+  commita T-01.01; entrega; tarefas T-01.01:concluida
+  roda
+  [ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-invalida:chamada' \
+    && passa 'evidencia v2 sem chamada.issues: FALHA evidencia-invalida:chamada' || quebra "sem chamada.issues: $(mostra)"
+
+  # uma issue trocada: os achados gravados não são mais os derivados
+  projeto trocada obrigatoria; escreve src/a.ts; revisa T-01.01 src/a.ts "$aux/resp-achado.json"
+  jq '.chamada.issues[0].label = "estilo"' "$(evidencia T-01.01)" > "$aux/ed.json" && cp "$aux/ed.json" "$(evidencia T-01.01)"
+  commita T-01.01; entrega; tarefas T-01.01:concluida
+  roda
+  [ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-invalida:achados' \
+    && passa 'issues com achado trocado: FALHA evidencia-invalida:achados' || quebra "issue trocada: $(mostra)"
+fi
+
+echo
+echo "$OK ok, $FALHOU falha(s)"
+[ "$FALHOU" = 0 ]
