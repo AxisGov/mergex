@@ -164,7 +164,7 @@ entregue_em: 2026-08-29
 | `origem_base` | `registrada_e0` \| `registrada_sprint` (a base reancorada pelo E0 na primeira retomada depois do PR de planejamento `merged`, sobre a main que contém o `merge_sha` — DM-261) \| `inferida_legado` (gravado uma única vez, pela primeira reconciliação de uma entrega anterior a esta chave — DM-183). Uma reconciliação aberta sobre uma base `registrada_sprint` grava no `RECONCILIACAO-BASE-001.md` `origem_base: registrada_e0`, como sobre qualquer base registrada |
 | `reconciliacoes` | Lista `{numero, arquivo, b1_sha, m_sha}`, na ordem da cadeia; `[]` sem reconciliação. Escrita só pelo `--registrar` |
 | `portao_sha` | SHA de 40 hex do `HEAD` que o E2 avaliou, gravado com `portao` só por `registrar-portao.sh`; `null` antes do E2 e depois de um `--registrar`. O `--resultado bloqueado` também grava `portao_sha` = `HEAD` avaliado, sem efeito na validade (`portao_nao_pronto` vem antes do SHA). O portão vale só para ele e para os commits de método `pre-e6`/`e8` de um pai que o seguem (DM-181) |
-| `commits` | Um item por task commitada, na ordem em que fecharam, cada um com a chave de ordem `seq`; `[]` sem versionador. Ver "A ordem de registro" |
+| `commits` | Um item por task commitada, na ordem em que fecharam, cada um com a chave de ordem `seq` e, no item novo, a `revisao` da task; `[]` sem versionador. Ver "A ordem de registro" |
 | `modulo_afetado` | Os módulos que a entrega toca (ver abaixo) |
 | `arquivos_alterados` | **O diff real** — ver abaixo. É o campo mais importante deste kind |
 | `faixa_atencao` | A faixa de atenção por arquivo (ver abaixo) |
@@ -317,7 +317,8 @@ Uma interpretação mecânica só, num script só — `scripts/sequencia-de-comm
 sequencia-de-commits.sh --ler <ENTREGA.md>     # ordem_efetiva, seq, task, commit por item
 sequencia-de-commits.sh --validar <ENTREGA.md> # a invariante acima; PARA quando quebra
 sequencia-de-commits.sh --proximo <ENTREGA.md> # o maior seq efetivo + 1
-sequencia-de-commits.sh --acrescentar <ENTREGA.md> <task> <commit>
+sequencia-de-commits.sh --acrescentar <ENTREGA.md> <task> <commit> [<revisao>]
+sequencia-de-commits.sh --revisao <valor>      # o valor de revisao como seria gravado
 ```
 
 - **`--acrescentar` é o escritor do E1** (e do E1 tardio). Ele acrescenta no **fim**, com `seq`,
@@ -325,6 +326,38 @@ sequencia-de-commits.sh --acrescentar <ENTREGA.md> <task> <commit>
 - **Gravação nova nunca cria item legado.** Leitura histórica aceita o prefixo; escrita, não.
 - A V11 usa a **leitura crua** desse mesmo script (`references/02-prontidao.md`). Ela pergunta se
   existe prova de E1 para a task, e **não** depende de ordem, `seq` ou sequência.
+
+### A chave `revisao` do item (DM-241)
+
+O item novo leva uma quarta chave, `revisao`, com o que o `conferir` do núcleo do expx disse da
+task no commit dela (o E1 o chama depois do `git commit`; `references/01-commits.md`, Passo 4):
+
+```yaml
+commits:
+  - seq: 16
+    task: T-04.04
+    commit: 1a2b3c4
+    revisao: incompleta:L1
+```
+
+| Valor | Quando |
+|---|---|
+| `ok` | `T ok` |
+| `achados` | `T FALHA achados-abertos:<n>` |
+| `incompleta:<classe>` | `T FALHA incompleta:<motivo>` |
+| `indisponivel:<classe>` | `T FALHA indisponivel:<motivo>` |
+| `null` | sem evidência no commit da task (`evidencia-ausente`, ou o projeto sem revisão por task) |
+| `invalida` | qualquer outra resposta: `evidencia-invalida…`, `evidencia-nao-bate…`, `commit-inexistente…`, saída 64, linha fora da forma, núcleo ou node ausente |
+
+- A **classe** é o texto do motivo antes do segundo `:`, como veio, com
+  `[A-Za-z0-9][A-Za-z0-9-]*` (`incompleta:L1:41` → `incompleta:L1`;
+  `indisponivel:arquivo-inexistente:src/a.ts` → `indisponivel:arquivo-inexistente`). O resto do
+  motivo — um caminho, um número — nunca entra no YAML.
+- Valor fora dessa gramática: o `--acrescentar` não grava nada (código 1). O E1 passa o valor
+  pelo `--revisao` antes e grava `invalida` no lugar de um que não cabe.
+- É **registro**, não prova: a V12 nunca lê esta chave (DM-239) e pergunta de novo ao `conferir`.
+  A leitura (`--ler`, `--validar`, `prova-de-commit.sh`) a ignora, e o item legado sem ela
+  continua válido.
 
 ### Sequência inválida é contrato inválido — e PARA
 
