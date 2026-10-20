@@ -501,7 +501,7 @@ ordem_schema="$(printf '%s\n' "$tabela_schema" | cut -d'|' -f1 | tr '\n' ' ' | s
   || fail "causa precedence diverges: schema '$ordem_schema' vs script '$(bash "$causa_sh" --ordem)'"
 [ "$(printf '%s\n' "$tabela_schema" | sort)" = "$(bash "$causa_sh" --causas | grep -v '^\*' | sort)" ] \
   || fail 'causa enum diverges between schema and script'
-[ "$(bash "$causa_sh" --causas | grep -c .)" = 12 ] || fail 'causa enum gained or lost a value'
+[ "$(bash "$causa_sh" --causas | grep -c .)" = 13 ] || fail 'causa enum gained or lost a value'
 bash "$causa_sh" --causas | grep -Fxq '*|indeterminada' || fail 'causa enum lost indeterminada'
 grep -Fq '**`indeterminada`**' "$schema" || fail 'schema does not define indeterminada'
 if bash "$causa_sh" --causas | grep -Eq 'falha_tecnica|decisao_humana|trabalho_novo|recurso_externo'; then
@@ -597,7 +597,7 @@ grep -Fq 'a **V11**' "$commits" || fail 'E1 does not name V11 as the check that 
 # A causa da V11: valor próprio, última posição do grupo que lê a execução.
 grep -Fq '| 11 | `v11` | `commit_nao_registrado` |' "$schema" \
   || fail 'schema has no causa row for v11'
-grep -Fq '`v1` … `v11`' "$schema" || fail 'schema falhas_portao enum does not reach v11'
+grep -Fq '`v1` … `v12`' "$schema" || fail 'schema falhas_portao enum does not reach v12'
 [ "$(bash "$causa_sh" --derivar v11)" = commit_nao_registrado ] \
   || fail 'v11 does not derive commit_nao_registrado'
 [ "$(bash "$causa_sh" --derivar v1 v11)" = tarefa_nao_concluida ] \
@@ -606,8 +606,23 @@ grep -Fq '`v1` … `v11`' "$schema" || fail 'schema falhas_portao enum does not 
   || fail 'v11 without proof does not derive indeterminada'
 grep -Fq '`commit_nao_registrado` não é `tarefa_nao_concluida`' "$schema" \
   || fail 'schema does not separate commit_nao_registrado from tarefa_nao_concluida'
-grep -Eq '^falhas_portao: .*v1\.\.v11' "$template_entrega" \
-  || fail 'ENTREGA template does not reach v11 in falhas_portao'
+grep -Eq '^falhas_portao: .*v1\.\.v12' "$template_entrega" \
+  || fail 'ENTREGA template does not reach v12 in falhas_portao'
+
+# A causa da V12 (DM-239): valor próprio, depois da V11 — sem o commit da task
+# não há evidência de revisão a conferir.
+grep -Fq '| 12 | `v12` | `revisao_reprovada` |' "$schema" \
+  || fail 'schema has no causa row for v12'
+[ "$(bash "$causa_sh" --derivar v12)" = revisao_reprovada ] \
+  || fail 'v12 does not derive revisao_reprovada'
+[ "$(bash "$causa_sh" --derivar v11 v12)" = commit_nao_registrado ] \
+  || fail 'v12 outranks v11 in the precedence order'
+[ "$(bash "$causa_sh" --derivar v1 v12)" = tarefa_nao_concluida ] \
+  || fail 'v12 outranks v1 in the precedence order'
+[ "$(bash "$causa_sh" --derivar v12_sem_prova)" = indeterminada ] \
+  || fail 'v12 without proof does not derive indeterminada'
+grep -Fq '`revisao_reprovada` não é `commit_nao_registrado`' "$schema" \
+  || fail 'schema does not separate revisao_reprovada from commit_nao_registrado'
 
 # ---------------------------------------------------------------------------
 # P0.2-C4 — a ordem de registro de ENTREGA.commits: a chave `seq`

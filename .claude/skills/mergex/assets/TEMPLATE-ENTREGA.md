@@ -60,7 +60,7 @@ atencao:
   dispensavel: {{n}}
 portao: {{pronto | bloqueado | null}}
 portao_sha: {{sha de 40 hex do HEAD que o E2 avaliou, gravado so por registrar-portao.sh | null}}
-falhas_portao: [{{as verificacoes com FALHA no E2: v1..v11, ou vN_sem_prova; vazio sem portao ou com PRONTO}}]
+falhas_portao: [{{as verificacoes com FALHA no E2: v1..v12, ou vN_sem_prova; vazio sem portao ou com PRONTO}}]
 causa: {{null | a causa derivada por scripts/causa-do-portao.sh --derivar, so com estado bloqueado}}
 desvios: []
 push_feito: {{true | false}}
