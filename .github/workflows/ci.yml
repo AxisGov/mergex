@@ -139,6 +139,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-portao-v12.sh
 
+      - name: Test E1 evidencia de revisao por task
+        shell: bash
+        run: bash scripts/ci/test-e1-evidencia-revisao.sh
+
       - name: Test E9 R4 PR head from the base repository
         shell: bash
         run: bash scripts/ci/test-r4-cabeca-do-pr.sh

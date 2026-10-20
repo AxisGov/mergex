@@ -204,8 +204,10 @@ M32() { # ao gravar, o helper faz backfill: o item legado ganha seq retroativo
   awk '"'"'/^  - task:/ { n++; printf "  - seq: %d\n   ", n } { print }'"'"' "$arq" > "$arq.bf" && mv "$arq.bf" "$arq"'
 }
 M33() { # a escrita nova volta a poder nascer sem seq
-  troca "$SEQ_SH" '      printf "  - seq: %s%s\n    task: %s%s\n    commit: %s%s\n", seq, cr, task, cr, commit, cr' \
-    '      printf "  - task: %s%s\n    commit: %s%s\n", task, cr, commit, cr'
+  # o printf continua na linha seguinte (os argumentos): o mutante a consome num
+  # printf morto, para o awk seguir válido
+  troca "$SEQ_SH" '      printf "  - seq: %s%s\n    task: %s%s\n    commit: %s%s\n    revisao: %s%s\n", \' \
+    '      printf "  - task: %s%s\n    commit: %s%s\n    revisao: %s%s\n", task, cr, commit, cr, revisao, cr; if (0) printf "%s%s%s%s%s%s%s%s", \'
 }
 M34() { # o item novo é inserido no COMEÇO da lista, e não no fim
   troca "$SEQ_SH" '        if (inline == "[]") { novo(cr); feito = 1 } else { dentro = 1 }' \

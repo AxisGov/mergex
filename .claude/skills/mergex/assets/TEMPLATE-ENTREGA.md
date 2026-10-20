@@ -48,6 +48,7 @@ commits:
   - seq: {{ordem de registro do E1: 1, 2, 3...}}
     task: {{T-NN.MM}}
     commit: {{identificador curto}}
+    revisao: {{ok | achados | incompleta:<classe> | indisponivel:<classe> | invalida | null}}
 modulo_afetado: [{{modulos em minuscula sem acento, ou vazio}}]
 arquivos_alterados: [{{o diff real: git diff --name-only <base>...HEAD, sem repeticao, ou vazio}}]
 faixa_atencao:

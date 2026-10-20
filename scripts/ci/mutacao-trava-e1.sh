@@ -93,9 +93,9 @@ M5() {
 
 # 6. A trava é liberada ANTES de acrescentar o item em ENTREGA.commits.
 M6() {
-  troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \' \
+  troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$revisao" 2>&1)" \' \
     '  liberar "$TOKEN" >/dev/null 2>&1; LIBERAR_NA_SAIDA=0
-  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \'
+  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$revisao" 2>&1)" \'
 }
 
 # 7. O `seq` é calculado fora da seção: D a G inteiros saem de baixo da trava.
@@ -113,9 +113,9 @@ M8() {
 
 # 9. Falha no append dispara um segundo commit.
 M9() {
-  troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \' \
-    '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" || git commit --allow-empty -q -m "segundo commit do E1"
-  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" 2>&1)" \'
+  troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$revisao" 2>&1)" \' \
+    '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$revisao" 2>&1)" || git commit --allow-empty -q -m "segundo commit do E1"
+  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$revisao" 2>&1)" \'
 }
 
 # 10. A trava órfã é removida automaticamente.
