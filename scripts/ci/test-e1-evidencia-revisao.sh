@@ -386,6 +386,20 @@ SAIDA2="$(cd "$R" && bash "$FECHA" --concluir --entrega "$ENTREGA_REL" --task T-
   && ok '--preparar põe a evidencia no stage e o --concluir a commita' \
   || falha "--preparar/--concluir — rc=$RC stage=$estagio rc2=$RC2 saida=$SAIDA $SAIDA2"
 
+# a evidência revisada de novo entre o --preparar e o --concluir: o --concluir não
+# commita a versão velha do stage nem deixa a nova para trás; para, sem commit
+R="$D/preparar-mudou"; repo "$R"
+printf 'png\n' > "$R/img/logo.png"
+revisa "$R" T-01.01 img/logo.png
+SAIDA="$(cd "$R" && bash "$FECHA" --preparar --entrega "$ENTREGA_REL" --task T-01.01 --mensagem "$MSG" -- img/logo.png 2>&1)"; RC=$?
+TOKEN="$(printf '%s\n' "$SAIDA" | sed -n 's/^token=//p')"
+printf '\n' >> "$R/$REVISAO_REL/T-01.01.json"
+SAIDA2="$(cd "$R" && bash "$FECHA" --concluir --entrega "$ENTREGA_REL" --task T-01.01 --mensagem "$MSG" --token "$TOKEN" 2>&1)"; RC2=$?
+[ "$RC" = 0 ] && [ "$RC2" = 4 ] && [ "$(git -C "$R" rev-list --count HEAD)" = 1 ] \
+  && case "$SAIDA2" in *"$REVISAO_REL/T-01.01.json"*) true ;; *) false ;; esac \
+  && ok 'evidencia que mudou entre --preparar e --concluir: para sem commit' \
+  || falha "evidencia que mudou entre --preparar e --concluir — rc=$RC rc2=$RC2 commits=$(git -C "$R" rev-list --count HEAD) saida=$SAIDA2"
+
 R="$D/existente"; repo "$R"
 printf 'png\n' > "$R/img/logo.png"
 revisa "$R" T-01.01 img/logo.png

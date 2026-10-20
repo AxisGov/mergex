@@ -911,6 +911,12 @@ case "$ACAO" in
       [ -n "$caminho_preparado" ] || continue
       if [ "$caminho_preparado" = "$(pasta_de_revisao)$TASK.json" ] \
         && nome_de_evidencia "$TASK.json" && evidencia_no_indice "$caminho_preparado"; then
+        # revisada de novo desde o --preparar: o stage tem a versão velha, e
+        # restagiar pularia a varredura de segredo feita sobre ele
+        GIT_LITERAL_PATHSPECS=1 git diff --quiet -- "$caminho_preparado" 2>/dev/null \
+          || para 4 'PARADO — a evidência de revisão mudou depois do --preparar' \
+            "Caminho: $caminho_preparado" \
+            'O stage tem a versão anterior. Nada foi commitado; rode o E1 de novo.'
         continue
       fi
       ESTAGIO_PRODUTO+=("$caminho_preparado")
