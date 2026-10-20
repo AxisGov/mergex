@@ -21,8 +21,8 @@
 # nenhum repositorio de skill depende do expxdev por npm. Mudou la, muda aqui, e o
 # sha256 abaixo junto (scripts/ci/test-fatiamento-e7.sh confere; com EXPXDEV_RAIZ,
 # compara com o arquivo de la).
-# Origem: AxisGov/expxdev 660bf9a scripts/verificar-fatiamento.sh
-# Corpo-sha256: 586a3cae512ae6e13b218f3b0cd0e0fb9f42470bdf01165090cac726bff89019
+# Origem: AxisGov/expxdev 405a134 scripts/verificar-fatiamento.sh
+# Corpo-sha256: 165d3495181c45eea605a7cadb10637bbce18c1630b999151a8b42073fddd43d
 #
 # Saida: 0 sem violacao, 1 com (linhas `VIOLACAO L2|L3|planejamento: ...`), 2 uso,
 # `FATIA_*` no ambiente ou medicao impossivel (ref inexistente, sem ancestral comum,
@@ -165,7 +165,7 @@ revisavel() {
 medir_arquivo() {
   local arquivo="$1" bytes linhas
   command -v iconv >/dev/null 2>&1 || { echo "iconv ausente: nao foi possivel medir $novo" >&2; return 2; }
-  if iconv -f UTF-8 -t UTF-8 "$arquivo" > "$decodificado" 2>/dev/null; then
+  if iconv -f UTF-8 -t UTF-8 < "$arquivo" > "$decodificado" 2>/dev/null; then
     bytes="$(wc -c < "$decodificado")" || return 2
     linhas="$(wc -l < "$decodificado")" || return 2
     printf '%d %d\n' "$((linhas + 1))" "$bytes"
@@ -200,7 +200,7 @@ while IFS= read -r -d '' estado; do
   read -r linhas bytes <<< "$medida"
 
   if [ -f "$novo" ] && [ ! -L "$novo" ]; then
-    oid_checkout="$(git hash-object "$novo" 2>/dev/null)" || { echo "nao foi possivel identificar $novo no checkout" >&2; exit 2; }
+    oid_checkout="$(git hash-object -- "$novo" 2>/dev/null)" || { echo "nao foi possivel identificar $novo no checkout" >&2; exit 2; }
     if [ "$oid_checkout" = "$oid" ]; then
       medida="$(medir_arquivo "$novo")" || exit 2
       read -r linhas_checkout bytes_checkout <<< "$medida"
