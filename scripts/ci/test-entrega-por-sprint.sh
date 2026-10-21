@@ -199,6 +199,9 @@ bloco "$ref/00-abertura.md" 'E0 --sprint' \
   | sed 's|<trabalho_id>|plan|g; s|<slug>|plan|g; s|<base>|main|g' \
   | sed "s#bash \.claude/skills/mergex/scripts/#bash '$scripts'/#g" > "$aux/e0s.sh"
 [ -s "$aux/e0s.sh" ]; confere '00-abertura tem o bloco do E0 --sprint' $?
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$RECON_CHAMADAS"' 'printf "ok=true\n"' > "$aux/recon-falso.sh"
+chmod +x "$aux/recon-falso.sh"
+sed "s#bash '$scripts'/reconciliacao-base.sh#bash '$aux/recon-falso.sh'#g" "$aux/e0s.sh" > "$aux/e0s-rec.sh"
 e0s() { # <dir> <NN> — saída em $aux/e0s.out/.err, código em $rc
   (cd "$1" && sprint="$2" bash "$aux/e0s.sh") >"$aux/e0s.out" 2>"$aux/e0s.err"; rc=$?
 }
@@ -325,6 +328,24 @@ e8 "$aux/r2" https://github.com/dono/repo/pull/2 aberto
 g -C "$aux/r2" add -A; g -C "$aux/r2" commit -q -m 'docs(mergex): E8' -m 'Trabalho: plan'
 fecha01 "$aux/r2" merge
 g -C "$aux/r2" merge -q --no-edit main
+
+# Uma cadeia legítima não pode prender o trabalho entre duas sprints. O E0
+# verifica a cadeia já avançada até a main nova antes de reancorar a sprint.
+cp -R "$aux/r2" "$aux/rrec"
+erec="$aux/rrec/docs/entregas/plan/ENTREGA.md"
+sed 's/^reconciliacoes: \[\]$/reconciliacoes:\n  - numero: 001\n    arquivo: RECONCILIACAO-BASE-001.md\n    b1_sha: 1111111111111111111111111111111111111111\n    m_sha: 2222222222222222222222222222222222222222/' \
+  "$erec" > "$aux/e.tmp" && mv "$aux/e.tmp" "$erec"
+sed "s/^base_validada_sha: .*/base_validada_sha: $(git -C "$aux/rrec" rev-parse main)/" \
+  "$erec" > "$aux/e.tmp" && mv "$aux/e.tmp" "$erec"
+: > "$aux/recon-chamadas"
+(cd "$aux/rrec" && RECON_CHAMADAS="$aux/recon-chamadas" sprint=02 bash "$aux/e0s-rec.sh") >"$aux/e0s.out" 2>"$aux/e0s.err"; rc=$?
+le_repo "$aux/rrec"
+[ "$rc" = 0 ] && [ "$(linha sprint_atual)" = 02 ] \
+  && grep -q -- '--verificar --entrega docs/entregas/plan/ENTREGA.md --origem sprintx --trabalho plan' "$aux/recon-chamadas"
+resultado=$?
+[ "$resultado" = 0 ] || mostra "$aux/e0s.err" "$aux/recon-chamadas"
+confere 'E0 da sprint 02 aceita cadeia de reconciliacao verificada na base nova' "$resultado"
+
 abre "$aux/r2" 02; task "$aux/r2" src/c.ts T-02.01
 v9 "$aux/r2"
 [ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
@@ -375,6 +396,13 @@ grep -q 'sprint anterior' "$aux/e7.txt" && grep -q 'não é retomada' "$aux/e7.t
 confere 'PR merged da sprint anterior nao e retomada (07-abertura-pr)' $?
 grep -q -- '--registrar-pr' "$ref/08-registro.md" && grep -q 'última sprint' "$ref/08-registro.md"
 confere '08-registro: o item da sprint pelo --registrar-pr; memox e fim de trabalho so na ultima sprint' $?
+grep -q 'união acumulada' "$ref/08-registro.md" && grep -q '`arquivos_alterados`' "$ref/08-registro.md" \
+  && grep -q 'faixa_atencao.*sprint.*substitui' "$ref/08-registro.md" \
+  && grep -q 'sprints anteriores' "$ref/00-schema.md"
+confere 'registro final acumula arquivos e faixas reais das sprints anteriores' $?
+grep -q 'Com reconcilia' "$scripts/portao-v9.sh" \
+  && grep -q 'PR fechado.*ancestral.*BASE' "$scripts/portao-v9.sh"
+confere 'V9 com reconciliacao exclui da base o ultimo PR de sprint ja entregue' $?
 grep -q -- '--sprint' "$ref/integracao/sprintx.md" && grep -q 'atualiza a branch a partir da main' "$ref/integracao/sprintx.md"
 confere 'integracao/sprintx: a F6 passa --sprint ao E0 e atualiza a branch a partir da main' $?
 grep -q '`entrega`.*`por_trabalho`.*`por_sprint`' "$ref/00-schema.md" \

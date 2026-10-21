@@ -567,6 +567,10 @@ echo '== E8 e E9: o registro do PR de planejamento =='
 
 SHA_M=0123456789abcdef0123456789abcdef01234567
 SHA_B=89abcdef0123456789abcdef0123456789abcdef
+SHA_OLD=fedcba9876543210fedcba9876543210fedcba98
+SHA_OTHER=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+SHA_FF1=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+SHA_FF2=cccccccccccccccccccccccccccccccccccccccc
 # --registrar-merge: só o item de planejamento ainda não merged
 entrega "$aux/reg.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
 bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
@@ -595,6 +599,20 @@ le "$aux/reg4.md"; cp "$aux/reg4.md" "$aux/reg5.md"
 sed 's/^    base_sha: .*/    base_sha: null/' "$aux/reg4.md" > "$aux/reg5.md"
 le "$aux/reg5.md"
 [ "$rc" = 0 ]; confere 'item merged com base_sha null (registro anterior a DM-263): legivel' $?
+# A reparação histórica alcança o planejamento depois da retomada e não
+# regrava o item atual nem os campos de PR do topo.
+sed 's/^sprint_atual: planejamento$/sprint_atual: null/; s/^pr_estado: merged$/pr_estado: null/; s/^pr_url: .*/pr_url: null/' \
+  "$aux/reg5.md" > "$aux/reg7.md"
+bash "$leitor" --completar-base planejamento --entrega "$aux/reg7.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >"$aux/out" 2>"$aux/err"; rc=$?
+le "$aux/reg7.md"
+[ "$rc" = 0 ] && grep -qx "planejamento_base_sha=$SHA_B" "$aux/out" \
+  && grep -qx 'sprint_atual=null' "$aux/out" && grep -qx 'pr_estado: null' "$aux/reg7.md" \
+  && [ "$(grep -c '^    base_sha:' "$aux/reg7.md")" = 1 ]
+confere '--completar-base repara o planejamento historico depois da retomada' $?
+cp "$aux/reg7.md" "$aux/reg7-antes.md"
+bash "$leitor" --completar-base planejamento --entrega "$aux/reg7.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && cmp -s "$aux/reg7.md" "$aux/reg7-antes.md"
+confere '--completar-base do planejamento e idempotente' $?
 sed "s/^    estado: merged/    estado: aberto/; s/^    merge_sha: .*/    merge_sha: null/; s/^    merge: humano/    merge: null/" "$aux/reg4.md" > "$aux/reg6.md"
 le "$aux/reg6.md"
 [ "$rc" = 2 ]; confere 'base_sha preenchida sem estar merged: sai 2' $?
@@ -679,18 +697,47 @@ confere 'MERGED sem mergeCommit: nao grava' $?
 e9 "$aux/e9b" GH_RESPOSTA="MERGED $SHA_M "
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
 confere 'MERGED sem a base do PR (baseRefOid): nao grava' $?
+# Entrega legada já retomada: o E9 usa a URL do item histórico e completa só
+# a base ausente do planejamento, sem depender de sprint_atual.
+mkdir -p "$aux/e9h/docs/entregas/login"
+sed 's/^sprint_atual: planejamento$/sprint_atual: null/; s/^pr_url: .*/pr_url: null/; s/^    estado: aberto$/    estado: merged/; s/^    merge_sha: null$/    merge_sha: '"$SHA_M"'/; s/^    merge: null$/    merge: humano/' \
+  "$aux/e9b/docs/entregas/login/ENTREGA.md" > "$aux/e9h/docs/entregas/login/ENTREGA.md"
+: > "$aux/gh-chamadas"
+e9 "$aux/e9h" GH_RESPOSTA="MERGED $SHA_M $SHA_B"
+(cd "$aux/e9h" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
+[ "$rc" = 0 ] && grep -qx "planejamento_base_sha=$SHA_B" "$aux/out" \
+  && grep -q 'pr view https://github.com/dono/repo/pull/9 ' "$aux/gh-chamadas"
+confere 'E9 completa base_sha do planejamento historico depois da retomada' $?
 # GitLab: o MR do planejamento lido com o glab (API do projeto), nunca com o gh
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\n[ -z "${GLAB_RESPOSTA:-}" ] || printf "%%s\\n" "$GLAB_RESPOSTA"\nexit "${GLAB_RC:-0}"\n' > "$aux/gh-falso/glab"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\ncase "$*" in\n  *"/repository/commits/"*) r="${GLAB_COMMIT_RESPOSTA:-}" ;;\n  *"/commits?"*) r="${GLAB_COMMITS_RESPOSTA:-}" ;;\n  *) r="${GLAB_RESPOSTA:-}" ;;\nesac\n[ -z "$r" ] || printf "%%s\\n" "$r"\nexit "${GLAB_RC:-0}"\n' > "$aux/gh-falso/glab"
 chmod +x "$aux/gh-falso/glab"
 repo_e9 "$aux/e9g"
 sed 's#https://github.com/dono/repo/pull/9#https://gitlab.com/dono/repo/-/merge_requests/9#' "$aux/e9g/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
   && mv "$aux/e.tmp" "$aux/e9g/docs/entregas/login/ENTREGA.md"
 : > "$aux/gh-chamadas"
-e9 "$aux/e9g" GLAB_RESPOSTA="{\"iid\": 9, \"state\": \"merged\", \"merge_commit_sha\": \"$SHA_M\", \"diff_refs\": {\"start_sha\": \"$SHA_B\"}}"
+e9 "$aux/e9g" \
+  GLAB_RESPOSTA="{\"iid\": 9, \"state\": \"merged\", \"merge_commit_sha\": \"$SHA_M\", \"diff_refs\": {\"start_sha\": \"$SHA_OLD\"}}" \
+  GLAB_COMMIT_RESPOSTA="{\"id\": \"$SHA_M\", \"parent_ids\": [\"$SHA_B\", \"$SHA_OTHER\"]}"
 (cd "$aux/e9g" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
 [ "$rc" = 0 ] && grep -qx "merge_sha=$SHA_M" "$aux/out" \
-  && grep -q 'api projects/:id/merge_requests/9' "$aux/gh-chamadas" && ! grep -q '^pr view' "$aux/gh-chamadas"
-confere 'E9 no GitLab: o MR de planejamento mergeado e lido pelo glab e registrado' $?
+  && grep -qx "base_sha=$SHA_B" "$aux/out" \
+  && grep -q 'api projects/:id/merge_requests/9' "$aux/gh-chamadas" \
+  && grep -q "api projects/:id/repository/commits/$SHA_M" "$aux/gh-chamadas" && ! grep -q '^pr view' "$aux/gh-chamadas"
+confere 'E9 no GitLab deriva a base do commit integrado, nao de diff_refs.start_sha antigo' $?
+# Em fast-forward/rebase, o commit integrado tem um pai do próprio MR; a base
+# é o único pai externo da linhagem completa, nunca start_sha.
+repo_e9 "$aux/e9ff"
+sed 's#https://github.com/dono/repo/pull/9#https://gitlab.com/dono/repo/-/merge_requests/10#' "$aux/e9ff/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/e9ff/docs/entregas/login/ENTREGA.md"
+: > "$aux/gh-chamadas"
+e9 "$aux/e9ff" \
+  GLAB_RESPOSTA="{\"iid\": 10, \"state\": \"merged\", \"merge_commit_sha\": \"$SHA_FF2\", \"diff_refs\": {\"start_sha\": \"$SHA_OLD\"}}" \
+  GLAB_COMMIT_RESPOSTA="{\"id\": \"$SHA_FF2\", \"parent_ids\": [\"$SHA_FF1\"]}" \
+  GLAB_COMMITS_RESPOSTA="[{\"id\":\"$SHA_FF1\",\"parent_ids\":[\"$SHA_B\"]},{\"id\":\"$SHA_FF2\",\"parent_ids\":[\"$SHA_FF1\"]}]"
+(cd "$aux/e9ff" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
+[ "$rc" = 0 ] && grep -qx "merge_sha=$SHA_FF2" "$aux/out" && grep -qx "base_sha=$SHA_B" "$aux/out" \
+  && grep -q 'merge_requests/10/commits?per_page=100' "$aux/gh-chamadas"
+confere 'E9 no GitLab deriva a base unica da linhagem no fast-forward ou rebase' $?
 # pr_url entre aspas (YAML valido): o servico recebe a URL sem elas
 repo_e9 "$aux/e9q"
 sed 's#^pr_url: \(.*\)$#pr_url: "\1"#' "$aux/e9q/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \

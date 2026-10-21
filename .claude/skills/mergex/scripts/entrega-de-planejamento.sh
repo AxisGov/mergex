@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # entrega-de-planejamento — lê e grava o modo e o PR atual da entrega.
 #
-# Contrato: references/00-schema.md, "A entrega por sprint"; DM-259 e DM-264.
+# Contrato: references/00-schema.md, "A entrega por sprint"; DM-259, DM-264 e DM-267.
 # É o ÚNICO leitor de `entrega`, `sprint_atual` e `prs` na mergex: E0, E2, E7,
 # E8 e E9 perguntam a ele, ninguém relê o YAML por conta própria.
 #
@@ -21,6 +21,7 @@
 #   planejamento=nao
 #   [planejamento_merge_sha=<prs[0].merge_sha>]   (só depois da retomada)
 #   [planejamento_base_sha=<prs[0].base_sha>]     (idem; `null` num registro anterior à DM-263)
+#   [planejamento_url=<prs[0].url>]                (com o item de planejamento)
 # ou `planejamento=sim` com estado/merge/base do primeiro item. Em ambos os
 # casos, também imprime `entrega=`, `entrega_origem=`, `sprint_atual=`, o estado
 # do item atual, o último item fechado e uma linha `pr=` por item.
@@ -33,7 +34,8 @@
 # Códigos: 0 leu; 2 ilegível ou incoerente (motivo em stderr); 64 uso.
 #
 # As ações de escrita são: `--registrar-pr` (E8), `--registrar-merge` (E9),
-# `--abrir-sprint` (E0). `--modo-efetivo` fixa a precedência plano > projeto antes
+# `--completar-base` (E9, migração de item merged), `--abrir-sprint` (E0).
+# `--modo-efetivo` fixa a precedência plano > projeto antes
 # do primeiro registro. Todas reescrevem só as chaves de que são donas, conferem o
 # temporário com este mesmo leitor e recusam link simbólico.
 #
@@ -45,6 +47,7 @@ uso() {
   [ -z "${1:-}" ] || printf 'entrega-de-planejamento: %s\n' "$1" >&2
   printf '%s\n' 'uso: entrega-de-planejamento.sh [--rev <commit>] --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --registrar-merge --merge-sha <sha> --base-sha <sha> --entrega <ENTREGA.md>' \
+    '     entrega-de-planejamento.sh --completar-base <planejamento|NN> --merge-sha <sha> --base-sha <sha> --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --registrar-pr --url <url|null> --estado <estado> --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --abrir-sprint <NN> --base-validada-sha <sha> --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --modo-efetivo --plano <00-PLANEJAMENTO.md> --projeto <modo> --entrega <ENTREGA.md>' >&2
@@ -53,7 +56,7 @@ uso() {
 ilegivel() { printf 'entrega-de-planejamento: %s\n' "$1" >&2; exit 2; }
 recusa() { printf 'entrega-de-planejamento: %s\n' "$1" >&2; exit 1; }
 
-ENTREGA=""; REV=""; TEM_REV=0; ACAO=ler; MERGE_SHA=""; BASE_SHA=""
+ENTREGA=""; REV=""; TEM_REV=0; ACAO=ler; MERGE_SHA=""; BASE_SHA=""; ALVO_SPRINT=""
 URL=""; TEM_URL=0; ESTADO=""; NN=""; BASE_VALIDADA=""; PLANO=""; PROJETO=""
 acao() { [ "$ACAO" = ler ] || uso 'uma ação por vez'; ACAO="$1"; }
 while [ "$#" -gt 0 ]; do
@@ -61,6 +64,7 @@ while [ "$#" -gt 0 ]; do
     --entrega) [ "$#" -ge 2 ] && [ -z "$ENTREGA" ] || uso; ENTREGA="$2"; shift 2 ;;
     --rev) [ "$#" -ge 2 ] && [ "$TEM_REV" = 0 ] || uso; REV="$2"; TEM_REV=1; shift 2 ;;
     --registrar-merge) acao registrar-merge; shift ;;
+    --completar-base) [ "$#" -ge 2 ] || uso; acao completar-base; ALVO_SPRINT="$2"; shift 2 ;;
     --registrar-pr) acao registrar-pr; shift ;;
     --abrir-sprint) [ "$#" -ge 2 ] || uso; acao abrir-sprint; NN="$2"; shift 2 ;;
     --modo-efetivo) acao modo-efetivo; shift ;;
@@ -82,14 +86,17 @@ sha_uso() { # <nome> <valor> <comprimento exigido, ou vazio para 40|64>
   if [ -n "${3:-}" ]; then [ "${#2}" = "$3" ] || uso "$1 inválido: $2"
   else [ "${#2}" = 40 ] || [ "${#2}" = 64 ] || uso "$1 inválido: $2"; fi
 }
-[ "$ACAO" = registrar-merge ] || [ -z "$MERGE_SHA$BASE_SHA" ] || uso '--merge-sha e --base-sha só com --registrar-merge'
+case "$ACAO" in registrar-merge|completar-base) ;; *) [ -z "$MERGE_SHA$BASE_SHA" ] || uso '--merge-sha e --base-sha só com --registrar-merge ou --completar-base' ;; esac
 [ "$ACAO" = registrar-pr ] || { [ "$TEM_URL" = 0 ] && [ -z "$ESTADO" ]; } || uso '--url e --estado só com --registrar-pr'
 [ "$ACAO" = abrir-sprint ] || [ -z "$BASE_VALIDADA" ] || uso '--base-validada-sha só com --abrir-sprint'
 [ "$ACAO" = modo-efetivo ] || [ -z "$PLANO$PROJETO" ] || uso '--plano e --projeto só com --modo-efetivo'
 case "$ACAO" in
-  registrar-merge)
+  registrar-merge|completar-base)
     sha_uso merge_sha "$MERGE_SHA"
-    sha_uso base_sha "${BASE_SHA:-}" "${#MERGE_SHA}" ;;
+    sha_uso base_sha "${BASE_SHA:-}" "${#MERGE_SHA}"
+    if [ "$ACAO" = completar-base ]; then
+      case "$ALVO_SPRINT" in planejamento|[0-9][0-9]) ;; *) uso "alvo de --completar-base fora de planejamento|NN: ${ALVO_SPRINT:-ausente}" ;; esac
+    fi ;;
   registrar-pr)
     [ "$TEM_URL" = 1 ] && [ -n "$URL" ] || uso 'falta --url (null quando o PR não abriu)'
     case "$URL" in *[[:space:]\"\'#]*) uso "url fora da forma: $URL" ;; esac
@@ -104,7 +111,7 @@ case "$ACAO" in
 esac
 
 # antes de ler: um link quebrado também é link, e a recusa é a mesma
-case "$ACAO" in registrar-merge|registrar-pr|abrir-sprint)
+case "$ACAO" in registrar-merge|completar-base|registrar-pr|abrir-sprint)
   [ ! -L "$ENTREGA" ] || recusa "$ENTREGA é link simbólico: o registro só grava um arquivo regular" ;;
 esac
 conteudo=""
@@ -224,10 +231,11 @@ proxima() { printf '%02d' "$((10#$1 + 1))"; }
 
 # Todo item: enums; o de planejamento só na primeira posição; as sprints em
 # sequência (01, 02, ...), depois do planejamento; todo item antes do último merged.
-p_sprint=""; p_estado=""; p_sha=""; p_merge=""; p_base=""
+p_sprint=""; p_url=""; p_estado=""; p_sha=""; p_merge=""; p_base=""
 u_pos=0; u_sprint=""; u_estado=""; u_sha=""; u_base=""; u_merge=""
+a_pos=0; a_sprint=""; a_estado=""; a_sha=""; a_base=""; a_merge=""
 f_sprint=""; f_sha=""; n_itens=0; ultima_nn=""; prs_linhas=""
-while IFS="$TAB" read -r _ pos s_item _url estado sha merge base; do
+while IFS="$TAB" read -r _ pos s_item url_item estado sha merge base; do
   [ -n "$pos" ] || continue
   case "$estado" in aberto|rascunho|aguardando_merge|merged|fechado|null) ;;
     *) ilegivel "estado fora do enum no item $pos de prs: $estado" ;; esac
@@ -251,7 +259,10 @@ while IFS="$TAB" read -r _ pos s_item _url estado sha merge base; do
   [ "$base" = null ] || sha_ok "$base" || ilegivel "item $pos de prs com base_sha inválido: $base"
   # sequencial (desenho 4.3): só o último item pode estar aberto
   [ "$u_pos" = 0 ] || [ "$u_estado" = merged ] || ilegivel "o item $pos de prs vem depois do item $u_pos, que não está merged"
-  if [ "$pos" = 1 ]; then p_sprint="$s_item"; p_estado="$estado"; p_sha="$sha"; p_merge="$merge"; p_base="$base"; fi
+  if [ "$pos" = 1 ]; then p_sprint="$s_item"; p_url="$url_item"; p_estado="$estado"; p_sha="$sha"; p_merge="$merge"; p_base="$base"; fi
+  if [ -n "$ALVO_SPRINT" ] && [ "$s_item" = "$ALVO_SPRINT" ]; then
+    a_pos="$pos"; a_sprint="$s_item"; a_estado="$estado"; a_sha="$sha"; a_merge="$merge"; a_base="$base"
+  fi
   u_pos="$pos"; u_sprint="$s_item"; u_estado="$estado"; u_sha="$sha"; u_base="$base"; u_merge="$merge"
   [ "$estado" != merged ] || { f_sprint="$s_item"; f_sha="$sha"; }
   n_itens="$pos"
@@ -287,9 +298,9 @@ case "$sprint" in planejamento|[0-9][0-9]) ATUAL_ESTADO="$u_estado" ;; esac
 
 saida() {
   if [ "$PLANEJAMENTO" = sim ]; then
-    printf 'planejamento=sim\nestado=%s\nmerge_sha=%s\nbase_sha=%s\n' "$p_estado" "$p_sha" "$p_base"
+    printf 'planejamento=sim\nestado=%s\nmerge_sha=%s\nbase_sha=%s\nplanejamento_url=%s\n' "$p_estado" "$p_sha" "$p_base" "$p_url"
   elif [ "$p_sprint" = planejamento ]; then
-    printf 'planejamento=nao\nplanejamento_merge_sha=%s\nplanejamento_base_sha=%s\n' "$p_sha" "$p_base"
+    printf 'planejamento=nao\nplanejamento_merge_sha=%s\nplanejamento_base_sha=%s\nplanejamento_url=%s\n' "$p_sha" "$p_base" "$p_url"
   else
     printf 'planejamento=nao\n'
   fi
@@ -404,6 +415,17 @@ confere_e_troca() {
 }
 
 case "$ACAO" in
+  completar-base)
+    [ "$a_pos" != 0 ] || recusa "não há item $ALVO_SPRINT em prs para completar base_sha"
+    [ "$a_estado" = merged ] || recusa "$(nome_pr "$a_sprint") não está merged: base_sha histórica só completa item fechado"
+    [ "$a_sha" = "$MERGE_SHA" ] || recusa "$(nome_pr "$a_sprint") está merged com outro merge_sha ($a_sha)"
+    if [ "$a_base" = "$BASE_SHA" ]; then
+      printf 'completado=%s\nmerge_sha=%s\nbase_sha=%s\n' "$a_sprint" "$MERGE_SHA" "$BASE_SHA"; exit 0
+    fi
+    [ "$a_base" = null ] || recusa "$(nome_pr "$a_sprint") já está merged com outra base_sha ($a_base)"
+    grava "$a_pos" "base_sha=$BASE_SHA" "atualizado_em=$hoje" ''
+    confere_e_troca "$(printf 'pr=%s\tmerged\t%s\t%s' "$a_sprint" "$MERGE_SHA" "$BASE_SHA")"
+    printf 'completado=%s\nmerge_sha=%s\nbase_sha=%s\n' "$a_sprint" "$MERGE_SHA" "$BASE_SHA" ;;
   registrar-merge)
     # o item da entrega atual: o de planejamento ou o da sprint atual
     case "$sprint" in

@@ -340,7 +340,16 @@ g cat-file -e "$BASE^{commit}" 2>/dev/null || sem_prova "base $BASE não é comm
 # planejamento é o 1º), a de HEAD é a mais nova (r = k), e k nunca passa do
 # número de PRs fechados. As guardas olham `<base> ^L`, L = o merge do k-ésimo.
 L_SPRINT=""
-if [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint ]; then
+if [ -n "$ULTIMO" ] && printf '%s\n' "$MARCA_H" | grep -qx 'entrega=por_sprint'; then
+  # Com reconciliação, a cadeia já prova BASE (DM-266). L_SPRINT ainda precisa apontar
+  # o último PR fechado: ele tem de ser ancestral de BASE e separa das guardas
+  # o produto das sprints que a main já recebeu.
+  printf '%s\n' "$MARCA_H" | awk -F'\t' '/^pr=/ && $2 == "merged" { print $3 }' > "$TMP_DIR/fechados"
+  L_SPRINT="$(sed -n '$p' "$TMP_DIR/fechados")"
+  [ -n "$L_SPRINT" ] || sem_prova 'entrega por_sprint reconciliada sem PR fechado que justifique a base' # guarda:V9PLAN
+  g merge-base --is-ancestor "$L_SPRINT" "$BASE" 2>/dev/null \
+    || sem_prova "o último PR fechado ($L_SPRINT) não é ancestral de BASE ($BASE) depois da reconciliação" # guarda:V9PLAN
+elif [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint ]; then
   printf '%s\n' "$MARCA_H" | awk -F'\t' '/^pr=/ && $2 == "merged" { print $3 }' > "$TMP_DIR/fechados"
   awk -F'\t' '$3 == "registrada_sprint" { print $2 }' "$TMP_DIR/versoes-info" | LC_ALL=C sort -u > "$TMP_DIR/sprint-bases"
   k="$(grep -c . "$TMP_DIR/sprint-bases")"; nf="$(grep -c . "$TMP_DIR/fechados")"

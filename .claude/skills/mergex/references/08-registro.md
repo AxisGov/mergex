@@ -125,8 +125,8 @@ entregue_em: 2026-08-29
 | `portao_sha` | O `HEAD` que o E2 avaliou, gravado com `portao` por `registrar-portao.sh`; o E8 o preserva. O commit `e8` é método de um pai no catálogo, e por isso não vence o portão |
 | `commits` | Um item por **fechamento de task em cada execução**, na ordem em que fecharam, cada um com a chave de ordem `seq` (`references/00-schema.md`, "A ordem de registro"); `[]` sem versionador. É histórico de execução: na retomada depois de replanejamento a lista é **preservada**, e um `task` id pode reaparecer com outro SHA (`01-commits.md`). O commit de artefatos de método não é task e **não entra aqui** — ele vai na prosa |
 | `modulo_afetado` | Os módulos que a entrega toca; copiado da skill de origem quando ela o declara |
-| `arquivos_alterados` | **O diff real** (`git diff --name-only <branch_base>...HEAD`), não a previsão do plano |
-| `faixa_atencao` | A faixa por arquivo do E3, no vocabulário do índice (`alta`/`media`/`baixa`); `[]` antes do E3 |
+| `arquivos_alterados` | **O diff real**, não a previsão do plano. Em `por_trabalho`, `git diff --name-only <branch_base>...HEAD`; em `por_sprint`, a união acumulada, sem repetição, desse diff em cada sprint |
+| `faixa_atencao` | A faixa por arquivo do E3, no vocabulário do índice (`alta`/`media`/`baixa`); `[]` antes do E3. Em `por_sprint`, acumula por caminho e a classificação da sprint atual substitui a anterior do mesmo arquivo |
 | `raio` | A faixa da legadox; `null` sem modo legado — **nunca invente uma faixa** |
 | `atencao` | As três contagens do E3; zeros quando o E3 não rodou |
 | `portao` | O resultado do E2 |
@@ -158,6 +158,18 @@ somente `url` e `estado` do item atual e recusa `merged`/`fechado`: quem registr
 E9 (`09-revisao.md`, DM-260 e DM-264). `sprint`, `merge_sha`, `merge`, `base_sha` e
 `sprint_atual` não mudam no E8. Depois de gravar, leia de novo: `sprint_atual` e `atual_estado`
 têm de ser os registrados; saída 2 é gravação errada, corrija antes do commit final.
+
+### O fato acumulado da entrega por sprint (DM-268)
+
+Antes de gravar o PR de uma entrega `por_sprint`, o E8 preserva o fato observado nas sprints
+anteriores. `arquivos_alterados` passa a ser a união ordenada, sem repetição, do valor existente
+com os caminhos do diff real da sprint atual. `faixa_atencao` é mesclada por `arquivo`: entradas
+que não reapareceram continuam; a classificação observada nesta sprint substitui a anterior do
+mesmo caminho. As contagens de `atencao` continuam descrevendo somente o PR atual.
+
+Isso não antecipa o fechamento: nas sprints intermediárias o memox e os artefatos finais continuam
+ausentes. Apenas conserva no `ENTREGA.md` os fatos necessários para que a última sprint indexe o
+trabalho inteiro, sem confundir mudanças alheias que chegaram pela main com arquivos do trabalho.
 
 Na entrega `por_trabalho` já retomada depois do planejamento, `sprint_atual: null`: o E8 mantém
 apenas `pr_url`/`pr_estado` de topo e não acrescenta item de sprint em `prs`.

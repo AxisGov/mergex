@@ -236,7 +236,7 @@ prs:
 | `estado` | O enum da tabela; o E8 grava o do E7, o E9 grava `merged` |
 | `merge_sha` | O commit de merge, só com `estado: merged`; `null` antes |
 | `merge` | `humano` quando o E9 registra o merge; `automatico` só quando o modo automático fizer o merge de uma sprint; **nunca** `automatico` no planejamento |
-| `base_sha` | A ponta da base quando o PR foi mergeado (`baseRefOid` no GitHub, `diff_refs.start_sha` no GitLab), gravada pelo E9 com o merge (DM-263); `null` antes. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
+| `base_sha` | A ponta comprovada da base quando o PR foi integrado (`baseRefOid` no GitHub; no GitLab, derivada dos pais do commit integrado e, no fast-forward/rebase, da linhagem exata dos commits do MR), gravada pelo E9 com o merge (DM-263 e DM-267); `null` antes. `diff_refs.start_sha` não serve: é da versão do diff, não do instante do merge. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
 
 - `prs` é sempre YAML de bloco; a forma em fluxo (`prs: [{...}]`) é ilegível. Lista vazia é `prs: []`.
 - Uma chave sem a outra é incoerente: `sprint_atual: planejamento` ou `NN` sem o item
@@ -250,8 +250,12 @@ prs:
   `scripts/entrega-de-planejamento.sh --entrega <ENTREGA.md> [--rev <commit>]`, que imprime
   `planejamento=sim|nao`, `entrega=`, `sprint_atual=`, o estado do item atual e os itens de `prs`
   (com `sim`, também `estado=`, `merge_sha=` e `base_sha=`; depois da retomada, também
-  `planejamento_merge_sha=` e `planejamento_base_sha=`, DM-261 e DM-263) e sai 2 com a entrega
+  `planejamento_merge_sha=` e `planejamento_base_sha=`; com o item, `planejamento_url=`, DM-261,
+  DM-263 e DM-267) e sai 2 com a entrega
   ilegível ou incoerente. E0, E2, E7, E8 e E9 o consomem.
+- `--completar-base <planejamento|NN> --merge-sha <sha> --base-sha <sha>` é a migração
+  idempotente de um item histórico `merged` com `base_sha: null`: exige o mesmo `merge_sha`,
+  recusa base diferente e não toca `sprint_atual`, `pr_url`, `pr_estado` nem outro item.
 
 ## A ordem de registro — a chave `seq`
 
@@ -427,7 +431,10 @@ mergex é a única camada do método que conhece o **diff real**: o que de fato 
 o que ninguém previu e excluindo o que foi previsto e não foi necessário. Um índice alimentado
 pela previsão do plano indexa a intenção; alimentado pelo diff, indexa o fato.
 
-- Fonte: `git diff --name-only <branch_base>...HEAD`, a mesma base do E3 (três pontos).
+- Em `por_trabalho`, a fonte é `git diff --name-only <branch_base>...HEAD`, a mesma base do E3
+  (três pontos). Em `por_sprint`, cada E3 acumula em `arquivos_alterados` a união, sem repetição,
+  do valor já gravado pelas sprints anteriores com o diff real da sprint atual. Assim a main já
+  atualizada não apaga do registro final um caminho entregue antes.
 - Caminhos **relativos à raiz do repositório**, na forma exata em que o versionador os devolve.
 - Sem repetição, ordenados alfabeticamente.
 - Inclui arquivo removido (`D`) e as duas pontas de um renomeado (`R`): o caminho antigo
@@ -480,8 +487,10 @@ Este campo é a contraparte **por arquivo** do campo `atencao`, que traz só as 
 contagens dizem quanto de olho humano a entrega pediu; a lista diz **onde**. Sem ela, o
 histórico de faixa de um arquivo não existe — e é ele que fecha o ciclo com o memox.
 
-`faixa_atencao` é `[]` enquanto o E3 não rodou (no E0 e durante o E1), e é gravado inteiro no
-E3, junto com as contagens.
+`faixa_atencao` é `[]` enquanto o E3 não rodou (no E0 e durante o E1). Em `por_trabalho`, o E3 a
+grava inteira, junto com as contagens. Em `por_sprint`, preserva as entradas das sprints anteriores
+e mescla as da sprint atual por caminho; a classificação observada na sprint atual substitui a
+anterior quando o mesmo arquivo reaparece. `atencao` continua sendo a contagem do PR atual.
 
 **Por que dois campos e não um.** `atencao` é lido pelo painel para mostrar quanto de revisão
 cada PR está pedindo; `faixa_atencao` é lido pelo índice para saber o passado de um caminho.

@@ -151,7 +151,9 @@ um arquivo sem a chave), com o modo que o mesmo `--modo-efetivo` disser.
 2. a sprint pedida é a seguinte à última de `prs`: fora de sequência, recusa;
 3. o `merge_sha` do último PR fechado é ancestral da base buscada, e a base buscada é ancestral do
    `HEAD` (a branch foi atualizada a partir da main depois do merge);
-4. `reconciliacoes` vazio, como na retomada depois do planejamento.
+4. com `reconciliacoes` não vazio, a atualização da branch a partir da main nova já foi
+   registrada como a reconciliação seguinte e a cadeia passa em `reconciliacao-base.sh
+   --verificar`; a `base_validada_sha` da cadeia é a base buscada (DM-266). Sem cadeia, nada muda.
 
 Então grava `entrega: por_sprint`, `sprint_atual: <NN>`, o item novo `{sprint: <NN>, url: null,
 estado: null, merge_sha: null, merge: null, base_sha: null}` no fim de `prs`, volta `pr_url` e
@@ -185,12 +187,26 @@ marca="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega
 atual="$(printf '%s\n' "$marca" | sed -n 's/^sprint_atual=//p')"
 fechada_sha="$(printf '%s\n' "$marca" | sed -n 's/^fechada_merge_sha=//p')"
 base_sha="$(git rev-parse --verify -q "<base>^{commit}")" || { printf 'mergex E0: base <base> inexistente\n' >&2; exit 2; }
+nova="$(git merge-base HEAD "$base_sha")" || { printf 'mergex E0: nenhum merge-base entre HEAD e <base>\n' >&2; exit 2; }
 if [ "$atual" != "$sprint" ] && [ -n "$fechada_sha" ]; then
-  # com reconciliação registrada, a base vem da cadeia: reancorar a deixaria sem âncora
   rec="$(awk 'NR == 1 { next } /^---/ { exit } /^reconciliacoes:/ { sub(/^reconciliacoes:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print "v=" $0; exit }' "$entrega")"
-  case "$rec" in ''|'v=[]') ;; *)
-    printf 'mergex E0 BLOQUEADO — a entrega já tem reconciliacoes: a base da sprint não é reancorada sobre uma cadeia de reconciliação\n' >&2
-    exit 1 ;;
+  case "$rec" in
+    ''|'v=[]') ;;
+    *)
+      prova="$(bash .claude/skills/mergex/scripts/reconciliacao-base.sh --verificar \
+        --entrega "$entrega" --origem sprintx --trabalho <trabalho_id>)" || {
+        printf 'mergex E0 BLOQUEADO — a cadeia de reconciliação não foi verificada antes da sprint %s\n' "$sprint" >&2
+        exit 1
+      }
+      [ "$(printf '%s\n' "$prova" | sed -n 1p)" = ok=true ] || {
+        printf 'mergex E0 BLOQUEADO — a cadeia de reconciliação respondeu sem ok=true\n' >&2
+        exit 1
+      }
+      base_da_cadeia="$(awk 'NR == 1 { next } /^---/ { exit } /^base_validada_sha:/ { sub(/^base_validada_sha:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit }' "$entrega")"
+      [ "$base_da_cadeia" = "$nova" ] || {
+        printf 'mergex E0 BLOQUEADO — registre a atualização da branch a partir da main como a próxima reconciliação; a cadeia termina em %s, não em %s\n' "${base_da_cadeia:-base ausente}" "$nova" >&2
+        exit 1
+      } ;;
   esac
   git merge-base --is-ancestor "$fechada_sha" "$base_sha" 2>/dev/null || {
     printf 'mergex E0 BLOQUEADO — a base <base> não contém o merge do último PR fechado (%s): busque a base de novo\n' "$fechada_sha" >&2
@@ -201,7 +217,6 @@ if [ "$atual" != "$sprint" ] && [ -n "$fechada_sha" ]; then
     exit 1
   }
 fi
-nova="$(git merge-base HEAD "$base_sha")" || { printf 'mergex E0: nenhum merge-base entre HEAD e <base>\n' >&2; exit 2; }
 bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --abrir-sprint "$sprint" --entrega "$entrega" --base-validada-sha "$nova" || {
   rc=$?; [ "$rc" = 1 ] && printf 'mergex E0 BLOQUEADO — a sprint %s não abre (motivo acima)\n' "$sprint" >&2; exit "$rc"
 }
