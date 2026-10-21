@@ -368,5 +368,80 @@ else
 fi
 chmod 755 "$aux/fechada/.expx" 2>/dev/null
 
+# 21. --nucleo-da-rev (D3 e merge automatico): o leitor executado e o da arvore de <rev>,
+# materializado do commit num temporario, nunca o instalado nem o do disco
+(cd "$tmp" && bash "$leitor" --nucleo-da-rev > "$aux/out" 2>/dev/null); rc=$?
+[ "$rc" = 64 ] && [ ! -s "$aux/out" ] && passa '--nucleo-da-rev sem --rev: sai 64' \
+  || quebra "--nucleo-da-rev sem --rev: rc $rc, stdout '$(cat "$aux/out")'"
+# commit sobre o HEAD sem um caminho (arquivo ou pasta): commit_sem <caminho>
+commit_sem() {
+  local idx="$aux/indice"; rm -f "$idx"
+  GIT_INDEX_FILE="$idx" g read-tree HEAD
+  GIT_INDEX_FILE="$idx" g rm -r -q --cached -- "$1"
+  g commit-tree "$(GIT_INDEX_FILE="$idx" g write-tree)" -p HEAD -m "sem $1"
+}
+if [ "$tem_node" = 1 ]; then
+  completo="$(cd "$tmp" && bash "$leitor" --rev HEAD)"
+  texto="$completo"$'\n''EXPX_MARCA_DA_BASE=1'
+  js="$(node -e 'process.stdout.write("process.stdout.write(" + JSON.stringify(process.argv[1] + "\n") + ")\n")' "$texto")"
+  marcado="$(commit_com 100644 "$(blob "$js")" "$nucleo_rel/expx-fatiamento.mjs")"
+  # o instalado fica fora do disco: o leitor da base vem do commit, nao da pasta instalada
+  mv "$tmp/.expx/marketplace" "$aux/marketplace"
+  (cd "$tmp" && bash "$leitor" --rev "$marcado" --nucleo-da-rev > "$aux/out" 2> "$aux/err"); rc=$?
+  mv "$aux/marketplace" "$tmp/.expx/marketplace"
+  [ "$rc" = 0 ] && grep -qxF 'EXPX_MARCA_DA_BASE=1' "$aux/out" && grep -qxF 'EXPX_ENTREGA=por_sprint' "$aux/out" \
+    && passa 'nucleo da base diferente do instalado: vale o da base, sem o instalado no disco' \
+    || quebra "nucleo da base diferente do instalado: rc $rc, stdout '$(cat "$aux/out")', stderr '$(cat "$aux/err")'"
+  (cd "$tmp" && bash "$leitor" --rev "$marcado" > "$aux/out" 2>/dev/null); rc=$?
+  [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && passa 'o mesmo commit sem --nucleo-da-rev: sai 3 (difere do instalado)' \
+    || quebra "o mesmo commit sem --nucleo-da-rev: rc $rc, stdout '$(cat "$aux/out")'"
+  # uma ref de substituicao local (refs/replace) nao troca a arvore do commit da base
+  real="$(g rev-parse HEAD)"; g replace "$real" "$marcado"
+  (cd "$tmp" && bash "$leitor" --rev "$real" --nucleo-da-rev > "$aux/out" 2> "$aux/err"); rc=$?
+  g replace -d "$real" >/dev/null
+  [ "$rc" = 0 ] && ! grep -q 'EXPX_MARCA_DA_BASE' "$aux/out" && grep -qxF 'EXPX_ENTREGA=por_sprint' "$aux/out" \
+    && passa '--nucleo-da-rev ignora refs/replace: vale a arvore do proprio commit' \
+    || quebra "--nucleo-da-rev com refs/replace: rc $rc, stdout '$(cat "$aux/out")', stderr '$(cat "$aux/err")'"
+else
+  passa 'nucleo da base diferente do instalado: vale o da base (sem node)'
+fi
+# base com o arquivo e sem a pasta do nucleo, nucleo antigo na base, ou entrada que nao e
+# arquivo comum (link, gitlink) na pasta: sai 3, sem chamar node
+sem_pasta="$(commit_sem "$nucleo_rel")"
+sem_limites="$(commit_sem "$nucleo_rel/expx-limites.mjs")"
+link_nucleo="$(commit_com 120000 "$(blob ../../../../../../../../fora.mjs)" "$nucleo_rel/expx-limites.mjs" "$nucleo_rel/expx-limites.mjs")"
+gitlink_nucleo="$(commit_com 160000 1111111111111111111111111111111111111111 "$nucleo_rel/perfis/sub")"
+# entrada crua na pasta do nucleo, que o indice nao aceitaria (`..`): arvore_com <entrada> -> commit
+arvore_com() {
+  local dir="$nucleo_rel" nova pai nome
+  nova="$( { g ls-tree "HEAD:$dir"; printf '%s\n' "$1"; } | g mktree)" || return 1
+  while [ -n "$dir" ]; do
+    nome="${dir##*/}"; case "$dir" in */*) pai="${dir%/*}" ;; *) pai='' ;; esac
+    nova="$( { g ls-tree "HEAD:$pai" | grep -v "$(printf '\t')$nome\$"; printf '040000 tree %s\t%s\n' "$nova" "$nome"; } | g mktree)" || return 1
+    dir="$pai"
+  done
+  g commit-tree "$nova" -p HEAD -m crua
+}
+b_x="$(blob x)"
+ponto_ponto="$(arvore_com "$(printf '100644 blob %s\t..' "$b_x")")"
+nome_estranho="$(arvore_com "$(printf '100644 blob %s\ta b.mjs' "$b_x")")"
+for caso in "sem-pasta|$sem_pasta|não versiona o núcleo" "nucleo-antigo|$sem_limites|expx update" \
+            "link|$link_nucleo|não é arquivo comum" "gitlink|$gitlink_nucleo|não é arquivo comum" \
+            "entrada-..|$ponto_ponto|não é arquivo comum" "nome-com-espaco|$nome_estranho|não é arquivo comum"; do
+  nome="${caso%%|*}"; resto="${caso#*|}"; c="${resto%%|*}"; msg="${resto#*|}"
+  rm -f "$aux/node-chamado"
+  (cd "$tmp" && PATH="$aux/node-espia:$PATH" bash "$leitor" --rev "$c" --nucleo-da-rev > "$aux/out" 2> "$aux/err"); rc=$?
+  [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && [ ! -e "$aux/node-chamado" ] && grep -qF "$msg" "$aux/err" \
+    && passa "--nucleo-da-rev com base $nome: sai 3 sem node ($msg)" \
+    || quebra "--nucleo-da-rev com base $nome: rc $rc, stdout '$(cat "$aux/out")', stderr '$(cat "$aux/err")'"
+done
+# base sem o arquivo (e sem a pasta do nucleo): os padroes, sem node
+idx="$aux/indice"; rm -f "$idx"; GIT_INDEX_FILE="$idx" g read-tree --empty
+sem_nada="$(g commit-tree "$(GIT_INDEX_FILE="$idx" g write-tree)" -m vazio)"
+saida="$(sem_node --rev "$sem_nada" --nucleo-da-rev)"; rc=$?
+[ "$rc" = 0 ] && case "$saida" in *'EXPX_FATIAMENTO_ORIGEM=padrao'*) true ;; *) false ;; esac \
+  && passa '--nucleo-da-rev com base sem o arquivo nem o nucleo: padroes, sem node' \
+  || quebra "--nucleo-da-rev com base sem o arquivo: rc $rc: $saida"
+
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

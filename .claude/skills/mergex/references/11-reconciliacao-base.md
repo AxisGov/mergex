@@ -13,6 +13,14 @@ obrigatória, gate completo e novo portão.
 A base que avança depois do E8 é **evento da entrega, não defeito de plano**: o registro é da
 MergeX e nunca altera task (DM-178).
 
+Sincronizar uma **feature redirecionada** com a base nova (a predecessora foi mergeada e o PR
+foi redirecionado para a base dela; `references/09-revisao.md`, "Feature redirecionada",
+DM-245) é uma integração de base depois do E8 e segue este reference: merge registrado da base
+nova, E2 e push, com o portão provado. Nunca pelo botão de atualizar a branch do serviço, que
+faz o merge sem o registro e deixa o portão vencido para o `pre-push` e para o CI, e nunca com
+um commit vazio, que invalida o portão. O HEAD novo precisa de CI e, com `revisor_bot`
+declarado na base, de revisão do bot, ambos depois do redirecionamento.
+
 ## Invariantes
 
 1. **Tasks concluídas permanecem congeladas.** Nada aqui grava ou propõe gravar `tasks.md`,

@@ -159,6 +159,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-r4-cabeca-do-pr.sh
 
+      - name: Test E9 feature redirecionada
+        shell: bash
+        run: bash scripts/ci/test-e9-redirecionamento.sh
+
       - name: Test PR de planejamento
         shell: bash
         run: bash scripts/ci/test-pr-de-planejamento.sh
