@@ -95,7 +95,8 @@ runx|BLOQUEIOS.md|bloqueios|D4:bloqueios-vazio|registro de bloqueios
 mergex|docs/entregas/<trabalho_id>/ENTREGA.md|entrega|D4|registro da entrega, gravado pela própria mergex
 mergex|docs/entregas/<trabalho_id>/PR.md|-|D4|descrição do PR, regravada pelo E4 desta entrega
 mergex|docs/entregas/<trabalho_id>/QA-PACOTE.md|-|D4|pacote de QA, regravado pelo E5 desta entrega
-mergex|docs/entregas/<trabalho_id>/ATENCAO.md|-|D4|classificação, regravada pelo E3 desta entrega'
+mergex|docs/entregas/<trabalho_id>/ATENCAO.md|-|D4|classificação, regravada pelo E3 desta entrega
+mergex|docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json|-|L4|evidência da revisão por task'
 
 BASE_REF=""
 RAIZ=""
@@ -311,6 +312,22 @@ REC_CRITERIO=""; REC_MOTIVO=""
 
 nao_reconhecido() { REC_CRITERIO=""; REC_MOTIVO="artefato de método não reconhecido: $1"; }
 
+# A evidência de revisão por task (DM-240, DM-242): a chave do catálogo e o nome
+# `<T-NN.MM>.json` ou o legado `<T-N>.json`, o id do contrato `expx-revisao` (o mesmo
+# nome que o E1 commita). O conteúdo é do núcleo: o reconhecimento nunca o lê.
+CHAVE_EVIDENCIA='docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json'
+nome_de_evidencia() {
+  local id="${1%.json}"
+  [ "$id.json" = "$1" ] || return 1
+  case "$id" in
+    T-[0123456789][0123456789].[0123456789][0123456789]) return 0 ;;
+    T-*) id="${id#T-}"
+         case "$id" in ''|*[!0123456789]*) return 1 ;; esac
+         return 0 ;;
+  esac
+  return 1
+}
+
 linha_do_catalogo() {
   # <origem> <chave> — a linha do catálogo, ou nada.
   printf '%s\n' "$CATALOGO" | awk -F'|' -v o="$1" -v c="$2" '$1 == o && $2 == c { print; exit }'
@@ -337,8 +354,14 @@ reconhece() {
   case "$caminho" in
     "docs/entregas/$TRABALHO/"*)
       nome="${caminho#docs/entregas/$TRABALHO/}"
-      case "$nome" in */*) nao_reconhecido "fora do catálogo"; return ;; esac
-      chave="docs/entregas/<trabalho_id>/$nome"; origem_linha=mergex ;;
+      case "$nome" in
+        revisao/*)
+          nome_de_evidencia "${nome#revisao/}" || { nao_reconhecido "fora do catálogo"; return; }
+          chave="$CHAVE_EVIDENCIA" ;;
+        */*) nao_reconhecido "fora do catálogo"; return ;;
+        *) chave="docs/entregas/<trabalho_id>/$nome" ;;
+      esac
+      origem_linha=mergex ;;
     docs/sprintx/estimativas/HISTORICO.md)
       chave="$caminho" ;;
     "$PASTA/"*)
@@ -371,7 +394,8 @@ reconhece() {
   kind_esperado="$(printf '%s' "$linha" | cut -d'|' -f3)"
   criterio="$(printf '%s' "$linha" | cut -d'|' -f4)"
   funcao="$(printf '%s' "$linha" | cut -d'|' -f5)"
-  kind_real="$(fm "$arq" kind)"
+  # A evidência não tem frontmatter no contrato, e a mergex não lê o conteúdo dela.
+  if [ "$chave" = "$CHAVE_EVIDENCIA" ]; then kind_real=""; else kind_real="$(fm "$arq" kind)"; fi
 
   if [ "$kind_esperado" = "-" ]; then
     [ -z "$kind_real" ] || { nao_reconhecido "o contrato não define kind para $chave, e o arquivo declara '$kind_real'"; return; }

@@ -437,6 +437,79 @@ saida_hook="$(printf '%s' "$entrada" | bash "$HOOK" 2>&1)"; rc=$?
   && ok 'hook commit-por-task aceita a evidencia da task atual no stage' \
   || falha "hook commit-por-task — rc=$rc saida=$saida_hook"
 
+echo '== C3: o E3 classifica a evidencia de revisao por task =='
+
+# DM-242: a evidência da task, no trabalho corrente, é LEITURA RÁPIDA (L4), nunca
+# DISPENSÁVEL; a de outro trabalho, ou outro nome sob `revisao/`, fica fora do catálogo
+# (OLHO OBRIGATÓRIO). O classificador decide pelo caminho e pelo tipo do arquivo, sem
+# ler o conteúdo, que é do núcleo. Usa o repo "atual", com a evidência do `revisar`
+# já no commit da task.
+CLASSIFICADOR="$SCRIPTS/classificar-atencao.sh"
+# atencao <caminho> — a linha "<faixa>|<justificativa>" que o E3 dá ao caminho
+atencao() {
+  printf '%s\n' "$1" | (cd "$R" && bash "$CLASSIFICADOR" --raiz "$R") 2>&1 \
+    | awk -F'\t' -v c="$1" '$1 == c { print $2 "|" $3; exit }'
+}
+R="$D/atual"
+EV="$REVISAO_REL/T-01.01.json"
+l="$(atencao "$EV")"
+case "$l" in
+  'LEITURA RÁPIDA|L4: evidência da revisão por task (docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json, origem mergex)')
+    ok 'revisao/T-01.01.json do trabalho corrente e L4' ;;
+  *) falha "revisao/T-01.01.json do trabalho corrente e L4 — $l" ;;
+esac
+
+mkdir -p "$R/docs/entregas/ft-outro/revisao"
+cp "$R/$EV" "$R/docs/entregas/ft-outro/revisao/T-01.01.json"
+l="$(atencao docs/entregas/ft-outro/revisao/T-01.01.json)"
+case "$l" in
+  'OLHO OBRIGATÓRIO|padrão: nenhum critério bateu (artefato de método não reconhecido: fora do catálogo)')
+    ok 'revisao de outro trabalho e OLHO OBRIGATORIO fora do catalogo' ;;
+  *) falha "revisao de outro trabalho e OLHO OBRIGATORIO fora do catalogo — $l" ;;
+esac
+
+cp "$R/$EV" "$R/$REVISAO_REL/T-3.json"
+l="$(atencao "$REVISAO_REL/T-3.json")"
+case "$l" in
+  'LEITURA RÁPIDA|L4: evidência da revisão por task'*) ok 'revisao com o id legado sem ponto (T-3.json) e L4' ;;
+  *) falha "revisao com o id legado sem ponto (T-3.json) e L4 — $l" ;;
+esac
+
+for nome in T-01.01.json.trava T-01.1.json notas.json T-01.01.json.tmp; do
+  cp "$R/$EV" "$R/$REVISAO_REL/$nome"
+  l="$(atencao "$REVISAO_REL/$nome")"
+  case "$l" in
+    'OLHO OBRIGATÓRIO|padrão: nenhum critério bateu (artefato de método não reconhecido: fora do catálogo'*)
+      ok "outro nome sob revisao/ ($nome) e OLHO OBRIGATORIO" ;;
+    *) falha "outro nome sob revisao/ ($nome) e OLHO OBRIGATORIO — $l" ;;
+  esac
+done
+
+ln -s T-01.01.json "$R/$REVISAO_REL/T-01.02.json" 2>/dev/null
+if [ -L "$R/$REVISAO_REL/T-01.02.json" ]; then
+  l="$(atencao "$REVISAO_REL/T-01.02.json")"
+  case "$l" in
+    'OLHO OBRIGATÓRIO|padrão: nenhum critério bateu (artefato de método não reconhecido: não é arquivo regular'*)
+      ok 'link simbolico com o nome da evidencia e OLHO OBRIGATORIO' ;;
+    *) falha "link simbolico com o nome da evidencia e OLHO OBRIGATORIO — $l" ;;
+  esac
+  rm -f "$R/$REVISAO_REL/T-01.02.json"
+fi
+
+# o conteúdo é do núcleo: um frontmatter com `kind:` no topo não muda a faixa
+printf -- '---\nkind: entrega\ntrabalho_id: ft-r\n---\n' > "$R/$REVISAO_REL/T-01.03.json"
+l="$(atencao "$REVISAO_REL/T-01.03.json")"
+case "$l" in
+  'LEITURA RÁPIDA|L4: evidência da revisão por task'*) ok 'o E3 nao le o conteudo da evidencia (kind no topo nao muda a faixa)' ;;
+  *) falha "o E3 nao le o conteudo da evidencia — $l" ;;
+esac
+
+# L4 e D4 recebidos na entrada são ignorados: a evidência nunca vira DISPENSÁVEL
+l="$(printf '%s\tD3: gerado pelo revisar\n' "$EV" | (cd "$R" && bash "$CLASSIFICADOR" --raiz "$R") 2>&1 | cut -f2)"
+[ "$l" = 'LEITURA RÁPIDA' ] \
+  && ok 'evidencia com D3 na entrada continua LEITURA RAPIDA (L4 vence D)' \
+  || falha "evidencia com D3 na entrada continua LEITURA RAPIDA — $l"
+
 # contrato: 01-commits nomeia a exceção exata, e a frase antiga sem exceção sumiu
 COMMITS_MD="$REPO/.claude/skills/mergex/references/01-commits.md"
 grep -Fq 'docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json' "$COMMITS_MD" \
