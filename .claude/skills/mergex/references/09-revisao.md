@@ -88,13 +88,13 @@ Nunca decida o trabalho atual por:
 ### O PR de planejamento (e o da sprint) do trabalho atual
 
 O E9 é o **único** que registra o merge do PR de planejamento (DM-260) e o do PR de cada sprint
-da entrega por sprint (DM-263), inclusive o feito fora dele, pelo botão do serviço. Com trabalho
+da entrega por sprint (DM-264), inclusive o feito fora dele, pelo botão do serviço. Com trabalho
 atual, quando `entrega-de-planejamento.sh` diz `sprint_atual=planejamento` ou `sprint_atual=<NN>`
 com o item dela ainda não `merged` (`atual_estado=`) e a `pr_url` preenchida, o E9 lê esse PR no
 serviço e, se ele já foi mergeado, grava o registro com `merge_sha` = o commit de merge:
 
 ```bash
-# E9: o merge do PR de planejamento ou da sprint do trabalho atual (DM-260, DM-263)
+# E9: o merge do PR de planejamento ou da sprint do trabalho atual (DM-260, DM-264)
 entrega="docs/entregas/<trabalho_id>/ENTREGA.md"
 marca="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2
 case "$(printf '%s\n' "$marca" | sed -n 's/^sprint_atual=//p')" in planejamento|[0-9][0-9]) ;; *) exit 0 ;; esac
@@ -127,7 +127,7 @@ No GitLab (`pr_url` com `/-/merge_requests/`), o bloco lê o MR pela API do proj
 (`glab api "projects/:id/merge_requests/<iid>"`: `state: merged` e `merge_commit_sha`, ou
 `squash_commit_sha` no squash, e a base em `diff_refs.start_sha`). O registro é o do passo 7,
 item 7: no primeiro item de `prs`, `estado: merged`, `merge_sha`, `merge: humano` e `base_sha`
-(a ponta da base quando o PR foi mergeado: `baseRefOid` no GitHub, DM-262), e `pr_estado:
+(a ponta da base quando o PR foi mergeado: `baseRefOid` no GitHub, DM-263), e `pr_estado:
 merged` no topo — o script grava só isso e confere a gravação. **Sem ferramenta, sem resposta,
 sem o commit de merge ou sem a base, não grava nada** e diz o motivo; PR ainda aberto também
 não grava. A V9 da primeira sprint confere todo commit de `base_sha..merge_sha`: num

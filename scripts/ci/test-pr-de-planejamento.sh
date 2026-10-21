@@ -462,7 +462,7 @@ v9 "$aux/s1l"
 [ "$rc" = 3 ] && grep -q 'origem_base lixo' "$aux/v9.out"
 confere 'V9: versao anterior com origem_base fora do enum: v9_sem_prova' $?
 
-# A base do PR de planejamento (decisão do usuário, 2026-10-20, item 1; DM-262): num
+# A base do PR de planejamento (decisão do usuário, 2026-10-20, item 1; DM-263): num
 # rebase-merge ou fast-forward, um commit de produto sem a marca do trabalho antes de P
 # fica dentro de `^P`; a V9 confere o intervalo base_sha..P gravado pelo E9
 # planejamento_com_produto <dir> — a branch do planejamento com um commit de produto sem
@@ -544,7 +544,7 @@ v9 "$aux/s1r"
 confere 'V9 com merge no intervalo do planejamento que acrescenta produto: v9_sem_prova' $?
 [ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
 
-# o merge do planejamento registrado sem base_sha (gravado antes da DM-262): v9_sem_prova
+# o merge do planejamento registrado sem base_sha (gravado antes da DM-263): v9_sem_prova
 repo_mergeado "$aux/s1s" merge
 sed '/^    base_sha:/d' "$aux/s1s/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" && mv "$aux/e.tmp" "$aux/s1s/docs/entregas/plan/ENTREGA.md"
 g -C "$aux/s1s" add -A; g -C "$aux/s1s" commit -q -m 'sem base_sha'
@@ -594,7 +594,7 @@ confere '--registrar-merge com base_sha: null no item: troca a linha, sem duplic
 le "$aux/reg4.md"; cp "$aux/reg4.md" "$aux/reg5.md"
 sed 's/^    base_sha: .*/    base_sha: null/' "$aux/reg4.md" > "$aux/reg5.md"
 le "$aux/reg5.md"
-[ "$rc" = 0 ]; confere 'item merged com base_sha null (registro anterior a DM-262): legivel' $?
+[ "$rc" = 0 ]; confere 'item merged com base_sha null (registro anterior a DM-263): legivel' $?
 sed "s/^    estado: merged/    estado: aberto/; s/^    merge_sha: .*/    merge_sha: null/; s/^    merge: humano/    merge: null/" "$aux/reg4.md" > "$aux/reg6.md"
 le "$aux/reg6.md"
 [ "$rc" = 2 ]; confere 'base_sha preenchida sem estar merged: sai 2' $?

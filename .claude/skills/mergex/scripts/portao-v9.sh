@@ -60,7 +60,7 @@
 #    P para o 1º pai quando P é merge) só toque
 #    `^docs/(sprintx|entregas|eventos)/`, e todo commit do intervalo do PR,
 #    `base_sha..P` (a base do PR no merge, gravada pelo E9 no item de
-#    planejamento; DM-262), também: o commit comum pelo que muda, o merge pelo
+#    planejamento; DM-263), também: o commit comum pelo que muda, o merge pelo
 #    que muda por conta própria (`--cc`). Assim um rebase-merge ou ff não
 #    esconde em `^P` um commit de produto sem a marca anterior ao último.
 #    Item sem base_sha, base_sha fora da história ou que não é ancestral
@@ -334,7 +334,7 @@ g cat-file -e "$BASE^{commit}" 2>/dev/null || sem_prova "base $BASE não é comm
 # O planejamento mergeado que a base contém não é trabalho escondido nela: as
 # guardas da história olham `<base> ^P` (o conteúdo de P é conferido depois,
 # guarda:V9PLAN, com a pasta do trabalho resolvida)
-# Entrega por sprint (DM-263): cada abertura de sprint reancora a base, então as
+# Entrega por sprint (DM-264): cada abertura de sprint reancora a base, então as
 # versões registrada_sprint têm k bases, em cadeia (cada uma ancestral da
 # seguinte); a de ordem r contém o merge do r-ésimo PR fechado de `prs` (o
 # planejamento é o 1º), a de HEAD é a mais nova (r = k), e k nunca passa do
@@ -411,7 +411,7 @@ c="$(g rev-list -n1 --encoding=UTF-8 --grep="^Trabalho: $TRAB_RE\$" "$BASE" $EXC
 # têm, e é a de HEAD: a spec só deixa a chave mudar por reconciliação (que traz
 # a cadeia, ancorada)
 if [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint ]; then
-  # reancorada pelo E0 depois do planejamento (DM-261) e a cada sprint (DM-263):
+  # reancorada pelo E0 depois do planejamento (DM-261) e a cada sprint (DM-264):
   # a cadeia das bases registrada_sprint já foi conferida acima; aqui, a base de
   # antes da primeira reancoragem e o rebaixamento
   # anterior é só registrada_e0 (ou sem a chave, como o E0 a lê): outra origem não vale
@@ -489,7 +489,7 @@ if [ -n "$EXCL" ]; then
     fora_p="$(so_metodo "$TMP_DIR/do-plan.nomes")"
     [ -z "$fora_p" ] || sem_prova "o merge do planejamento $M_PLAN traz $fora_p: o planejamento só leva docs/sprintx, docs/entregas e docs/eventos" # guarda:V9PLAN
   fi
-  # o intervalo do PR de planejamento, base_sha..P (DM-262): no rebase-merge e no
+  # o intervalo do PR de planejamento, base_sha..P (DM-263): no rebase-merge e no
   # fast-forward, P é só o último commit; os de antes, com ou sem a marca, também
   # são do PR. Commit comum: o que ele muda; merge: o que ele muda por conta
   # própria (--cc), porque o que vem dos pais já é um commit do intervalo ou da base

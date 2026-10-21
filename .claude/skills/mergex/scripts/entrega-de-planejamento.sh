@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # entrega-de-planejamento — lê e grava o modo e o PR atual da entrega.
 #
-# Contrato: references/00-schema.md, "A entrega por sprint"; DM-259 e DM-263.
+# Contrato: references/00-schema.md, "A entrega por sprint"; DM-259 e DM-264.
 # É o ÚNICO leitor de `entrega`, `sprint_atual` e `prs` na mergex: E0, E2, E7,
 # E8 e E9 perguntam a ele, ninguém relê o YAML por conta própria.
 #
@@ -20,7 +20,7 @@
 # Saída (stdout):
 #   planejamento=nao
 #   [planejamento_merge_sha=<prs[0].merge_sha>]   (só depois da retomada)
-#   [planejamento_base_sha=<prs[0].base_sha>]     (idem; `null` num registro anterior à DM-262)
+#   [planejamento_base_sha=<prs[0].base_sha>]     (idem; `null` num registro anterior à DM-263)
 # ou `planejamento=sim` com estado/merge/base do primeiro item. Em ambos os
 # casos, também imprime `entrega=`, `entrega_origem=`, `sprint_atual=`, o estado
 # do item atual, o último item fechado e uma linha `pr=` por item.
@@ -306,7 +306,7 @@ case "$ACAO" in
     v_plano=""
     if [ -e "$PLANO" ]; then
       [ -f "$PLANO" ] && [ -r "$PLANO" ] || ilegivel "plano ilegível: $PLANO"
-      # o E0 lê a chave uma vez, só do frontmatter (DM-263)
+      # o E0 lê a chave uma vez, só do frontmatter (DM-264)
       v_plano="$(awk -v q="'" '
         { sub(/\r$/, "") }
         NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
@@ -415,7 +415,7 @@ case "$ACAO" in
       if [ "$u_base" = "$BASE_SHA" ]; then
         printf 'registrado=merged\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA"; exit 0
       fi
-      # o registro anterior à DM-262 (sem a base) ganha a base; outra base é recusa
+      # o registro anterior à DM-263 (sem a base) ganha a base; outra base é recusa
       [ "$u_base" = null ] || recusa "$(nome_pr "$u_sprint") já está merged com outra base_sha ($u_base)"
     fi
     m="humano"; [ "$u_estado" != merged ] || m="$u_merge"

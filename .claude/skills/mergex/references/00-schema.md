@@ -236,7 +236,7 @@ prs:
 | `estado` | O enum da tabela; o E8 grava o do E7, o E9 grava `merged` |
 | `merge_sha` | O commit de merge, só com `estado: merged`; `null` antes |
 | `merge` | `humano` quando o E9 registra o merge; `automatico` só quando o modo automático fizer o merge de uma sprint; **nunca** `automatico` no planejamento |
-| `base_sha` | A ponta da base quando o PR foi mergeado (`baseRefOid` no GitHub, `diff_refs.start_sha` no GitLab), gravada pelo E9 com o merge (DM-262); `null` antes. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
+| `base_sha` | A ponta da base quando o PR foi mergeado (`baseRefOid` no GitHub, `diff_refs.start_sha` no GitLab), gravada pelo E9 com o merge (DM-263); `null` antes. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
 
 - `prs` é sempre YAML de bloco; a forma em fluxo (`prs: [{...}]`) é ilegível. Lista vazia é `prs: []`.
 - Uma chave sem a outra é incoerente: `sprint_atual: planejamento` ou `NN` sem o item
@@ -250,7 +250,7 @@ prs:
   `scripts/entrega-de-planejamento.sh --entrega <ENTREGA.md> [--rev <commit>]`, que imprime
   `planejamento=sim|nao`, `entrega=`, `sprint_atual=`, o estado do item atual e os itens de `prs`
   (com `sim`, também `estado=`, `merge_sha=` e `base_sha=`; depois da retomada, também
-  `planejamento_merge_sha=` e `planejamento_base_sha=`, DM-261 e DM-262) e sai 2 com a entrega
+  `planejamento_merge_sha=` e `planejamento_base_sha=`, DM-261 e DM-263) e sai 2 com a entrega
   ilegível ou incoerente. E0, E2, E7, E8 e E9 o consomem.
 
 ## A ordem de registro — a chave `seq`

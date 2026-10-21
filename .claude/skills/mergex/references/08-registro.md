@@ -155,7 +155,7 @@ bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-pr \
 O `url` é o `pr_url` do E7 (`null` quando o PR não abriu ou foi recusado). O estado é o estado
 real do PR; `aguardando_merge` vale quando ele está pronto e só espera o merge. O helper atualiza
 somente `url` e `estado` do item atual e recusa `merged`/`fechado`: quem registra o merge é só o
-E9 (`09-revisao.md`, DM-260 e DM-263). `sprint`, `merge_sha`, `merge`, `base_sha` e
+E9 (`09-revisao.md`, DM-260 e DM-264). `sprint`, `merge_sha`, `merge`, `base_sha` e
 `sprint_atual` não mudam no E8. Depois de gravar, leia de novo: `sprint_atual` e `atual_estado`
 têm de ser os registrados; saída 2 é gravação errada, corrija antes do commit final.
 
@@ -224,7 +224,7 @@ que nunca chega ao `Stop`.
 Em `por_sprint`, cada E8 persiste o registro e os artefatos de método da sprint atual, mas os
 **artefatos de fim de trabalho** — `FECHAMENTO.md`, `HISTORICO.md`, `arquivos_alterados` do
 `ORQUESTRADOR.md` e o `kind: entrega` que o memox indexa — só existem e entram no PR da **última
-sprint** (DM-264). Uma sprint intermediária não os cria, não os reindexa e não os inclui por
+sprint** (DM-265). Uma sprint intermediária não os cria, não os reindexa e não os inclui por
 antecipação.
 
 O `ENTREGA.md` que você acabou de gravar só serve a quem vem depois se estiver **no histórico**.

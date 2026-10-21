@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# A entrega por sprint (Task S1; DM-263 e DM-264): o E0 `--sprint` fixa o modo e a
+# A entrega por sprint (Task S1; DM-264 e DM-265): o E0 `--sprint` fixa o modo e a
 # sprint, a sprint seguinte só abre depois do merge da anterior (a partir da main), o
 # E8 e o E9 gravam o item da sprint registrada, e a V9 da sprint seguinte só vê ela.
 #

@@ -129,7 +129,7 @@ quem abre a primeira sprint depois do planejamento é o bloco abaixo.
 
 ## A entrega por sprint (`--sprint <NN>`)
 
-*Desenho de 2026-10-18, 4.3; DM-263.* Com `entrega: por_sprint`, o trabalho continua um só (mesmo
+*Desenho de 2026-10-18, 4.3; DM-264.* Com `entrega: por_sprint`, o trabalho continua um só (mesmo
 slug, mesma branch, mesmo `ENTREGA.md`), mas cada sprint vai num PR próprio, **um por vez**: a sprint
 N+1 só abre depois do merge do PR da N, com a branch atualizada a partir da main. A F6 chama o E0 no
 início de cada sprint com `--sprint <NN>`, o id fixo da sprint (`01`, `02`, ...), que o E0 grava;
@@ -166,7 +166,7 @@ Saída 0: aberta (ou retomada). Saída 1: recusa, sem escrever nada. Saída 2: e
 ilegível, ou base inexistente. `$sprint` é o `<NN>` que a F6 passou; `<base>` é a base buscada:
 
 ```bash
-# E0 --sprint <NN>: o modo efetivo, a sequência e a base da sprint (DM-263)
+# E0 --sprint <NN>: o modo efetivo, a sequência e a base da sprint (DM-264)
 sprint="${sprint:?o E0 --sprint recebe o id da sprint}"
 entrega="docs/entregas/<trabalho_id>/ENTREGA.md"
 plano="docs/sprintx/features/<slug>/00-PLANEJAMENTO.md"
