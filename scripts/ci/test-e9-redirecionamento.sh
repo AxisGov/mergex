@@ -152,8 +152,12 @@ cenario "$P" "$H" "$(check_app app-a lint "$antes"),$(check_app app-b lint "$dep
 espera 'dois apps com um check de mesmo nome: o de antes nao some, inelegivel CI anterior' 1 "$m_ci"
 cenario "$P" "$H" "$(check_app app-a lint "$antes"),$(check_app app-a lint "$depois")" ''
 espera 'o mesmo app com o check numa suite nova: vale a nova, elegivel' 0 "$eleg"
-cenario "$P" "$H" "$ci_ok,$(status bot "$depois"),$(check lento "$depois" '' IN_PROGRESS),$(status externo "$antes" PENDING)" ''
+cenario "$P" "$H" "$ci_ok,$(status bot "$depois"),$(check lento "$depois" '' IN_PROGRESS),$(status externo "$depois" PENDING)" ''
 espera 'sincronizado, CI verde no head, sem revisor_bot: elegivel (check em andamento fica para o R1)' 0 "$eleg"
+cenario "$P" "$H" "$(check hooks "$antes" "$antes"),$(check hooks "$depois" '' IN_PROGRESS)" ''
+espera 'execucao de antes concluida e a nova so em andamento: fica para o R1, nao e CI anterior' 0 "$eleg"
+cenario "$P" "$H" "$ci_ok,$(status externo "$antes" PENDING)" ''
+espera 'status pendente desde antes do redirecionamento: inelegivel CI anterior' 1 "$m_ci"
 PAGINA_A_MAIS=1 cenario "$P" "$H" "$ci_ok" ''
 espera 'checks em mais de uma pagina: nao verificavel' 1 'redirecionado=nao_verificavel: os checks não foram lidos'
 CABECA="$M" cenario "$P" "$H" "$ci_ok" ''

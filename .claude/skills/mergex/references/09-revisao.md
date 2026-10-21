@@ -811,8 +811,8 @@ contra a base antiga, e o HEAD pode nem ter mudado, quando a base nova já era a
 
 - **está sincronizado:** a ponta da base atual (`baseRefOid`) é ancestral do `headRefOid`;
   senão, inelegível com `não sincronizado com a base nova`;
-- **o CI é de depois do redirecionamento:** há check do `headRefOid`, e todo check concluído
-  dele **nasceu** depois do evento de troca de base do serviço (o último, se houve mais de
+- **o CI é de depois do redirecionamento:** há check do `headRefOid`, e todo check dele
+  **nasceu** depois do evento de troca de base do serviço (o último, se houve mais de
   um): o check run, pela criação da execução do workflow (`checkSuite.workflowRun.createdAt`;
   fora do Actions, a do `checkSuite`), e o status, pela criação dele. A conclusão não basta:
   a re-execução de uma execução antiga repete o evento antigo, com o merge da base antiga, e
@@ -821,8 +821,8 @@ contra a base antiga, e o HEAD pode nem ter mudado, quando a base nova já era a
   execução mais nova, e a lista inteira tem de
   caber numa página. Senão — nenhum check nesse HEAD, só os de um HEAD anterior, ou algum
   nascido antes do redirecionamento —, inelegível com `CI anterior ao redirecionamento`.
-  Check ainda em andamento não conta aqui: é o R1 que o trata. A cor dos checks também é do
-  R1, que tem de estar verde como para qualquer PR;
+  Check nascido depois e ainda em andamento passa aqui: esperar por ele é do R1, como a cor
+  dos checks, que tem de estar verde como para qualquer PR;
 - **o bot revisou o HEAD novo:** com `revisor_bot` declarado no `.expx/fatiamento.json` **da
   base** (`EXPX_REVISOR_BOT`, lido por `leitor-do-projeto.sh --rev <baseRefOid>
   --nucleo-da-rev`, que executa o leitor do núcleo da árvore da base, nunca o do disco nem o
@@ -871,11 +871,9 @@ ci="$(gh api graphql -f h="$head_oid" -f o="${dono_repo%%/*}" -f r="${dono_repo#
         else $s.contexts.nodes end
       | map(if .__typename == "CheckRun"
               then {k: ("run:" + (.checkSuite.app.slug // "") + "/" + (.checkSuite.workflowRun.workflow.id // "") + "/" + .name),
-                    nasceu: (.checkSuite.workflowRun.createdAt // .checkSuite.createdAt // ""),
-                    concluido: (.status == "COMPLETED")}
-              else {k: ("status:" + .context), nasceu: (.createdAt // ""),
-                    concluido: (.state != "PENDING" and .state != "EXPECTED")} end)
-      | group_by(.k) | map(max_by(.nasceu)) | map(select(.concluido))
+                    nasceu: (.checkSuite.workflowRun.createdAt // .checkSuite.createdAt // "")}
+              else {k: ("status:" + .context), nasceu: (.createdAt // "")} end)
+      | group_by(.k) | map(max_by(.nasceu))
       | if length > 0 and all(.[]; .nasceu > $r) then "depois" else "antes" end')" || nv 'os checks não foram lidos'
 [ "$ci" = depois ] || motivos="${motivos}CI anterior ao redirecionamento
 "
