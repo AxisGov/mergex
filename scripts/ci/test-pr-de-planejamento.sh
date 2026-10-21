@@ -52,7 +52,7 @@ le "$aux/antiga.md"
 
 entrega "$aux/aberto.md" "$PLAN_ABERTO"
 le "$aux/aberto.md"
-[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'planejamento=sim\nestado=null\nmerge_sha=null')" ]
+[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'planejamento=sim\nestado=null\nmerge_sha=null\nbase_sha=null')" ]
 confere 'planejamento aberto: sim, estado null' $?
 
 entrega "$aux/so-sprint.md" 'sprint_atual: planejamento'
@@ -105,7 +105,7 @@ confere 'planejamento merged: estado e merge_sha' $?
 
 entrega "$aux/retomada.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/^sprint_atual: planejamento/sprint_atual: null/; s/estado: null/estado: merged/; s/merge_sha: null/merge_sha: 0123456789abcdef0123456789abcdef01234567/; s/merge: null/merge: humano/')"
 le "$aux/retomada.md"
-[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=0123456789abcdef0123456789abcdef01234567')" ]
+[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=0123456789abcdef0123456789abcdef01234567\nplanejamento_base_sha=null')" ]
 confere 'depois da retomada (sprint_atual null, planejamento merged): nao, com o merge do planejamento' $?
 
 entrega "$aux/sem-chave.md" "$(printf '%s
@@ -300,7 +300,7 @@ repo_mergeado() {
   printf 'p\n' > "$d/src/p.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'main depois do planejamento'
   g -C "$d" switch -q feature/plan
   g -C "$d" merge -q --no-edit main
-  (cd "$d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m") >/dev/null 2>&1
+  (cd "$d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m" --base-sha "$(git -C "$d" rev-parse "$m^1")") >/dev/null 2>&1
   g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): merge do planejamento registrado' -m 'Trabalho: plan'
 }
 
@@ -317,7 +317,7 @@ v9 "$aux/s1a"
 confere 'V9 da primeira sprint depois do merge do planejamento: passa com a base nova' $?
 [ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
 (cd "$aux/s1a" && bash "$leitor" --entrega docs/entregas/plan/ENTREGA.md) > "$aux/out" 2>&1
-[ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=%s' "$(git -C "$aux/s1a" rev-parse 'main~1')")" ]
+[ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=%s\nplanejamento_base_sha=%s' "$(git -C "$aux/s1a" rev-parse 'main~1')" "$(git -C "$aux/s1a" rev-parse 'main~2')")" ]
 confere 'depois da reancoragem, o leitor diz nao com o merge do planejamento' $?
 # mais uma task depois: a V9 continua passando (a reancoragem é uma só)
 printf 'c\n' >> "$aux/s1a/src/b.ts"; g -C "$aux/s1a" add -A; g -C "$aux/s1a" commit -q -m 'feat: b2' -m 'Trabalho: plan'
@@ -357,7 +357,7 @@ repo_planejamento "$aux/s1d"
 g -C "$aux/s1d" switch -q main; g -C "$aux/s1d" merge -q --no-ff --no-edit feature/plan
 m_d="$(git -C "$aux/s1d" rev-parse HEAD)"
 g -C "$aux/s1d" switch -q feature/plan
-(cd "$aux/s1d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_d") >/dev/null 2>&1
+(cd "$aux/s1d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_d" --base-sha "$(git -C "$aux/s1d" rev-parse "$m_d^1")") >/dev/null 2>&1
 e0r "$aux/s1d"
 [ "$rc" = 1 ] && grep -q 'atualizada' "$aux/e0r.err" && [ ! -s "$aux/e0r.out" ]
 confere 'E0 da primeira sprint com a branch sem a main: recusa' $?
@@ -368,7 +368,7 @@ printf 'x\n' > "$aux/s1e/src/x.ts"; g -C "$aux/s1e" add -A; g -C "$aux/s1e" comm
 g -C "$aux/s1e" switch -q main; g -C "$aux/s1e" merge -q --no-ff --no-edit feature/plan
 m_e="$(git -C "$aux/s1e" rev-parse HEAD)"
 g -C "$aux/s1e" switch -q feature/plan; g -C "$aux/s1e" merge -q --no-edit main
-(cd "$aux/s1e" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_e") >/dev/null 2>&1
+(cd "$aux/s1e" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_e" --base-sha "$(git -C "$aux/s1e" rev-parse "$m_e^1")") >/dev/null 2>&1
 g -C "$aux/s1e" add -A; g -C "$aux/s1e" commit -q -m registro
 e0r "$aux/s1e"; reancora "$aux/s1e"; sprint1 "$aux/s1e"
 v9 "$aux/s1e"
@@ -401,7 +401,7 @@ printf 'o\n' > "$aux/s1h/src/o.ts"; g -C "$aux/s1h" add -A; g -C "$aux/s1h" comm
 g -C "$aux/s1h" cherry-pick feature/plan >/dev/null
 m_h="$(git -C "$aux/s1h" rev-parse HEAD)"
 g -C "$aux/s1h" switch -q feature/plan; g -C "$aux/s1h" merge -q --no-edit main
-(cd "$aux/s1h" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_h") >/dev/null 2>&1
+(cd "$aux/s1h" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_h" --base-sha "$(git -C "$aux/s1h" rev-parse "$m_h^1")") >/dev/null 2>&1
 g -C "$aux/s1h" add -A; g -C "$aux/s1h" commit -q -m registro
 e0r "$aux/s1h"; reancora "$aux/s1h"; sprint1 "$aux/s1h"
 v9 "$aux/s1h"
@@ -415,7 +415,7 @@ printf 'u\n' > "$aux/s1i/src/u.ts"; g -C "$aux/s1i" add -A; g -C "$aux/s1i" comm
 g -C "$aux/s1i" switch -q main; g -C "$aux/s1i" merge -q --no-ff --no-edit feature/plan
 m_i="$(git -C "$aux/s1i" rev-parse HEAD)"
 g -C "$aux/s1i" switch -q feature/plan; g -C "$aux/s1i" merge -q --no-edit main
-(cd "$aux/s1i" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_i") >/dev/null 2>&1
+(cd "$aux/s1i" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m_i" --base-sha "$(git -C "$aux/s1i" rev-parse "$m_i^1")") >/dev/null 2>&1
 g -C "$aux/s1i" add -A; g -C "$aux/s1i" commit -q -m registro
 e0r "$aux/s1i"; reancora "$aux/s1i"; sprint1 "$aux/s1i"
 v9 "$aux/s1i"
@@ -454,26 +454,151 @@ v9 "$aux/s1l"
 [ "$rc" = 3 ] && grep -q 'origem_base lixo' "$aux/v9.out"
 confere 'V9: versao anterior com origem_base fora do enum: v9_sem_prova' $?
 
+# A base do PR de planejamento (decisão do usuário, 2026-10-20, item 1; DM-262): num
+# rebase-merge ou fast-forward, um commit de produto sem a marca do trabalho antes de P
+# fica dentro de `^P`; a V9 confere o intervalo base_sha..P gravado pelo E9
+# planejamento_com_produto <dir> — a branch do planejamento com um commit de produto sem
+# marca no meio e um commit de docs por último (P, no rebase e no ff)
+planejamento_com_produto() {
+  repo_planejamento "$1"
+  printf 'u\n' > "$1/src/u.ts"; g -C "$1" add -A; g -C "$1" commit -q -m 'sem marca'
+  printf 'evento 2\n' >> "$1/docs/eventos/plan.md"; g -C "$1" add -A; g -C "$1" commit -q -m 'docs: evento' -m 'Trabalho: plan'
+}
+# registra_e_retoma <dir> <merge_sha> <base_sha> — a branch atualizada, o merge
+# registrado (E9), a retomada do E0 e a primeira task
+registra_e_retoma() {
+  g -C "$1" switch -q feature/plan; g -C "$1" merge -q --no-edit main
+  (cd "$1" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$2" --base-sha "$3") >/dev/null 2>&1
+  g -C "$1" add -A; g -C "$1" commit -q -m registro
+  e0r "$1"; reancora "$1"; sprint1 "$1"
+}
+planejamento_com_produto "$aux/s1m"
+g -C "$aux/s1m" switch -q main
+printf 'o\n' > "$aux/s1m/src/o.ts"; g -C "$aux/s1m" add -A; g -C "$aux/s1m" commit -q -m 'outra coisa na main'
+b_m="$(git -C "$aux/s1m" rev-parse HEAD)"
+g -C "$aux/s1m" cherry-pick "$(git -C "$aux/s1m" merge-base main feature/plan)..feature/plan" >/dev/null
+registra_e_retoma "$aux/s1m" "$(git -C "$aux/s1m" rev-parse main)" "$b_m"
+v9 "$aux/s1m"
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'src/u.ts' "$aux/v9.out"
+confere 'V9 depois de rebase-merge do planejamento com commit de produto sem marca antes de P: v9_sem_prova' $?
+[ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
+
+planejamento_com_produto "$aux/s1n"
+b_n="$(git -C "$aux/s1n" rev-parse main)"
+g -C "$aux/s1n" switch -q main; g -C "$aux/s1n" merge -q --ff-only feature/plan
+registra_e_retoma "$aux/s1n" "$(git -C "$aux/s1n" rev-parse main)" "$b_n"
+v9 "$aux/s1n"
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'src/u.ts' "$aux/v9.out"
+confere 'V9 depois de fast-forward do planejamento com commit de produto sem marca antes de P: v9_sem_prova' $?
+[ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
+
+# rebase-merge de dois commits só de docs: passa (o intervalo inteiro é planejamento)
+repo_planejamento "$aux/s1p"
+printf 'evento 2\n' >> "$aux/s1p/docs/eventos/plan.md"; g -C "$aux/s1p" add -A; g -C "$aux/s1p" commit -q -m 'docs: evento' -m 'Trabalho: plan'
+g -C "$aux/s1p" switch -q main
+printf 'o\n' > "$aux/s1p/src/o.ts"; g -C "$aux/s1p" add -A; g -C "$aux/s1p" commit -q -m 'outra coisa na main'
+b_p="$(git -C "$aux/s1p" rev-parse HEAD)"
+g -C "$aux/s1p" cherry-pick "$(git -C "$aux/s1p" merge-base main feature/plan)..feature/plan" >/dev/null
+registra_e_retoma "$aux/s1p" "$(git -C "$aux/s1p" rev-parse main)" "$b_p"
+v9 "$aux/s1p"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+confere 'V9 depois de rebase-merge de dois commits so de docs: passa' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out"
+
+# merge comum de uma branch que sincronizou a main no meio: o merge de sincronização
+# traz produto da main, mas não é produto do planejamento (só o que ele mesmo muda conta)
+repo_planejamento "$aux/s1q"
+g -C "$aux/s1q" switch -q main
+printf 'o\n' > "$aux/s1q/src/o.ts"; g -C "$aux/s1q" add -A; g -C "$aux/s1q" commit -q -m 'outra coisa na main'
+g -C "$aux/s1q" switch -q feature/plan; g -C "$aux/s1q" merge -q --no-edit main
+printf 'evento 2\n' >> "$aux/s1q/docs/eventos/plan.md"; g -C "$aux/s1q" add -A; g -C "$aux/s1q" commit -q -m 'docs: evento' -m 'Trabalho: plan'
+g -C "$aux/s1q" switch -q main
+b_q="$(git -C "$aux/s1q" rev-parse HEAD)"
+g -C "$aux/s1q" merge -q --no-ff --no-edit feature/plan
+registra_e_retoma "$aux/s1q" "$(git -C "$aux/s1q" rev-parse main)" "$b_q"
+v9 "$aux/s1q"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+confere 'V9 com o planejamento que sincronizou a main antes do merge: passa' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out"
+
+# um merge dentro do intervalo que acrescenta produto por conta própria (merge "mau"): v9_sem_prova
+repo_planejamento "$aux/s1r"
+g -C "$aux/s1r" switch -q main
+printf 'o\n' > "$aux/s1r/src/o.ts"; g -C "$aux/s1r" add -A; g -C "$aux/s1r" commit -q -m 'outra coisa na main'
+g -C "$aux/s1r" switch -q feature/plan; g -C "$aux/s1r" merge -q --no-commit main
+printf 'mau\n' > "$aux/s1r/src/mau.ts"; g -C "$aux/s1r" add -A; g -C "$aux/s1r" commit -q --no-edit
+g -C "$aux/s1r" switch -q main
+b_r="$(git -C "$aux/s1r" rev-parse HEAD)"
+g -C "$aux/s1r" merge -q --ff-only feature/plan
+registra_e_retoma "$aux/s1r" "$(git -C "$aux/s1r" rev-parse main)" "$b_r"
+v9 "$aux/s1r"
+[ "$rc" = 3 ] && grep -q 'src/mau.ts' "$aux/v9.out"
+confere 'V9 com merge no intervalo do planejamento que acrescenta produto: v9_sem_prova' $?
+[ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
+
+# o merge do planejamento registrado sem base_sha (gravado antes da DM-262): v9_sem_prova
+repo_mergeado "$aux/s1s" merge
+sed '/^    base_sha:/d' "$aux/s1s/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" && mv "$aux/e.tmp" "$aux/s1s/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1s" add -A; g -C "$aux/s1s" commit -q -m 'sem base_sha'
+e0r "$aux/s1s"; reancora "$aux/s1s"; sprint1 "$aux/s1s"
+v9 "$aux/s1s"
+[ "$rc" = 3 ] && grep -q 'base_sha' "$aux/v9.out"
+confere 'V9 com o merge do planejamento registrado sem base_sha: v9_sem_prova' $?
+
+# base_sha que não é ancestral do merge: v9_sem_prova
+repo_mergeado "$aux/s1t" merge
+sed "s/^    base_sha: .*/    base_sha: $(git -C "$aux/s1t" rev-parse 'main')/" "$aux/s1t/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/s1t/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1t" add -A; g -C "$aux/s1t" commit -q -m 'base_sha forjada'
+e0r "$aux/s1t"; reancora "$aux/s1t"; sprint1 "$aux/s1t"
+v9 "$aux/s1t"
+[ "$rc" = 3 ] && grep -q 'base_sha' "$aux/v9.out"
+confere 'V9 com base_sha que nao e ancestral do merge do planejamento: v9_sem_prova' $?
+
 echo '== E8 e E9: o registro do PR de planejamento =='
 
 SHA_M=0123456789abcdef0123456789abcdef01234567
+SHA_B=89abcdef0123456789abcdef0123456789abcdef
 # --registrar-merge: só o item de planejamento ainda não merged
 entrega "$aux/reg.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
-bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
 le "$aux/reg.md"
 [ "$rc" = 0 ] && grep -qx 'estado=merged' "$aux/out" && grep -qx "merge_sha=$SHA_M" "$aux/out" \
   && grep -qx '    merge: humano' "$aux/reg.md" && grep -qx 'pr_estado: merged' "$aux/reg.md" \
   && grep -qx 'trabalho_id: login' "$aux/reg.md" && grep -qx '# Entrega' "$aux/reg.md"
 confere '--registrar-merge grava prs[0] merged, merge humano e pr_estado merged, sem tocar o resto' $?
+grep -qx "    base_sha: $SHA_B" "$aux/reg.md" && grep -qx "base_sha=$SHA_B" "$aux/out" \
+  && [ "$(sed -n '/^    merge: humano$/{n;p;}' "$aux/reg.md")" = "    base_sha: $SHA_B" ]
+confere '--registrar-merge grava base_sha no item (acrescentada depois de merge quando o item nao a tem)' $?
 cp "$aux/reg.md" "$aux/reg-antes.md"
-bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" --base-sha "fedcba9876543210fedcba9876543210fedcba98" >/dev/null 2>&1; rc=$?
+[ "$rc" = 1 ] && cmp -s "$aux/reg.md" "$aux/reg-antes.md"
+confere '--registrar-merge com o mesmo merge e outra base: recusa sem escrever' $?
+entrega "$aux/reg3.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
+cp "$aux/reg3.md" "$aux/reg3-antes.md"
+bash "$leitor" --registrar-merge --entrega "$aux/reg3.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+[ "$rc" = 64 ] && cmp -s "$aux/reg3.md" "$aux/reg3-antes.md"
+confere '--registrar-merge sem --base-sha: uso (64), sem escrever' $?
+entrega "$aux/reg4.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/; s/^    merge: null$/    merge: null\n    base_sha: null/')"
+bash "$leitor" --registrar-merge --entrega "$aux/reg4.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && [ "$(grep -c 'base_sha' "$aux/reg4.md")" = 1 ] && grep -qx "    base_sha: $SHA_B" "$aux/reg4.md"
+confere '--registrar-merge com base_sha: null no item: troca a linha, sem duplicar' $?
+le "$aux/reg4.md"; cp "$aux/reg4.md" "$aux/reg5.md"
+sed 's/^    base_sha: .*/    base_sha: null/' "$aux/reg4.md" > "$aux/reg5.md"
+le "$aux/reg5.md"
+[ "$rc" = 0 ]; confere 'item merged com base_sha null (registro anterior a DM-262): legivel' $?
+sed "s/^    estado: merged/    estado: aberto/; s/^    merge_sha: .*/    merge_sha: null/; s/^    merge: humano/    merge: null/" "$aux/reg4.md" > "$aux/reg6.md"
+le "$aux/reg6.md"
+[ "$rc" = 2 ]; confere 'base_sha preenchida sem estar merged: sai 2' $?
+cp "$aux/reg.md" "$aux/reg-antes.md"
+bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
 [ "$rc" = 0 ] && cmp -s "$aux/reg.md" "$aux/reg-antes.md"
 confere '--registrar-merge de novo com o mesmo sha: nada muda' $?
-bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "fedcba9876543210fedcba9876543210fedcba98" >/dev/null 2>&1; rc=$?
+bash "$leitor" --registrar-merge --entrega "$aux/reg.md" --merge-sha "fedcba9876543210fedcba9876543210fedcba98" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
 [ "$rc" = 1 ] && cmp -s "$aux/reg.md" "$aux/reg-antes.md"
 confere '--registrar-merge com outro sha num planejamento ja merged: recusa sem escrever' $?
 cp "$aux/antiga.md" "$aux/antiga-antes.md"
-bash "$leitor" --registrar-merge --entrega "$aux/antiga.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+bash "$leitor" --registrar-merge --entrega "$aux/antiga.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
 [ "$rc" = 1 ] && cmp -s "$aux/antiga.md" "$aux/antiga-antes.md"
 confere '--registrar-merge numa entrega comum: recusa sem escrever' $?
 # ENTREGA.md que e link simbolico: recusa sem tocar o alvo (no Windows o link pode nao ser criavel)
@@ -481,11 +606,11 @@ entrega "$aux/alvo.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/est
 cp "$aux/alvo.md" "$aux/alvo-antes.md"
 ln -s "$aux/alvo.md" "$aux/link.md" 2>/dev/null
 if [ -L "$aux/link.md" ]; then
-  bash "$leitor" --registrar-merge --entrega "$aux/link.md" --merge-sha "$SHA_M" >/dev/null 2>"$aux/err"; rc=$?
+  bash "$leitor" --registrar-merge --entrega "$aux/link.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>"$aux/err"; rc=$?
   [ "$rc" = 1 ] && [ -L "$aux/link.md" ] && cmp -s "$aux/alvo.md" "$aux/alvo-antes.md" && grep -q 'link simbólico' "$aux/err"
   confere '--registrar-merge num ENTREGA.md que e link simbolico: recusa sem tocar o alvo' $?
   ln -s "$aux/nao-existe.md" "$aux/link-quebrado.md"
-  bash "$leitor" --registrar-merge --entrega "$aux/link-quebrado.md" --merge-sha "$SHA_M" >/dev/null 2>"$aux/err"; rc=$?
+  bash "$leitor" --registrar-merge --entrega "$aux/link-quebrado.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>"$aux/err"; rc=$?
   [ "$rc" = 1 ] && [ -L "$aux/link-quebrado.md" ] && [ ! -e "$aux/nao-existe.md" ] && grep -q 'link simbólico' "$aux/err"
   confere '--registrar-merge num link simbolico quebrado: a mesma recusa (1), sem criar o alvo' $?
 else
@@ -496,13 +621,14 @@ fi
 entrega "$aux/crlf.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/estado: null/estado: aberto/')"
 sed 's/$/\r/' "$aux/crlf.md" > "$aux/crlf.tmp" && mv "$aux/crlf.tmp" "$aux/crlf.md"
 crs_antes="$(tr -cd '\r' < "$aux/crlf.md" | wc -c | tr -d ' ')"
-bash "$leitor" --registrar-merge --entrega "$aux/crlf.md" --merge-sha "$SHA_M" >/dev/null 2>&1; rc=$?
+bash "$leitor" --registrar-merge --entrega "$aux/crlf.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
 crs_depois="$(tr -cd '\r' < "$aux/crlf.md" | wc -c | tr -d ' ')"
-[ "$rc" = 0 ] && [ "$crs_antes" -gt 0 ] && [ "$crs_depois" = "$crs_antes" ] \
+[ "$rc" = 0 ] && [ "$crs_antes" -gt 0 ] && [ "$crs_depois" = "$((crs_antes + 1))" ] \
+  && tr '\r' '#' < "$aux/crlf.md" | grep -qx "    base_sha: $SHA_B#" \
   && [ "$(grep -c 'merged' "$aux/crlf.md")" = 2 ] && ! ls "$aux"/crlf.md.tmp.* >/dev/null 2>&1
-confere "--registrar-merge num arquivo CRLF mantem os CR ($crs_antes antes, $crs_depois depois) e nao deixa temporario" $?
+confere "--registrar-merge num arquivo CRLF mantem os CR e a linha nova de base_sha os segue ($crs_antes antes, $crs_depois depois) e nao deixa temporario" $?
 entrega "$aux/reg2.md" "$PLAN_ABERTO"
-bash "$leitor" --registrar-merge --entrega "$aux/reg2.md" --merge-sha 'nao-e-sha' >/dev/null 2>&1
+bash "$leitor" --registrar-merge --entrega "$aux/reg2.md" --merge-sha 'nao-e-sha' --base-sha "$SHA_B" >/dev/null 2>&1
 [ "$?" = 64 ]; confere '--registrar-merge com sha invalido: uso (64)' $?
 
 # O bloco real do E9, com um `gh` falso no PATH (nunca o serviço)
@@ -525,11 +651,12 @@ e9() { # <dir> [VAR=valor...]
 }
 repo_e9 "$aux/e9a"
 : > "$aux/gh-chamadas"
-e9 "$aux/e9a" GH_RESPOSTA="MERGED $SHA_M"
+e9 "$aux/e9a" GH_RESPOSTA="MERGED $SHA_M $SHA_B"
 (cd "$aux/e9a" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
 [ "$rc" = 0 ] && grep -qx 'estado=merged' "$aux/out" && grep -qx "merge_sha=$SHA_M" "$aux/out" \
-  && grep -q 'pr view https://github.com/dono/repo/pull/9' "$aux/gh-chamadas"
-confere 'E9 com o PR de planejamento mergeado pelo servico: grava prs[0] merged com o mergeCommit' $?
+  && grep -qx "base_sha=$SHA_B" "$aux/out" \
+  && grep -q 'pr view https://github.com/dono/repo/pull/9 --json state,mergeCommit,baseRefOid' "$aux/gh-chamadas"
+confere 'E9 com o PR de planejamento mergeado pelo servico: grava prs[0] merged com o mergeCommit e a base (baseRefOid)' $?
 repo_e9 "$aux/e9b"; cp "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md"
 e9 "$aux/e9b" GH_RC=1
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
@@ -540,6 +667,9 @@ confere 'PR de planejamento ainda aberto: nao grava' $?
 e9 "$aux/e9b" GH_RESPOSTA="MERGED "
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
 confere 'MERGED sem mergeCommit: nao grava' $?
+e9 "$aux/e9b" GH_RESPOSTA="MERGED $SHA_M "
+cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
+confere 'MERGED sem a base do PR (baseRefOid): nao grava' $?
 # GitLab: o MR do planejamento lido com o glab (API do projeto), nunca com o gh
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\n[ -z "${GLAB_RESPOSTA:-}" ] || printf "%%s\\n" "$GLAB_RESPOSTA"\nexit "${GLAB_RC:-0}"\n' > "$aux/gh-falso/glab"
 chmod +x "$aux/gh-falso/glab"
@@ -547,7 +677,7 @@ repo_e9 "$aux/e9g"
 sed 's#https://github.com/dono/repo/pull/9#https://gitlab.com/dono/repo/-/merge_requests/9#' "$aux/e9g/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
   && mv "$aux/e.tmp" "$aux/e9g/docs/entregas/login/ENTREGA.md"
 : > "$aux/gh-chamadas"
-e9 "$aux/e9g" GLAB_RESPOSTA="{\"iid\": 9, \"state\": \"merged\", \"merge_commit_sha\": \"$SHA_M\"}"
+e9 "$aux/e9g" GLAB_RESPOSTA="{\"iid\": 9, \"state\": \"merged\", \"merge_commit_sha\": \"$SHA_M\", \"diff_refs\": {\"start_sha\": \"$SHA_B\"}}"
 (cd "$aux/e9g" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
 [ "$rc" = 0 ] && grep -qx "merge_sha=$SHA_M" "$aux/out" \
   && grep -q 'api projects/:id/merge_requests/9' "$aux/gh-chamadas" && ! grep -q '^pr view' "$aux/gh-chamadas"
@@ -557,7 +687,7 @@ repo_e9 "$aux/e9q"
 sed 's#^pr_url: \(.*\)$#pr_url: "\1"#' "$aux/e9q/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
   && mv "$aux/e.tmp" "$aux/e9q/docs/entregas/login/ENTREGA.md"
 : > "$aux/gh-chamadas"
-e9 "$aux/e9q" GH_RESPOSTA="MERGED $SHA_M"
+e9 "$aux/e9q" GH_RESPOSTA="MERGED $SHA_M $SHA_B"
 [ "$rc" = 0 ] && grep -q '^pr view https://github.com/dono/repo/pull/9 ' "$aux/gh-chamadas"
 confere 'E9 com pr_url entre aspas: le o PR pela URL sem as aspas' $?
 (cd "$aux/e9b" && env PATH="$(dirname "$(command -v bash)"):/usr/bin:/bin" bash -c 'command -v gh' >/dev/null 2>&1) \

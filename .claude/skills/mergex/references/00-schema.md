@@ -178,7 +178,7 @@ entregue_em: 2026-08-29
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
 | `pr_estado` | `rascunho` na abertura normal; `aberto` quando o QA já aprovou; `merged`/`fechado` quando o E9 ou uma pessoa atualizarem |
 | `sprint_atual` | `planejamento` enquanto a entrega atual é o PR de planejamento; `null` fora dele. Ver "A entrega de planejamento" |
-| `prs` | Os PRs do trabalho, um item `{sprint, url, estado, merge_sha, merge}` por PR, em YAML de bloco; `[]` sem PR registrado. O de planejamento é sempre o primeiro. `pr_url`/`pr_estado` de topo são os da entrega atual. Ver "A entrega de planejamento" |
+| `prs` | Os PRs do trabalho, um item `{sprint, url, estado, merge_sha, merge, base_sha}` por PR, em YAML de bloco; `[]` sem PR registrado. O de planejamento é sempre o primeiro. `pr_url`/`pr_estado` de topo são os da entrega atual. Ver "A entrega de planejamento" |
 | `entregue_em` | A data em que o fluxo completou; `null` enquanto `estado` não for `entregue` |
 
 ## A entrega de planejamento — `sprint_atual` e `prs`
@@ -196,6 +196,7 @@ prs:
     estado: null
     merge_sha: null
     merge: null
+    base_sha: null
 ```
 
 | Campo do item | Regra |
@@ -205,6 +206,7 @@ prs:
 | `estado` | O enum da tabela; o E8 grava o do E7, o E9 grava `merged` |
 | `merge_sha` | O commit de merge, só com `estado: merged`; `null` antes |
 | `merge` | `humano` quando o E9 registra o merge; **nunca** `automatico` no planejamento |
+| `base_sha` | A ponta da base quando o PR foi mergeado (`baseRefOid` no GitHub, `diff_refs.start_sha` no GitLab), gravada pelo E9 com o merge (DM-262); `null` antes. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
 
 - `prs` é sempre YAML de bloco; a forma em fluxo (`prs: [{...}]`) é ilegível. Lista vazia é `prs: []`.
 - Uma chave sem a outra é incoerente: `sprint_atual: planejamento` sem o item, ou o item sem
@@ -213,8 +215,8 @@ prs:
 - Entrega anterior às chaves (sem `sprint_atual` nem `prs`) não é de planejamento.
 - **Ninguém relê estas chaves por conta própria.** O leitor único é
   `scripts/entrega-de-planejamento.sh --entrega <ENTREGA.md> [--rev <commit>]`, que imprime
-  `planejamento=sim|nao` (com `sim`, também `estado=` e `merge_sha=`; com `nao` depois da
-  retomada, também `planejamento_merge_sha=`, DM-261) e sai 2 com a entrega ilegível ou
+  `planejamento=sim|nao` (com `sim`, também `estado=`, `merge_sha=` e `base_sha=`; com `nao`
+  depois da retomada, também `planejamento_merge_sha=` e `planejamento_base_sha=`, DM-261 e DM-262) e sai 2 com a entrega ilegível ou
   incoerente. E0, E2, E7, E8 e E9 o consomem.
 
 ## A ordem de registro — a chave `seq`

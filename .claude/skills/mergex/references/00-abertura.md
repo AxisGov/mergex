@@ -313,7 +313,8 @@ replanejamento (portão bloqueado → replaneja → F3/F4/F5 → F6 de novo → 
 - `criado_em` e `atualizado_em` com a data de hoje
 - `sprint_atual` e `prs`: sem `--planejamento`, `sprint_atual: null` e `prs: []`. **Com
   `--planejamento`**, `sprint_atual: planejamento` e `prs` em YAML de bloco com um item só —
-  `sprint: planejamento`, `url: null`, `estado: null`, `merge_sha: null`, `merge: null`
+  `sprint: planejamento`, `url: null`, `estado: null`, `merge_sha: null`, `merge: null`,
+  `base_sha: null`
   (`00-schema.md`, "A entrega de planejamento"). Confira a gravação com
   `entrega-de-planejamento.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md`: tem de dizer
   `planejamento=sim`

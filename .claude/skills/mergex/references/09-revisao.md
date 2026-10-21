@@ -106,25 +106,31 @@ case "$pr_url" in
     [ -n "$iid" ] || { echo "pr_url do GitLab sem número de MR: nada gravado"; exit 3; }
     command -v glab >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
       || { echo "sem glab ou jq: o merge do MR de planejamento não foi lido, nada gravado"; exit 3; }
-    resposta="$(glab api "projects/:id/merge_requests/$iid" | jq -r '[(.state // "" | ascii_upcase), (.merge_commit_sha // .squash_commit_sha // "")] | join(" ")')" \
+    resposta="$(glab api "projects/:id/merge_requests/$iid" | jq -r '[(.state // "" | ascii_upcase), (.merge_commit_sha // .squash_commit_sha // ""), (.diff_refs.start_sha // "")] | join(" ")')" \
       || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; } ;;
   *)
     command -v gh >/dev/null 2>&1 || { echo "sem gh: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
-    resposta="$(gh pr view "$pr_url" --json state,mergeCommit --jq '[.state, (.mergeCommit.oid // "")] | join(" ")')" \
+    resposta="$(gh pr view "$pr_url" --json state,mergeCommit,baseRefOid --jq '[.state, (.mergeCommit.oid // ""), (.baseRefOid // "")] | join(" ")')" \
       || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; } ;;
 esac
-estado_pr="${resposta%% *}"; merge_sha="${resposta#* }"
+read -r estado_pr merge_sha base_sha _ <<EOF
+$resposta
+EOF
 [ "$estado_pr" = MERGED ] || { echo "PR de planejamento ainda não mergeado (${estado_pr:-sem estado}): nada gravado"; exit 0; }
-[ -n "$merge_sha" ] && [ "$merge_sha" != "$resposta" ] || { echo "MERGED sem commit de merge: nada gravado"; exit 3; }
-bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega "$entrega" --merge-sha "$merge_sha"
+[ -n "$merge_sha" ] || { echo "MERGED sem commit de merge: nada gravado"; exit 3; }
+[ -n "$base_sha" ] || { echo "MERGED sem a base do PR no merge: nada gravado"; exit 3; }
+bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega "$entrega" --merge-sha "$merge_sha" --base-sha "$base_sha"
 ```
 
 No GitLab (`pr_url` com `/-/merge_requests/`), o bloco lê o MR pela API do projeto
 (`glab api "projects/:id/merge_requests/<iid>"`: `state: merged` e `merge_commit_sha`, ou
-`squash_commit_sha` no squash). O registro é o do passo 7, item 7: no primeiro item de `prs`,
-`estado: merged`, `merge_sha` e `merge: humano`, e `pr_estado: merged` no topo — o script grava
-só isso e confere a gravação. **Sem ferramenta, sem resposta ou sem o commit de merge, não grava
-nada** e diz o motivo; PR ainda aberto também não grava. O E0 da primeira sprint depende desse
+`squash_commit_sha` no squash, e a base em `diff_refs.start_sha`). O registro é o do passo 7,
+item 7: no primeiro item de `prs`, `estado: merged`, `merge_sha`, `merge: humano` e `base_sha`
+(a ponta da base quando o PR foi mergeado: `baseRefOid` no GitHub, DM-262), e `pr_estado:
+merged` no topo — o script grava só isso e confere a gravação. **Sem ferramenta, sem resposta,
+sem o commit de merge ou sem a base, não grava nada** e diz o motivo; PR ainda aberto também
+não grava. A V9 da primeira sprint confere todo commit de `base_sha..merge_sha`: num
+rebase-merge ou fast-forward, o PR de planejamento é o intervalo inteiro, não só o último commit. O E0 da primeira sprint depende desse
 registro (`00-abertura.md`, "Retomada depois do PR de planejamento"), e nunca consulta o serviço.
 
 **O PR de planejamento nunca tem merge automático**, com qualquer configuração: o merge é do
@@ -1140,8 +1146,9 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
 7. Atualize `pr_estado: merged` no `ENTREGA.md` correspondente, quando ele existir localmente.
    Se esse `ENTREGA.md` é a entrega de planejamento (`entrega-de-planejamento.sh` diz
    `planejamento=sim`), o registro é o do script, que grava também o primeiro item de `prs`
-   (`estado: merged`, `merge_sha` = o commit de merge, `merge: humano`):
-   `entrega-de-planejamento.sh --registrar-merge --entrega <ENTREGA.md> --merge-sha <commit de merge>`
+   (`estado: merged`, `merge_sha` = o commit de merge, `merge: humano`, `base_sha` = a ponta da
+   base no merge, relida no serviço como no bloco):
+   `entrega-de-planejamento.sh --registrar-merge --entrega <ENTREGA.md> --merge-sha <commit de merge> --base-sha <base>`
    ("O PR de planejamento do trabalho atual", no passo 2).
 
    **E, somente se o PR mergeado for o do trabalho atual**, grave `pr_estado: merged`

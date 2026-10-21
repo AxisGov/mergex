@@ -19,14 +19,17 @@
 #       estado: <aberto | rascunho | aguardando_merge | merged | fechado | null>
 #       merge_sha: <sha | null>  (sha só com estado merged)
 #       merge: <humano | null>   (`automatico` nunca: o planejamento é do desenvolvedor)
+#       base_sha: <sha | null>   (a base do PR no merge, só com merged; ausente = null, DM-262)
 #
 # Saída (stdout):
 #   planejamento=nao
 #   [planejamento_merge_sha=<prs[0].merge_sha>]   (só depois da retomada)
+#   [planejamento_base_sha=<prs[0].base_sha>]     (idem; `null` num registro anterior à DM-262)
 # ou
 #   planejamento=sim
 #   estado=<prs[0].estado>      (nulo sai como o texto `null`)
 #   merge_sha=<prs[0].merge_sha>
+#   base_sha=<prs[0].base_sha>
 #
 # Entrega sem `sprint_atual` nem `prs` (anterior às chaves) é `nao`. Depois da
 # retomada do E0 (`sprint_atual: null` com o planejamento `merged`) também, com
@@ -36,13 +39,17 @@
 # Códigos: 0 leu; 2 ilegível ou incoerente (motivo em stderr); 64 uso.
 #
 # A gravação do merge (E9, DM-260; a única escrita deste script):
-#   entrega-de-planejamento.sh --registrar-merge --entrega <ENTREGA.md> --merge-sha <sha>
+#   entrega-de-planejamento.sh --registrar-merge --entrega <ENTREGA.md> --merge-sha <sha> --base-sha <sha>
 # Só numa entrega com `planejamento=sim` e o item ainda não `merged`: grava no
-# primeiro item de `prs` `estado: merged`, `merge_sha: <sha>` e `merge: humano`,
-# e no topo `pr_estado: merged` e `atualizado_em` (a data do sistema); o resto do
-# arquivo fica byte a byte. Imprime `registrado=merged` e `merge_sha=<sha>`.
-# Já `merged` com o mesmo sha: não escreve e sai 0; com outro: 1. Entrega que não
-# é de planejamento, ou ENTREGA.md que é link simbólico: 1. Ilegível: 2. sha fora de 40 ou 64 hex minúsculos: 64.
+# primeiro item de `prs` `estado: merged`, `merge_sha: <sha>`, `merge: humano` e
+# `base_sha: <a base do PR no merge>` (a linha entra depois de `merge:` quando o item
+# não a tem; DM-262), e no topo `pr_estado: merged` e `atualizado_em` (a data do
+# sistema); o resto do arquivo fica byte a byte. Imprime `registrado=merged`,
+# `merge_sha=<sha>` e `base_sha=<sha>`. Já `merged` com o mesmo merge e a mesma
+# base: não escreve e sai 0; com o mesmo merge e `base_sha: null` (registro anterior
+# à DM-262): grava a base; com outro merge ou outra base: 1. Entrega que não é de
+# planejamento, ou ENTREGA.md que é link simbólico: 1. Ilegível: 2. sha fora de 40
+# ou 64 hex minúsculos, ou sem --base-sha: 64.
 #
 # Bash 3.2 (macOS): nada de mapfile, arrays associativos ou ${v,,}.
 
@@ -50,19 +57,20 @@ set -uo pipefail
 
 uso() {
   [ -z "${1:-}" ] || printf 'entrega-de-planejamento: %s\n' "$1" >&2
-  printf '%s\n' 'uso: entrega-de-planejamento.sh [--registrar-merge --merge-sha <sha>] --entrega <ENTREGA.md> [--rev <commit>]' >&2
+  printf '%s\n' 'uso: entrega-de-planejamento.sh [--registrar-merge --merge-sha <sha> --base-sha <sha>] --entrega <ENTREGA.md> [--rev <commit>]' >&2
   exit 64
 }
 ilegivel() { printf 'entrega-de-planejamento: %s\n' "$1" >&2; exit 2; }
 recusa() { printf 'entrega-de-planejamento: %s\n' "$1" >&2; exit 1; }
 
-ENTREGA=""; REV=""; TEM_REV=0; REGISTRAR=0; MERGE_SHA=""
+ENTREGA=""; REV=""; TEM_REV=0; REGISTRAR=0; MERGE_SHA=""; BASE_SHA=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --entrega) [ "$#" -ge 2 ] && [ -z "$ENTREGA" ] || uso; ENTREGA="$2"; shift 2 ;;
     --rev) [ "$#" -ge 2 ] && [ "$TEM_REV" = 0 ] || uso; REV="$2"; TEM_REV=1; shift 2 ;;
     --registrar-merge) [ "$REGISTRAR" = 0 ] || uso; REGISTRAR=1; shift ;;
     --merge-sha) [ "$#" -ge 2 ] && [ -z "$MERGE_SHA" ] || uso; MERGE_SHA="$2"; shift 2 ;;
+    --base-sha) [ "$#" -ge 2 ] && [ -z "$BASE_SHA" ] || uso; BASE_SHA="$2"; shift 2 ;;
     *) uso "opção desconhecida: $1" ;;
   esac
 done
@@ -72,8 +80,10 @@ if [ "$REGISTRAR" = 1 ]; then
   [ "$TEM_REV" = 0 ] || uso '--registrar-merge grava o disco: sem --rev'
   case "$MERGE_SHA" in *[!0-9a-f]*|'') uso "merge_sha inválido: ${MERGE_SHA:-ausente}" ;; esac
   [ "${#MERGE_SHA}" = 40 ] || [ "${#MERGE_SHA}" = 64 ] || uso "merge_sha inválido: $MERGE_SHA"
+  case "$BASE_SHA" in *[!0-9a-f]*|'') uso "base_sha inválido: ${BASE_SHA:-ausente (a base do PR no merge, DM-262)}" ;; esac
+  [ "${#BASE_SHA}" = "${#MERGE_SHA}" ] || uso "base_sha inválido: $BASE_SHA"
 else
-  [ -z "$MERGE_SHA" ] || uso '--merge-sha só com --registrar-merge'
+  [ -z "$MERGE_SHA$BASE_SHA" ] || uso '--merge-sha e --base-sha só com --registrar-merge'
 fi
 
 # antes de ler: um link quebrado também é link, e a recusa é a mesma
@@ -92,7 +102,7 @@ fi
 # Uma linha por fato, com o motivo da ilegibilidade quando houver:
 #   S<TAB><sprint_atual>          (ausente: sem a linha)
 #   P<TAB><inline de prs:>        (ausente: sem a linha)
-#   I<TAB>pos<TAB>sprint<TAB>url<TAB>estado<TAB>merge_sha<TAB>merge
+#   I<TAB>pos<TAB>sprint<TAB>url<TAB>estado<TAB>merge_sha<TAB>merge<TAB>base_sha
 #   E<TAB><motivo>
 fatos="$(printf '%s\n' "$conteudo" | awk -v q="'" '
   function limpa(v,   a, z) {
@@ -108,13 +118,14 @@ fatos="$(printf '%s\n' "$conteudo" | awk -v q="'" '
       if (erro == "") erro = "item " n " de prs sem as cinco chaves (sprint, url, estado, merge_sha, merge)"
       return
     }
-    printf "I\t%d\t%s\t%s\t%s\t%s\t%s\n", n, c["sprint"], c["url"], c["estado"], c["merge_sha"], c["merge"]
+    if (!("base_sha" in c)) c["base_sha"] = "null"
+    printf "I\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n", n, c["sprint"], c["url"], c["estado"], c["merge_sha"], c["merge"], c["base_sha"]
   }
   function campo(l,   k, v) {
     if (l !~ /^[a-z_]+:/) { erro = "linha de prs fora da forma chave: valor: " l; return }
     k = l; sub(/:.*/, "", k)
     v = l; sub(/^[^:]*:/, "", v); v = limpa(v)
-    if (k != "sprint" && k != "url" && k != "estado" && k != "merge_sha" && k != "merge") {
+    if (k != "sprint" && k != "url" && k != "estado" && k != "merge_sha" && k != "merge" && k != "base_sha") {
       erro = "chave desconhecida num item de prs: " k; return
     }
     if (k in c) { erro = "chave repetida num item de prs: " k; return }
@@ -182,9 +193,9 @@ sha_ok() {
 }
 
 # Todo item: enums; o de planejamento só na primeira posição.
-p_sprint=""; p_estado=""; p_sha=""; p_merge=""
+p_sprint=""; p_estado=""; p_sha=""; p_merge=""; p_base=""
 TAB='	'
-while IFS="$TAB" read -r _ pos s_item _url estado sha merge; do
+while IFS="$TAB" read -r _ pos s_item _url estado sha merge base; do
   [ -n "$pos" ] || continue
   case "$estado" in aberto|rascunho|aguardando_merge|merged|fechado|null) ;;
     *) ilegivel "estado fora do enum no item $pos de prs: $estado" ;; esac
@@ -199,8 +210,10 @@ while IFS="$TAB" read -r _ pos s_item _url estado sha merge; do
     sha_ok "$sha" || ilegivel "item $pos de prs merged sem merge_sha válido: $sha"
   else
     [ "$sha" = null ] || ilegivel "item $pos de prs com merge_sha sem estar merged"
+    [ "$base" = null ] || ilegivel "item $pos de prs com base_sha sem estar merged"
   fi
-  if [ "$pos" = 1 ]; then p_sprint="$s_item"; p_estado="$estado"; p_sha="$sha"; p_merge="$merge"; fi
+  [ "$base" = null ] || sha_ok "$base" || ilegivel "item $pos de prs com base_sha inválido: $base"
+  if [ "$pos" = 1 ]; then p_sprint="$s_item"; p_estado="$estado"; p_sha="$sha"; p_merge="$merge"; p_base="$base"; fi
 done <<EOF
 $itens
 EOF
@@ -220,9 +233,9 @@ fi
 
 if [ "$REGISTRAR" = 0 ]; then
   if [ "$PLANEJAMENTO" = sim ]; then
-    printf 'planejamento=sim\nestado=%s\nmerge_sha=%s\n' "$p_estado" "$p_sha"
+    printf 'planejamento=sim\nestado=%s\nmerge_sha=%s\nbase_sha=%s\n' "$p_estado" "$p_sha" "$p_base"
   elif [ "$p_sprint" = planejamento ]; then
-    printf 'planejamento=nao\nplanejamento_merge_sha=%s\n' "$p_sha"
+    printf 'planejamento=nao\nplanejamento_merge_sha=%s\nplanejamento_base_sha=%s\n' "$p_sha" "$p_base"
   else
     printf 'planejamento=nao\n'
   fi
@@ -235,7 +248,11 @@ fi
 [ "$PLANEJAMENTO" = sim ] || recusa 'a entrega não é a do PR de planejamento: nada a registrar'
 if [ "$p_estado" = merged ]; then
   [ "$p_sha" = "$MERGE_SHA" ] || recusa "o planejamento já está merged com outro merge_sha ($p_sha)"
-  printf 'registrado=merged\nmerge_sha=%s\n' "$MERGE_SHA"; exit 0
+  if [ "$p_base" = "$BASE_SHA" ]; then
+    printf 'registrado=merged\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA"; exit 0
+  fi
+  # o registro anterior à DM-262 (sem a base) ganha a base; outra base é recusa
+  [ "$p_base" = null ] || recusa "o planejamento já está merged com outra base_sha ($p_base)"
 fi
 hoje="$(date +%Y-%m-%d)" || ilegivel 'data do sistema indisponível'
 tmp="$ENTREGA.tmp.$$"
@@ -244,7 +261,7 @@ trap 'exit 2' HUP INT TERM
 # Só três linhas do primeiro item de `prs` e duas chaves de topo, no frontmatter;
 # o fim de linha de cada linha (CRLF ou LF) fica como estava. BINMODE=3: o gawk
 # do Git para Windows (MSYS) tira o CR na leitura sem ele; os outros awk o ignoram.
-awk -v BINMODE=3 -v sha="$MERGE_SHA" -v hoje="$hoje" '
+awk -v BINMODE=3 -v sha="$MERGE_SHA" -v base="$BASE_SHA" -v hoje="$hoje" '
   function troca(l, chave, valor,   cr, ind) {
     cr = ""; if (l ~ /\r$/) { cr = "\r"; sub(/\r$/, "", l) }
     ind = l; sub(/[^ \t].*$/, "", ind)
@@ -266,13 +283,32 @@ awk -v BINMODE=3 -v sha="$MERGE_SHA" -v hoje="$hoje" '
     k = l; sub(/^[[:space:]]+(-[[:space:]]+)?/, "", k); sub(/:.*/, "", k)
     if (k == "estado") { print troca($0, "estado", "merged"); next }
     if (k == "merge_sha") { print troca($0, "merge_sha", sha); next }
-    if (k == "merge") { print troca($0, "merge", "humano"); next }
+    if (k == "base_sha") { print troca($0, "base_sha", base); tem_base = 1; next }
+    if (k == "merge") {
+      print troca($0, "merge", "humano")
+      # o item sem a chave (anterior à DM-262) a ganha logo depois de `merge:`,
+      # com a indentação das chaves do item e o fim de linha da linha de `merge:`
+      if (!tem_base_no_item) {
+        cr = ""; if ($0 ~ /\r$/) cr = "\r"
+        ind = l; sub(/[^ \t].*$/, "", ind)
+        if (substr(l, length(ind) + 1, 2) == "- ") ind = ind "  "
+        print ind "base_sha: " base cr
+      }
+      next
+    }
   }
   { print }
-' "$ENTREGA" > "$tmp" || { rm -f "$tmp"; ilegivel "não consegui gravar $ENTREGA"; }
+' tem_base_no_item="$(printf '%s\n' "$conteudo" | awk '
+    { sub(/\r$/, "") }
+    NR == 1 { next }
+    /^---[[:space:]]*$/ { exit }
+    /^[A-Za-z_][A-Za-z0-9_]*:/ { d = ($0 ~ /^prs:/); next }
+    d && /^[[:space:]]+-/ { it++ }
+    d && it == 1 && /^[[:space:]]+(-[[:space:]]+)?base_sha:/ { print 1; exit }
+  ')" "$ENTREGA" > "$tmp" || { rm -f "$tmp"; ilegivel "não consegui gravar $ENTREGA"; }
 # confere antes de trocar: o resultado tem de ser lido como merged com este sha
 depois="$(bash "$0" --entrega "$tmp" 2>/dev/null)" \
-  && [ "$depois" = "$(printf 'planejamento=sim\nestado=merged\nmerge_sha=%s' "$MERGE_SHA")" ] \
+  && [ "$depois" = "$(printf 'planejamento=sim\nestado=merged\nmerge_sha=%s\nbase_sha=%s' "$MERGE_SHA" "$BASE_SHA")" ] \
   || { rm -f "$tmp"; ilegivel "a gravação do merge não ficou legível em $ENTREGA"; }
 mv "$tmp" "$ENTREGA" || { rm -f "$tmp"; ilegivel "não consegui gravar $ENTREGA"; }
-printf 'registrado=merged\nmerge_sha=%s\n' "$MERGE_SHA"
+printf 'registrado=merged\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA"

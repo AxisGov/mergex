@@ -58,7 +58,13 @@
 #    contém é o planejamento, desde que todo commit do trabalho alcançável de
 #    P (com `Trabalho: <id>` ou tocando a pasta ou a entrega, e a diferença de
 #    P para o 1º pai quando P é merge) só toque
-#    `^docs/(sprintx|entregas|eventos)/`; senão, v9_sem_prova.
+#    `^docs/(sprintx|entregas|eventos)/`, e todo commit do intervalo do PR,
+#    `base_sha..P` (a base do PR no merge, gravada pelo E9 no item de
+#    planejamento; DM-262), também: o commit comum pelo que muda, o merge pelo
+#    que muda por conta própria (`--cc`). Assim um rebase-merge ou ff não
+#    esconde em `^P` um commit de produto sem a marca anterior ao último.
+#    Item sem base_sha, base_sha fora da história ou que não é ancestral
+#    própria de P: v9_sem_prova.
 #    Riscos residuais conhecidos (limite de desenho; o Git local não
 #    distingue):
 #    - legado com a ref de base movida para um commit sem nenhuma dessas
@@ -69,13 +75,11 @@
 #      zero em que o ENTREGA.md nasce noutro caminho e é renomeado para o
 #      canônico já com a base errada: `rev-list -- <caminho>` não segue
 #      renomeação, e no caminho nunca houve outra versão;
-#    - merge do planejamento forjado: um merge_sha gravado na entrega que
-#      aponta para um commit sem marca do trabalho e com produto; as guardas
-#      não o distinguem de um merge da main. Também: num rebase-merge ou ff,
-#      um commit de produto sem a marca e fora da pasta, anterior ao último
-#      (P), fica em `^P` sem ser conferido, como merges marcados que não são
-#      o próprio P; e a base reancorada pode ser qualquer descendente de P
-#      (o E0 a lê da ref buscada);
+#    - registro do merge do planejamento forjado: o intervalo conferido é o
+#      que a entrega diz (`base_sha..merge_sha`, gravados pelo E9 a partir do
+#      serviço); uma base_sha gravada depois da base real deixa fora do
+#      intervalo o que veio antes dela. E a base reancorada pode ser qualquer
+#      descendente de P (o E0 a lê da ref buscada);
 #    - B1 lateral: com reconciliação, a cadeia nunca reconfere b1_sha contra a
 #      base real; um B1 forjado (descende de B0, traz produto, a ref movida no
 #      registro) desloca a base.
@@ -225,6 +229,7 @@ M_PLAN=""
 MARCA_H="$(bash "$PLANEJAMENTO_SH" --entrega "$ENTREGA_H" 2>&1)" \
   || sem_prova "entrega de HEAD ilegível para entrega-de-planejamento.sh: $MARCA_H" # guarda:V9PLAN
 mp="$(printf '%s\n' "$MARCA_H" | sed -n 's/^planejamento_merge_sha=//p')"
+B_PLAN_REG="$(printf '%s\n' "$MARCA_H" | sed -n 's/^planejamento_base_sha=//p')"
 if [ -n "$mp" ]; then
   M_PLAN="$(g rev-parse --verify -q "$mp^{commit}" 2>/dev/null)" \
     || sem_prova "o merge do planejamento registrado ($mp) não é um commit deste repositório" # guarda:V9PLAN
@@ -444,6 +449,28 @@ if [ -n "$EXCL" ]; then
     fora_p="$(so_metodo "$TMP_DIR/do-plan.nomes")"
     [ -z "$fora_p" ] || sem_prova "o merge do planejamento $M_PLAN traz $fora_p: o planejamento só leva docs/sprintx, docs/entregas e docs/eventos" # guarda:V9PLAN
   fi
+  # o intervalo do PR de planejamento, base_sha..P (DM-262): no rebase-merge e no
+  # fast-forward, P é só o último commit; os de antes, com ou sem a marca, também
+  # são do PR. Commit comum: o que ele muda; merge: o que ele muda por conta
+  # própria (--cc), porque o que vem dos pais já é um commit do intervalo ou da base
+  case "$B_PLAN_REG" in
+    ''|null) sem_prova "o merge do planejamento $M_PLAN está registrado sem base_sha (a base do PR no merge): rode o E9, que a lê no serviço" ;; # guarda:V9PLAN
+  esac
+  B_PLAN="$(g rev-parse --verify -q "$B_PLAN_REG^{commit}" 2>/dev/null)" \
+    || sem_prova "a base_sha do PR de planejamento ($B_PLAN_REG) não é um commit deste repositório" # guarda:V9PLAN
+  [ "$B_PLAN" != "$M_PLAN" ] && g merge-base --is-ancestor "$B_PLAN" "$M_PLAN" 2>/dev/null \
+    || sem_prova "a base_sha do PR de planejamento ($B_PLAN) não é ancestral própria do merge $M_PLAN" # guarda:V9PLAN
+  g rev-list --parents "$B_PLAN..$M_PLAN" > "$TMP_DIR/intervalo" 2>/dev/null \
+    || sem_prova "intervalo $B_PLAN..$M_PLAN do PR de planejamento ilegível" # guarda:V9PLAN
+  while read -r cpl _pai1 pai2 _ <&3; do
+    if [ -n "${pai2:-}" ]; then
+      g diff-tree -r -z --cc --no-commit-id --name-only "$cpl" > "$TMP_DIR/do-plan.nomes" 2>/dev/null
+    else
+      g diff-tree -r -z --root --no-commit-id --name-only --no-renames "$cpl" > "$TMP_DIR/do-plan.nomes" 2>/dev/null
+    fi || sem_prova "commit $cpl do PR de planejamento ilegível" # guarda:V9PLAN
+    fora_p="$(so_metodo "$TMP_DIR/do-plan.nomes")"
+    [ -z "$fora_p" ] || sem_prova "o commit $cpl do PR de planejamento ($B_PLAN..$M_PLAN) toca $fora_p: o planejamento só leva docs/sprintx, docs/entregas e docs/eventos" # guarda:V9PLAN
+  done 3< "$TMP_DIR/intervalo"
 fi
 # O planejamento não aceita pela união: nada de produto entra nele.
 : > "$TMP_DIR/uniao"
