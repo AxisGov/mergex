@@ -56,6 +56,7 @@ apaga() {
 
 bancada()   { bash scripts/ci/test-trava-e1.sh $GRUPO > saida.log 2>&1; }
 validador() { bash scripts/ci/validate-mergex-contract.sh > saida.log 2>&1; }
+teste_ev()  { bash scripts/ci/test-e1-evidencia-revisao.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As doze mutações do contrato da C5, mais as que atacam o texto dele.
@@ -157,6 +158,21 @@ M16() {
 # 17. O schema deixa de dizer que o seq é atribuído sob a seção crítica.
 M17() { apaga "$SCHEMA" '**Quem impede a corrida é o E1**'; }
 
+# 18. O --concluir deixa de conferir a árvore do índice preparado (DM-262).
+M18() { troca "$FECHA" '    confere_indice_preparado' '    :'; }
+
+# 19. O --preparar deixa de registrar a árvore do índice (DM-262).
+M19() { troca "$FECHA" '    registra_indice_preparado' '    :'; }
+
+# 20. O `conferir` volta a rodar sem limite (DM-262).
+M20() {
+  troca "$FECHA" '  com_limite "$limite" "$tmp" node "$mjs" conferir --trabalho "$TRABALHO" --modo obrigatoria \' \
+    '  node "$mjs" conferir --trabalho "$TRABALHO" --modo obrigatoria > "$tmp" 2>/dev/null \'
+}
+
+# 21. O vigia em bash nunca mata o node: sem `timeout`, o E1 espera o que vier.
+M21() { troca "$FECHA" '    kill -KILL "$pid" 2>/dev/null' '    :'; }
+
 LISTA='M1|trava adquirida so depois do git add|bancada|B
 M2|trava no indice do diretorio Git comum|bancada|C
 M3|E1 ignora trava existente|bancada|E
@@ -173,7 +189,11 @@ M13|o contrato perde a secao critica do E1|validador|
 M14|o contrato volta a permitir [ -d .git ]|validador|
 M15|o contrato perde o desfecho commit sem registro|validador|
 M16|um segundo escritor real de commits escapa da regra|validador|
-M17|o schema nao situa o seq sob a secao critica|validador|'
+M17|o schema nao situa o seq sob a secao critica|validador|
+M18|concluir nao confere a arvore do indice preparado|teste_ev|
+M19|preparar nao registra a arvore do indice|teste_ev|
+M20|conferir sem limite de tempo|teste_ev|
+M21|vigia sem timeout nunca mata o node|teste_ev|'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
@@ -184,7 +204,7 @@ controle() {
   local d rc
   d="$(copia)"
   echo "Controle — cópia SEM mutação: as verificações têm que passar"
-  for v in bancada validador; do
+  for v in bancada validador teste_ev; do
     rc=0; ( cd "$d" && GRUPO="" "$v" ) || rc=$?
     if [ "$rc" = 0 ]; then printf '  ok     %s\n' "$v"
     else CONTROLE_OK=0; printf '  FALHA  %s — verde era esperado (rc=%s)\n' "$v" "$rc"
