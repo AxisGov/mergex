@@ -793,11 +793,137 @@ Enquanto a predecessora estiver aberta, o empilhado fica nos inelegíveis com o 
 `empilhado sobre #<n>`. Ele só chega ao passo 7 se, na vez dele, a base relida no serviço não for
 a branch de um PR aberto nem a de um PR mergeado nesta passagem — depois do merge da
 predecessora, a base tem de ter sido redirecionada para a base dela, pelo serviço ou pelo
-desenvolvedor. Senão continua inelegível, com o motivo.
+desenvolvedor. Senão continua inelegível, com o motivo. Redirecionado, ele ainda tem de
+cumprir as condições de "Feature redirecionada", abaixo.
 
-PRs **inelegíveis para merge** — rascunho, integração contínua vermelha, review obrigatório pendente (`reviewDecision: REVIEW_REQUIRED` no GitHub; aprovações exigidas ainda não dadas no GitLab), `empilhado sobre #<n>` (ver "Antes do impacto: PRs empilhados", acima), conflito com a base (inclusive o "conflito não verificado", que conta como conflito), ou `REVIEW EVIDENCE: BLOQUEADO` por **bloqueio corrigível por remediação** (ver "Dois tipos de bloqueio", acima) — aparecem na lista, **no fim**, marcados com o motivo, e **não entram na condução do passo 7**.
+PRs **inelegíveis para merge** — rascunho, integração contínua vermelha, review obrigatório pendente (`reviewDecision: REVIEW_REQUIRED` no GitHub; aprovações exigidas ainda não dadas no GitLab), `empilhado sobre #<n>` (ver "Antes do impacto: PRs empilhados", acima), feature redirecionada sem as condições dela (`não sincronizado com a base nova`, `CI anterior ao redirecionamento`, `revisão do revisor_bot ausente no HEAD atual`, ou o redirecionamento não verificável; ver "Feature redirecionada", abaixo), conflito com a base (inclusive o "conflito não verificado", que conta como conflito), ou `REVIEW EVIDENCE: BLOQUEADO` por **bloqueio corrigível por remediação** (ver "Dois tipos de bloqueio", acima) — aparecem na lista, **no fim**, marcados com o motivo, e **não entram na condução do passo 7**.
 
 PRs com `REVIEW EVIDENCE: BLOQUEADO` **apenas** por **bloqueio confirmável humanamente nesta execução**, e sem nenhum outro impedimento (não rascunho, CI não vermelha, sem conflito com a base), ficam na fila pela mesma ordem de impacto, marcados `confirmação humana necessária`, e entram no passo 7 **só** na condução limitada: pedir as confirmações específicas, recalcular o gate, e seguir apenas se o resultado for `SATISFEITO`.
+
+### Feature redirecionada
+
+Um PR cuja base foi trocada (a predecessora foi mergeada e o PR foi redirecionado para a base
+dela, pelo serviço ou pelo desenvolvedor) traz um verde que pode não valer mais: o CI rodou
+contra a base antiga, e o HEAD pode nem ter mudado, quando a base nova já era ancestral dele
+(predecessora mergeada por fast-forward). Um verde de antes do redirecionamento, como o
+`fora-de-main` do gate do conselho, não rodou a suíte contra a base atual (desenho de
+2026-10-18, 4.4; DM-245). Por isso, sobre o `headRefOid` **atual**, ele só é elegível se:
+
+- **está sincronizado:** a ponta da base atual (`baseRefOid`) é ancestral do `headRefOid`;
+  senão, inelegível com `não sincronizado com a base nova`;
+- **o CI é de depois do redirecionamento:** há check do `headRefOid`, e todo check dele
+  **nasceu** depois do evento de troca de base do serviço (o último, se houve mais de
+  um): o check run, pela criação da execução do workflow (`checkSuite.workflowRun.createdAt`;
+  fora do Actions, a do `checkSuite`), e o status, pela criação dele. A conclusão não basta:
+  a re-execução de uma execução antiga repete o evento antigo, com o merge da base antiga, e
+  termina depois do redirecionamento sem ter rodado contra a base atual. De cada check (o app, o
+  workflow pelo id, nunca pelo nome, e o nome do check; status, pelo contexto) vale só o da
+  execução mais nova, e a lista inteira tem de
+  caber numa página. Senão — nenhum check nesse HEAD, só os de um HEAD anterior, ou algum
+  nascido antes do redirecionamento —, inelegível com `CI anterior ao redirecionamento`.
+  Check nascido depois e ainda em andamento passa aqui: esperar por ele é do R1, como a cor
+  dos checks, que tem de estar verde como para qualquer PR;
+- **o bot revisou o HEAD novo:** com `revisor_bot` declarado no `.expx/fatiamento.json` **da
+  base** (`EXPX_REVISOR_BOT`, lido por `leitor-do-projeto.sh --rev <baseRefOid>
+  --nucleo-da-rev`, que executa o leitor do núcleo da árvore da base, nunca o do disco nem o
+  da branch do PR), há uma revisão de um desses logins, comparado exatamente (sem prefixo e
+  sem diferença de caixa), cujo commit é o `headRefOid` e que foi submetida depois do
+  redirecionamento; senão, inelegível com `revisão do revisor_bot ausente no HEAD atual`. O
+  `revisor_bot` que a branch do PR acrescenta ou tira não vale: vale o da base. Base com o
+  arquivo e sem a pasta do núcleo versionada (o leitor sai 3) ou com a configuração inválida:
+  inelegível com `configuração da base não lida`;
+- **o R1–R6 inteiro foi recalculado** sobre esse `headRefOid` depois do redirecionamento,
+  com todas as páginas, como em qualquer avaliação do gate: nenhuma avaliação de antes dele
+  é reaproveitada.
+
+No GitHub, depois do bloco do HEAD autoritativo (acima, com `$cabeca` e a fonte da base):
+
+```bash
+# E9: feature redirecionada (DM-245); depois do bloco do HEAD autoritativo ($cabeca, $repo_url, $remoto_base)
+set -o pipefail
+export GIT_NO_REPLACE_OBJECTS=1   # refs/replace local não muda ancestralidade nem árvore da base
+nv() { echo "redirecionado=nao_verificavel: $1"; exit 1; }
+command -v jq >/dev/null 2>&1 || nv 'sem jq'
+dono_repo="${repo_url#*://*/}"                                   # <dono>/<repo>
+pr="$(gh pr view <n> --json baseRefName,baseRefOid,headRefOid)" || nv 'o PR não foi lido'
+base_nome="$(printf '%s' "$pr" | jq -r .baseRefName)" && base_oid="$(printf '%s' "$pr" | jq -r .baseRefOid)" \
+  && head_oid="$(printf '%s' "$pr" | jq -r .headRefOid)" || nv 'o PR não foi lido'
+redir="$(gh api graphql -F n=<n> -f o="${dono_repo%%/*}" -f r="${dono_repo#*/}" -f query='
+  query($o: String!, $r: String!, $n: Int!) { repository(owner: $o, name: $r) { pullRequest(number: $n) {
+    timelineItems(itemTypes: [BASE_REF_CHANGED_EVENT], last: 1) { nodes { ... on BaseRefChangedEvent { createdAt } } } } } }' \
+  | jq -r '.data.repository.pullRequest.timelineItems.nodes
+           | if type == "array" then (.[0].createdAt // "") else error("sem a linha do tempo") end')" \
+  || nv 'a linha do tempo do PR não foi lida'
+[ -n "$redir" ] || { echo 'redirecionado=nao'; exit 0; }
+[ "$cabeca" = "$head_oid" ] || nv 'a cabeça buscada não é o headRefOid'
+git fetch -q "${remoto_base:-$repo_url}" "refs/heads/$base_nome" \
+  && [ "$(git rev-parse --verify 'FETCH_HEAD^{commit}')" = "$base_oid" ] || nv 'a ponta da base não é o baseRefOid'
+motivos=''
+git merge-base --is-ancestor "$base_oid" "$head_oid"; rc=$?
+case "$rc" in 0) ;; 1) motivos="${motivos}não sincronizado com a base nova
+" ;; *) nv 'a ancestralidade não foi calculada' ;; esac
+ci="$(gh api graphql -f h="$head_oid" -f o="${dono_repo%%/*}" -f r="${dono_repo#*/}" -f query='
+  query($o: String!, $r: String!, $h: GitObjectID!) { repository(owner: $o, name: $r) { object(oid: $h) { ... on Commit {
+    statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename
+      ... on CheckRun { name status completedAt checkSuite { createdAt app { slug } workflowRun { createdAt workflow { id } } } }
+      ... on StatusContext { context state createdAt } } } } } } } }' \
+  | jq -r --arg r "$redir" '.data.repository.object.statusCheckRollup as $s
+      | if $s == null then [] elif $s.contexts.pageInfo.hasNextPage then error("mais de uma página de checks")
+        else $s.contexts.nodes end
+      | map(if .__typename == "CheckRun"
+              then {k: ("run:" + (.checkSuite.app.slug // "") + "/" + (.checkSuite.workflowRun.workflow.id // "") + "/" + .name),
+                    nasceu: (.checkSuite.workflowRun.createdAt // .checkSuite.createdAt // "")}
+              else {k: ("status:" + .context), nasceu: (.createdAt // "")} end)
+      | group_by(.k) | map(max_by(.nasceu))
+      | if length > 0 and all(.[]; .nasceu > $r) then "depois" else "antes" end')" || nv 'os checks não foram lidos'
+[ "$ci" = depois ] || motivos="${motivos}CI anterior ao redirecionamento
+"
+cfg="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev "$base_oid" --nucleo-da-rev)"; rc=$?
+if [ "$rc" != 0 ]; then motivos="${motivos}configuração da base não lida (leitor-do-projeto saiu $rc)
+"
+else
+  bots="$(eval "$cfg" && printf '%s' "${EXPX_REVISOR_BOT:-}")" || nv 'a saída do leitor não foi lida'  # o consumo do leitor, num subshell
+  if [ -n "$bots" ]; then
+    revs="$(gh api --paginate "repos/$dono_repo/pulls/<n>/reviews?per_page=100")" || nv 'as revisões não foram lidas'
+    n_bot="$(printf '%s' "$revs" | jq -s -r --arg b "$bots" --arg h "$head_oid" --arg r "$redir" '
+      ($b | split(",")) as $bots | [add // [] | .[] | (.user.login // "") as $l
+        | select(any($bots[]; . == $l) and .commit_id == $h and (.submitted_at // "") > $r)] | length')" \
+      || nv 'as revisões não foram lidas'
+    [ "$n_bot" -gt 0 ] || motivos="${motivos}revisão do revisor_bot ausente no HEAD atual
+"
+  fi
+fi
+[ -n "$motivos" ] || { echo 'redirecionado=sim elegivel'; exit 0; }
+echo 'redirecionado=sim inelegivel'; printf '%s' "$motivos" | sed 's/^/motivo: /'; exit 1
+```
+
+Saída: `redirecionado=nao` (sem troca de base: as condições não se aplicam),
+`redirecionado=sim elegivel`, ou `redirecionado=sim inelegivel` seguido de uma linha
+`motivo: <motivo>` por condição que falta (saída 1); leitura que falha é
+`redirecionado=nao_verificavel: <o quê>` (saída 1), e o PR fica inelegível com
+`redirecionamento não verificável`. Os horários são os do serviço, comparados estritamente:
+nascido no mesmo segundo do redirecionamento não é depois dele. O bloco roda do checkout da
+base (ou da skill instalada), nunca de um checkout da branch do PR, que traria o próprio
+`leitor-do-projeto.sh` dela. No GitLab, o mesmo com: o
+evento é a última nota de sistema `changed target branch from … to …` do MR
+(`glab api --paginate projects/:id/merge_requests/<iid>/notes`, `system: true`, `created_at`);
+a ponta da base, `target_branch` buscada no repositório base e conferida com
+`projects/:id/repository/branches/<target_branch>` (`commit.id`); o CI, o `head_pipeline` do
+MR, com `sha` igual ao `sha` do MR (no pipeline de resultado de merge, o commit de merge cujo
+segundo pai é o `sha` do MR) e `created_at` depois do evento (o retry de um job fica no
+pipeline antigo e não conta); a revisão do bot, uma nota
+de diff de um dos logins (`author.username`) com `position.head_sha` igual ao `sha` do MR e
+`created_at` depois do evento. O GitLab não prende uma revisão sem nota de diff a um commit: sem
+essa nota, `revisão do revisor_bot ausente no HEAD atual`.
+
+**Orientação ao desenvolvedor.** Para sincronizar, a reconciliação de base
+(`references/11-reconciliacao-base.md`: merge registrado da base nova, E2 e push), que mantém
+o portão provado e dá um HEAD novo, com CI e revisão novos. O botão de atualizar a branch do
+serviço faz o mesmo merge sem o registro, e o portão aparece vencido para o `pre-push` e para
+o CI. Sincronizado, com `CI anterior ao redirecionamento`, dispare o CI de novo pelo serviço
+com um evento novo, que use a base atual — por exemplo, fechar e reabrir o PR; o botão de
+re-executar repete o evento antigo, com a base antiga, e não conta — e peça a revisão do bot
+de novo — **nunca com commit vazio**, que invalidaria o portão.
 
 ## Passo 5 — Analisar conflitos (relatar, nunca resolver)
 
@@ -956,8 +1082,10 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    equivalente); estado de rascunho; CI/status checks desse HEAD; decisão de review e pedidos de
    mudança ativos (`reviewDecision` ou equivalente); threads e findings relevantes; a base
    (`baseRefName`; no GitLab, `target_branch`), que não pode ser a branch de um PR aberto nem a
-   de um PR mergeado nesta passagem (ver "Antes do impacto: PRs empilhados", no passo 4). A
-   confirmação humana final **não congela** o estado do PR.
+   de um PR mergeado nesta passagem (ver "Antes do impacto: PRs empilhados", no passo 4); e
+   o bloco de "Feature redirecionada" (passo 4), de novo, sobre o HEAD relido: a base pode ter
+   andado ou sido trocada depois da primeira avaliação, e o PR só segue com `redirecionado=nao`
+   ou `redirecionado=sim elegivel`. A confirmação humana final **não congela** o estado do PR.
 
    A releitura **recalcula o gate R1–R6 inteiro**, com as mesmas regras e todas as páginas
    (threads, reviews, comentários e checks, inclusive os não obrigatórios), e não só o HEAD:
@@ -972,7 +1100,8 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
      próximo PR.
    - **HEAD igual, mas algum critério passou a bloquear** (virou rascunho, CI deixou de estar
      verde, pedido de mudança novo, finding novo ou reaberto, base que passou a ser a branch de
-     outro PR aberto ou mergeado nesta passagem): não faça o merge; diga
+     outro PR aberto ou mergeado nesta passagem, feature redirecionada que deixou de cumprir
+     as condições dela): não faça o merge; diga
      exatamente o que mudou.
    - **HEAD igual e gate igual no bloqueio, mas resultado diferente** (contagem do bloco
      `Reviews` mudou, finding novo já classificado, check novo verde): não faça o merge nesta
@@ -994,8 +1123,11 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    aos checks não obrigatórios. Por isso: (a) o merge é a operação **seguinte** à releitura, sem
    pergunta, outro PR ou trabalho entre as duas; (b) logo depois do merge, releia o gate do
    mesmo HEAD mais uma vez. Finding, review ou check criado ou concluído antes do instante do
-   merge e ausente da releitura é mudança no resultado do gate entre a releitura e o merge: a
-   passagem fica invalidada — diga ao desenvolvedor exatamente o que mudou e que o merge já foi
+   merge e ausente da releitura é mudança no resultado do gate entre a releitura e o merge; num
+   PR redirecionado, também a base que andou entre as duas (o `--match-head-commit` prende o
+   HEAD, não a base): o pai, na base, do que o merge pôs nela (o primeiro pai do commit de
+   merge; no squash, o pai do commit; no rebase, o do primeiro commit reaplicado) tem de ser o `baseRefOid` revalidado. Em qualquer desses
+   casos a passagem fica invalidada — diga ao desenvolvedor exatamente o que mudou e que o merge já foi
    feito, registre no rastro, **encerre a passagem** sem oferecer os PRs seguintes e nunca
    reverta por conta própria (a decisão de reverter é humana). **Releitura posterior
    impossível** (falha, ou alguma página do gate não obtida) é tratada como mudança, com a
@@ -1053,6 +1185,7 @@ humana substitui CI vermelho (`FALHOU`) nem CI não verificável (R1 `NÃO VERIF
 - [ ] Sobreposições estão no topo, com os PRs identificados e os arquivos em comum.
 - [ ] O critério de ordenação está declarado.
 - [ ] A ordem vai do menor para o maior impacto, depois da ordem dos empilhados: nenhum PR empilhado foi oferecido antes da predecessora.
+- [ ] Nenhum PR redirecionado foi oferecido sem `redirecionado=sim elegivel` sobre o HEAD atual (sincronizado, CI e revisão do `revisor_bot` da base depois do redirecionamento).
 - [ ] PRs com integração vermelha, rascunhos e `REVIEW EVIDENCE` diferente de `SATISFEITO` não foram oferecidos para merge.
 - [ ] Todo PR mostrou `Review Evidence: SATISFEITO | BLOQUEADO`, R1–R6 individuais e o bloco `Reviews` com as seis contagens.
 - [ ] Todo merge feito passou pela revalidação imediatamente anterior (HEAD, rascunho, CI, decisão de review, threads, base), com o gate R1–R6 recalculado e igual ao confirmado; HEAD alterado invalidou as confirmações e barrou o merge nesta passagem, e qualquer mudança no resultado do gate entre a releitura e o merge invalidou a passagem.
