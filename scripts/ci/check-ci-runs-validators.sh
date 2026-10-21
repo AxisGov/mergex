@@ -57,6 +57,9 @@ matriz="$(tr -d '\r' < "$mut" | awk '
   { dentro = 0 }
   /^[[:space:]]*bancada:[[:space:]]*$/ { dentro = 1 }
 ')"
+# E a matriz só vale se um passo, não comentado, executa a bancada da matriz.
+n="$(tr -d '\r' < "$mut" | grep -cE '^[[:space:]]*run:[[:space:]]+bash[[:space:]]+scripts/ci/\$\{\{[[:space:]]*matrix\.bancada[[:space:]]*\}\}\.sh[[:space:]]*$' || true)"
+[ "$n" = '1' ] || fail "$mut executa a bancada da matriz $n vez(es); esperado exatamente 1"
 for f in scripts/ci/mutacao-*.sh; do
   b="$(basename "$f" .sh)"
   n="$(printf '%s\n' "$matriz" | grep -cFx -- "$b" || true)"
