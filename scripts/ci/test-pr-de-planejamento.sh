@@ -48,11 +48,15 @@ echo '== entrega-de-planejamento.sh =='
 
 entrega "$aux/antiga.md" ''
 le "$aux/antiga.md"
-[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = 'planejamento=nao' ]; confere 'entrega antiga sem as chaves: nao' $?
+[ "$rc" = 0 ] && grep -qx 'planejamento=nao' "$aux/out" \
+  && grep -qx 'entrega=por_trabalho' "$aux/out" && grep -qx 'sprint_atual=null' "$aux/out"
+confere 'entrega antiga sem as chaves: nao' $?
 
 entrega "$aux/aberto.md" "$PLAN_ABERTO"
 le "$aux/aberto.md"
-[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'planejamento=sim\nestado=null\nmerge_sha=null\nbase_sha=null')" ]
+[ "$rc" = 0 ] && grep -qx 'planejamento=sim' "$aux/out" && grep -qx 'estado=null' "$aux/out" \
+  && grep -qx 'merge_sha=null' "$aux/out" && grep -qx 'base_sha=null' "$aux/out" \
+  && grep -qx 'sprint_atual=planejamento' "$aux/out"
 confere 'planejamento aberto: sim, estado null' $?
 
 entrega "$aux/so-sprint.md" 'sprint_atual: planejamento'
@@ -105,7 +109,9 @@ confere 'planejamento merged: estado e merge_sha' $?
 
 entrega "$aux/retomada.md" "$(printf '%s\n' "$PLAN_ABERTO" | sed 's/^sprint_atual: planejamento/sprint_atual: null/; s/estado: null/estado: merged/; s/merge_sha: null/merge_sha: 0123456789abcdef0123456789abcdef01234567/; s/merge: null/merge: humano/')"
 le "$aux/retomada.md"
-[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=0123456789abcdef0123456789abcdef01234567\nplanejamento_base_sha=null')" ]
+[ "$rc" = 0 ] && grep -qx 'planejamento=nao' "$aux/out" \
+  && grep -qx 'planejamento_merge_sha=0123456789abcdef0123456789abcdef01234567' "$aux/out" \
+  && grep -qx 'planejamento_base_sha=null' "$aux/out" && grep -qx 'sprint_atual=null' "$aux/out"
 confere 'depois da retomada (sprint_atual null, planejamento merged): nao, com o merge do planejamento' $?
 
 entrega "$aux/sem-chave.md" "$(printf '%s
@@ -317,7 +323,9 @@ v9 "$aux/s1a"
 confere 'V9 da primeira sprint depois do merge do planejamento: passa com a base nova' $?
 [ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
 (cd "$aux/s1a" && bash "$leitor" --entrega docs/entregas/plan/ENTREGA.md) > "$aux/out" 2>&1
-[ "$(cat "$aux/out")" = "$(printf 'planejamento=nao\nplanejamento_merge_sha=%s\nplanejamento_base_sha=%s' "$(git -C "$aux/s1a" rev-parse 'main~1')" "$(git -C "$aux/s1a" rev-parse 'main~2')")" ]
+[ "$(sed -n 's/^planejamento_merge_sha=//p' "$aux/out")" = "$(git -C "$aux/s1a" rev-parse 'main~1')" ] \
+  && [ "$(sed -n 's/^planejamento_base_sha=//p' "$aux/out")" = "$(git -C "$aux/s1a" rev-parse 'main~2')" ] \
+  && grep -qx 'planejamento=nao' "$aux/out" && grep -qx 'sprint_atual=null' "$aux/out"
 confere 'depois da reancoragem, o leitor diz nao com o merge do planejamento' $?
 # mais uma task depois: a V9 continua passando (a reancoragem é uma só)
 printf 'c\n' >> "$aux/s1a/src/b.ts"; g -C "$aux/s1a" add -A; g -C "$aux/s1a" commit -q -m 'feat: b2' -m 'Trabalho: plan'
@@ -623,10 +631,11 @@ sed 's/$/\r/' "$aux/crlf.md" > "$aux/crlf.tmp" && mv "$aux/crlf.tmp" "$aux/crlf.
 crs_antes="$(tr -cd '\r' < "$aux/crlf.md" | wc -c | tr -d ' ')"
 bash "$leitor" --registrar-merge --entrega "$aux/crlf.md" --merge-sha "$SHA_M" --base-sha "$SHA_B" >/dev/null 2>&1; rc=$?
 crs_depois="$(tr -cd '\r' < "$aux/crlf.md" | wc -c | tr -d ' ')"
-[ "$rc" = 0 ] && [ "$crs_antes" -gt 0 ] && [ "$crs_depois" = "$((crs_antes + 1))" ] \
+[ "$rc" = 0 ] && [ "$crs_antes" -gt 0 ] && [ "$crs_depois" = "$((crs_antes + 2))" ] \
   && tr '\r' '#' < "$aux/crlf.md" | grep -qx "    base_sha: $SHA_B#" \
+  && tr '\r' '#' < "$aux/crlf.md" | grep -Eq '^atualizado_em: [0-9]{4}-[0-9]{2}-[0-9]{2}#$' \
   && [ "$(grep -c 'merged' "$aux/crlf.md")" = 2 ] && ! ls "$aux"/crlf.md.tmp.* >/dev/null 2>&1
-confere "--registrar-merge num arquivo CRLF mantem os CR e a linha nova de base_sha os segue ($crs_antes antes, $crs_depois depois) e nao deixa temporario" $?
+confere "--registrar-merge num arquivo CRLF mantem os CR em base_sha e atualizado_em ($crs_antes antes, $crs_depois depois) e nao deixa temporario" $?
 entrega "$aux/reg2.md" "$PLAN_ABERTO"
 bash "$leitor" --registrar-merge --entrega "$aux/reg2.md" --merge-sha 'nao-e-sha' --base-sha "$SHA_B" >/dev/null 2>&1
 [ "$?" = 64 ]; confere '--registrar-merge com sha invalido: uso (64)' $?
@@ -695,8 +704,8 @@ confere 'E9 com pr_url entre aspas: le o PR pela URL sem as aspas' $?
        cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
        confere 'sem ferramenta do servico: nao grava' $?; }
 
-grep -q 'prs` (o primeiro item' "$ref/08-registro.md" && grep -q 'entrega-de-planejamento.sh' "$ref/08-registro.md"
-confere '08-registro grava prs[0]' $?
+grep -q -- '--registrar-pr' "$ref/08-registro.md" && grep -q 'sprint_atual=planejamento' "$ref/08-registro.md"
+confere '08-registro grava o item de prs da entrega atual' $?
 grep -q 'O PR de planejamento nunca tem merge automático' "$ref/09-revisao.md"
 confere '09-revisao diz que o PR de planejamento nunca tem merge automatico' $?
 grep -q 'pulou a revisão por passar de 100 arquivos não é finding nem pendência' "$ref/09-revisao.md"

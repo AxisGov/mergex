@@ -247,6 +247,11 @@ Qualquer falha — sem permissão, PR já existe, base inválida, rede fora — 
 Se a falha for "PR já existe para esta branch", recupere a URL existente (`gh pr view --json url`; no GitLab, `glab mr view <branch> --output json`,
 campo `web_url`) e registre-a: é uma retomada, não uma falha. É o caso normal depois de uma reconciliação de base (`references/11-reconciliacao-base.md`): o PR existente é retomado, **nunca um segundo PR**.
 
+Na entrega `por_sprint`, isso só é retomada quando o PR existente é o da `sprint_atual` que o
+E0 registrou. Um PR `merged` da sprint anterior é histórico em `prs`, **não é retomada**: depois
+de o E0 abrir a sprint seguinte, o E7 abre o PR novo dessa sprint. Nunca associe à sprint atual a
+URL do PR já fechado da anterior.
+
 ## Passo 3 — Quando a ferramenta não está disponível
 
 Não falhe, não pergunte, não peça credencial. Faça três coisas:

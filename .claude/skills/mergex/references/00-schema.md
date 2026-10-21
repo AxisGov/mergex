@@ -62,12 +62,13 @@ Valem para todo arquivo que leva frontmatter:
 | `expx_tool` | `sprintx` \| `runx` |
 | `entregue_por` | `mergex` |
 | `tipo_trabalho` | `feature` \| `ocorrencia` |
+| `entrega` | `por_trabalho` \| `por_sprint` |
 | `estado` | `aberto` \| `entregue` \| `bloqueado` |
 | `portao` | `pronto` \| `bloqueado` \| `null` (ainda não rodou) |
 | `falhas_portao` (por item) | `v1` … `v12` \| `v1_sem_prova` … `v12_sem_prova` |
 | `causa` | ver "A causa do bloqueio" \| `null` (não bloqueado) |
 | `pr_estado` | `rascunho` \| `aberto` \| `merged` \| `fechado` \| `null` |
-| `sprint_atual` | `planejamento` \| `null` |
+| `sprint_atual` | `planejamento` \| `NN` (dois dígitos, `01`, `02`, ...) \| `null` |
 | `estado` (por item de `prs`) | `aberto` \| `rascunho` \| `aguardando_merge` \| `merged` \| `fechado` \| `null` |
 | `merge` (por item de `prs`) | `humano` \| `automatico` \| `null` |
 | `raio` | `baixo` \| `medio` \| `alto` \| `null` (sem modo legado) |
@@ -106,6 +107,7 @@ entregue_por: mergex
 titulo: Corrigir base de calculo do ICMS-ST com desconto incondicional
 tipo_trabalho: ocorrencia
 tipo_ocorrencia: regra-de-calculo
+entrega: por_trabalho
 estado: entregue
 versionado: true
 branch: fix/OC-2026-0184-icms-st-base-desconto
@@ -157,6 +159,7 @@ entregue_em: 2026-08-29
 | `trabalho_id` | O slug da sprintx ou o `<OC-ID>-<slug>` da runx. O mesmo da pasta de origem |
 | `entregue_por` | Sempre `mergex` |
 | `tipo_ocorrencia` | O tipo da runx; `null` quando `tipo_trabalho: feature` |
+| `entrega` | O modo efetivo fixado pelo E0: `por_trabalho` ou `por_sprint`. O valor do plano sobrescreve o do projeto apenas antes do primeiro registro; ausente em entrega antiga é lido como `por_trabalho` |
 | `estado` | `aberto` no E0; `entregue` quando o fluxo completou; `bloqueado` quando o portão barrou |
 | `versionado` | `false` em repositório sem versionador |
 | `branch`, `branch_base` | `null` quando `versionado: false` |
@@ -177,11 +180,11 @@ entregue_em: 2026-08-29
 | `push_feito` | `true` só quando o E6 confirmou que o remoto tem o mesmo commit |
 | `pr_url` | A URL devolvida pelo E7; `null` quando o PR não foi aberto — **não é falha** |
 | `pr_estado` | `rascunho` na abertura normal; `aberto` quando o QA já aprovou; `merged`/`fechado` quando o E9 ou uma pessoa atualizarem |
-| `sprint_atual` | `planejamento` enquanto a entrega atual é o PR de planejamento; `null` fora dele. Ver "A entrega de planejamento" |
-| `prs` | Os PRs do trabalho, um item `{sprint, url, estado, merge_sha, merge, base_sha}` por PR, em YAML de bloco; `[]` sem PR registrado. O de planejamento é sempre o primeiro. `pr_url`/`pr_estado` de topo são os da entrega atual. Ver "A entrega de planejamento" |
+| `sprint_atual` | `planejamento` no PR de planejamento, `NN` na sprint que o E0 abriu, ou `null` fora dessas entregas. Nunca é relido do plano depois de registrado |
+| `prs` | Os PRs do trabalho, um item `{sprint, url, estado, merge_sha, merge, base_sha}` por PR, em YAML de bloco e em sequência. O de planejamento é sempre o primeiro; numa entrega `por_sprint`, seguem `01`, `02`, ... . `pr_url`/`pr_estado` de topo são os da entrega atual |
 | `entregue_em` | A data em que o fluxo completou; `null` enquanto `estado` não for `entregue` |
 
-## A entrega de planejamento — `sprint_atual` e `prs`
+## A entrega por sprint — `entrega`, `sprint_atual` e `prs`
 
 O PR de planejamento (DM-259) leva só os artefatos de método do planejamento (tudo sob
 `^docs/(sprintx|entregas|eventos)/`), abre no fim da F5 e tem merge do desenvolvedor, nunca
@@ -199,25 +202,56 @@ prs:
     base_sha: null
 ```
 
+Depois do merge do planejamento, uma entrega `por_sprint` abre uma sprint por vez. O E0 recebe
+`--sprint <NN>`, fixa o modo efetivo e acrescenta o item da sprint; por exemplo, durante a 02:
+
+```yaml
+entrega: por_sprint
+sprint_atual: 02
+prs:
+  - sprint: planejamento
+    url: https://github.com/<org>/<repo>/pull/480
+    estado: merged
+    merge_sha: 1111111111111111111111111111111111111111
+    merge: humano
+    base_sha: 0000000000000000000000000000000000000000
+  - sprint: 01
+    url: https://github.com/<org>/<repo>/pull/481
+    estado: merged
+    merge_sha: 3333333333333333333333333333333333333333
+    merge: humano
+    base_sha: 2222222222222222222222222222222222222222
+  - sprint: 02
+    url: null
+    estado: null
+    merge_sha: null
+    merge: null
+    base_sha: null
+```
+
 | Campo do item | Regra |
 |---|---|
-| `sprint` | `planejamento` só no **primeiro** item |
+| `sprint` | `planejamento` só no **primeiro** item; depois, `01`, `02`, ... sem lacuna |
 | `url` | A URL do PR, gravada pelo E8; `null` antes do E7 |
 | `estado` | O enum da tabela; o E8 grava o do E7, o E9 grava `merged` |
 | `merge_sha` | O commit de merge, só com `estado: merged`; `null` antes |
-| `merge` | `humano` quando o E9 registra o merge; **nunca** `automatico` no planejamento |
+| `merge` | `humano` quando o E9 registra o merge; `automatico` só quando o modo automático fizer o merge de uma sprint; **nunca** `automatico` no planejamento |
 | `base_sha` | A ponta da base quando o PR foi mergeado (`baseRefOid` no GitHub, `diff_refs.start_sha` no GitLab), gravada pelo E9 com o merge (DM-262); `null` antes. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
 
 - `prs` é sempre YAML de bloco; a forma em fluxo (`prs: [{...}]`) é ilegível. Lista vazia é `prs: []`.
-- Uma chave sem a outra é incoerente: `sprint_atual: planejamento` sem o item, ou o item sem
-  `sprint_atual`. A exceção é a retomada do E0 depois do merge: `sprint_atual: null` com o
-  item `merged`.
-- Entrega anterior às chaves (sem `sprint_atual` nem `prs`) não é de planejamento.
+- Uma chave sem a outra é incoerente: `sprint_atual: planejamento` ou `NN` sem o item
+  correspondente em `prs`, ou item de sprint com `sprint_atual: null`. A exceção é a retomada do
+  E0 depois do merge do planejamento: `sprint_atual: null` com aquele item `merged`.
+- Numa entrega `por_sprint`, cada item anterior ao atual está `merged`; só o último pode estar
+  aberto. O E0 só acrescenta a sprint seguinte depois de o E9 registrar o merge da anterior.
+- Entrega anterior às três chaves é lida como `entrega: por_trabalho`, `sprint_atual: null` e
+  `prs: []`.
 - **Ninguém relê estas chaves por conta própria.** O leitor único é
   `scripts/entrega-de-planejamento.sh --entrega <ENTREGA.md> [--rev <commit>]`, que imprime
-  `planejamento=sim|nao` (com `sim`, também `estado=`, `merge_sha=` e `base_sha=`; com `nao`
-  depois da retomada, também `planejamento_merge_sha=` e `planejamento_base_sha=`, DM-261 e DM-262) e sai 2 com a entrega ilegível ou
-  incoerente. E0, E2, E7, E8 e E9 o consomem.
+  `planejamento=sim|nao`, `entrega=`, `sprint_atual=`, o estado do item atual e os itens de `prs`
+  (com `sim`, também `estado=`, `merge_sha=` e `base_sha=`; depois da retomada, também
+  `planejamento_merge_sha=` e `planejamento_base_sha=`, DM-261 e DM-262) e sai 2 com a entrega
+  ilegível ou incoerente. E0, E2, E7, E8 e E9 o consomem.
 
 ## A ordem de registro — a chave `seq`
 

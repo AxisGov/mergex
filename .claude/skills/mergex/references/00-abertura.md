@@ -124,6 +124,89 @@ git merge-base --is-ancestor "$base_sha" HEAD 2>/dev/null || {
 printf 'base_validada_sha=%s\norigem_base=registrada_sprint\n' "$(git merge-base HEAD "$base_sha")"
 ```
 
+Esse bloco é o da entrega `por_trabalho`. Na entrega por sprint, a F6 chama o E0 com `--sprint`, e
+quem abre a primeira sprint depois do planejamento é o bloco abaixo.
+
+## A entrega por sprint (`--sprint <NN>`)
+
+*Desenho de 2026-10-18, 4.3; DM-263.* Com `entrega: por_sprint`, o trabalho continua um só (mesmo
+slug, mesma branch, mesmo `ENTREGA.md`), mas cada sprint vai num PR próprio, **um por vez**: a sprint
+N+1 só abre depois do merge do PR da N, com a branch atualizada a partir da main. A F6 chama o E0 no
+início de cada sprint com `--sprint <NN>`, o id fixo da sprint (`01`, `02`, ...), que o E0 grava;
+nenhuma etapa seguinte relê a sprint do plano.
+
+**O modo efetivo é fixado uma vez.** O E0 lê `entrega:` do frontmatter do `00-PLANEJAMENTO.md` do
+trabalho, que sobrescreve o `EXPX_ENTREGA` do `leitor-do-projeto.sh` (o padrão do projeto); valor
+fora de `por_trabalho | por_sprint` faz o E0 parar. Gravado o modo na entrega (`entrega:`), ele não muda
+mais, nem com o `00-PLANEJAMENTO.md` alterado depois: quem o lê é
+`entrega-de-planejamento.sh --modo-efetivo`. `--sprint` num trabalho `por_trabalho` é recusa. Na
+entrega `por_trabalho`, o E0 grava `entrega: por_trabalho` no caso 1 (e na primeira retomada de
+um arquivo sem a chave), com o modo que o mesmo `--modo-efetivo` disser.
+
+**A sequência**, conferida antes de qualquer escrita (a gravação é de
+`entrega-de-planejamento.sh --abrir-sprint`, o escritor único de `entrega`, `sprint_atual` e `prs`):
+
+1. a sprint 01 só abre com o PR de planejamento `merged` (`prs[0]`); a sprint N+1, com o PR da N
+   `merged` — sem o registro do merge, o E0 recusa e manda rodar o E9, que o lê no serviço;
+2. a sprint pedida é a seguinte à última de `prs`: fora de sequência, recusa;
+3. o `merge_sha` do último PR fechado é ancestral da base buscada, e a base buscada é ancestral do
+   `HEAD` (a branch foi atualizada a partir da main depois do merge);
+4. `reconciliacoes` vazio, como na retomada depois do planejamento.
+
+Então grava `entrega: por_sprint`, `sprint_atual: <NN>`, o item novo `{sprint: <NN>, url: null,
+estado: null, merge_sha: null, merge: null, base_sha: null}` no fim de `prs`, volta `pr_url` e
+`pr_estado` a `null`, e **reancora a base validada**: `base_validada_sha` = `git merge-base HEAD
+<base>` e `origem_base: registrada_sprint` (a mesma exceção da retomada depois do planejamento,
+DM-261). Com `--sprint <NN>` igual à `sprint_atual` e o PR dela ainda não `merged`, é retomada da
+mesma sprint: nada disso muda. **Sprint fechada é imutável:** `--sprint <NN>` de uma sprint já
+`merged` é recusa — defeito achado depois do merge vira task da sprint seguinte ou correção
+própria, nunca reabertura.
+
+Saída 0: aberta (ou retomada). Saída 1: recusa, sem escrever nada. Saída 2: entrega ou configuração
+ilegível, ou base inexistente. `$sprint` é o `<NN>` que a F6 passou; `<base>` é a base buscada:
+
+```bash
+# E0 --sprint <NN>: o modo efetivo, a sequência e a base da sprint (DM-263)
+sprint="${sprint:?o E0 --sprint recebe o id da sprint}"
+entrega="docs/entregas/<trabalho_id>/ENTREGA.md"
+plano="docs/sprintx/features/<slug>/00-PLANEJAMENTO.md"
+fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh)" || { printf 'mergex E0: configuração do projeto (.expx/fatiamento.json) não lida\n' >&2; exit 2; }
+projeto="$(printf '%s\n' "$fatia" | sed -n 's/^EXPX_ENTREGA=//p')"
+modo="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --modo-efetivo --entrega "$entrega" --plano "$plano" --projeto "${projeto:-por_trabalho}")"
+case $? in
+  0) ;;
+  1) printf 'mergex E0 BLOQUEADO — entrega: no frontmatter de %s fora de por_trabalho | por_sprint\n' "$plano" >&2; exit 1 ;;
+  *) exit 2 ;;
+esac
+case "$modo" in entrega=por_sprint*) ;; *)
+  printf 'mergex E0 BLOQUEADO — --sprint num trabalho por_trabalho (%s)\n' "$(printf '%s\n' "$modo" | tr '\n' ' ')" >&2; exit 1 ;;
+esac
+marca="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2
+atual="$(printf '%s\n' "$marca" | sed -n 's/^sprint_atual=//p')"
+fechada_sha="$(printf '%s\n' "$marca" | sed -n 's/^fechada_merge_sha=//p')"
+base_sha="$(git rev-parse --verify -q "<base>^{commit}")" || { printf 'mergex E0: base <base> inexistente\n' >&2; exit 2; }
+if [ "$atual" != "$sprint" ] && [ -n "$fechada_sha" ]; then
+  # com reconciliação registrada, a base vem da cadeia: reancorar a deixaria sem âncora
+  rec="$(awk 'NR == 1 { next } /^---/ { exit } /^reconciliacoes:/ { sub(/^reconciliacoes:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print "v=" $0; exit }' "$entrega")"
+  case "$rec" in ''|'v=[]') ;; *)
+    printf 'mergex E0 BLOQUEADO — a entrega já tem reconciliacoes: a base da sprint não é reancorada sobre uma cadeia de reconciliação\n' >&2
+    exit 1 ;;
+  esac
+  git merge-base --is-ancestor "$fechada_sha" "$base_sha" 2>/dev/null || {
+    printf 'mergex E0 BLOQUEADO — a base <base> não contém o merge do último PR fechado (%s): busque a base de novo\n' "$fechada_sha" >&2
+    exit 1
+  }
+  git merge-base --is-ancestor "$base_sha" HEAD 2>/dev/null || {
+    printf 'mergex E0 BLOQUEADO — a branch não foi atualizada a partir de <base> depois do merge do último PR fechado\n' >&2
+    exit 1
+  }
+fi
+nova="$(git merge-base HEAD "$base_sha")" || { printf 'mergex E0: nenhum merge-base entre HEAD e <base>\n' >&2; exit 2; }
+bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --abrir-sprint "$sprint" --entrega "$entrega" --base-validada-sha "$nova" || {
+  rc=$?; [ "$rc" = 1 ] && printf 'mergex E0 BLOQUEADO — a sprint %s não abre (motivo acima)\n' "$sprint" >&2; exit "$rc"
+}
+```
+
 ## Passo 1 — Detectar se o repositório usa versionamento
 
 ```

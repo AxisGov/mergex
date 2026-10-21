@@ -26,6 +26,11 @@ nunca da mão. Confira com `scripts/causa-do-portao.sh --validar` antes de commi
 só o `reconciliacao-base.sh --registrar` a troca e acrescenta itens a `reconciliacoes`; só o
 `registrar-portao.sh` grava `portao_sha`. Nenhuma delas é escrita à mão.
 
+`entrega`, `sprint_atual` e `prs` são gravados pelos escritores do fluxo, nunca inferidos ao
+preencher o template. O E0 fixa `entrega`, abre a sprint e acrescenta o item; o E8 atualiza URL e
+estado pelo `entrega-de-planejamento.sh --registrar-pr`; o E9 registra o merge. Em
+`por_trabalho`, use `sprint_atual: null` e preserve o histórico de `prs` que já existir.
+
 ---
 
 ---
@@ -37,6 +42,7 @@ entregue_por: mergex
 titulo: {{titulo do trabalho, uma linha, sem acento no frontmatter}}
 tipo_trabalho: {{feature | ocorrencia}}
 tipo_ocorrencia: {{tipo da runx | null}}
+entrega: {{por_trabalho | por_sprint}}
 estado: {{aberto | entregue | bloqueado}}
 versionado: {{true | false}}
 branch: {{nome da branch | null}}
@@ -67,8 +73,8 @@ desvios: []
 push_feito: {{true | false}}
 pr_url: {{url | null}}
 pr_estado: {{rascunho | aberto | merged | fechado | null}}
-sprint_atual: {{planejamento, so no E0 --planejamento | null}}
-prs: {{[] | a lista em bloco com o item de planejamento, so no E0 --planejamento (references/00-schema.md)}}
+sprint_atual: {{planejamento | NN | null}}
+prs: {{[] | a lista em bloco: planejamento primeiro e depois 01, 02... (references/00-schema.md)}}
 criado_em: {{AAAA-MM-DD}}
 atualizado_em: {{AAAA-MM-DD}}
 entregue_em: {{AAAA-MM-DD | null}}

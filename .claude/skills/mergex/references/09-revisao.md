@@ -85,21 +85,22 @@ Nunca decida o trabalho atual por:
 - o `ENTREGA.md` modificado mais recentemente;
 - o PR que está sendo revisado.
 
-### O PR de planejamento do trabalho atual
+### O PR de planejamento (e o da sprint) do trabalho atual
 
-O E9 é o **único** que registra o merge do PR de planejamento (DM-260), inclusive o feito fora
-dele, pelo botão do serviço. Com trabalho atual, quando `entrega-de-planejamento.sh` diz
-`planejamento=sim` com o item ainda não `merged` e a `pr_url` preenchida, o E9 lê esse PR no
+O E9 é o **único** que registra o merge do PR de planejamento (DM-260) e o do PR de cada sprint
+da entrega por sprint (DM-263), inclusive o feito fora dele, pelo botão do serviço. Com trabalho
+atual, quando `entrega-de-planejamento.sh` diz `sprint_atual=planejamento` ou `sprint_atual=<NN>`
+com o item dela ainda não `merged` (`atual_estado=`) e a `pr_url` preenchida, o E9 lê esse PR no
 serviço e, se ele já foi mergeado, grava o registro com `merge_sha` = o commit de merge:
 
 ```bash
-# E9: o merge do PR de planejamento do trabalho atual (DM-260)
+# E9: o merge do PR de planejamento ou da sprint do trabalho atual (DM-260, DM-263)
 entrega="docs/entregas/<trabalho_id>/ENTREGA.md"
-planejamento="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2
-case "$planejamento" in planejamento=sim*) ;; *) exit 0 ;; esac
-case "$planejamento" in *estado=merged*) exit 0 ;; esac
+marca="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2
+case "$(printf '%s\n' "$marca" | sed -n 's/^sprint_atual=//p')" in planejamento|[0-9][0-9]) ;; *) exit 0 ;; esac
+case "$(printf '%s\n' "$marca" | sed -n 's/^atual_estado=//p')" in merged) exit 0 ;; esac
 pr_url="$(awk 'NR == 1 { next } /^---/ { exit } /^pr_url:/ { sub(/^pr_url:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); if ($0 ~ /^".*"$/ || $0 ~ /^\047.*\047$/) $0 = substr($0, 2, length($0) - 2); print; exit }' "$entrega")"
-case "$pr_url" in ''|null) echo "PR de planejamento sem pr_url: nada a ler no serviço"; exit 0 ;; esac
+case "$pr_url" in ''|null) echo "PR atual sem pr_url: nada a ler no serviço"; exit 0 ;; esac
 case "$pr_url" in
   */-/merge_requests/*)   # GitLab: a API do projeto do remoto, como no passo 1
     iid="${pr_url##*/-/merge_requests/}"; iid="${iid%%[!0-9]*}"
@@ -116,7 +117,7 @@ esac
 read -r estado_pr merge_sha base_sha _ <<EOF
 $resposta
 EOF
-[ "$estado_pr" = MERGED ] || { echo "PR de planejamento ainda não mergeado (${estado_pr:-sem estado}): nada gravado"; exit 0; }
+[ "$estado_pr" = MERGED ] || { echo "PR atual ainda não mergeado (${estado_pr:-sem estado}): nada gravado"; exit 0; }
 [ -n "$merge_sha" ] || { echo "MERGED sem commit de merge: nada gravado"; exit 3; }
 [ -n "$base_sha" ] || { echo "MERGED sem a base do PR no merge: nada gravado"; exit 3; }
 bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega "$entrega" --merge-sha "$merge_sha" --base-sha "$base_sha"
@@ -131,7 +132,9 @@ merged` no topo — o script grava só isso e confere a gravação. **Sem ferram
 sem o commit de merge ou sem a base, não grava nada** e diz o motivo; PR ainda aberto também
 não grava. A V9 da primeira sprint confere todo commit de `base_sha..merge_sha`: num
 rebase-merge ou fast-forward, o PR de planejamento é o intervalo inteiro, não só o último commit. O E0 da primeira sprint depende desse
-registro (`00-abertura.md`, "Retomada depois do PR de planejamento"), e nunca consulta o serviço.
+registro (`00-abertura.md`, "Retomada depois do PR de planejamento"), e o da sprint seguinte, do
+registro do PR da anterior ("A entrega por sprint"); o E0 nunca consulta o serviço. O item
+gravado é o da sprint que o E0 registrou (`sprint_atual`), nunca relida do plano.
 
 **O PR de planejamento nunca tem merge automático**, com qualquer configuração: o merge é do
 desenvolvedor, no serviço ou confirmado aqui no passo 7. E o aviso do app de revisão de que
@@ -1144,12 +1147,13 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    reduz a janela, mas não dispensa (a) nem (b).
 6. Revalidado sem mudança **e com o merge atomicamente preso ao HEAD revalidado** (item 5), faça o merge com a estratégia que o repositório usa (detecte em `CONVENCOES.md` da stackx ou nos merges anteriores; na ausência, use o padrão do serviço). Nunca force, nunca reescreva histórico já enviado.
 7. Atualize `pr_estado: merged` no `ENTREGA.md` correspondente, quando ele existir localmente.
-   Se esse `ENTREGA.md` é a entrega de planejamento (`entrega-de-planejamento.sh` diz
-   `planejamento=sim`), o registro é o do script, que grava também o primeiro item de `prs`
+   Se esse `ENTREGA.md` é a entrega de planejamento ou a de uma sprint (`entrega-de-planejamento.sh`
+   diz `sprint_atual=planejamento` ou `sprint_atual=<NN>`), o registro é o do script, que grava
+   também o item dela em `prs`
    (`estado: merged`, `merge_sha` = o commit de merge, `merge: humano`, `base_sha` = a ponta da
    base no merge, relida no serviço como no bloco):
    `entrega-de-planejamento.sh --registrar-merge --entrega <ENTREGA.md> --merge-sha <commit de merge> --base-sha <base>`
-   ("O PR de planejamento do trabalho atual", no passo 2).
+   ("O PR de planejamento (e o da sprint) do trabalho atual", no passo 2).
 
    **E, somente se o PR mergeado for o do trabalho atual**, grave `pr_estado: merged`
    também em `.expx/estado.json`. O E9 percorre PRs de vários trabalhos e de outras
