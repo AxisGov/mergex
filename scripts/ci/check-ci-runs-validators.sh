@@ -49,9 +49,17 @@ done
 
 mut="${2:-.github/workflows/mutacao.yml}"
 [ -f "$mut" ] || fail "workflow de mutacao ausente: $mut"
+# Só os itens da lista `bancada:` da matriz contam: o mesmo nome em outra lista
+# (os `paths` do gatilho, por exemplo) não põe a bancada para rodar.
+matriz="$(tr -d '\r' < "$mut" | awk '
+  dentro && /^[[:space:]]*-[[:space:]]/ { sub(/^[[:space:]]*-[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print; next }
+  dentro && /^[[:space:]]*(#.*)?$/ { next }
+  { dentro = 0 }
+  /^[[:space:]]*bancada:[[:space:]]*$/ { dentro = 1 }
+')"
 for f in scripts/ci/mutacao-*.sh; do
   b="$(basename "$f" .sh)"
-  n="$(grep -cE "^[[:space:]]*-[[:space:]]+${b}[[:space:]]*$" "$mut" || true)"
+  n="$(printf '%s\n' "$matriz" | grep -cFx -- "$b" || true)"
   [ "$n" = '1' ] || fail "$f aparece $n vez(es) na matriz de $mut; esperado exatamente 1"
 done
 
