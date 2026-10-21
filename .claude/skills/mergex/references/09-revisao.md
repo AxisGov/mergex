@@ -816,8 +816,9 @@ contra a base antiga, e o HEAD pode nem ter mudado, quando a base nova já era a
   um): o check run, pela criação da execução do workflow (`checkSuite.workflowRun.createdAt`;
   fora do Actions, a do `checkSuite`), e o status, pela criação dele. A conclusão não basta:
   a re-execução de uma execução antiga repete o evento antigo, com o merge da base antiga, e
-  termina depois do redirecionamento sem ter rodado contra a base atual. De cada check (nome
-  e workflow; status, pelo contexto) vale só o da execução mais nova, e a lista inteira tem de
+  termina depois do redirecionamento sem ter rodado contra a base atual. De cada check (o app, o
+  workflow pelo id, nunca pelo nome, e o nome do check; status, pelo contexto) vale só o da
+  execução mais nova, e a lista inteira tem de
   caber numa página. Senão — nenhum check nesse HEAD, só os de um HEAD anterior, ou algum
   nascido antes do redirecionamento —, inelegível com `CI anterior ao redirecionamento`.
   Check ainda em andamento não conta aqui: é o R1 que o trata. A cor dos checks também é do
@@ -863,13 +864,13 @@ case "$rc" in 0) ;; 1) motivos="${motivos}não sincronizado com a base nova
 ci="$(gh api graphql -f h="$head_oid" -f o="${dono_repo%%/*}" -f r="${dono_repo#*/}" -f query='
   query($o: String!, $r: String!, $h: GitObjectID!) { repository(owner: $o, name: $r) { object(oid: $h) { ... on Commit {
     statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename
-      ... on CheckRun { name status completedAt checkSuite { createdAt workflowRun { createdAt workflow { name } } } }
+      ... on CheckRun { name status completedAt checkSuite { createdAt app { slug } workflowRun { createdAt workflow { id } } } }
       ... on StatusContext { context state createdAt } } } } } } } }' \
   | jq -r --arg r "$redir" '.data.repository.object.statusCheckRollup as $s
       | if $s == null then [] elif $s.contexts.pageInfo.hasNextPage then error("mais de uma página de checks")
         else $s.contexts.nodes end
       | map(if .__typename == "CheckRun"
-              then {k: ("run:" + (.checkSuite.workflowRun.workflow.name // "") + "/" + .name),
+              then {k: ("run:" + (.checkSuite.app.slug // "") + "/" + (.checkSuite.workflowRun.workflow.id // "") + "/" + .name),
                     nasceu: (.checkSuite.workflowRun.createdAt // .checkSuite.createdAt // ""),
                     concluido: (.status == "COMPLETED")}
               else {k: ("status:" + .context), nasceu: (.createdAt // ""),
@@ -1123,8 +1124,11 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    aos checks não obrigatórios. Por isso: (a) o merge é a operação **seguinte** à releitura, sem
    pergunta, outro PR ou trabalho entre as duas; (b) logo depois do merge, releia o gate do
    mesmo HEAD mais uma vez. Finding, review ou check criado ou concluído antes do instante do
-   merge e ausente da releitura é mudança no resultado do gate entre a releitura e o merge: a
-   passagem fica invalidada — diga ao desenvolvedor exatamente o que mudou e que o merge já foi
+   merge e ausente da releitura é mudança no resultado do gate entre a releitura e o merge; num
+   PR redirecionado, também a base que andou entre as duas (o `--match-head-commit` prende o
+   HEAD, não a base): o pai, na base, do que o merge pôs nela (o primeiro pai do commit de
+   merge; no squash, o pai do commit; no rebase, o do primeiro commit reaplicado) tem de ser o `baseRefOid` revalidado. Em qualquer desses
+   casos a passagem fica invalidada — diga ao desenvolvedor exatamente o que mudou e que o merge já foi
    feito, registre no rastro, **encerre a passagem** sem oferecer os PRs seguintes e nunca
    reverta por conta própria (a decisão de reverter é humana). **Releitura posterior
    impossível** (falha, ou alguma página do gate não obtida) é tratada como mudança, com a

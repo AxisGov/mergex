@@ -94,9 +94,13 @@ GH
 chmod +x "$aux/bin/gh"
 
 redir='2026-10-20T10:00:00Z'; antes='2026-10-20T09:00:00Z'; depois='2026-10-20T11:00:00Z'; fim='2026-10-20T12:00:00Z'
-# check <nome> <nasceu> [<concluido em>] [<status>]: check run de uma execucao do Actions
-check() { printf '{"__typename":"CheckRun","name":"%s","status":"%s","completedAt":"%s","checkSuite":{"createdAt":"%s","workflowRun":{"createdAt":"%s","workflow":{"name":"CI"}}}}' \
-            "$1" "${4:-COMPLETED}" "${3:-$fim}" "$2" "$2"; }
+# check <nome> <nasceu> [<concluido em>] [<status>] [<id do workflow>]: check run de uma execucao
+# do Actions (todo workflow se chama CI: o que os distingue e o id)
+check() { printf '{"__typename":"CheckRun","name":"%s","status":"%s","completedAt":"%s","checkSuite":{"createdAt":"%s","app":{"slug":"github-actions"},"workflowRun":{"createdAt":"%s","workflow":{"id":"%s","name":"CI"}}}}' \
+            "$1" "${4:-COMPLETED}" "${3:-$fim}" "$2" "$2" "${5:-W_ci}"; }
+# check_app <app> <nome> <nasceu>: check run de um app, fora do Actions
+check_app() { printf '{"__typename":"CheckRun","name":"%s","status":"COMPLETED","completedAt":"%s","checkSuite":{"createdAt":"%s","app":{"slug":"%s"},"workflowRun":null}}' \
+                "$2" "$fim" "$3" "$1"; }
 status() { printf '{"__typename":"StatusContext","context":"%s","state":"%s","createdAt":"%s"}' "$1" "${3:-SUCCESS}" "$2"; }
 review() { printf '{"user":{"login":"%s"},"commit_id":"%s","submitted_at":"%s","state":"COMMENTED"}' "$1" "$2" "$3"; }
 # cenario <base> <head> <checks> <reviews> ; opcionais no ambiente: REDIR (vazio: sem troca de
@@ -142,6 +146,12 @@ cenario "$P" "$H" "$ci_ok,$(status CodeAnt "$antes")" ''
 espera 'status de antes do redirecionamento: inelegivel CI anterior' 1 "$m_ci"
 cenario "$P" "$H" "$(check hooks "$antes" "$antes"),$(check hooks "$depois"),$(status CodeAnt "$antes"),$(status CodeAnt "$depois")" ''
 espera 'o mesmo check numa execucao de antes e numa nova (reabrir o PR): vale a nova, elegivel' 0 "$eleg"
+cenario "$P" "$H" "$(check hooks "$antes" "$antes" '' W_outro),$(check hooks "$depois")" ''
+espera 'dois workflows com o mesmo nome e o mesmo check: o de antes nao some, inelegivel CI anterior' 1 "$m_ci"
+cenario "$P" "$H" "$(check_app app-a lint "$antes"),$(check_app app-b lint "$depois")" ''
+espera 'dois apps com um check de mesmo nome: o de antes nao some, inelegivel CI anterior' 1 "$m_ci"
+cenario "$P" "$H" "$(check_app app-a lint "$antes"),$(check_app app-a lint "$depois")" ''
+espera 'o mesmo app com o check numa suite nova: vale a nova, elegivel' 0 "$eleg"
 cenario "$P" "$H" "$ci_ok,$(status bot "$depois"),$(check lento "$depois" '' IN_PROGRESS),$(status externo "$antes" PENDING)" ''
 espera 'sincronizado, CI verde no head, sem revisor_bot: elegivel (check em andamento fica para o R1)' 0 "$eleg"
 PAGINA_A_MAIS=1 cenario "$P" "$H" "$ci_ok" ''
