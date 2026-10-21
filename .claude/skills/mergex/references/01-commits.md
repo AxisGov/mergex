@@ -175,6 +175,14 @@ O `--preparar` vincula `origem`, `trabalho_id` e `task` ao dono da seção. O
 plano corrente antes do commit. O token sozinho não autoriza trocar de trabalho
 nem aproveitar um id de task repetido em outra feature.
 
+O `--preparar` também grava no dono da seção a árvore do índice que ele montou
+(`git write-tree`), e o `--concluir` só commita se o índice ainda for exatamente
+essa árvore (DM-262). A varredura de segredo é sobre o stage do `--preparar`:
+qualquer reestágio entre os dois tempos — outro arquivo, o mesmo arquivo com
+outro conteúdo, a evidência revisada de novo — para com
+`PARADO — o stage mudou depois do --preparar` (código 4), sem commit e com o stage
+preservado. Rode o E1 de novo.
+
 Achou segredo entre os dois tempos: **não conclua**. Aborte como manda o passo 2, e libere a seção (`trava-do-e1.sh --liberar <token>`) — a task fica sem commit e a V11 do E2 a nomeia.
 
 | Código | Desfecho |
@@ -601,7 +609,7 @@ commits:
 
 `seq` é a **ordem de registro do E1**: inteiro positivo, monotônico, **global à ENTREGA**. Não é número de task, de sprint, de rodada da F5, nem timestamp, nem quantidade de commits da branch. O contrato inteiro — progressão, prefixo legado, invariante — está em `references/00-schema.md`, "A ordem de registro".
 
-`revisao` é o que o `conferir` do núcleo do expx diz da task **no commit dela**, depois do `git commit` (`--modo obrigatoria --task <T>=<SHA do commit>`): `ok`; `achados` (`FALHA achados-abertos:<n>`); `incompleta:<classe>` e `indisponivel:<classe>` (a classe é o motivo antes do segundo `:`, sem caminho); `null` sem evidência no commit (sem chamar node); `invalida` para qualquer outra resposta, núcleo ou node ausente inclusive. É registro, nunca prova: a V12 pergunta de novo ao `conferir`, e o E1 nunca para por causa dela — o commit já existe. A tabela completa está em `references/00-schema.md`, "A chave `revisao` do item" (DM-241).
+`revisao` é o que o `conferir` do núcleo do expx diz da task **no commit dela**, depois do `git commit` (`--modo obrigatoria --task <T>=<SHA do commit>`): `ok`; `achados` (`FALHA achados-abertos:<n>`); `incompleta:<classe>` e `indisponivel:<classe>` (a classe é o motivo antes do segundo `:`, sem caminho); `null` sem evidência no commit (sem chamar node); `invalida` para qualquer outra resposta, núcleo ou node ausente inclusive. É registro, nunca prova: a V12 pergunta de novo ao `conferir`, e o E1 nunca para por causa dela — o commit já existe. A tabela completa está em `references/00-schema.md`, "A chave `revisao` do item" (DM-241). O `conferir` tem limite de tempo (`MERGEX_E1_CONFERIR_LIMITE`, em segundos, 120 por padrão; DM-262): estourou, o valor é `invalida`, como em qualquer outra falha, e o E1 segue.
 
 **Não escreva o item à mão.** O escritor canônico é o `scripts/sequencia-de-commits.sh`: ele lê a lista, valida a sequência, calcula o próximo número e acrescenta o item no fim.
 

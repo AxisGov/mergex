@@ -400,6 +400,59 @@ SAIDA2="$(cd "$R" && bash "$FECHA" --concluir --entrega "$ENTREGA_REL" --task T-
   && ok 'evidencia que mudou entre --preparar e --concluir: para sem commit' \
   || falha "evidencia que mudou entre --preparar e --concluir — rc=$RC rc2=$RC2 commits=$(git -C "$R" rev-list --count HEAD) saida=$SAIDA2"
 
+# A janela entre o --preparar e o --concluir (DM-262): a varredura de segredo é sobre
+# o stage do --preparar. Qualquer reestagio depois dela (outro arquivo da task, ou o
+# mesmo com outro conteúdo) muda a árvore do índice, e o --concluir para sem commitar.
+janela() { # <dir> <rotulo> <comando que reestagia, rodado no dir>
+  local R="$1" rotulo="$2" antes
+  printf 'png\n' > "$R/img/logo.png"
+  revisa "$R" T-01.01 img/logo.png
+  SAIDA="$(cd "$R" && bash "$FECHA" --preparar --entrega "$ENTREGA_REL" --task T-01.01 --mensagem "$MSG" -- img/logo.png 2>&1)"; RC=$?
+  TOKEN="$(printf '%s\n' "$SAIDA" | sed -n 's/^token=//p')"
+  (cd "$R" && eval "$3") >/dev/null 2>&1
+  antes="$(git -C "$R" write-tree)"
+  SAIDA2="$(cd "$R" && bash "$FECHA" --concluir --entrega "$ENTREGA_REL" --task T-01.01 --mensagem "$MSG" --token "$TOKEN" 2>&1)"; RC2=$?
+  [ "$RC" = 0 ] && [ "$RC2" = 4 ] && [ "$(git -C "$R" rev-list --count HEAD)" = 1 ] \
+    && [ "$(git -C "$R" write-tree)" = "$antes" ] \
+    && case "$SAIDA2" in *'o stage mudou depois do --preparar'*) true ;; *) false ;; esac \
+    && ok "$rotulo: o --concluir para sem commit e preserva o stage" \
+    || falha "$rotulo — rc=$RC rc2=$RC2 commits=$(git -C "$R" rev-list --count HEAD) saida=$SAIDA2"
+}
+R="$D/janela-outro"; repo "$R"
+janela "$R" 'outro arquivo da task reestagiado entre --preparar e --concluir' \
+  "printf 'reescrito\n' > src/a.js && git add src/a.js"
+R="$D/janela-mesmo"; repo "$R"
+janela "$R" 'o mesmo arquivo reestagiado com outro conteudo' \
+  "printf 'outro png\n' > img/logo.png && git add img/logo.png"
+R="$D/janela-evidencia"; repo "$R"
+janela "$R" 'a evidencia reestagiada depois de revisada de novo' \
+  "printf '\n' >> '$REVISAO_REL/T-01.01.json' && git add '$REVISAO_REL/T-01.01.json'"
+# o caso sem mudança na janela é o '--preparar põe a evidencia no stage e o --concluir
+# a commita', acima: o mesmo stage, o commit sai
+
+# O `conferir` chamado depois do commit tem limite (DM-262): um node que não volta
+# não segura o E1; o commit fica, o item é registrado com `revisao: invalida`.
+mkdir -p "$D/node-lento" "$D/sem-timeout"
+printf '#!%s\nsleep 30\nexit 0\n' "$BASH" > "$D/node-lento/node"
+printf '#!%s\nexit 1\n' "$BASH" > "$D/sem-timeout/timeout"
+chmod +x "$D/node-lento/node" "$D/sem-timeout/timeout"
+lento() { # <dir> <rotulo> <PATH extra>
+  local R="$1" inicio fim
+  printf 'png\n' > "$R/img/logo.png"
+  revisa "$R" T-01.01 img/logo.png
+  inicio="$(date +%s)"
+  fechar "$R" MERGEX_E1_CONFERIR_LIMITE=2 PATH="$3:$PATH" -- img/logo.png
+  fim="$(date +%s)"
+  [ "$RC" = 0 ] && [ "$(no_commit "$R")" = "$REVISAO_REL/T-01.01.json img/logo.png " ] \
+    && [ "$(revisao_de "$R")" = invalida ] && [ $((fim - inicio)) -lt 25 ] \
+    && ok "$2" \
+    || falha "$2 — rc=$RC $((fim - inicio))s item=$(ultimo "$R") saida=$SAIDA"
+}
+R="$D/conferir-lento"; repo "$R"
+lento "$R" 'conferir que nao volta: o E1 corta no limite e registra revisao: invalida' "$D/node-lento"
+R="$D/conferir-lento-sem-timeout"; repo "$R"
+lento "$R" 'sem timeout utilizavel: o limite vem do vigia do proprio E1' "$D/sem-timeout:$D/node-lento"
+
 R="$D/existente"; repo "$R"
 printf 'png\n' > "$R/img/logo.png"
 revisa "$R" T-01.01 img/logo.png
