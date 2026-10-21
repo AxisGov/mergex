@@ -49,6 +49,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ "$da_rev" = 0 ] || [ -n "$rev" ] || uso '--nucleo-da-rev exige --rev'
+# o codigo que roda e o da arvore do proprio commit: uma ref local de substituicao
+# (refs/replace) nao troca a arvore
+[ "$da_rev" = 0 ] || export GIT_NO_REPLACE_OBJECTS=1
 
 # `FATIA_*` sao reservados para sempre: nunca lidos, nunca ignorados em silencio
 fatia_no_ambiente=0

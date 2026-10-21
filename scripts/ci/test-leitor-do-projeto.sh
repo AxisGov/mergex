@@ -395,6 +395,13 @@ if [ "$tem_node" = 1 ]; then
   (cd "$tmp" && bash "$leitor" --rev "$marcado" > "$aux/out" 2>/dev/null); rc=$?
   [ "$rc" = 3 ] && [ ! -s "$aux/out" ] && passa 'o mesmo commit sem --nucleo-da-rev: sai 3 (difere do instalado)' \
     || quebra "o mesmo commit sem --nucleo-da-rev: rc $rc, stdout '$(cat "$aux/out")'"
+  # uma ref de substituicao local (refs/replace) nao troca a arvore do commit da base
+  real="$(g rev-parse HEAD)"; g replace "$real" "$marcado"
+  (cd "$tmp" && bash "$leitor" --rev "$real" --nucleo-da-rev > "$aux/out" 2> "$aux/err"); rc=$?
+  g replace -d "$real" >/dev/null
+  [ "$rc" = 0 ] && ! grep -q 'EXPX_MARCA_DA_BASE' "$aux/out" && grep -qxF 'EXPX_ENTREGA=por_sprint' "$aux/out" \
+    && passa '--nucleo-da-rev ignora refs/replace: vale a arvore do proprio commit' \
+    || quebra "--nucleo-da-rev com refs/replace: rc $rc, stdout '$(cat "$aux/out")', stderr '$(cat "$aux/err")'"
 else
   passa 'nucleo da base diferente do instalado: vale o da base (sem node)'
 fi
@@ -404,8 +411,23 @@ sem_pasta="$(commit_sem "$nucleo_rel")"
 sem_limites="$(commit_sem "$nucleo_rel/expx-limites.mjs")"
 link_nucleo="$(commit_com 120000 "$(blob ../../../../../../../../fora.mjs)" "$nucleo_rel/expx-limites.mjs" "$nucleo_rel/expx-limites.mjs")"
 gitlink_nucleo="$(commit_com 160000 1111111111111111111111111111111111111111 "$nucleo_rel/perfis/sub")"
+# entrada crua na pasta do nucleo, que o indice nao aceitaria (`..`): arvore_com <entrada> -> commit
+arvore_com() {
+  local dir="$nucleo_rel" nova pai nome
+  nova="$( { g ls-tree "HEAD:$dir"; printf '%s\n' "$1"; } | g mktree)" || return 1
+  while [ -n "$dir" ]; do
+    nome="${dir##*/}"; case "$dir" in */*) pai="${dir%/*}" ;; *) pai='' ;; esac
+    nova="$( { g ls-tree "HEAD:$pai" | grep -v "$(printf '\t')$nome\$"; printf '040000 tree %s\t%s\n' "$nova" "$nome"; } | g mktree)" || return 1
+    dir="$pai"
+  done
+  g commit-tree "$nova" -p HEAD -m crua
+}
+b_x="$(blob x)"
+ponto_ponto="$(arvore_com "$(printf '100644 blob %s\t..' "$b_x")")"
+nome_estranho="$(arvore_com "$(printf '100644 blob %s\ta b.mjs' "$b_x")")"
 for caso in "sem-pasta|$sem_pasta|não versiona o núcleo" "nucleo-antigo|$sem_limites|expx update" \
-            "link|$link_nucleo|não é arquivo comum" "gitlink|$gitlink_nucleo|não é arquivo comum"; do
+            "link|$link_nucleo|não é arquivo comum" "gitlink|$gitlink_nucleo|não é arquivo comum" \
+            "entrada-..|$ponto_ponto|não é arquivo comum" "nome-com-espaco|$nome_estranho|não é arquivo comum"; do
   nome="${caso%%|*}"; resto="${caso#*|}"; c="${resto%%|*}"; msg="${resto#*|}"
   rm -f "$aux/node-chamado"
   (cd "$tmp" && PATH="$aux/node-espia:$PATH" bash "$leitor" --rev "$c" --nucleo-da-rev > "$aux/out" 2> "$aux/err"); rc=$?

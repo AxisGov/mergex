@@ -812,11 +812,16 @@ contra a base antiga, e o HEAD pode nem ter mudado, quando a base nova já era a
 - **está sincronizado:** a ponta da base atual (`baseRefOid`) é ancestral do `headRefOid`;
   senão, inelegível com `não sincronizado com a base nova`;
 - **o CI é de depois do redirecionamento:** há check do `headRefOid`, e todo check concluído
-  dele terminou depois do evento de troca de base do serviço (o último, se houve mais de um);
-  senão — nenhum check nesse HEAD, só os de um HEAD anterior, ou algum de antes do
-  redirecionamento —, inelegível com `CI anterior ao redirecionamento`. Check ainda em
-  andamento não conta aqui: é o R1 que o trata. A cor dos checks também é do R1, que tem de
-  estar verde como para qualquer PR;
+  dele **nasceu** depois do evento de troca de base do serviço (o último, se houve mais de
+  um): o check run, pela criação da execução do workflow (`checkSuite.workflowRun.createdAt`;
+  fora do Actions, a do `checkSuite`), e o status, pela criação dele. A conclusão não basta:
+  a re-execução de uma execução antiga repete o evento antigo, com o merge da base antiga, e
+  termina depois do redirecionamento sem ter rodado contra a base atual. De cada check (nome
+  e workflow; status, pelo contexto) vale só o da execução mais nova, e a lista inteira tem de
+  caber numa página. Senão — nenhum check nesse HEAD, só os de um HEAD anterior, ou algum
+  nascido antes do redirecionamento —, inelegível com `CI anterior ao redirecionamento`.
+  Check ainda em andamento não conta aqui: é o R1 que o trata. A cor dos checks também é do
+  R1, que tem de estar verde como para qualquer PR;
 - **o bot revisou o HEAD novo:** com `revisor_bot` declarado no `.expx/fatiamento.json` **da
   base** (`EXPX_REVISOR_BOT`, lido por `leitor-do-projeto.sh --rev <baseRefOid>
   --nucleo-da-rev`, que executa o leitor do núcleo da árvore da base, nunca o do disco nem o
@@ -838,7 +843,7 @@ set -o pipefail
 nv() { echo "redirecionado=nao_verificavel: $1"; exit 1; }
 command -v jq >/dev/null 2>&1 || nv 'sem jq'
 dono_repo="${repo_url#*://*/}"                                   # <dono>/<repo>
-pr="$(gh pr view <n> --json baseRefName,baseRefOid,headRefOid,statusCheckRollup)" || nv 'o PR não foi lido'
+pr="$(gh pr view <n> --json baseRefName,baseRefOid,headRefOid)" || nv 'o PR não foi lido'
 base_nome="$(printf '%s' "$pr" | jq -r .baseRefName)" && base_oid="$(printf '%s' "$pr" | jq -r .baseRefOid)" \
   && head_oid="$(printf '%s' "$pr" | jq -r .headRefOid)" || nv 'o PR não foi lido'
 redir="$(gh api graphql -F n=<n> -f o="${dono_repo%%/*}" -f r="${dono_repo#*/}" -f query='
@@ -855,10 +860,22 @@ motivos=''
 git merge-base --is-ancestor "$base_oid" "$head_oid"; rc=$?
 case "$rc" in 0) ;; 1) motivos="${motivos}não sincronizado com a base nova
 " ;; *) nv 'a ancestralidade não foi calculada' ;; esac
-ci="$(printf '%s' "$pr" | jq -r --arg r "$redir" '[.statusCheckRollup[]?
-       | if .__typename == "CheckRun" then (if .status == "COMPLETED" then .completedAt else empty end)
-         else (if .state == "PENDING" or .state == "EXPECTED" then empty else .startedAt end) end]
-       | if length > 0 and all(.[]; (. // "") > $r) then "depois" else "antes" end')" || nv 'os checks não foram lidos'
+ci="$(gh api graphql -f h="$head_oid" -f o="${dono_repo%%/*}" -f r="${dono_repo#*/}" -f query='
+  query($o: String!, $r: String!, $h: GitObjectID!) { repository(owner: $o, name: $r) { object(oid: $h) { ... on Commit {
+    statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename
+      ... on CheckRun { name status completedAt checkSuite { createdAt workflowRun { createdAt workflow { name } } } }
+      ... on StatusContext { context state createdAt } } } } } } } }' \
+  | jq -r --arg r "$redir" '.data.repository.object.statusCheckRollup as $s
+      | if $s == null then [] elif $s.contexts.pageInfo.hasNextPage then error("mais de uma página de checks")
+        else $s.contexts.nodes end
+      | map(if .__typename == "CheckRun"
+              then {k: ("run:" + (.checkSuite.workflowRun.workflow.name // "") + "/" + .name),
+                    nasceu: (.checkSuite.workflowRun.createdAt // .checkSuite.createdAt // ""),
+                    concluido: (.status == "COMPLETED")}
+              else {k: ("status:" + .context), nasceu: (.createdAt // ""),
+                    concluido: (.state != "PENDING" and .state != "EXPECTED")} end)
+      | group_by(.k) | map(max_by(.nasceu)) | map(select(.concluido))
+      | if length > 0 and all(.[]; .nasceu > $r) then "depois" else "antes" end')" || nv 'os checks não foram lidos'
 [ "$ci" = depois ] || motivos="${motivos}CI anterior ao redirecionamento
 "
 cfg="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev "$base_oid" --nucleo-da-rev)"; rc=$?
@@ -885,12 +902,16 @@ Saída: `redirecionado=nao` (sem troca de base: as condições não se aplicam),
 `motivo: <motivo>` por condição que falta (saída 1); leitura que falha é
 `redirecionado=nao_verificavel: <o quê>` (saída 1), e o PR fica inelegível com
 `redirecionamento não verificável`. Os horários são os do serviço, comparados estritamente:
-concluído no mesmo segundo do redirecionamento não é depois dele. No GitLab, o mesmo com: o
+nascido no mesmo segundo do redirecionamento não é depois dele. O bloco roda do checkout da
+base (ou da skill instalada), nunca de um checkout da branch do PR, que traria o próprio
+`leitor-do-projeto.sh` dela. No GitLab, o mesmo com: o
 evento é a última nota de sistema `changed target branch from … to …` do MR
 (`glab api --paginate projects/:id/merge_requests/<iid>/notes`, `system: true`, `created_at`);
 a ponta da base, `target_branch` buscada no repositório base e conferida com
 `projects/:id/repository/branches/<target_branch>` (`commit.id`); o CI, o `head_pipeline` do
-MR, com `sha` igual ao `sha` do MR e `finished_at` depois do evento; a revisão do bot, uma nota
+MR, com `sha` igual ao `sha` do MR (no pipeline de resultado de merge, o commit de merge cujo
+segundo pai é o `sha` do MR) e `created_at` depois do evento (o retry de um job fica no
+pipeline antigo e não conta); a revisão do bot, uma nota
 de diff de um dos logins (`author.username`) com `position.head_sha` igual ao `sha` do MR e
 `created_at` depois do evento. O GitLab não prende uma revisão sem nota de diff a um commit: sem
 essa nota, `revisão do revisor_bot ausente no HEAD atual`.
@@ -900,8 +921,9 @@ essa nota, `revisão do revisor_bot ausente no HEAD atual`.
 o portão provado e dá um HEAD novo, com CI e revisão novos. O botão de atualizar a branch do
 serviço faz o mesmo merge sem o registro, e o portão aparece vencido para o `pre-push` e para
 o CI. Sincronizado, com `CI anterior ao redirecionamento`, dispare o CI de novo pelo serviço
-(re-run que use a base atual) e peça a revisão do bot de novo — **nunca com commit vazio**,
-que invalidaria o portão.
+com um evento novo, que use a base atual — por exemplo, fechar e reabrir o PR; o botão de
+re-executar repete o evento antigo, com a base antiga, e não conta — e peça a revisão do bot
+de novo — **nunca com commit vazio**, que invalidaria o portão.
 
 ## Passo 5 — Analisar conflitos (relatar, nunca resolver)
 

@@ -74,29 +74,43 @@ mkdir -p "$aux/clone/.claude/skills/mergex/scripts"
 cp "$raiz/.claude/skills/mergex/scripts/leitor-do-projeto.sh" "$aux/clone/.claude/skills/mergex/scripts/"
 
 mkdir -p "$aux/bin" "$aux/f"
-cat > "$aux/bin/gh" <<'EOF'
+# o gh falso confere os argumentos que importam: o PR, o dono/repo e, nos checks, o headRefOid
+cat > "$aux/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
   'pr view 7 --json url --jq .url') printf '%s/pull/7\n' "$URL_REPO" ;;
-  'pr view 7 --json '*) cat "$FALSO/view.json" ;;
-  'api graphql '*) cat "$FALSO/linha.json" ;;
-  'api --paginate repos/dono/repo/pulls/7/reviews'*) cat "$FALSO/reviews.json" ;;
+  'pr view 7 --json baseRefName,baseRefOid,headRefOid') cat "$FALSO/view.json" ;;
+  'api graphql '*)
+    case " $* " in *'-f o=dono -f r=repo '*) ;; *) echo "gh falso: dono/repo errado: $*" >&2; exit 9 ;; esac
+    case "$*" in
+      *BASE_REF_CHANGED_EVENT*) case " $* " in *' -F n=7 '*) cat "$FALSO/linha.json" ;; *) echo "gh falso: PR errado" >&2; exit 9 ;; esac ;;
+      *statusCheckRollup*) case " $* " in *" -f h=$HEAD_ESPERADO "*) cat "$FALSO/checks.json" ;; *) echo "gh falso: HEAD errado" >&2; exit 9 ;; esac ;;
+      *) echo "gh falso: consulta inesperada" >&2; exit 9 ;;
+    esac ;;
+  'api --paginate repos/dono/repo/pulls/7/reviews?per_page=100') cat "$FALSO/reviews.json" ;;
   *) echo "gh falso: chamada inesperada: $*" >&2; exit 9 ;;
 esac
-EOF
+GH
 chmod +x "$aux/bin/gh"
 
-redir='2026-10-20T10:00:00Z'; antes='2026-10-20T09:00:00Z'; depois='2026-10-20T11:00:00Z'
-check() { printf '{"__typename":"CheckRun","name":"%s","status":"COMPLETED","conclusion":"SUCCESS","completedAt":"%s"}' "$1" "$2"; }
+redir='2026-10-20T10:00:00Z'; antes='2026-10-20T09:00:00Z'; depois='2026-10-20T11:00:00Z'; fim='2026-10-20T12:00:00Z'
+# check <nome> <nasceu> [<concluido em>] [<status>]: check run de uma execucao do Actions
+check() { printf '{"__typename":"CheckRun","name":"%s","status":"%s","completedAt":"%s","checkSuite":{"createdAt":"%s","workflowRun":{"createdAt":"%s","workflow":{"name":"CI"}}}}' \
+            "$1" "${4:-COMPLETED}" "${3:-$fim}" "$2" "$2"; }
+status() { printf '{"__typename":"StatusContext","context":"%s","state":"%s","createdAt":"%s"}' "$1" "${3:-SUCCESS}" "$2"; }
 review() { printf '{"user":{"login":"%s"},"commit_id":"%s","submitted_at":"%s","state":"COMMENTED"}' "$1" "$2" "$3"; }
-# cenario <base> <head> <checks json> <reviews json> [<redirecionamento>] [<cabeca do PR>]
+# cenario <base> <head> <checks> <reviews> ; opcionais no ambiente: REDIR (vazio: sem troca de
+# base), CABECA (a ref do PR no repositorio), MAIN (a ponta real da base), PAGINA_A_MAIS=1 (os
+# checks nao cabem numa pagina), REVS2 (uma segunda pagina de revisoes)
 cenario() {
-  g -C "$sem" push -q -f "$aux/dono/repo.git" "$1:refs/heads/main" "${6:-$2}:refs/pull/7/head" 2>/dev/null
-  printf '{"baseRefName":"main","baseRefOid":"%s","headRefOid":"%s","statusCheckRollup":[%s]}' "$1" "$2" "$3" > "$aux/f/view.json"
-  printf '[%s]' "$4" > "$aux/f/reviews.json"
-  if [ "${5-$redir}" = '' ]; then nos=''; else nos="{\"createdAt\":\"${5-$redir}\"}"; fi
+  g -C "$sem" push -q -f "$aux/dono/repo.git" "${MAIN:-$1}:refs/heads/main" "${CABECA:-$2}:refs/pull/7/head" 2>/dev/null
+  printf '{"baseRefName":"main","baseRefOid":"%s","headRefOid":"%s"}' "$1" "$2" > "$aux/f/view.json"
+  printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":%s},"nodes":[%s]}}}}}}' \
+    "$([ -n "${PAGINA_A_MAIS:-}" ] && echo true || echo false)" "$3" > "$aux/f/checks.json"
+  printf '[%s]' "$4" > "$aux/f/reviews.json"; [ -z "${REVS2:-}" ] || printf '[%s]' "$REVS2" >> "$aux/f/reviews.json"
+  if [ "${REDIR-$redir}" = '' ]; then nos=''; else nos="{\"createdAt\":\"${REDIR-$redir}\"}"; fi
   printf '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[%s]}}}}}' "$nos" > "$aux/f/linha.json"
-  saida="$(cd "$aux/clone" && PATH="$aux/bin:$PATH" URL_REPO="$url" FALSO="$aux/f" bash "$aux/e9.sh" 2>"$aux/err")"; rc=$?
+  saida="$(cd "$aux/clone" && PATH="$aux/bin:$PATH" URL_REPO="$url" FALSO="$aux/f" HEAD_ESPERADO="$2" bash "$aux/e9.sh" 2>"$aux/err")"; rc=$?
 }
 # espera <nome> <rc> <linha esperada> [<linha que nao pode aparecer>]
 espera() {
@@ -105,28 +119,37 @@ espera() {
   else quebra "$1: rc $rc, saida '$saida', stderr '$(head -c 400 "$aux/err")'"; fi
 }
 ci_ok="$(check hooks "$depois")"
-eleg='redirecionado=sim elegivel'; ineleg='redirecionado=sim inelegivel'
+eleg='redirecionado=sim elegivel'
 m_sinc='motivo: não sincronizado com a base nova'
 m_ci='motivo: CI anterior ao redirecionamento'
 m_bot='motivo: revisão do revisor_bot ausente no HEAD atual'
 
-cenario "$P" "$H" "$ci_ok" '' ''
+REDIR='' cenario "$P" "$H" "$ci_ok" ''
 espera 'PR sem redirecionamento: as condicoes nao se aplicam' 0 'redirecionado=nao'
 cenario "$M" "$H" "$ci_ok" ''
 espera 'base nova nao ancestral do head: inelegivel nao sincronizado' 1 "$m_sinc" "$m_ci"
 cenario "$P" "$H" '' ''
 espera 'sincronizado e check verde so de head anterior: inelegivel CI anterior ao redirecionamento' 1 "$m_ci"
-cenario "$P" "$H" "$(check hooks "$antes")" ''
+cenario "$P" "$H" "$(check hooks "$antes" "$antes")" ''
 espera 'head inalterado pelo redirecionamento e check verde so de antes dele: inelegivel CI anterior ao redirecionamento' 1 "$m_ci"
+cenario "$P" "$H" "$(check hooks "$antes" "$depois")" ''
+espera 're-execucao de uma execucao de antes do redirecionamento, concluida depois: inelegivel CI anterior' 1 "$m_ci"
 cenario "$P" "$H" "$(check hooks "$depois"),$(check contract "$antes")" ''
 espera 'um check do head de antes do redirecionamento, outro depois: inelegivel CI anterior' 1 "$m_ci"
 cenario "$P" "$H" "$(check hooks "$redir")" ''
-espera 'check concluido no mesmo segundo do redirecionamento nao e depois dele' 1 "$m_ci"
-cenario "$P" "$H" "$ci_ok,{\"__typename\":\"StatusContext\",\"context\":\"bot\",\"state\":\"SUCCESS\",\"startedAt\":\"$depois\"},{\"__typename\":\"CheckRun\",\"name\":\"lento\",\"status\":\"IN_PROGRESS\",\"conclusion\":\"\",\"completedAt\":\"0001-01-01T00:00:00Z\"}" ''
+espera 'check nascido no mesmo segundo do redirecionamento nao e depois dele' 1 "$m_ci"
+cenario "$P" "$H" "$ci_ok,$(status CodeAnt "$antes")" ''
+espera 'status de antes do redirecionamento: inelegivel CI anterior' 1 "$m_ci"
+cenario "$P" "$H" "$(check hooks "$antes" "$antes"),$(check hooks "$depois"),$(status CodeAnt "$antes"),$(status CodeAnt "$depois")" ''
+espera 'o mesmo check numa execucao de antes e numa nova (reabrir o PR): vale a nova, elegivel' 0 "$eleg"
+cenario "$P" "$H" "$ci_ok,$(status bot "$depois"),$(check lento "$depois" '' IN_PROGRESS),$(status externo "$antes" PENDING)" ''
 espera 'sincronizado, CI verde no head, sem revisor_bot: elegivel (check em andamento fica para o R1)' 0 "$eleg"
-cenario "$P" "$H" "$ci_ok" '' "$redir" "$M"
+PAGINA_A_MAIS=1 cenario "$P" "$H" "$ci_ok" ''
+espera 'checks em mais de uma pagina: nao verificavel' 1 'redirecionado=nao_verificavel: os checks não foram lidos'
+CABECA="$M" cenario "$P" "$H" "$ci_ok" ''
 espera 'cabeca buscada diferente do headRefOid: nao verificavel' 1 'redirecionado=nao_verificavel: a cabeça buscada não é o headRefOid'
-
+MAIN="$A" cenario "$P" "$H" "$ci_ok" ''
+espera 'ponta da base diferente do baseRefOid: nao verificavel' 1 'redirecionado=nao_verificavel: a ponta da base não é o baseRefOid'
 if command -v node >/dev/null 2>&1; then
   cenario "$B" "$HB" "$ci_ok" "$(review 'codeant-ai[bot]' "$B" "$depois")"
   espera 'revisor_bot declarado e revisao so de head anterior: inelegivel' 1 "$m_bot"
