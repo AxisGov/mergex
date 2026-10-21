@@ -224,6 +224,31 @@ confere_contexto_preparado() {
     'O stage preparado foi preservado e nenhum commit foi criado.'
 }
 
+# A janela entre o --preparar e o --concluir (DM-262). A varredura de segredo é sobre
+# o stage do --preparar; a árvore dele (`git write-tree`) fica no dono da seção, e o
+# --concluir só commita se o índice ainda for exatamente essa árvore.
+registra_indice_preparado() {
+  local trava arvore
+  arvore="$(git write-tree 2>/dev/null)" || arvore=""
+  trava="$(caminho_da_trava 2>/dev/null)"
+  [ -n "$arvore" ] && printf 'arvore_preparada=%s\n' "$arvore" >> "$trava/dono" \
+    || para 4 'PARADO — a árvore do índice preparado não pôde ser registrada' \
+      'Nenhum commit foi criado e nada foi limpo: o stage ficou para diagnóstico.'
+}
+
+confere_indice_preparado() {
+  local trava preparada atual
+  trava="$(caminho_da_trava 2>/dev/null)"
+  preparada="$(campo_do_dono "$trava" arvore_preparada)"
+  atual="$(git write-tree 2>/dev/null)" || atual=""
+  [ -n "$preparada" ] && [ "$preparada" = "$atual" ] && return 0
+  para 4 'PARADO — o stage mudou depois do --preparar' \
+    "Preparado: árvore ${preparada:-ausente}" \
+    "Agora:     árvore ${atual:-ilegível}" \
+    'A varredura de segredo foi feita sobre o stage do --preparar, não sobre este.' \
+    'O stage atual foi preservado e nenhum commit foi criado; rode o E1 de novo.'
+}
+
 valida_mensagem() {
   local saida
   saida="$(bash "$CONTRATO_COMMIT_SH" --validar-e1 \
@@ -626,16 +651,52 @@ EOF
 # evidência no commit: `null`, sem node. Com ela, qualquer resposta que não seja
 # uma linha `<task> ok|FALHA …` coerente com o código (núcleo ou node ausente,
 # saída 64, linha fora da forma) é `invalida`. Nunca para o E1: o commit já existe.
+# com_limite <segundos> <saída> <comando...> — roda o comando com a saída num arquivo e
+# o mata no limite (DM-262). Usa `timeout` quando ele funciona (o do Windows, em
+# System32, é outro programa, e o macOS pode não ter); senão, um vigia em bash puro. A
+# saída vai para arquivo, nunca para um pipe: um filho órfão do comando não segura o E1.
+com_limite() {
+  local limite="$1" saida="$2" pid vigia rc
+  shift 2
+  if timeout -k 5 1 true >/dev/null 2>&1; then
+    timeout -k 5 "$limite" "$@" > "$saida" 2>/dev/null
+    return
+  fi
+  "$@" > "$saida" 2>/dev/null &
+  pid=$!
+  (
+    i=0
+    while [ "$i" -lt "$limite" ]; do
+      sleep 1
+      kill -0 "$pid" 2>/dev/null || exit 0
+      i=$((i + 1))
+    done
+    kill -KILL "$pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
+  vigia=$!
+  wait "$pid"; rc=$?
+  wait "$vigia" 2>/dev/null
+  return "$rc"
+}
+
 revisao_da_task() {
-  local task="$1" sha="$2" mjs raiz_node out rc cru
+  local task="$1" sha="$2" mjs raiz_node out rc cru limite tmp
   git cat-file -e "$sha:$(pasta_de_revisao)$task.json" 2>/dev/null || { printf 'null\n'; return 0; }
   mjs="$RAIZ/$NUCLEO_REL/expx-revisao.mjs"
   { [ -f "$mjs" ] && command -v node >/dev/null 2>&1; } || { printf 'invalida\n'; return 0; }
   raiz_node="$RAIZ"
   # node nativo no Windows não entende o caminho do MSYS
   if command -v cygpath >/dev/null 2>&1; then mjs="$(cygpath -w "$mjs")"; raiz_node="$(cygpath -w "$RAIZ")"; fi
-  out="$(node "$mjs" conferir --trabalho "$TRABALHO" --modo obrigatoria --raiz "$raiz_node" \
-    --task "$task=$sha" 2>/dev/null)"; rc=$?
+  # com limite (DM-262): estourou, o código não é 0 nem 1, e o valor é `invalida`
+  limite="${MERGEX_E1_CONFERIR_LIMITE:-120}"
+  case "$limite" in *[!0123456789]*) limite=120 ;; esac
+  limite="${limite#"${limite%%[!0]*}"}"   # sem zeros à esquerda: `00` é zero, `010` é 10
+  [ -n "$limite" ] || limite=120
+  tmp="$(mktemp 2>/dev/null)" || { printf 'invalida\n'; return 0; }
+  com_limite "$limite" "$tmp" node "$mjs" conferir --trabalho "$TRABALHO" --modo obrigatoria \
+    --raiz "$raiz_node" --task "$task=$sha"; rc=$?
+  out="$(cat "$tmp" 2>/dev/null)"
+  rm -f "$tmp"
   case "$out" in *$'\n'*|*$'\r'*) out="" ;; esac
   case "$rc:$out" in
     "0:$task ok") cru=ok ;;
@@ -879,6 +940,7 @@ case "$ACAO" in
     registra_contexto_preparado
     classifica_arvore "$TASK" "$@"
     prepara
+    registra_indice_preparado
     # A seção continua aberta: quem preparou tem a trava até `--concluir`.
     LIBERAR_NA_SAIDA=0
     printf 'token=%s\n' "$TOKEN"
@@ -903,6 +965,7 @@ case "$ACAO" in
     carrega_contexto "$ENTREGA"
     valida_mensagem
     confere_contexto_preparado
+    confere_indice_preparado
     NOTA_INDICE='O stage preparado foi preservado e nenhum commit foi criado.'
     # o stage, sem isenção de método; só a evidência de revisão da task atual,
     # que o --preparar pôs junto (DM-240), não é produto
