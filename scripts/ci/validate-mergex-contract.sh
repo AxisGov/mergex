@@ -447,7 +447,23 @@ catalogo_script="$(bash "$classificador" --catalogo | sort)"
   fail 'method-artifact catalog diverges between reference and classifier'
 }
 
-# Nenhum curinga no catálogo: caminhos exatos, só `sprint-NN` e `base/<area>.md` como variáveis.
+# A regra do nome da evidência de revisão (DM-240, DM-242) existe em duas cópias:
+# a que o E1 commita e a que o E3 reconhece. As duas têm de ser a mesma função.
+nome_de_evidencia_em() {
+  tr -d '\r' < "$1" | awk '/^nome_de_evidencia\(\) \{$/ { dentro = 1 } dentro { print } dentro && /^\}$/ { exit }'
+}
+nome_e1="$(nome_de_evidencia_em .claude/skills/mergex/scripts/fechamento-do-e1.sh)"
+nome_e3="$(nome_de_evidencia_em "$classificador")"
+[ -n "$nome_e1" ] || fail 'E1 lost nome_de_evidencia'
+[ -n "$nome_e3" ] || fail 'E3 classifier lost nome_de_evidencia'
+[ "$nome_e1" = "$nome_e3" ] || {
+  diff <(printf '%s\n' "$nome_e1") <(printf '%s\n' "$nome_e3") >&2 || true
+  fail 'nome_de_evidencia diverges between E1 (fechamento-do-e1.sh) and E3 (classificar-atencao.sh)'
+}
+
+# Nenhum curinga no catálogo: caminhos exatos, só `sprint-NN` e `base/<area>.md` como
+# variáveis; na evidência de revisão da mergex, também `<trabalho_id>` (o trabalho
+# corrente) e `<T-NN.MM>` (nome_de_evidencia, conferida acima).
 if bash "$classificador" --catalogo | cut -d'|' -f2 | grep -Eq '\*|\?|\[|^docs/?$|^docs/sprintx/?$|^docs/manutencao/?$'; then
   fail 'method-artifact catalog contains a wildcard'
 fi
