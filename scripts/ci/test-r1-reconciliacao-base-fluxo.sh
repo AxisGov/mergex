@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # shellcheck shell=bash
 #
 # Parte da bancada R1: scripts/ci/test-r1-reconciliacao-base.sh a carrega com
