@@ -841,6 +841,7 @@ No GitHub, depois do bloco do HEAD autoritativo (acima, com `$cabeca` e a fonte 
 ```bash
 # E9: feature redirecionada (DM-245); depois do bloco do HEAD autoritativo ($cabeca, $repo_url, $remoto_base)
 set -o pipefail
+export GIT_NO_REPLACE_OBJECTS=1   # refs/replace local não muda ancestralidade nem árvore da base
 nv() { echo "redirecionado=nao_verificavel: $1"; exit 1; }
 command -v jq >/dev/null 2>&1 || nv 'sem jq'
 dono_repo="${repo_url#*://*/}"                                   # <dono>/<repo>

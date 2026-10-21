@@ -132,6 +132,13 @@ REDIR='' cenario "$P" "$H" "$ci_ok" ''
 espera 'PR sem redirecionamento: as condicoes nao se aplicam' 0 'redirecionado=nao'
 cenario "$M" "$H" "$ci_ok" ''
 espera 'base nova nao ancestral do head: inelegivel nao sincronizado' 1 "$m_sinc" "$m_ci"
+# uma ref de substituicao local (refs/replace) que poe a base nova embaixo do head nao sincroniza
+g -C "$sem" push -q -f "$aux/dono/repo.git" "$M:refs/heads/m-tmp" "$H:refs/heads/h-tmp" 2>/dev/null
+g -C "$aux/clone" fetch -q origin m-tmp h-tmp 2>/dev/null
+g -C "$aux/clone" replace "$H" "$(g -C "$aux/clone" commit-tree "$H^{tree}" -p "$M" -m falso)"
+cenario "$M" "$H" "$ci_ok" ''
+g -C "$aux/clone" replace -d "$H" >/dev/null
+espera 'refs/replace local nao faz a base parecer ancestral: inelegivel nao sincronizado' 1 "$m_sinc"
 cenario "$P" "$H" '' ''
 espera 'sincronizado e check verde so de head anterior: inelegivel CI anterior ao redirecionamento' 1 "$m_ci"
 cenario "$P" "$H" "$(check hooks "$antes" "$antes")" ''
