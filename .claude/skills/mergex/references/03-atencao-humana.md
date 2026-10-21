@@ -285,6 +285,7 @@ mesmo trabalho. Kind `-` quer dizer que o contrato de origem não define frontma
 | mergex | `docs/entregas/<trabalho_id>/PR.md` | - | D4 | descrição do PR, regravada pelo E4 desta entrega |
 | mergex | `docs/entregas/<trabalho_id>/QA-PACOTE.md` | - | D4 | pacote de QA, regravado pelo E5 desta entrega |
 | mergex | `docs/entregas/<trabalho_id>/ATENCAO.md` | - | D4 | classificação, regravada pelo E3 desta entrega |
+| mergex | `docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json` | - | L4 | evidência da revisão por task |
 
 Por que cada um está onde está:
 
@@ -304,6 +305,11 @@ Por que cada um está onde está:
   - `ENTREGA.md`, `PR.md`, `QA-PACOTE.md`, `ATENCAO.md` deste trabalho: a própria saída da
     mergex. O `ENTREGA.md` só com `kind: entrega`, este `trabalho_id` e a `branch:` atual; os
     outros três só aparecem no diff numa retomada, e são regravados nesta entrega.
+- **L4 — a evidência da revisão por task** (`revisao/<T-NN.MM>.json`, ou o id legado `<T-N>.json`,
+  deste trabalho; DM-242): é LEITURA RÁPIDA, nunca DISPENSÁVEL. O reconhecimento só confere o
+  caminho e que é arquivo comum; o conteúdo é do núcleo do expx, e a mergex não o lê (nem o
+  frontmatter). Quem diz como a revisão terminou é o `conferir` (V12), não o classificador. A
+  evidência de outro trabalho, e qualquer outro nome sob `revisao/`, ficam fora do catálogo.
 - **Fora do catálogo, de propósito:** `docs/relatorios/**` da runx (só existe depois do E5 da
   runx), `docs/projeto/**` da buildx (vive na branch de controle, nunca no diff da feature),
   qualquer arquivo novo que alguém criar na pasta do trabalho. Todos seguem a classificação normal.
