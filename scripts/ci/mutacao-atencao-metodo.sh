@@ -77,6 +77,7 @@ teste_seq()   { bash scripts/ci/test-sequencia-commits.sh > saida.log 2>&1; }
 teste_own()   { bash scripts/ci/test-ownership-task.sh > saida.log 2>&1; }
 teste_hooks()      { bash .claude/hooks/teste.sh > saida.log 2>&1; }
 teste_integracao() { bash scripts/ci/test-integracao-c7a.sh > saida.log 2>&1; }
+teste_ev()   { bash scripts/ci/test-e1-evidencia-revisao.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As mutações: id | descrição | verificação que TEM que falhar | função que muta
@@ -309,6 +310,31 @@ M52() { # 9. a trava não é liberada quando o ownership barra
 M53() { # 3b. o caso 2 (arquivo_de_task_irma) é ignorado pelo fechamento real
   troca "$FECHAMENTO_SH" '  case "$rc" in' '  case 0 in'
 }
+# C3 (DM-242): a evidência de revisão por task no catálogo da mergex, em L4.
+M54a() { # a linha da evidência deixa de casar nos dois catálogos: volta a OLHO pelo padrão
+  troca "$CLASS" 'mergex|docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json|-|L4|evidência da revisão por task'"'" \
+    'mergex|docs/entregas/<trabalho_id>/revisao/<id>.json|-|L4|evidência da revisão por task'"'" \
+    && troca "$REF" '| mergex | `docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json` | - | L4 | evidência da revisão por task |' \
+      '| mergex | `docs/entregas/<trabalho_id>/revisao/<id>.json` | - | L4 | evidência da revisão por task |'
+}
+M54b() { # a evidência vira DISPENSÁVEL (D4) nos dois catálogos, que continuam batendo
+  troca "$CLASS" 'mergex|docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json|-|L4|evidência da revisão por task'"'" \
+    'mergex|docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json|-|D4|evidência da revisão por task'"'" \
+    && troca "$REF" '| mergex | `docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json` | - | L4 | evidência da revisão por task |' \
+      '| mergex | `docs/entregas/<trabalho_id>/revisao/<T-NN.MM>.json` | - | D4 | evidência da revisão por task |'
+}
+M54c() { # o reconhecimento volta a ler o frontmatter da evidência
+  troca "$CLASS" '  if [ "$chave" = "$CHAVE_EVIDENCIA" ]; then kind_real=""; else kind_real="$(fm "$arq" kind)"; fi' \
+    '  kind_real="$(fm "$arq" kind)"'
+}
+M54d() { # qualquer nome sob revisao/ passa a ser evidência
+  troca "$CLASS" '          nome_de_evidencia "${nome#revisao/}" || { nao_reconhecido "fora do catálogo"; return; }' \
+    '          :'
+}
+M54e() { # a evidência de qualquer trabalho é reconhecida como a do trabalho corrente
+  troca "$CLASS" '    "docs/entregas/$TRABALHO/"*)' '    docs/entregas/*/revisao/*|"docs/entregas/$TRABALHO/"*)' \
+    && troca "$CLASS" '      nome="${caminho#docs/entregas/$TRABALHO/}"' '      nome="${caminho#docs/entregas/*/}"'
+}
 
 LISTA='M1a|remove a regra L4 do classificador|teste
 M1b|remove a linha L4 do reference|validador
@@ -375,7 +401,12 @@ M49|V9 vira escopo unitario (usa o dono, nao a uniao)|validador
 M50|atual+irma e barrado como se fosse so da irma|teste_integracao
 M51|V11 ganha prova mesmo sem commit real|teste_integracao
 M52|lock nao e liberado na saida do ownership|teste_integracao
-M53|caso 2 (arquivo_de_task_irma) e ignorado pelo fechamento real|teste_integracao'
+M53|caso 2 (arquivo_de_task_irma) e ignorado pelo fechamento real|teste_integracao
+M54a|evidencia de revisao sai do catalogo da mergex|teste_ev
+M54b|evidencia de revisao vira D4 nos dois catalogos|teste_ev
+M54c|reconhecimento le o frontmatter da evidencia|teste_ev
+M54d|qualquer nome sob revisao/ vira evidencia|teste_ev
+M54e|evidencia de outro trabalho e reconhecida|teste_ev'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
@@ -388,7 +419,7 @@ controle() {
   local d rc
   d="$(copia)"
   echo "Controle — cópia SEM mutação: as verificações têm que passar"
-  for v in teste teste_causa teste_v11 teste_seq teste_own teste_hooks teste_integracao validador; do
+  for v in teste teste_causa teste_v11 teste_seq teste_own teste_hooks teste_integracao teste_ev validador; do
     rc=0; ( cd "$d" && "$v" ) || rc=$?
     if [ "$rc" = 0 ]; then printf '  ok     %s\n' "$v"
     else CONTROLE_OK=0; printf '  FALHA  %s — verde era esperado (rc=%s)\n' "$v" "$rc"
