@@ -10,7 +10,10 @@
 # sem que a verificação exista. Também recusa validador novo em scripts/ci/ que
 # ninguém registrou aqui: ele existiria e nunca rodaria.
 #
-# Uso: bash scripts/ci/check-ci-runs-validators.sh [workflow]
+# Pelo mesmo motivo, cada bancada scripts/ci/mutacao-*.sh tem de estar, uma vez,
+# na matriz do workflow agendado de mutação (que não é check exigido).
+#
+# Uso: bash scripts/ci/check-ci-runs-validators.sh [workflow [workflow-de-mutacao]]
 
 set -euo pipefail
 
@@ -42,6 +45,14 @@ for f in scripts/ci/validate-*.sh; do
     [ "$f" = "$v" ] && achado=1
   done
   [ "$achado" = '1' ] || fail "$f existe mas nao esta registrado em check-ci-runs-validators.sh"
+done
+
+mut="${2:-.github/workflows/mutacao.yml}"
+[ -f "$mut" ] || fail "workflow de mutacao ausente: $mut"
+for f in scripts/ci/mutacao-*.sh; do
+  b="$(basename "$f" .sh)"
+  n="$(grep -cE "^[[:space:]]*-[[:space:]]+${b}[[:space:]]*$" "$mut" || true)"
+  [ "$n" = '1' ] || fail "$f aparece $n vez(es) na matriz de $mut; esperado exatamente 1"
 done
 
 printf 'ci runs both validators\n'

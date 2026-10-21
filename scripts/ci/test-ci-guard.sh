@@ -8,7 +8,9 @@
 #   2. o passo do validate-review-evidence-contract.sh some;
 #   3. o passo existe, mas comentado;
 #   4. o passo roda duas vezes (duplicado);
-#   5. um validate-*.sh novo aparece em scripts/ci/ sem ser registrado.
+#   5. um validate-*.sh novo aparece em scripts/ci/ sem ser registrado;
+#   6. o workflow de mutacao perde uma bancada (scripts/ci/mutacao-*.sh);
+#   7. uma bancada de mutacao nova aparece sem entrar no workflow de mutacao.
 #
 # Uso: bash scripts/ci/test-ci-guard.sh
 
@@ -66,6 +68,25 @@ else
   passa 'validador novo sem registro: a guarda reprova'
 fi
 rm -f "$novo"
+
+# 6. o workflow de mutacao perde uma bancada
+mut='.github/workflows/mutacao.yml'
+grep -vE '^[[:space:]]*- mutacao-trava-e1[[:space:]]*$' "$mut" > "$tmp/mutacao-sem-uma.yml"
+if bash "$guarda" "$ci" "$tmp/mutacao-sem-uma.yml" >/dev/null 2>&1; then
+  quebra 'bancada de mutacao fora do workflow agendado: a guarda aceitou'
+else
+  passa 'bancada de mutacao fora do workflow agendado: a guarda reprova'
+fi
+
+# 7. uma bancada de mutacao nova, nao registrada
+nova='scripts/ci/mutacao-nova-bancada-teste.sh'
+printf '#!/usr/bin/env bash\nexit 0\n' > "$nova"
+if bash "$guarda" "$ci" >/dev/null 2>&1; then
+  quebra 'bancada de mutacao nova sem registro: a guarda aceitou'
+else
+  passa 'bancada de mutacao nova sem registro: a guarda reprova'
+fi
+rm -f "$nova"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
