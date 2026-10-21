@@ -689,7 +689,9 @@ revisao_da_task() {
   if command -v cygpath >/dev/null 2>&1; then mjs="$(cygpath -w "$mjs")"; raiz_node="$(cygpath -w "$RAIZ")"; fi
   # com limite (DM-262): estourou, o código não é 0 nem 1, e o valor é `invalida`
   limite="${MERGEX_E1_CONFERIR_LIMITE:-120}"
-  case "$limite" in ''|*[!0123456789]*|0) limite=120 ;; esac
+  case "$limite" in *[!0123456789]*) limite=120 ;; esac
+  limite="${limite#"${limite%%[!0]*}"}"   # sem zeros à esquerda: `00` é zero, `010` é 10
+  [ -n "$limite" ] || limite=120
   tmp="$(mktemp 2>/dev/null)" || { printf 'invalida\n'; return 0; }
   com_limite "$limite" "$tmp" node "$mjs" conferir --trabalho "$TRABALHO" --modo obrigatoria \
     --raiz "$raiz_node" --task "$task=$sha"; rc=$?

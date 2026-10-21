@@ -452,6 +452,15 @@ R="$D/conferir-lento"; repo "$R"
 lento "$R" 'conferir que nao volta: o E1 corta no limite e registra revisao: invalida' "$D/node-lento"
 R="$D/conferir-lento-sem-timeout"; repo "$R"
 lento "$R" 'sem timeout utilizavel: o limite vem do vigia do proprio E1' "$D/sem-timeout:$D/node-lento"
+# limite zero escrito com mais de um dígito não é limite: vale o padrão, e o conferir
+# de verdade responde (pelo vigia, onde um limite zero mataria o node na hora)
+R="$D/conferir-limite-00"; repo "$R"
+printf 'png\n' > "$R/img/logo.png"
+revisa "$R" T-01.01 img/logo.png
+fechar "$R" MERGEX_E1_CONFERIR_LIMITE=00 PATH="$D/sem-timeout:$PATH" -- img/logo.png
+[ "$RC" = 0 ] && [ "$(revisao_de "$R")" = ok ] \
+  && ok 'MERGEX_E1_CONFERIR_LIMITE=00 vale o padrao, nao zero' \
+  || falha "MERGEX_E1_CONFERIR_LIMITE=00 — rc=$RC item=$(ultimo "$R") saida=$SAIDA"
 
 R="$D/existente"; repo "$R"
 printf 'png\n' > "$R/img/logo.png"
