@@ -442,6 +442,19 @@ v9 "$aux/s1j"
 [ "$rc" = 3 ] && grep -q 'rebaixamento' "$aux/v9.out"
 confere 'V9: versao registrada_e0 depois da reancoragem (rebaixamento): v9_sem_prova' $?
 
+# âncora: uma versão intermediária sem a chave também é rebaixamento; restaurar
+# a chave depois não pode apagar essa revisão alcançável da prova histórica
+repo_mergeado "$aux/s1j-sem-chave" merge
+e0r "$aux/s1j-sem-chave"; reancora "$aux/s1j-sem-chave"
+cp "$aux/s1j-sem-chave/docs/entregas/plan/ENTREGA.md" "$aux/s1j-sem-chave-depois.md"
+sed '/^base_validada_sha:/d' "$aux/s1j-sem-chave-depois.md" > "$aux/s1j-sem-chave/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1j-sem-chave" add -A; g -C "$aux/s1j-sem-chave" commit -q -m sem-base
+cp "$aux/s1j-sem-chave-depois.md" "$aux/s1j-sem-chave/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1j-sem-chave" add -A; g -C "$aux/s1j-sem-chave" commit -q -m restaura-base; sprint1 "$aux/s1j-sem-chave"
+v9 "$aux/s1j-sem-chave"
+[ "$rc" = 3 ] && grep -q 'rebaixamento' "$aux/v9.out"
+confere 'V9: versao sem base depois da reancoragem, ainda que restaurada: v9_sem_prova' $?
+
 # âncora: duas versões registrada_sprint com bases diferentes
 repo_mergeado "$aux/s1k" merge
 e0r "$aux/s1k"; reancora "$aux/s1k"

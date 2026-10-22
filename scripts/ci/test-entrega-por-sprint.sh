@@ -268,10 +268,13 @@ e="$aux/r1/docs/entregas/plan/ENTREGA.md"
 confere 'E0 grava entrega e sprint_atual efetivos (e reancora a base na main)' $?
 [ "$rc" = 0 ] || mostra "$aux/e0s.err" "$aux/err"
 g -C "$aux/r1" add -A; g -C "$aux/r1" commit -q -m 'docs(mergex): abre a sprint 01' -m 'Trabalho: plan'
+mkdir -p "$aux/r1/.expx"
+printf '{configuração inválida\n' > "$aux/r1/.expx/fatiamento.json"
 cp "$e" "$aux/r1-antes.md"
 e0s "$aux/r1" 01
 [ "$rc" = 0 ] && cmp -s "$e" "$aux/r1-antes.md"
-confere 'E0 --sprint 01 de novo com a 01 aberta: retomada, nada muda' $?
+confere 'E0 --sprint 01 registrado independe da configuração atual e retoma sem mudar' $?
+rm -rf "$aux/r1/.expx"
 e0s "$aux/r1" 03
 [ "$rc" = 1 ] && grep -q 'sequência' "$aux/e0s.err" && cmp -s "$e" "$aux/r1-antes.md"
 confere 'E0 recusa sprint fora de sequencia' $?

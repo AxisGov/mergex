@@ -139,9 +139,11 @@ nenhuma etapa seguinte relê a sprint do plano.
 trabalho, que sobrescreve o `EXPX_ENTREGA` do `leitor-do-projeto.sh` (o padrão do projeto); valor
 fora de `por_trabalho | por_sprint` faz o E0 parar. Gravado o modo na entrega (`entrega:`), ele não muda
 mais, nem com o `00-PLANEJAMENTO.md` alterado depois: quem o lê é
-`entrega-de-planejamento.sh --modo-efetivo`. `--sprint` num trabalho `por_trabalho` é recusa. Na
-entrega `por_trabalho`, o E0 grava `entrega: por_trabalho` no caso 1 (e na primeira retomada de
-um arquivo sem a chave), com o modo que o mesmo `--modo-efetivo` disser.
+`entrega-de-planejamento.sh --modo-efetivo`. A configuração atual do projeto só é lida se nem a
+entrega nem o plano já decidirem o modo; uma entrega registrada continua definitiva mesmo se
+`.expx/fatiamento.json` estiver depois ausente ou inválido. `--sprint` num trabalho `por_trabalho`
+é recusa. Na entrega `por_trabalho`, o E0 grava `entrega: por_trabalho` no caso 1 (e na primeira
+retomada de um arquivo sem a chave), com o modo que o mesmo `--modo-efetivo` disser.
 
 **A sequência**, conferida antes de qualquer escrita (a gravação é de
 `entrega-de-planejamento.sh --abrir-sprint`, o escritor único de `entrega`, `sprint_atual` e `prs`):
@@ -172,14 +174,24 @@ ilegível, ou base inexistente. `$sprint` é o `<NN>` que a F6 passou; `<base>` 
 sprint="${sprint:?o E0 --sprint recebe o id da sprint}"
 entrega="docs/entregas/<trabalho_id>/ENTREGA.md"
 plano="docs/sprintx/features/<slug>/00-PLANEJAMENTO.md"
-fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh)" || { printf 'mergex E0: configuração do projeto (.expx/fatiamento.json) não lida\n' >&2; exit 2; }
-projeto="$(printf '%s\n' "$fatia" | sed -n 's/^EXPX_ENTREGA=//p')"
-modo="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --modo-efetivo --entrega "$entrega" --plano "$plano" --projeto "${projeto:-por_trabalho}")"
+modo="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --modo-efetivo --entrega "$entrega" --plano "$plano" --projeto por_trabalho)"
 case $? in
   0) ;;
   1) printf 'mergex E0 BLOQUEADO — entrega: no frontmatter de %s fora de por_trabalho | por_sprint\n' "$plano" >&2; exit 1 ;;
   *) exit 2 ;;
 esac
+if printf '%s\n' "$modo" | grep -qx 'origem=projeto'; then
+  fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh)" \
+    || { printf 'mergex E0: configuração do projeto (.expx/fatiamento.json) não lida\n' >&2; exit 2; }
+  projeto="$(printf '%s\n' "$fatia" | sed -n 's/^EXPX_ENTREGA=//p')"
+  modo="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --modo-efetivo \
+    --entrega "$entrega" --plano "$plano" --projeto "${projeto:-por_trabalho}")"
+  case $? in
+    0) ;;
+    1) printf 'mergex E0 BLOQUEADO — entrega: no frontmatter de %s fora de por_trabalho | por_sprint\n' "$plano" >&2; exit 1 ;;
+    *) exit 2 ;;
+  esac
+fi
 case "$modo" in entrega=por_sprint*) ;; *)
   printf 'mergex E0 BLOQUEADO — --sprint num trabalho por_trabalho (%s)\n' "$(printf '%s\n' "$modo" | tr '\n' ' ')" >&2; exit 1 ;;
 esac

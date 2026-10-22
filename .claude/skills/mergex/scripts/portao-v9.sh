@@ -46,8 +46,9 @@
 #    `planejamento_merge_sha=`), e esse merge P tem de ser ancestral da base.
 #    A âncora passa a ser: toda versão registrada_sprint tem a base de HEAD;
 #    as anteriores (registrada_e0 ou sem a chave) têm UMA base, ancestral de
-#    P; e nenhuma versão anterior descende de uma registrada_sprint
-#    (rebaixamento). Senão, ou sem o merge registrado: v9_sem_prova.
+#    P; e nenhuma versão de ordem anterior — inclusive uma revisão sem a chave —
+#    descende de uma registrada_sprint (rebaixamento). Senão, ou sem o merge
+#    registrado: v9_sem_prova.
 #    Em qualquer origem, a base que já contém o trabalho é v9_sem_prova: a
 #    própria HEAD; uma base da qual é ancestral algum commit de
 #    ENTREGA.commits (de HEAD; entrada que não resolve para um único commit
@@ -274,15 +275,20 @@ AVISOS="$TMP_DIR/avisos"; : > "$AVISOS"
 # alcançáveis de HEAD (rev-list --full-history: sem simplificação de merge e sem
 # depender de data nem de "qual commit o criou"). Chave presente e malformada,
 # em qualquer versão: v9_sem_prova. VALORES fica com um valor por versão que
-# tem a chave; vazio, e só então, a entrega é legada.
+# tem a chave; SEM_BASE registra toda versão que não a tem, para a prova de que
+# nenhuma delas veio depois de uma reancoragem. VALORES vazio, e só então, é legado.
 VALORES="$TMP_DIR/valores"; : > "$VALORES"
+SEM_BASE="$TMP_DIR/versoes-sem-base"; : > "$SEM_BASE"
 if [ -z "$ULTIMO" ]; then
   g rev-list --full-history "$HEAD_SHA" -- "$ENTREGA" > "$TMP_DIR/versoes" 2>/dev/null \
     || sem_prova "histórico de $ENTREGA ilegível" # guarda:V9SHA
   while IFS= read -r cv <&3; do
     case "$(modo_em "$cv" "$ENTREGA")" in 100644|100755) ;; *) continue ;; esac
     g cat-file blob "$cv:$ENTREGA" > "$TMP_DIR/versao.md" 2>/dev/null || sem_prova "$ENTREGA ilegível em $cv"
-    _entrega_chave_qualquer "$TMP_DIR/versao.md" base_validada_sha || continue
+    if ! _entrega_chave_qualquer "$TMP_DIR/versao.md" base_validada_sha; then
+      printf '%s\n' "$cv" >> "$SEM_BASE"
+      continue
+    fi
     vv="$(catalogo_fm "$TMP_DIR/versao.md" base_validada_sha)"
     oid_valido "$vv" || sem_prova "$ENTREGA em $cv tem base_validada_sha malformada: ${vv:-vazia ou ilegível}"
     printf '%s\n' "$vv" >> "$VALORES"
@@ -433,9 +439,11 @@ if [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint
   g merge-base --is-ancestor "$(sed -n 1p "$TMP_DIR/distintos")" "$M_PLAN" 2>/dev/null \
     || sem_prova "a base anterior à reancoragem ($(sed -n 1p "$TMP_DIR/distintos")) não é ancestral do merge do planejamento $M_PLAN" # guarda:V9PLAN
   # rebaixamento: uma versão de ordem menor (0 antes da reancoragem; r, a da sua
-  # base registrada_sprint) que descende de uma de ordem maior
+  # base registrada_sprint; 0 também para uma revisão sem a chave) que descende
+  # de uma de ordem maior
   awk -F'\t' 'NR == FNR { r[$1] = $2; next } { print $1 "\t" (($3 == "registrada_sprint") ? r[$2] : 0) }' \
     "$TMP_DIR/ranks" "$TMP_DIR/versoes-info" > "$TMP_DIR/v-ordem"
+  awk '{ print $1 "\t0" }' "$SEM_BASE" >> "$TMP_DIR/v-ordem"
   # Uma travessia pais-antes-dos-filhos propaga a maior ordem registrada em
   # qualquer ancestral. Assim cada aresta é examinada uma vez; não se abre um
   # processo Git para cada par de versões da entrega.
