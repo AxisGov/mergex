@@ -95,7 +95,7 @@ Essa distinção vai literalmente para a seção "o que foi congelado" do pull r
 
 > ## Entrega no repositório
 >
-> Quando a [`mergex`](https://github.com/bittencourtthulio/mergex) estiver instalada, os artefatos da `legadox` alimentam a entrega automaticamente, sem acionamento nenhum:
+> Quando a [`mergex`](https://github.com/AxisGov/mergex) estiver instalada, os artefatos da `legadox` alimentam a entrega automaticamente, sem acionamento nenhum:
 >
 > - as **zonas de risco** do `PERFIL.md` fazem um arquivo ser classificado como OLHO OBRIGATÓRIO no diff, **mesmo com uma linha alterada**;
 > - a **faixa de raio** entra no portão de prontidão, na descrição do pull request e na ordenação da revisão manual;

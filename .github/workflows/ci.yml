@@ -2,7 +2,6 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -106,6 +105,14 @@ jobs:
             # Root commit: no HEAD^ exists, so check the whole commit against the empty tree.
             git diff --check "$(git hash-object -t tree /dev/null)" HEAD
           fi
+
+      - name: Check canonical skill origins
+        shell: bash
+        run: bash scripts/ci/test-proveniencia.sh
+
+      - name: Test provenance guard contract
+        shell: bash
+        run: bash scripts/ci/test-proveniencia-contrato.sh
 
       - name: Validate Mergex contract
         shell: bash

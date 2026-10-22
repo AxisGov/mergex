@@ -84,7 +84,7 @@ A `sprintx` planeja e executa features novas em seis fases (F1–F6). O código 
 
 > ## Entrega no repositório
 >
-> A `sprintx` termina com o código escrito e os testes verdes. Levar isso até o repositório e até o revisor é trabalho da [`mergex`](https://github.com/bittencourtthulio/mergex): ela adota a branch e o worktree que a F1 abriu, commita cada task que fecha, e ao fim monta a entrega — portão de prontidão, classificação do diff por atenção humana, descrição do pull request e pacote para o QA.
+> A `sprintx` termina com o código escrito e os testes verdes. Levar isso até o repositório e até o revisor é trabalho da [`mergex`](https://github.com/AxisGov/mergex): ela adota a branch e o worktree que a F1 abriu, commita cada task que fecha, e ao fim monta a entrega — portão de prontidão, classificação do diff por atenção humana, descrição do pull request e pacote para o QA.
 >
 > A integração é condicional: sem a `mergex` instalada, a F6 roda exatamente como sempre.
 
