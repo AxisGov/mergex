@@ -249,10 +249,14 @@ OLHO OBRIGATÓRIO.
 A lista é **fechada**. Arquivo fora dela não é artefato de método para o E3, mesmo morando em
 `docs/sprintx/` ou declarando `expx_tool: sprintx`. Caminho sem `docs/` na frente é relativo à
 pasta **deste** trabalho: `docs/sprintx/features/<slug>/` (ou `docs/<slug>/` no formato antigo)
-na sprintx, `docs/manutencao/<OC-ID>-<slug>/` na runx. O único segmento variável é `sprint-NN`
-(`sprint-` e dígitos). `base/<area>.md` só vale para arquivo listado no `base/00-INDICE.md` do
-mesmo trabalho. Kind `-` quer dizer que o contrato de origem não define frontmatter, e o arquivo
-**não pode** declarar um.
+na sprintx, `docs/manutencao/<OC-ID>-<slug>/` na runx. Nos caminhos relativos, o único segmento
+variável é `sprint-NN` (`sprint-` e dígitos). `base/<area>.md` só vale para arquivo listado no
+`base/00-INDICE.md` do mesmo trabalho. Nos caminhos da mergex, `<trabalho_id>` é sempre o
+trabalho corrente, e a evidência da revisão por task tem mais um segmento variável: o nome
+`<T-NN.MM>.json` (ou o id legado `<T-N>.json`), o mesmo que o E1 commita. Kind `-` quer dizer
+que o contrato de origem não define frontmatter, e o arquivo **não pode** declarar um, **salvo**
+a evidência da revisão por task: ela é JSON do núcleo, sem frontmatter, e o classificador não lê
+o conteúdo dela (DM-242).
 
 | origem | caminho | kind | critério | função |
 |---|---|---|---|---|

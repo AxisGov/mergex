@@ -447,7 +447,23 @@ catalogo_script="$(bash "$classificador" --catalogo | sort)"
   fail 'method-artifact catalog diverges between reference and classifier'
 }
 
-# Nenhum curinga no catálogo: caminhos exatos, só `sprint-NN` e `base/<area>.md` como variáveis.
+# A regra do nome da evidência de revisão (DM-240, DM-242) existe em duas cópias:
+# a que o E1 commita e a que o E3 reconhece. As duas têm de ser a mesma função.
+nome_de_evidencia_em() {
+  tr -d '\r' < "$1" | awk '/^nome_de_evidencia\(\) \{$/ { dentro = 1 } dentro { print } dentro && /^\}$/ { exit }'
+}
+nome_e1="$(nome_de_evidencia_em .claude/skills/mergex/scripts/fechamento-do-e1.sh)"
+nome_e3="$(nome_de_evidencia_em "$classificador")"
+[ -n "$nome_e1" ] || fail 'E1 lost nome_de_evidencia'
+[ -n "$nome_e3" ] || fail 'E3 classifier lost nome_de_evidencia'
+[ "$nome_e1" = "$nome_e3" ] || {
+  diff <(printf '%s\n' "$nome_e1") <(printf '%s\n' "$nome_e3") >&2 || true
+  fail 'nome_de_evidencia diverges between E1 (fechamento-do-e1.sh) and E3 (classificar-atencao.sh)'
+}
+
+# Nenhum curinga no catálogo: caminhos exatos, só `sprint-NN` e `base/<area>.md` como
+# variáveis; na evidência de revisão da mergex, também `<trabalho_id>` (o trabalho
+# corrente) e `<T-NN.MM>` (nome_de_evidencia, conferida acima).
 if bash "$classificador" --catalogo | cut -d'|' -f2 | grep -Eq '\*|\?|\[|^docs/?$|^docs/sprintx/?$|^docs/manutencao/?$'; then
   fail 'method-artifact catalog contains a wildcard'
 fi
@@ -792,15 +808,15 @@ fi
 # não descontasse comentário reprovaria a explicação junto com a violação.
 codigo() { grep -v '^[[:space:]]*#' "$1"; }
 
-if codigo "$trava_sh" | grep -Fq '.git'; then
+if codigo "$trava_sh" | grep -F '.git' >/dev/null; then
   fail 'the E1 lock hardcodes the gitdir layout'
 fi
 
 # O mecanismo é `mkdir` atômico; `flock` quebraria Windows/macOS/Git Bash.
-codigo "$trava_sh" | grep -Fq 'mkdir "$trava"' \
+codigo "$trava_sh" | grep -F 'mkdir "$trava"' >/dev/null \
   || fail 'the E1 lock is not an atomic mkdir'
 for f in "$trava_sh" "$fecha_sh"; do
-  if codigo "$f" | grep -Fq 'flock'; then fail "$f depends on flock"; fi
+  if codigo "$f" | grep -F 'flock' >/dev/null; then fail "$f depends on flock"; fi
 done
 
 # Nada de recuperação automática, e nada de remover a trava de outro E1.
@@ -808,7 +824,7 @@ grep -Fq '**Não remova a trava automaticamente.**' "$commits" \
   || fail 'E1 allows removing an orphan lock automatically'
 grep -Fq 'decisão sobre uma trava órfã é humana' "$commits" \
   || fail 'E1 does not leave the orphan-lock call to a person'
-if codigo "$trava_sh" | grep -Fq 'rm -rf'; then
+if codigo "$trava_sh" | grep -F 'rm -rf' >/dev/null; then
   fail 'the E1 lock wipes a directory tree'
 fi
 grep -Fq 'nenhuma execução remove a trava de outra' "$commits" \
@@ -835,7 +851,7 @@ fi
 if printf '%s\n' "$bloco_orfao" | grep -Fq 'git-common-dir'; then
   fail 'orphan-lock runbook reaches the common git directory'
 fi
-if codigo "$trava_sh" | grep -Fq -- '--force-unlock'; then
+if codigo "$trava_sh" | grep -F -- '--force-unlock' >/dev/null; then
   fail 'production lock exposes --force-unlock'
 fi
 
@@ -845,7 +861,7 @@ grep -Fq '**Stage já não vazio antes de o E1 preparar qualquer coisa: PARE.**'
 grep -Fq '**Deixe exatamente como estava**' "$commits" \
   || fail 'E1 no longer preserves a preexisting stage'
 for g in 'git reset' 'git stash' 'git restore' 'git checkout' 'git clean'; do
-  if codigo "$fecha_sh" | grep -Fq "$g"; then
+  if codigo "$fecha_sh" | grep -F "$g" >/dev/null; then
     fail "the E1 critical section runs $g on state it does not own"
   fi
 done
@@ -860,14 +876,14 @@ done
 # Só chamada ao versionador: a mensagem do código 5 cita `--no-verify` para
 # PROIBI-LO, e proibir não é usar.
 for g in '--amend' '--no-verify' 'reset --hard'; do
-  if codigo "$fecha_sh" | grep -F 'git ' | grep -Fq -- "$g"; then
+  if codigo "$fecha_sh" | grep -F 'git ' | grep -F -- "$g" >/dev/null; then
     fail 'the E1 critical section rewrites or discards history'
   fi
 done
 
 # O escritor da lista não ganhou trava própria, e leitura nunca trava.
 for t in mkdir flock; do
-  if codigo "$seq_sh" | grep -Fq "$t"; then
+  if codigo "$seq_sh" | grep -F "$t" >/dev/null; then
     fail "the commits writer implements its own lock ($t)"
   fi
 done
@@ -1116,10 +1132,10 @@ done
 grep -Fq 'trava-do-e1.sh' "$persiste_sh" || fail 'method lifecycle does not reuse the C5 lock'
 grep -Fq 'contrato-de-commit.sh' "$persiste_sh" || fail 'method lifecycle does not validate commit grammar'
 grep -Fq 'sem-segredo.sh' "$persiste_sh" || fail 'method lifecycle bypasses the secret gate'
-if codigo "$persiste_sh" | grep -Eq 'git add (-A|--all|docs/)'; then
+if codigo "$persiste_sh" | grep -E 'git add (-A|--all|docs/)' >/dev/null; then
   fail 'method lifecycle performs broad staging'
 fi
-if codigo "$persiste_sh" | grep -Fq 'expx_trabalho_atual_por_branch'; then
+if codigo "$persiste_sh" | grep -F 'expx_trabalho_atual_por_branch' >/dev/null; then
   fail 'method lifecycle selects current work from the branch'
 fi
 grep -Fq -- '--checkpoint pre-e2' '.claude/skills/mergex/references/02-prontidao.md' \
@@ -1215,7 +1231,7 @@ grep -Fq 'catalogo-de-metodo.sh' "$fecha_sh" || fail 'M4-B: E1 does not use the 
 grep -Fq 'catalogo-de-metodo.sh' "$persiste_sh" || fail 'M4-B: method lifecycle does not use the shared catalog'
 grep -Fq 'git status --porcelain=v1 -z --untracked-files=all' "$fecha_sh" \
   || fail 'M4-B: E1 lost the NUL-safe whole-tree inventory'
-if codigo "$catalogo_sh" | grep -Fq 'docs/*'; then
+if codigo "$catalogo_sh" | grep -F 'docs/*' >/dev/null; then
   fail 'M4-B: method catalog uses a directory glob'
 fi
 grep -Fq 'para 11 ' "$fecha_sh" || fail 'M4-B: E1 lost the unlisted-current-product barrier (code 11)'
@@ -1244,7 +1260,7 @@ grep -Fq '| DM-174 |' '.claude/skills/mergex/DECISOES-DA-SKILL.md' \
   || fail 'decision log is missing DM-174'
 grep -Fq 'confere_historico_inicial()' "$persiste_sh" \
   || fail 'D-02: method lifecycle lost the whole-file proof of the first HISTORICO'
-if codigo "$persiste_sh" | grep -Fq 'untracked não tem base'; then
+if codigo "$persiste_sh" | grep -F 'untracked não tem base' >/dev/null; then
   fail 'D-02: method lifecycle still refuses every untracked HISTORICO'
 fi
 grep -Fq 'ls-tree --name-only HEAD -- "$caminho"' "$persiste_sh" \
@@ -1257,7 +1273,7 @@ for f in scripts/ci/test-d02-historico-inicial.sh scripts/ci/mutacao-d02-histori
   [ -f "$f" ] || fail "D-02: missing $f"
 done
 # Alinhamento ao contrato publicado: a prova não é um segundo schema sprintx.
-if codigo "$persiste_sh" | grep -Fq 'cita_tasks'; then
+if codigo "$persiste_sh" | grep -F 'cita_tasks' >/dev/null; then
   fail 'D-02: first HISTORICO proof scans task ids in free prose again'
 fi
 grep -Fq 'marcador do template não substituído' "$persiste_sh" \
@@ -1278,7 +1294,7 @@ done
 # Um leitor só: HEAD e working tree passam pelo mesmo parser da primeira criação.
 [ "$(codigo "$persiste_sh" | grep -c 'ler_historico "')" -ge 3 ] \
   || fail 'DM-175: initial, HEAD and worktree HISTORICO no longer share one reader'
-if codigo "$persiste_sh" | grep -Eq 'diff HEAD .*-- "\$caminho"'; then
+if codigo "$persiste_sh" | grep -E 'diff HEAD .*-- "\$caminho"' >/dev/null; then
   fail 'DM-175: tracked HISTORICO is proved by textual diff again'
 fi
 grep -Fq 'grupo_tracked' scripts/ci/test-d02-historico-inicial.sh \
@@ -1294,7 +1310,7 @@ grep -Fq 'DM-176' '.claude/skills/mergex/references/01-commits.md' \
 grep -Fq 'function decodifica(' "$persiste_sh" \
   || fail 'DM-176: HISTORICO reader lost the single quoted-scalar decoder'
 # Um decodificador só: escalar e efetivo não desaspam o miolo cru.
-if codigo "$persiste_sh" | grep -Fq -e 'if (aspas) return substr(v, 2' -e 'if (aspas) return "s:" substr(v, 2'; then
+if codigo "$persiste_sh" | grep -F -e 'if (aspas) return substr(v, 2' -e 'if (aspas) return "s:" substr(v, 2' >/dev/null; then
   fail 'DM-176: a quoted scalar is unquoted outside the single decoder'
 fi
 # Não é parser YAML geral, e a decisão diz isso.
@@ -1413,9 +1429,9 @@ grep -Fq -- "$composicao" "$barreira_ref" || fail '12-barreira-de-push sem a ins
 grep -Fq -- "$composicao" "$ativacao_sh" || fail 'ativacao-pre-push.sh: a instrução de composição diverge do reference'
 grep -Fxq '# mergex: pre-push gerenciado' "$modelo_pp" || fail 'o modelo do pre-push gerenciado perdeu o marcador'
 # o E0 nunca escreve core.hooksPath; nenhuma opção de força nos executáveis novos
-codigo "$ativacao_sh" | grep -Eq 'config[^|;&]*core\.hooksPath' && fail 'ativacao-pre-push.sh escreve core.hooksPath'
+codigo "$ativacao_sh" | grep -E 'config[^|;&]*core\.hooksPath' >/dev/null && fail 'ativacao-pre-push.sh escreve core.hooksPath'
 for f in "$ativacao_sh" "$registrar_sh"; do
-  codigo "$f" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$f tem opção de força"
+  codigo "$f" | grep -Ei -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' >/dev/null && fail "$f tem opção de força"
   grep -Fq '# guarda:' "$f" || fail "$f sem linha de guarda"
 done
 grep -Fq 'ativacao-pre-push.sh' "$persiste_sh" || fail 'persistir-metodo.sh não prova o pre-push antes de persistir pronto'
@@ -1430,7 +1446,7 @@ for f in "$ci_sh" "$ci_tpl"; do
   [ -f "$f" ] || fail "DM-184: missing $f"
 done
 grep -Fxq '## CI' "$barreira_ref" || fail '12-barreira-de-push sem a seção ## CI'
-codigo "$ci_sh" | grep -Eqi -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' && fail "$ci_sh tem opção de força"
+codigo "$ci_sh" | grep -Ei -- '--(force|forca|forcar|sem-prova|sem-hook|pular)' >/dev/null && fail "$ci_sh tem opção de força"
 # DM-185: o CI seleciona pelo conteúdo (pr_entregas_do_intervalo) e decide
 # cada entrega pela regra compartilhada (pr_decide_entregas); nada nele filtra
 # a seleção pelo nome da branch
@@ -1531,7 +1547,7 @@ done
 grep -Fq 'sem_repositorio_git ||' "$registrar_sh" || fail 'registrar-portao.sh não exige sem_repositorio_git antes de dispensar'
 grep -Fq 'sem_repositorio_git ||' "$ativacao_sh" || fail 'ativacao-pre-push.sh não exige sem_repositorio_git antes de sair 0'
 grep -F '# guarda:E2SEMHOOK' "$registrar_sh" | grep -Fq 'SEM_GIT' || fail 'registrar-portao.sh: a dispensa sem Git não está na linha da guarda E2SEMHOOK'
-codigo "$registrar_sh" | grep -Fq 'versionado' && fail 'registrar-portao.sh decide a dispensa pelo campo versionado (o critério é só o Git real)'
+codigo "$registrar_sh" | grep -F 'versionado' >/dev/null && fail 'registrar-portao.sh decide a dispensa pelo campo versionado (o critério é só o Git real)'
 for f in .claude/commands/mergex-check.md .opencode/commands/mergex-check.md "$prontidao" "$barreira_ref"; do
   grep -Fq 'nunca pelo campo `versionado`' "$f" \
     || fail "$f não diz que fora de um repositório Git a prova é dispensada pelo Git real, nunca pelo campo versionado (DM-186)"

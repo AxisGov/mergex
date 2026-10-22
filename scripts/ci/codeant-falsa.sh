@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # shellcheck shell=bash
 #
 # A CLI do CodeAnt falsa dos testes da V12 (biblioteca, carregada com `.`).

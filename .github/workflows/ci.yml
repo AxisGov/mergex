@@ -118,6 +118,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/validate-mergex-contract.sh
 
+      - name: Test Mergex contract validator
+        shell: bash
+        run: bash scripts/ci/test-validate-mergex-contract.sh
+
       - name: Validate review evidence contract
         shell: bash
         run: bash scripts/ci/validate-review-evidence-contract.sh
@@ -149,6 +153,18 @@ jobs:
       - name: Test E1 evidencia de revisao por task
         shell: bash
         run: bash scripts/ci/test-e1-evidencia-revisao.sh
+
+      - name: Test E8 causa do portao
+        shell: bash
+        run: bash scripts/ci/test-causa-portao.sh
+
+      - name: Test E2 V11
+        shell: bash
+        run: bash scripts/ci/test-portao-v11.sh
+
+      - name: Test R3 predecessores da sprintx
+        shell: bash
+        run: bash scripts/ci/test-r3-predecessores-sprintx.sh
 
       - name: Test E9 R4 PR head from the base repository
         shell: bash
