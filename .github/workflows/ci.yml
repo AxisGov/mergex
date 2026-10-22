@@ -177,3 +177,7 @@ jobs:
       - name: Test PR de planejamento
         shell: bash
         run: bash scripts/ci/test-pr-de-planejamento.sh
+
+      - name: Test entrega sequencial por sprint
+        shell: bash
+        run: bash scripts/ci/test-entrega-por-sprint.sh

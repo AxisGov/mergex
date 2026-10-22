@@ -46,8 +46,9 @@
 #    `planejamento_merge_sha=`), e esse merge P tem de ser ancestral da base.
 #    A âncora passa a ser: toda versão registrada_sprint tem a base de HEAD;
 #    as anteriores (registrada_e0 ou sem a chave) têm UMA base, ancestral de
-#    P; e nenhuma versão anterior descende de uma registrada_sprint
-#    (rebaixamento). Senão, ou sem o merge registrado: v9_sem_prova.
+#    P; e nenhuma versão de ordem anterior — inclusive uma revisão sem a chave —
+#    descende de uma registrada_sprint (rebaixamento). Senão, ou sem o merge
+#    registrado: v9_sem_prova.
 #    Em qualquer origem, a base que já contém o trabalho é v9_sem_prova: a
 #    própria HEAD; uma base da qual é ancestral algum commit de
 #    ENTREGA.commits (de HEAD; entrada que não resolve para um único commit
@@ -58,7 +59,13 @@
 #    contém é o planejamento, desde que todo commit do trabalho alcançável de
 #    P (com `Trabalho: <id>` ou tocando a pasta ou a entrega, e a diferença de
 #    P para o 1º pai quando P é merge) só toque
-#    `^docs/(sprintx|entregas|eventos)/`; senão, v9_sem_prova.
+#    `^docs/(sprintx|entregas|eventos)/`, e todo commit do intervalo do PR,
+#    `base_sha..P` (a base do PR no merge, gravada pelo E9 no item de
+#    planejamento; DM-269), também: o commit comum pelo que muda, o merge pelo
+#    que muda por conta própria (`--cc`). Assim um rebase-merge ou ff não
+#    esconde em `^P` um commit de produto sem a marca anterior ao último.
+#    Item sem base_sha, base_sha fora da história ou que não é ancestral
+#    própria de P: v9_sem_prova.
 #    Riscos residuais conhecidos (limite de desenho; o Git local não
 #    distingue):
 #    - legado com a ref de base movida para um commit sem nenhuma dessas
@@ -69,13 +76,11 @@
 #      zero em que o ENTREGA.md nasce noutro caminho e é renomeado para o
 #      canônico já com a base errada: `rev-list -- <caminho>` não segue
 #      renomeação, e no caminho nunca houve outra versão;
-#    - merge do planejamento forjado: um merge_sha gravado na entrega que
-#      aponta para um commit sem marca do trabalho e com produto; as guardas
-#      não o distinguem de um merge da main. Também: num rebase-merge ou ff,
-#      um commit de produto sem a marca e fora da pasta, anterior ao último
-#      (P), fica em `^P` sem ser conferido, como merges marcados que não são
-#      o próprio P; e a base reancorada pode ser qualquer descendente de P
-#      (o E0 a lê da ref buscada);
+#    - registro do merge do planejamento forjado: o intervalo conferido é o
+#      que a entrega diz (`base_sha..merge_sha`, gravados pelo E9 a partir do
+#      serviço); uma base_sha gravada depois da base real deixa fora do
+#      intervalo o que veio antes dela. E a base reancorada pode ser qualquer
+#      descendente de P (o E0 a lê da ref buscada);
 #    - B1 lateral: com reconciliação, a cadeia nunca reconfere b1_sha contra a
 #      base real; um B1 forjado (descende de B0, traz produto, a ref movida no
 #      registro) desloca a base.
@@ -225,6 +230,7 @@ M_PLAN=""
 MARCA_H="$(bash "$PLANEJAMENTO_SH" --entrega "$ENTREGA_H" 2>&1)" \
   || sem_prova "entrega de HEAD ilegível para entrega-de-planejamento.sh: $MARCA_H" # guarda:V9PLAN
 mp="$(printf '%s\n' "$MARCA_H" | sed -n 's/^planejamento_merge_sha=//p')"
+B_PLAN_REG="$(printf '%s\n' "$MARCA_H" | sed -n 's/^planejamento_base_sha=//p')"
 if [ -n "$mp" ]; then
   M_PLAN="$(g rev-parse --verify -q "$mp^{commit}" 2>/dev/null)" \
     || sem_prova "o merge do planejamento registrado ($mp) não é um commit deste repositório" # guarda:V9PLAN
@@ -269,15 +275,20 @@ AVISOS="$TMP_DIR/avisos"; : > "$AVISOS"
 # alcançáveis de HEAD (rev-list --full-history: sem simplificação de merge e sem
 # depender de data nem de "qual commit o criou"). Chave presente e malformada,
 # em qualquer versão: v9_sem_prova. VALORES fica com um valor por versão que
-# tem a chave; vazio, e só então, a entrega é legada.
+# tem a chave; SEM_BASE registra toda versão que não a tem, para a prova de que
+# nenhuma delas veio depois de uma reancoragem. VALORES vazio, e só então, é legado.
 VALORES="$TMP_DIR/valores"; : > "$VALORES"
+SEM_BASE="$TMP_DIR/versoes-sem-base"; : > "$SEM_BASE"
 if [ -z "$ULTIMO" ]; then
   g rev-list --full-history "$HEAD_SHA" -- "$ENTREGA" > "$TMP_DIR/versoes" 2>/dev/null \
     || sem_prova "histórico de $ENTREGA ilegível" # guarda:V9SHA
   while IFS= read -r cv <&3; do
     case "$(modo_em "$cv" "$ENTREGA")" in 100644|100755) ;; *) continue ;; esac
     g cat-file blob "$cv:$ENTREGA" > "$TMP_DIR/versao.md" 2>/dev/null || sem_prova "$ENTREGA ilegível em $cv"
-    _entrega_chave_qualquer "$TMP_DIR/versao.md" base_validada_sha || continue
+    if ! _entrega_chave_qualquer "$TMP_DIR/versao.md" base_validada_sha; then
+      printf '%s\n' "$cv" >> "$SEM_BASE"
+      continue
+    fi
     vv="$(catalogo_fm "$TMP_DIR/versao.md" base_validada_sha)"
     oid_valido "$vv" || sem_prova "$ENTREGA em $cv tem base_validada_sha malformada: ${vv:-vazia ou ilegível}"
     printf '%s\n' "$vv" >> "$VALORES"
@@ -329,8 +340,51 @@ g cat-file -e "$BASE^{commit}" 2>/dev/null || sem_prova "base $BASE não é comm
 # O planejamento mergeado que a base contém não é trabalho escondido nela: as
 # guardas da história olham `<base> ^P` (o conteúdo de P é conferido depois,
 # guarda:V9PLAN, com a pasta do trabalho resolvida)
+# Entrega por sprint (DM-264): cada abertura de sprint reancora a base, então as
+# versões registrada_sprint têm k bases, em cadeia (cada uma ancestral da
+# seguinte); a de ordem r contém o merge do r-ésimo PR fechado de `prs` (o
+# planejamento é o 1º), a de HEAD é a mais nova (r = k), e k nunca passa do
+# número de PRs fechados. As guardas olham `<base> ^L`, L = o merge do k-ésimo.
+L_SPRINT=""
+if [ -n "$ULTIMO" ] && printf '%s\n' "$MARCA_H" | grep -qx 'entrega=por_sprint'; then
+  # Com reconciliação, a cadeia já prova BASE (DM-266). L_SPRINT ainda precisa apontar
+  # o último PR fechado: ele tem de ser ancestral de BASE e separa das guardas
+  # o produto das sprints que a main já recebeu.
+  printf '%s\n' "$MARCA_H" | awk -F'\t' '/^pr=/ && $2 == "merged" { print $3 }' > "$TMP_DIR/fechados"
+  L_SPRINT="$(sed -n '$p' "$TMP_DIR/fechados")"
+  [ -n "$L_SPRINT" ] || sem_prova 'entrega por_sprint reconciliada sem PR fechado que justifique a base' # guarda:V9PLAN
+  g merge-base --is-ancestor "$L_SPRINT" "$BASE" 2>/dev/null \
+    || sem_prova "o último PR fechado ($L_SPRINT) não é ancestral de BASE ($BASE) depois da reconciliação" # guarda:V9PLAN
+elif [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint ]; then
+  printf '%s\n' "$MARCA_H" | awk -F'\t' '/^pr=/ && $2 == "merged" { print $3 }' > "$TMP_DIR/fechados"
+  awk -F'\t' '$3 == "registrada_sprint" { print $2 }' "$TMP_DIR/versoes-info" | LC_ALL=C sort -u > "$TMP_DIR/sprint-bases"
+  k="$(grep -c . "$TMP_DIR/sprint-bases")"; nf="$(grep -c . "$TMP_DIR/fechados")"
+  [ "$k" -le "$nf" ] \
+    || sem_prova "as versões de $ENTREGA têm $k bases registrada_sprint e prs só $nf PR(s) fechado(s): registrada_sprint com outra base que nenhum merge justifica" # guarda:V9PLAN
+  : > "$TMP_DIR/ranks"
+  while IFS= read -r b <&4; do
+    r=1
+    while IFS= read -r o <&5; do
+      [ "$o" = "$b" ] || ! g merge-base --is-ancestor "$o" "$b" 2>/dev/null || r=$((r + 1))
+    done 5< "$TMP_DIR/sprint-bases"
+    printf '%s\t%s\n' "$b" "$r" >> "$TMP_DIR/ranks"
+  done 4< "$TMP_DIR/sprint-bases"
+  [ "$(cut -f2 "$TMP_DIR/ranks" | LC_ALL=C sort -u | grep -c .)" = "$k" ] \
+    || sem_prova "as bases registrada_sprint de $ENTREGA não formam uma cadeia (cada uma ancestral da seguinte): $(cut -f1 "$TMP_DIR/ranks" | tr '\n' ' ')" # guarda:V9PLAN
+  [ "$(awk -F'\t' -v b="$BASE" '$1 == b { print $2 }' "$TMP_DIR/ranks")" = "$k" ] \
+    || sem_prova "a base de HEAD ($BASE) não é a mais nova das bases registrada_sprint: registrada_sprint com outra base depois da de HEAD" # guarda:V9PLAN
+  while IFS="$TAB" read -r b r <&4; do
+    f="$(sed -n "${r}p" "$TMP_DIR/fechados")"
+    if [ "$r" = 1 ]; then o="do planejamento $f"; else o="do PR fechado nº $r de prs ($f)"; fi
+    g merge-base --is-ancestor "$f" "$b" 2>/dev/null \
+      || sem_prova "origem_base registrada_sprint: a base $b não contém o merge $o" # guarda:V9PLAN
+  done 4< "$TMP_DIR/ranks"
+  L_SPRINT="$(sed -n "${k}p" "$TMP_DIR/fechados")"
+fi
 EXCL=""
-if [ -n "$M_PLAN" ] && g merge-base --is-ancestor "$M_PLAN" "$BASE" 2>/dev/null; then
+if [ -n "$L_SPRINT" ]; then
+  EXCL="^$L_SPRINT"
+elif [ -n "$M_PLAN" ] && g merge-base --is-ancestor "$M_PLAN" "$BASE" 2>/dev/null; then
   EXCL="^$M_PLAN"
 elif [ "$ORIGEM_BASE" = registrada_sprint ]; then
   sem_prova "origem_base registrada_sprint: a base $BASE não contém o merge do planejamento $M_PLAN" # guarda:V9PLAN
@@ -355,6 +409,11 @@ while IFS="$TAB" read -r _ c <&3; do
   [ -n "$c" ] || continue
   # abreviação ambígua, SHA inexistente ou valor solto: a guarda não pula em silêncio
   cs="$(g rev-parse --verify -q "$c^{commit}" 2>/dev/null)" || sem_prova "ENTREGA.commits de HEAD: $c não resolve para um único commit" # guarda:V9SHA
+  # o commit de uma sprint já mergeada (ou do planejamento) está no PR fechado que
+  # as guardas descontam, `^L`: não é trabalho escondido na base
+  if [ -n "$EXCL" ] && g merge-base --is-ancestor "$cs" "${EXCL#^}" 2>/dev/null; then
+    continue
+  fi
   if g merge-base --is-ancestor "$cs" "$BASE" 2>/dev/null; then
     sem_prova "a base $BASE contém o commit $cs de ENTREGA.commits: a base contém o trabalho" # guarda:V9SHA
   fi
@@ -367,11 +426,9 @@ c="$(g rev-list -n1 --encoding=UTF-8 --grep="^Trabalho: $TRAB_RE\$" "$BASE" $EXC
 # têm, e é a de HEAD: a spec só deixa a chave mudar por reconciliação (que traz
 # a cadeia, ancorada)
 if [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint ]; then
-  # reancorada pelo E0 depois do planejamento (DM-261): duas bases, cada uma
-  # do seu lado da reancoragem
-  awk -F'\t' -v b="$BASE" '$3 == "registrada_sprint" && $2 != b { print $1; exit }' "$TMP_DIR/versoes-info" > "$TMP_DIR/sprint-outra"
-  [ ! -s "$TMP_DIR/sprint-outra" ] \
-    || sem_prova "a versão de $ENTREGA em $(cat "$TMP_DIR/sprint-outra") é registrada_sprint com outra base que a de HEAD ($BASE)" # guarda:V9PLAN
+  # reancorada pelo E0 depois do planejamento (DM-261) e a cada sprint (DM-264):
+  # a cadeia das bases registrada_sprint já foi conferida acima; aqui, a base de
+  # antes da primeira reancoragem e o rebaixamento
   # anterior é só registrada_e0 (ou sem a chave, como o E0 a lê): outra origem não vale
   awk -F'\t' '$3 != "registrada_sprint" && $3 != "registrada_e0" && $3 != "" { print $1 "\t" $3; exit }' "$TMP_DIR/versoes-info" > "$TMP_DIR/origem-outra"
   [ ! -s "$TMP_DIR/origem-outra" ] \
@@ -381,15 +438,53 @@ if [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint
   [ "$n" = 1 ] || sem_prova "as versões de $ENTREGA anteriores à reancoragem têm $n bases ($(tr '\n' ' ' < "$TMP_DIR/distintos")): a base anterior não é uma só" # guarda:V9PLAN
   g merge-base --is-ancestor "$(sed -n 1p "$TMP_DIR/distintos")" "$M_PLAN" 2>/dev/null \
     || sem_prova "a base anterior à reancoragem ($(sed -n 1p "$TMP_DIR/distintos")) não é ancestral do merge do planejamento $M_PLAN" # guarda:V9PLAN
-  # rebaixamento: uma versão anterior que descende de uma reancorada
-  awk -F'\t' '$3 == "registrada_sprint" { print $1 }' "$TMP_DIR/versoes-info" > "$TMP_DIR/v-sprint"
-  awk -F'\t' '$3 != "registrada_sprint" { print $1 }' "$TMP_DIR/versoes-info" > "$TMP_DIR/v-antes"
-  while IFS= read -r vs <&4; do
-    while IFS= read -r va <&5; do
-      ! g merge-base --is-ancestor "$vs" "$va" 2>/dev/null \
-        || sem_prova "a versão de $ENTREGA em $va volta à base anterior depois da reancoragem em $vs: rebaixamento" # guarda:V9PLAN
-    done 5< "$TMP_DIR/v-antes"
-  done 4< "$TMP_DIR/v-sprint"
+  # rebaixamento: uma versão de ordem menor (0 antes da reancoragem; r, a da sua
+  # base registrada_sprint; 0 também para uma revisão sem a chave) que descende
+  # de uma de ordem maior
+  awk -F'\t' 'NR == FNR { r[$1] = $2; next } { print $1 "\t" (($3 == "registrada_sprint") ? r[$2] : 0) }' \
+    "$TMP_DIR/ranks" "$TMP_DIR/versoes-info" > "$TMP_DIR/v-ordem"
+  awk '{ print $1 "\t0" }' "$SEM_BASE" >> "$TMP_DIR/v-ordem"
+  # Uma travessia pais-antes-dos-filhos propaga a maior ordem registrada em
+  # qualquer ancestral. Assim cada aresta é examinada uma vez; não se abre um
+  # processo Git para cada par de versões da entrega.
+  g rev-list --reverse --topo-order --parents "$HEAD_SHA" > "$TMP_DIR/grafo-versoes" 2>/dev/null \
+    || sem_prova "histórico de $HEAD_SHA ilegível ao conferir rebaixamento" # guarda:V9PLAN
+  awk -F'\t' '
+    NR == FNR {
+      ordem[$1] = $2 + 0
+      versao[$1] = 1
+      next
+    }
+    {
+      n = split($0, no, " ")
+      atual = no[1]
+      maior = 0
+      origem = ""
+      for (i = 2; i <= n; i++) {
+        pai = no[i]
+        if (maximo[pai] > maior) {
+          maior = maximo[pai]
+          origem = fonte[pai]
+        }
+      }
+      if (versao[atual] && maior > ordem[atual]) {
+        print atual "\t" origem
+        exit
+      }
+      if (versao[atual] && ordem[atual] >= maior) {
+        maximo[atual] = ordem[atual]
+        fonte[atual] = atual
+      } else {
+        maximo[atual] = maior
+        fonte[atual] = origem
+      }
+    }
+  ' "$TMP_DIR/v-ordem" "$TMP_DIR/grafo-versoes" > "$TMP_DIR/rebaixamento"
+  if [ -s "$TMP_DIR/rebaixamento" ]; then
+    va="$(cut -f1 "$TMP_DIR/rebaixamento")"
+    vs="$(cut -f2 "$TMP_DIR/rebaixamento")"
+    sem_prova "a versão de $ENTREGA em $va volta a uma base anterior depois da reancoragem em $vs: rebaixamento" # guarda:V9PLAN
+  fi
 elif [ -z "$ULTIMO" ] && [ -s "$VALORES" ]; then
   LC_ALL=C sort -u "$VALORES" > "$TMP_DIR/distintos"
   n="$(grep -c . "$TMP_DIR/distintos")"
@@ -444,6 +539,28 @@ if [ -n "$EXCL" ]; then
     fora_p="$(so_metodo "$TMP_DIR/do-plan.nomes")"
     [ -z "$fora_p" ] || sem_prova "o merge do planejamento $M_PLAN traz $fora_p: o planejamento só leva docs/sprintx, docs/entregas e docs/eventos" # guarda:V9PLAN
   fi
+  # o intervalo do PR de planejamento, base_sha..P (DM-269): no rebase-merge e no
+  # fast-forward, P é só o último commit; os de antes, com ou sem a marca, também
+  # são do PR. Commit comum: o que ele muda; merge: o que ele muda por conta
+  # própria (--cc), porque o que vem dos pais já é um commit do intervalo ou da base
+  case "$B_PLAN_REG" in
+    ''|null) sem_prova "o merge do planejamento $M_PLAN está registrado sem base_sha (a base do PR no merge): rode o E9, que a lê no serviço" ;; # guarda:V9PLAN
+  esac
+  B_PLAN="$(g rev-parse --verify -q "$B_PLAN_REG^{commit}" 2>/dev/null)" \
+    || sem_prova "a base_sha do PR de planejamento ($B_PLAN_REG) não é um commit deste repositório" # guarda:V9PLAN
+  [ "$B_PLAN" != "$M_PLAN" ] && g merge-base --is-ancestor "$B_PLAN" "$M_PLAN" 2>/dev/null \
+    || sem_prova "a base_sha do PR de planejamento ($B_PLAN) não é ancestral própria do merge $M_PLAN" # guarda:V9PLAN
+  g rev-list --parents "$B_PLAN..$M_PLAN" > "$TMP_DIR/intervalo" 2>/dev/null \
+    || sem_prova "intervalo $B_PLAN..$M_PLAN do PR de planejamento ilegível" # guarda:V9PLAN
+  while read -r cpl _pai1 pai2 _ <&3; do
+    if [ -n "${pai2:-}" ]; then
+      g diff-tree -r -z --cc --no-commit-id --name-only "$cpl" > "$TMP_DIR/do-plan.nomes" 2>/dev/null
+    else
+      g diff-tree -r -z --root --no-commit-id --name-only --no-renames "$cpl" > "$TMP_DIR/do-plan.nomes" 2>/dev/null
+    fi || sem_prova "commit $cpl do PR de planejamento ilegível" # guarda:V9PLAN
+    fora_p="$(so_metodo "$TMP_DIR/do-plan.nomes")"
+    [ -z "$fora_p" ] || sem_prova "o commit $cpl do PR de planejamento ($B_PLAN..$M_PLAN) toca $fora_p: o planejamento só leva docs/sprintx, docs/entregas e docs/eventos" # guarda:V9PLAN
+  done 3< "$TMP_DIR/intervalo"
 fi
 # O planejamento não aceita pela união: nada de produto entra nele.
 : > "$TMP_DIR/uniao"
