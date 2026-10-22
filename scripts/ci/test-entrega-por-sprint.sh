@@ -414,5 +414,9 @@ confere 'TEMPLATE-ENTREGA: inclui o modo e a sprint registrada pelo E0' $?
 grep -q 'bash scripts/ci/test-entrega-por-sprint.sh' "$raiz/.github/workflows/ci.yml"
 confere 'CI executa a bancada de entrega por sprint' $?
 
+grep -Fq 'rev-list --reverse --topo-order --parents "$HEAD_SHA"' "$scripts/portao-v9.sh" \
+  && ! grep -Fq 'done 5< "$TMP_DIR/v-ordem"' "$scripts/portao-v9.sh"
+confere 'V9 verifica rebaixamento em uma travessia do grafo, sem pares quadraticos' $?
+
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

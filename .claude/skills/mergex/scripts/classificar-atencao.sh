@@ -64,7 +64,9 @@ ORDEM='O1 O2 O3 O4 O5 O6 O7 O8 O9 O10 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO'
 #   caminho sem `docs/` na frente é relativo à pasta do trabalho;
 #   `sprint-NN` é só `sprint-` seguido de dígitos; `base/<area>.md` só vale para
 #   arquivo listado no `base/00-INDICE.md` do mesmo trabalho;
-#   kind `-` = o contrato não define frontmatter, e o arquivo não pode declarar kind;
+#   kind `-` = o contrato não define frontmatter, e o arquivo não pode declarar kind
+#   (salvo a evidência de revisão, $CHAVE_EVIDENCIA: o conteúdo nunca é lido);
+#   na evidência, `<T-NN.MM>` também é variável (nome_de_evidencia, igual ao do E1);
 #   critério `D4:<prova>` = dispensável só quando a prova mecânica passa; se não
 #   passa, o artefato é conferido em LEITURA RÁPIDA (L4).
 CATALOGO='sprintx|00-DECISOES.md|decisoes|L4|decisões e hipóteses do trabalho

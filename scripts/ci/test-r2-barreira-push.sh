@@ -1699,11 +1699,20 @@ grupo_ci() {
   sed -n '1p' "$TEMPLATE_CI" | grep -Fq 'TEMPLATE' && grep -Fq 'NÃO o' "$TEMPLATE_CI" \
     && ok "template declara no topo que é template e que esta branch não o ativa" || falha "template sem a declaração de template"
 
-  # ---- nenhum workflow ativo ------------------------------------------------------------
-  [ -z "$(git -C "$REPO" ls-files .github/workflows)" ] && ok "nenhum workflow ativo nesta branch (git ls-files .github/workflows vazio)" \
-    || falha "há arquivo versionado em .github/workflows"
-  [ -z "$(git -C "$REPO" ls-files | grep -E '(^|/)\.github/workflows/')" ] \
-    && ok "nenhum caminho versionado sob .github/workflows em qualquer nível" || falha "caminho sob .github/workflows"
+  # ---- o portão de CI não está ativo (DM-184, DM-263) ------------------------------------
+  # O repositório tem o CI dos próprios testes (.github/workflows/ci.yml, mutacao.yml); o
+  # que esta branch não ativa é o portão: nenhum workflow versionado, em qualquer nível,
+  # roda o portao-ci.sh nem é o template mergex-portao.
+  local wf portao_ativo=""
+  while IFS= read -r wf; do
+    [ -n "$wf" ] || continue
+    case "$wf" in */mergex-portao.yml|*/mergex-portao.yaml|mergex-portao.y*ml) portao_ativo="$portao_ativo $wf"; continue ;; esac
+    git -C "$REPO" show ":$wf" 2>/dev/null | grep -Eq 'portao-ci\.sh|mergex-portao' && portao_ativo="$portao_ativo $wf"
+  done <<EOF
+$(git -C "$REPO" ls-files | grep -E '(^|/)\.github/workflows/')
+EOF
+  [ -z "$portao_ativo" ] && ok "nenhum workflow versionado ativa o portão de CI (portao-ci.sh / mergex-portao)" \
+    || falha "workflow versionado ativa o portão de CI:$portao_ativo"
 
   # ---- documentação não afirma CI ativo ---------------------------------------------------
   frase='CI do portão ativo'

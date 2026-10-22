@@ -8,7 +8,11 @@
 #   2. o passo do validate-review-evidence-contract.sh some;
 #   3. o passo existe, mas comentado;
 #   4. o passo roda duas vezes (duplicado);
-#   5. um validate-*.sh novo aparece em scripts/ci/ sem ser registrado.
+#   5. um validate-*.sh novo aparece em scripts/ci/ sem ser registrado;
+#   6. o workflow de mutacao perde uma bancada (scripts/ci/mutacao-*.sh);
+#   6b. a bancada sai da matriz e o nome fica so noutra lista do workflow;
+#   6c. a matriz fica, e o passo deixa de executar a bancada;
+#   7. uma bancada de mutacao nova aparece sem entrar no workflow de mutacao.
 #
 # Uso: bash scripts/ci/test-ci-guard.sh
 
@@ -26,7 +30,12 @@ passa()  { ok=$((ok+1)); printf '  ok    %s\n' "$1"; }
 quebra() { falhou=$((falhou+1)); printf '  FALHA %s\n' "$1"; }
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+# As sondas dos casos 5 e 7 moram em scripts/ci/: saem tambem na interrupcao.
+# O nome leva o PID: duas execucoes simultaneas nao apagam a sonda uma da outra,
+# e um arquivo que ja existia nunca e o da sonda.
+novo="scripts/ci/validate-novo-contrato-teste-$$.sh"
+nova="scripts/ci/mutacao-nova-bancada-teste-$$.sh"
+trap 'rm -rf "$tmp"; rm -f "$novo" "$nova"' EXIT
 
 # 0. o workflow real passa
 if bash "$guarda" "$ci" >/dev/null 2>&1; then
@@ -58,7 +67,6 @@ deve_reprovar 'passo comentado' "$tmp/comentado.yml"
 deve_reprovar 'passo duplicado' "$tmp/duplicado.yml"
 
 # 5. um validador novo, não registrado
-novo='scripts/ci/validate-novo-contrato-teste.sh'
 printf '#!/usr/bin/env bash\nexit 0\n' > "$novo"
 if bash "$guarda" "$ci" >/dev/null 2>&1; then
   quebra 'validador novo sem registro: a guarda aceitou'
@@ -66,6 +74,43 @@ else
   passa 'validador novo sem registro: a guarda reprova'
 fi
 rm -f "$novo"
+
+# 6. o workflow de mutacao perde uma bancada
+mut='.github/workflows/mutacao.yml'
+grep -vE '^[[:space:]]*- mutacao-trava-e1[[:space:]]*$' "$mut" > "$tmp/mutacao-sem-uma.yml"
+if bash "$guarda" "$ci" "$tmp/mutacao-sem-uma.yml" >/dev/null 2>&1; then
+  quebra 'bancada de mutacao fora do workflow agendado: a guarda aceitou'
+else
+  passa 'bancada de mutacao fora do workflow agendado: a guarda reprova'
+fi
+
+# 6b. a bancada sai da matriz, mas o nome continua noutra lista do workflow
+awk '/^[[:space:]]*- mutacao-trava-e1[[:space:]]*$/ { next }
+     /^[[:space:]]*paths:[[:space:]]*$/ { print; print "      - mutacao-trava-e1"; next } { print }' \
+  "$mut" >"$tmp/mutacao-fora-da-matriz.yml"
+if bash "$guarda" "$ci" "$tmp/mutacao-fora-da-matriz.yml" >/dev/null 2>&1; then
+  quebra 'bancada so fora da matriz (noutra lista): a guarda aceitou'
+else
+  passa 'bancada so fora da matriz (noutra lista): a guarda reprova'
+fi
+
+# 6c. a bancada continua na matriz, mas o passo deixa de executa-la
+sed 's|^\([[:space:]]*\)run: bash scripts/ci/${{ matrix.bancada }}.sh|\1run: echo pulado|' \
+  "$mut" > "$tmp/mutacao-sem-execucao.yml"
+if bash "$guarda" "$ci" "$tmp/mutacao-sem-execucao.yml" >/dev/null 2>&1; then
+  quebra 'matriz intacta, passo que nao executa a bancada: a guarda aceitou'
+else
+  passa 'matriz intacta, passo que nao executa a bancada: a guarda reprova'
+fi
+
+# 7. uma bancada de mutacao nova, nao registrada
+printf '#!/usr/bin/env bash\nexit 0\n' > "$nova"
+if bash "$guarda" "$ci" >/dev/null 2>&1; then
+  quebra 'bancada de mutacao nova sem registro: a guarda aceitou'
+else
+  passa 'bancada de mutacao nova sem registro: a guarda reprova'
+fi
+rm -f "$nova"
 
 printf '%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

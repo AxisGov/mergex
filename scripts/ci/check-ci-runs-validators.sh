@@ -10,7 +10,10 @@
 # sem que a verificação exista. Também recusa validador novo em scripts/ci/ que
 # ninguém registrou aqui: ele existiria e nunca rodaria.
 #
-# Uso: bash scripts/ci/check-ci-runs-validators.sh [workflow]
+# Pelo mesmo motivo, cada bancada scripts/ci/mutacao-*.sh tem de estar, uma vez,
+# na matriz do workflow agendado de mutação (que não é check exigido).
+#
+# Uso: bash scripts/ci/check-ci-runs-validators.sh [workflow [workflow-de-mutacao]]
 
 set -euo pipefail
 
@@ -42,6 +45,25 @@ for f in scripts/ci/validate-*.sh; do
     [ "$f" = "$v" ] && achado=1
   done
   [ "$achado" = '1' ] || fail "$f existe mas nao esta registrado em check-ci-runs-validators.sh"
+done
+
+mut="${2:-.github/workflows/mutacao.yml}"
+[ -f "$mut" ] || fail "workflow de mutacao ausente: $mut"
+# Só os itens da lista `bancada:` da matriz contam: o mesmo nome em outra lista
+# (os `paths` do gatilho, por exemplo) não põe a bancada para rodar.
+matriz="$(tr -d '\r' < "$mut" | awk '
+  dentro && /^[[:space:]]*-[[:space:]]/ { sub(/^[[:space:]]*-[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print; next }
+  dentro && /^[[:space:]]*(#.*)?$/ { next }
+  { dentro = 0 }
+  /^[[:space:]]*bancada:[[:space:]]*$/ { dentro = 1 }
+')"
+# E a matriz só vale se um passo, não comentado, executa a bancada da matriz.
+n="$(tr -d '\r' < "$mut" | grep -cE '^[[:space:]]*run:[[:space:]]+bash[[:space:]]+scripts/ci/\$\{\{[[:space:]]*matrix\.bancada[[:space:]]*\}\}\.sh[[:space:]]*$' || true)"
+[ "$n" = '1' ] || fail "$mut executa a bancada da matriz $n vez(es); esperado exatamente 1"
+for f in scripts/ci/mutacao-*.sh; do
+  b="$(basename "$f" .sh)"
+  n="$(printf '%s\n' "$matriz" | grep -cFx -- "$b" || true)"
+  [ "$n" = '1' ] || fail "$f aparece $n vez(es) na matriz de $mut; esperado exatamente 1"
 done
 
 printf 'ci runs both validators\n'

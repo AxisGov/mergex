@@ -11,8 +11,8 @@ O painel apenas LÊ. Esta skill continua sendo a única a escrever `docs/entrega
 
 ## Contrato irmão — sprintx e runx
 
-O `expx-schema v1` é compartilhado com a [`sprintx`](https://github.com/bittencourtthulio/sprintx)
-(Build, F1–F6) e a [`runx`](https://github.com/bittencourtthulio/runx) (Run, E1–E5). A mergex
+O `expx-schema v1` é compartilhado com a [`sprintx`](https://github.com/AxisGov/sprintx)
+(Build, F1–F6) e a [`runx`](https://github.com/AxisGov/runx) (Run, E1–E5). A mergex
 não tem kind compartilhado: ela produz dois kinds, exclusivos dela — o `entrega` e o
 `reconciliacao_base` (DM-178, ver "O kind da reconciliação de base").
 
@@ -236,7 +236,7 @@ prs:
 | `estado` | O enum da tabela; o E8 grava o do E7, o E9 grava `merged` |
 | `merge_sha` | O commit de merge, só com `estado: merged`; `null` antes |
 | `merge` | `humano` quando o E9 registra o merge; `automatico` só quando o modo automático fizer o merge de uma sprint; **nunca** `automatico` no planejamento |
-| `base_sha` | A ponta comprovada da base quando o PR foi integrado (`baseRefOid` no GitHub; no GitLab, derivada dos pais do commit integrado e, no fast-forward/rebase, da linhagem exata dos commits do MR), gravada pelo E9 com o merge (DM-263 e DM-267); `null` antes. `diff_refs.start_sha` não serve: é da versão do diff, não do instante do merge. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
+| `base_sha` | A ponta comprovada da base quando o PR foi integrado (`baseRefOid` no GitHub; no GitLab, derivada dos pais do commit integrado e, no fast-forward/rebase, da linhagem exata dos commits do MR), gravada pelo E9 com o merge (DM-269 e DM-267); `null` antes. `diff_refs.start_sha` não serve: é da versão do diff, não do instante do merge. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
 
 - `prs` é sempre YAML de bloco; a forma em fluxo (`prs: [{...}]`) é ilegível. Lista vazia é `prs: []`.
 - Uma chave sem a outra é incoerente: `sprint_atual: planejamento` ou `NN` sem o item
@@ -251,7 +251,7 @@ prs:
   `planejamento=sim|nao`, `entrega=`, `sprint_atual=`, o estado do item atual e os itens de `prs`
   (com `sim`, também `estado=`, `merge_sha=` e `base_sha=`; depois da retomada, também
   `planejamento_merge_sha=` e `planejamento_base_sha=`; com o item, `planejamento_url=`, DM-261,
-  DM-263 e DM-267) e sai 2 com a entrega
+  DM-269 e DM-267) e sai 2 com a entrega
   ilegível ou incoerente. E0, E2, E7, E8 e E9 o consomem.
 - `--completar-base <planejamento|NN> --merge-sha <sha> --base-sha <sha>` é a migração
   idempotente de um item histórico `merged` com `base_sha: null`: exige o mesmo `merge_sha`,

@@ -112,7 +112,7 @@ A coluna **Evidência** existe para o mesmo fim que em toda a `stackx`: uma conv
 
 > ## Versionamento e entrega
 >
-> O eixo de versionamento do `CONVENCOES.md` — nome de branch, branch base, formato de commit, comando da suíte, arquivos gerados e estratégia de merge — é consumido pela [`mergex`](https://github.com/bittencourtthulio/mergex), a skill que cria a branch, commita cada task e abre o pull request.
+> O eixo de versionamento do `CONVENCOES.md` — nome de branch, branch base, formato de commit, comando da suíte, arquivos gerados e estratégia de merge — é consumido pela [`mergex`](https://github.com/AxisGov/mergex), a skill que cria a branch, commita cada task e abre o pull request.
 >
 > **Convenção `OBSERVADO` governa** a `mergex`: ela segue o repositório em vez do próprio padrão. Ponto marcado como `PROPOSTA` **não governa** — vira aviso, não regra —, porque uma proposta é uma padronização que o time ainda não adotou.
 >

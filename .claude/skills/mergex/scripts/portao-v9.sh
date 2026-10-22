@@ -60,7 +60,7 @@
 #    P para o 1º pai quando P é merge) só toque
 #    `^docs/(sprintx|entregas|eventos)/`, e todo commit do intervalo do PR,
 #    `base_sha..P` (a base do PR no merge, gravada pelo E9 no item de
-#    planejamento; DM-263), também: o commit comum pelo que muda, o merge pelo
+#    planejamento; DM-269), também: o commit comum pelo que muda, o merge pelo
 #    que muda por conta própria (`--cc`). Assim um rebase-merge ou ff não
 #    esconde em `^P` um commit de produto sem a marca anterior ao último.
 #    Item sem base_sha, base_sha fora da história ou que não é ancestral
@@ -436,14 +436,47 @@ if [ -z "$ULTIMO" ] && [ -s "$VALORES" ] && [ "$ORIGEM_BASE" = registrada_sprint
   # base registrada_sprint) que descende de uma de ordem maior
   awk -F'\t' 'NR == FNR { r[$1] = $2; next } { print $1 "\t" (($3 == "registrada_sprint") ? r[$2] : 0) }' \
     "$TMP_DIR/ranks" "$TMP_DIR/versoes-info" > "$TMP_DIR/v-ordem"
-  while IFS="$TAB" read -r vs rs <&4; do
-    [ "$rs" -gt 0 ] || continue
-    while IFS="$TAB" read -r va ra <&5; do
-      [ "$ra" -lt "$rs" ] || continue
-      ! g merge-base --is-ancestor "$vs" "$va" 2>/dev/null \
-        || sem_prova "a versão de $ENTREGA em $va volta a uma base anterior depois da reancoragem em $vs: rebaixamento" # guarda:V9PLAN
-    done 5< "$TMP_DIR/v-ordem"
-  done 4< "$TMP_DIR/v-ordem"
+  # Uma travessia pais-antes-dos-filhos propaga a maior ordem registrada em
+  # qualquer ancestral. Assim cada aresta é examinada uma vez; não se abre um
+  # processo Git para cada par de versões da entrega.
+  g rev-list --reverse --topo-order --parents "$HEAD_SHA" > "$TMP_DIR/grafo-versoes" 2>/dev/null \
+    || sem_prova "histórico de $HEAD_SHA ilegível ao conferir rebaixamento" # guarda:V9PLAN
+  awk -F'\t' '
+    NR == FNR {
+      ordem[$1] = $2 + 0
+      versao[$1] = 1
+      next
+    }
+    {
+      n = split($0, no, " ")
+      atual = no[1]
+      maior = 0
+      origem = ""
+      for (i = 2; i <= n; i++) {
+        pai = no[i]
+        if (maximo[pai] > maior) {
+          maior = maximo[pai]
+          origem = fonte[pai]
+        }
+      }
+      if (versao[atual] && maior > ordem[atual]) {
+        print atual "\t" origem
+        exit
+      }
+      if (versao[atual] && ordem[atual] >= maior) {
+        maximo[atual] = ordem[atual]
+        fonte[atual] = atual
+      } else {
+        maximo[atual] = maior
+        fonte[atual] = origem
+      }
+    }
+  ' "$TMP_DIR/v-ordem" "$TMP_DIR/grafo-versoes" > "$TMP_DIR/rebaixamento"
+  if [ -s "$TMP_DIR/rebaixamento" ]; then
+    va="$(cut -f1 "$TMP_DIR/rebaixamento")"
+    vs="$(cut -f2 "$TMP_DIR/rebaixamento")"
+    sem_prova "a versão de $ENTREGA em $va volta a uma base anterior depois da reancoragem em $vs: rebaixamento" # guarda:V9PLAN
+  fi
 elif [ -z "$ULTIMO" ] && [ -s "$VALORES" ]; then
   LC_ALL=C sort -u "$VALORES" > "$TMP_DIR/distintos"
   n="$(grep -c . "$TMP_DIR/distintos")"
@@ -498,7 +531,7 @@ if [ -n "$EXCL" ]; then
     fora_p="$(so_metodo "$TMP_DIR/do-plan.nomes")"
     [ -z "$fora_p" ] || sem_prova "o merge do planejamento $M_PLAN traz $fora_p: o planejamento só leva docs/sprintx, docs/entregas e docs/eventos" # guarda:V9PLAN
   fi
-  # o intervalo do PR de planejamento, base_sha..P (DM-263): no rebase-merge e no
+  # o intervalo do PR de planejamento, base_sha..P (DM-269): no rebase-merge e no
   # fast-forward, P é só o último commit; os de antes, com ou sem a marca, também
   # são do PR. Commit comum: o que ele muda; merge: o que ele muda por conta
   # própria (--cc), porque o que vem dos pais já é um commit do intervalo ou da base

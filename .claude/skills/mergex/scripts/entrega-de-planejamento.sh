@@ -20,7 +20,7 @@
 # Saída (stdout):
 #   planejamento=nao
 #   [planejamento_merge_sha=<prs[0].merge_sha>]   (só depois da retomada)
-#   [planejamento_base_sha=<prs[0].base_sha>]     (idem; `null` num registro anterior à DM-263)
+#   [planejamento_base_sha=<prs[0].base_sha>]     (idem; `null` num registro anterior à DM-269)
 #   [planejamento_url=<prs[0].url>]                (com o item de planejamento)
 # ou `planejamento=sim` com estado/merge/base do primeiro item. Em ambos os
 # casos, também imprime `entrega=`, `entrega_origem=`, `sprint_atual=`, o estado
@@ -437,7 +437,7 @@ case "$ACAO" in
       if [ "$u_base" = "$BASE_SHA" ]; then
         printf 'registrado=merged\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA"; exit 0
       fi
-      # o registro anterior à DM-263 (sem a base) ganha a base; outra base é recusa
+      # o registro anterior à DM-269 (sem a base) ganha a base; outra base é recusa
       [ "$u_base" = null ] || recusa "$(nome_pr "$u_sprint") já está merged com outra base_sha ($u_base)"
     fi
     m="humano"; [ "$u_estado" != merged ] || m="$u_merge"

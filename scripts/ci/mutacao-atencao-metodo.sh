@@ -336,6 +336,14 @@ M54e() { # a evidência de qualquer trabalho é reconhecida como a do trabalho c
     && troca "$CLASS" '      nome="${caminho#docs/entregas/$TRABALHO/}"' '      nome="${caminho#docs/entregas/*/}"'
 }
 
+M55a() { # a regra do nome da evidência muda só no E1: as duas cópias divergem
+  troca "$FECHAMENTO_SH" '    T-[0123456789][0123456789].[0123456789][0123456789]) return 0 ;;' \
+    '    T-[0123456789][0123456789].[0123456789]*) return 0 ;;'
+}
+M55b() { # a regra do nome da evidência muda só no E3: as duas cópias divergem
+  troca "$CLASS" '    T-*) id="${id#T-}"' '    T-*) id="${id#T-}"; id="${id%.*}"'
+}
+
 LISTA='M1a|remove a regra L4 do classificador|teste
 M1b|remove a linha L4 do reference|validador
 M2a|remove a regra D4 do classificador|teste
@@ -406,7 +414,9 @@ M54a|evidencia de revisao sai do catalogo da mergex|teste_ev
 M54b|evidencia de revisao vira D4 nos dois catalogos|teste_ev
 M54c|reconhecimento le o frontmatter da evidencia|teste_ev
 M54d|qualquer nome sob revisao/ vira evidencia|teste_ev
-M54e|evidencia de outro trabalho e reconhecida|teste_ev'
+M54e|evidencia de outro trabalho e reconhecida|teste_ev
+M55a|nome da evidencia muda so no E1|validador
+M55b|nome da evidencia muda so no E3|validador'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1

@@ -1,0 +1,60 @@
+name: Mutacao
+
+# As bancadas de mutacao (scripts/ci/mutacao-*.sh) provam que os testes mordem:
+# cada mutante quebra uma regra numa copia temporaria e a bancada tem que pega-lo.
+# Sao caras (cada mutante roda uma suite inteira), entao ficam fora do CI de cada
+# PR: rodam toda semana, a mao (workflow_dispatch) e quando este workflow ou uma
+# bancada de mutacao muda. Nenhum destes jobs e check exigido do ruleset do main.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/mutacao.yml'
+      - 'scripts/ci/mutacao-*.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  mutacao:
+    name: mutacao / ${{ matrix.bancada }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        bancada:
+          - mutacao-atencao-metodo
+          - mutacao-d02-historico-inicial
+          - mutacao-d04-historico-yaml-escalar
+          - mutacao-d07-contrato-de-evento
+          - mutacao-m1-ownership-contextual
+          - mutacao-m2-lifecycle-recuperacao
+          - mutacao-m3-fixture-lock-lf
+          - mutacao-m4b-arvore-inteira
+          - mutacao-r1-reconciliacao-base
+          - mutacao-r3-predecessores-sprintx
+          - mutacao-trava-e1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Ensure jq
+        shell: bash
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+      - name: Run ${{ matrix.bancada }}
+        shell: bash
+        run: bash scripts/ci/${{ matrix.bancada }}.sh

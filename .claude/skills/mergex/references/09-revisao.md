@@ -101,7 +101,7 @@ reparo=nao; alvo=""; merge_esperado=""
 p_merge="$(printf '%s\n' "$marca" | sed -n 's/^planejamento_merge_sha=//p')"
 p_base="$(printf '%s\n' "$marca" | sed -n 's/^planejamento_base_sha=//p')"
 if [ -n "$p_merge" ] && [ "$p_base" = null ]; then
-  # Registro anterior à DM-263: o planejamento já é histórico, mas o E9 ainda
+  # Registro anterior à DM-269: o planejamento já é histórico, mas o E9 ainda
   # consegue completar exclusivamente a base ausente pelo PR gravado no item.
   reparo=sim; alvo=planejamento; merge_esperado="$p_merge"
   pr_url="$(printf '%s\n' "$marca" | sed -n 's/^planejamento_url=//p')"
@@ -182,7 +182,7 @@ mais de uma base possível falha fechado. `diff_refs.start_sha` é só a base da
 **não** prova a base no instante do merge (DM-267). O registro é o do passo 7,
 item 7: no item atual de `prs`, `estado: merged`, `merge_sha`, `merge: humano` e `base_sha`
 (a ponta comprovada da base quando o PR foi integrado), e `pr_estado: merged` no topo — o script
-grava só isso e confere a gravação. Num item histórico anterior à DM-263, o E9 usa a URL gravada
+grava só isso e confere a gravação. Num item histórico anterior à DM-269, o E9 usa a URL gravada
 nele e `--completar-base` preenche exclusivamente o `base_sha: null`, sem reabrir nem alterar a
 sprint atual. **Sem ferramenta, sem resposta,
 sem o commit de merge ou sem a base, não grava nada** e diz o motivo; PR ainda aberto também
