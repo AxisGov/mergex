@@ -806,7 +806,16 @@ fi
 # Só o CÓDIGO conta. Os comentários destes scripts citam `.git/index`, `flock`
 # e `rm -rf` justamente para dizer que nenhum deles é usado — uma varredura que
 # não descontasse comentário reprovaria a explicação junto com a violação.
-codigo() { grep -v '^[[:space:]]*#' "$1"; }
+codigo() {
+  local rc
+  grep -v '^[[:space:]]*#' "$1"
+  rc=$?
+  # Os consumidores usam grep -q e podem fechar o pipe assim que encontram o
+  # texto. O produtor recebe SIGPIPE (141), mas isso significa que a busca já
+  # tem o resultado; com pipefail, não pode virar uma falsa ausência.
+  [ "$rc" = 141 ] && return 0
+  return "$rc"
+}
 
 if codigo "$trava_sh" | grep -Fq '.git'; then
   fail 'the E1 lock hardcodes the gitdir layout'
@@ -876,7 +885,7 @@ done
 # Só chamada ao versionador: a mensagem do código 5 cita `--no-verify` para
 # PROIBI-LO, e proibir não é usar.
 for g in '--amend' '--no-verify' 'reset --hard'; do
-  if codigo "$fecha_sh" | grep -F 'git ' | grep -Fq -- "$g"; then
+  if codigo "$fecha_sh" | grep -F 'git ' | grep -F -- "$g" >/dev/null; then
     fail 'the E1 critical section rewrites or discards history'
   fi
 done

@@ -118,6 +118,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/validate-mergex-contract.sh
 
+      - name: Test Mergex contract validator
+        shell: bash
+        run: bash scripts/ci/test-validate-mergex-contract.sh
+
       - name: Validate review evidence contract
         shell: bash
         run: bash scripts/ci/validate-review-evidence-contract.sh
