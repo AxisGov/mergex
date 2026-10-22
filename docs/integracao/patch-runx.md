@@ -103,7 +103,7 @@ E no **relatório de uso**, nenhuma alteração: ele é o texto que o suporte de
 
 > ## Entrega no repositório
 >
-> A `runx` termina com a ocorrência fechada e os relatórios gravados. Levar o código até o repositório e até o revisor é trabalho da [`mergex`](https://github.com/bittencourtthulio/mergex): ela abre a branch no início do E3, commita cada task que fecha, e entre o E4 e o E5 monta a entrega — portão de prontidão, classificação do diff por atenção humana, descrição do pull request e pacote para o QA.
+> A `runx` termina com a ocorrência fechada e os relatórios gravados. Levar o código até o repositório e até o revisor é trabalho da [`mergex`](https://github.com/AxisGov/mergex): ela abre a branch no início do E3, commita cada task que fecha, e entre o E4 e o E5 monta a entrega — portão de prontidão, classificação do diff por atenção humana, descrição do pull request e pacote para o QA.
 >
 > A `mergex` entrega; **quem fecha a ocorrência continua sendo a `runx`**, no E5. A integração é condicional: sem a `mergex` instalada, os estágios rodam exatamente como sempre.
 

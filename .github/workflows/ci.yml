@@ -107,6 +107,10 @@ jobs:
             git diff --check "$(git hash-object -t tree /dev/null)" HEAD
           fi
 
+      - name: Check canonical skill origins
+        shell: bash
+        run: bash scripts/ci/test-proveniencia.sh
+
       - name: Validate Mergex contract
         shell: bash
         run: bash scripts/ci/validate-mergex-contract.sh
