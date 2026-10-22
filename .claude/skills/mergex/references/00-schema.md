@@ -11,8 +11,8 @@ O painel apenas LÊ. Esta skill continua sendo a única a escrever `docs/entrega
 
 ## Contrato irmão — sprintx e runx
 
-O `expx-schema v1` é compartilhado com a [`sprintx`](https://github.com/bittencourtthulio/sprintx)
-(Build, F1–F6) e a [`runx`](https://github.com/bittencourtthulio/runx) (Run, E1–E5). A mergex
+O `expx-schema v1` é compartilhado com a [`sprintx`](https://github.com/AxisGov/sprintx)
+(Build, F1–F6) e a [`runx`](https://github.com/AxisGov/runx) (Run, E1–E5). A mergex
 não tem kind compartilhado: ela produz dois kinds, exclusivos dela — o `entrega` e o
 `reconciliacao_base` (DM-178, ver "O kind da reconciliação de base").
 
