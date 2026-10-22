@@ -99,23 +99,26 @@ O `init` busca a `mergex` na versão publicada, empacota como plugin local e con
 
 ### Claude Code
 
+Os hooks precisam do registro em `.claude/settings.json`. Se o arquivo não
+existe, o bloco abaixo copia o modelo; se já existe, **junte** manualmente o
+bloco `hooks` — não sobrescreva, porque ele pode ter configuração sua.
+
 ```bash
-git clone https://github.com/AxisGov/mergex.git /tmp/mergex
+mergex_tmp="$(mktemp -d)"
+trap 'rm -rf "$mergex_tmp"' EXIT
+git clone https://github.com/AxisGov/mergex.git "$mergex_tmp/mergex"
 mkdir -p .claude/skills .claude/commands .claude/hooks .claude/agents .expx
-cp -r /tmp/mergex/.claude/skills/mergex .claude/skills/
-cp /tmp/mergex/.claude/commands/mergex*.md .claude/commands/
-cp -r /tmp/mergex/.claude/hooks/. .claude/hooks/
-cp /tmp/mergex/.claude/agents/*.md .claude/agents/
-cp /tmp/mergex/.expx/hooks.json .expx/
-cp /tmp/mergex/AGENTS.md .
-```
-
-Os hooks precisam do registro em `.claude/settings.json`. Se o arquivo ainda
-não existe, copie o do repositório; se já existe, **junte** o bloco `hooks` ao
-seu — não sobrescreva, porque ele pode ter configuração sua:
-
-```bash
-cp /tmp/mergex/.claude/settings.json .claude/settings.json   # só se não existir
+cp -r "$mergex_tmp/mergex/.claude/skills/mergex" .claude/skills/
+cp "$mergex_tmp"/mergex/.claude/commands/mergex*.md .claude/commands/
+cp -r "$mergex_tmp/mergex/.claude/hooks/." .claude/hooks/
+cp "$mergex_tmp"/mergex/.claude/agents/*.md .claude/agents/
+cp "$mergex_tmp/mergex/.expx/hooks.json" .expx/
+cp "$mergex_tmp/mergex/AGENTS.md" .
+if [ ! -e .claude/settings.json ]; then
+  cp "$mergex_tmp/mergex/.claude/settings.json" .claude/settings.json
+fi
+rm -rf "$mergex_tmp"
+trap - EXIT
 ```
 
 Para usar em todos os projetos, troque `.claude/` por `~/.claude/`.
@@ -125,15 +128,19 @@ Para usar em todos os projetos, troque `.claude/` por `~/.claude/`.
 A skill vai no mesmo lugar; muda só a pasta dos comandos:
 
 ```bash
-git clone https://github.com/AxisGov/mergex.git /tmp/mergex
+mergex_tmp="$(mktemp -d)"
+trap 'rm -rf "$mergex_tmp"' EXIT
+git clone https://github.com/AxisGov/mergex.git "$mergex_tmp/mergex"
 mkdir -p .claude/skills .claude/hooks .opencode/commands .opencode/plugin .opencode/agent .expx
-cp -r /tmp/mergex/.claude/skills/mergex .claude/skills/
-cp /tmp/mergex/.opencode/commands/mergex*.md .opencode/commands/
-cp -r /tmp/mergex/.claude/hooks/. .claude/hooks/
-cp /tmp/mergex/.opencode/plugin/mergex.ts .opencode/plugin/
-cp /tmp/mergex/.opencode/agent/*.md .opencode/agent/
-cp /tmp/mergex/.expx/hooks.json .expx/
-cp /tmp/mergex/AGENTS.md .
+cp -r "$mergex_tmp/mergex/.claude/skills/mergex" .claude/skills/
+cp "$mergex_tmp"/mergex/.opencode/commands/mergex*.md .opencode/commands/
+cp -r "$mergex_tmp/mergex/.claude/hooks/." .claude/hooks/
+cp "$mergex_tmp/mergex/.opencode/plugin/mergex.ts" .opencode/plugin/
+cp "$mergex_tmp"/mergex/.opencode/agent/*.md .opencode/agent/
+cp "$mergex_tmp/mergex/.expx/hooks.json" .expx/
+cp "$mergex_tmp/mergex/AGENTS.md" .
+rm -rf "$mergex_tmp"
+trap - EXIT
 ```
 
 Os scripts dos hooks ficam em `.claude/hooks/` mesmo no OpenCode: o plugin em
