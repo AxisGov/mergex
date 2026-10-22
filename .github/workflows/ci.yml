@@ -111,6 +111,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-proveniencia.sh
 
+      - name: Test provenance guard contract
+        shell: bash
+        run: bash scripts/ci/test-proveniencia-contrato.sh
+
       - name: Validate Mergex contract
         shell: bash
         run: bash scripts/ci/validate-mergex-contract.sh
