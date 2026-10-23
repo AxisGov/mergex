@@ -171,6 +171,21 @@ printf 'novo\n' > "$aux/e0/docs/sprintx/features/plan/01-tasks.md"
 e0_escreve "$aux/e0"
 [ "$rc" = 1 ] && grep -q '01-tasks.md' "$aux/err" && [ ! -e "$aux/e0/docs/entregas" ]
 confere 'E0 --planejamento com artefato do planejamento fora do indice: recusa sem escrever' $?
+g -C "$aux/e0" checkout -q -- .
+rm -f "$aux/e0/docs/sprintx/features/plan/01-tasks.md"
+printf '%s\n' '.DS_Store' '01-IGNORADO.md' > "$aux/e0/.git/info/exclude"
+printf 'auxiliar\n' > "$aux/e0/docs/sprintx/features/plan/.DS_Store"
+e0_escreve "$aux/e0"
+[ "$rc" = 0 ] && [ -d "$aux/e0/docs/entregas/plan" ]
+confere 'E0 --planejamento ignora auxiliar ignorado que não é artefato Markdown' $?
+rm -rf "$aux/e0/docs/entregas"
+rm -f "$aux/e0/docs/sprintx/features/plan/.DS_Store"
+printf 'plano ignorado\n' > "$aux/e0/docs/sprintx/features/plan/01-IGNORADO.md"
+e0_escreve "$aux/e0"
+[ "$rc" = 1 ] && grep -q '01-IGNORADO.md' "$aux/err" && [ ! -e "$aux/e0/docs/entregas" ]
+confere 'E0 --planejamento bloqueia artefato Markdown ignorado' $?
+rm -f "$aux/e0/docs/sprintx/features/plan/01-IGNORADO.md"
+
 # so a pasta canonica serve: com so a pasta antiga (docs/<slug>/), suja ou nao, recusa
 git init -q -b main "$aux/e0-legado"
 mkdir -p "$aux/e0-legado/docs/plan"; printf 'plano\n' > "$aux/e0-legado/docs/plan/ORQUESTRADOR.md"
@@ -475,9 +490,9 @@ v9 "$aux/s1l"
 [ "$rc" = 3 ] && grep -q 'origem_base lixo' "$aux/v9.out"
 confere 'V9: versao anterior com origem_base fora do enum: v9_sem_prova' $?
 
-# A base do PR de planejamento (decisão do usuário, 2026-10-20, item 1; DM-269): num
-# rebase-merge ou fast-forward, um commit de produto sem a marca do trabalho antes de P
-# fica dentro de `^P`; a V9 confere o intervalo base_sha..P gravado pelo E9
+# A base do PR de planejamento (DM-269) nao pode ser só um ancestral declarado
+# pela propria entrega. Em historico linear de varios commits, a V9 falha antes
+# de confiar no intervalo base_sha..P.
 # planejamento_com_produto <dir> — a branch do planejamento com um commit de produto sem
 # marca no meio e um commit de docs por último (P, no rebase e no ff)
 planejamento_com_produto() {
@@ -500,8 +515,8 @@ b_m="$(git -C "$aux/s1m" rev-parse HEAD)"
 g -C "$aux/s1m" cherry-pick "$(git -C "$aux/s1m" merge-base main feature/plan)..feature/plan" >/dev/null
 registra_e_retoma "$aux/s1m" "$(git -C "$aux/s1m" rev-parse main)" "$b_m"
 v9 "$aux/s1m"
-[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'src/u.ts' "$aux/v9.out"
-confere 'V9 depois de rebase-merge do planejamento com commit de produto sem marca antes de P: v9_sem_prova' $?
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não é a base comprovável' "$aux/v9.out"
+confere 'V9 depois de rebase-merge de varios commits: base nao comprovavel' $?
 [ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
 
 planejamento_com_produto "$aux/s1n"
@@ -509,11 +524,11 @@ b_n="$(git -C "$aux/s1n" rev-parse main)"
 g -C "$aux/s1n" switch -q main; g -C "$aux/s1n" merge -q --ff-only feature/plan
 registra_e_retoma "$aux/s1n" "$(git -C "$aux/s1n" rev-parse main)" "$b_n"
 v9 "$aux/s1n"
-[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'src/u.ts' "$aux/v9.out"
-confere 'V9 depois de fast-forward do planejamento com commit de produto sem marca antes de P: v9_sem_prova' $?
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não é a base comprovável' "$aux/v9.out"
+confere 'V9 depois de fast-forward de varios commits: base nao comprovavel' $?
 [ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
 
-# rebase-merge de dois commits só de docs: passa (o intervalo inteiro é planejamento)
+# rebase-merge de dois commits não tem base comprovável offline: falha fechado
 repo_planejamento "$aux/s1p"
 printf 'evento 2\n' >> "$aux/s1p/docs/eventos/plan.md"; g -C "$aux/s1p" add -A; g -C "$aux/s1p" commit -q -m 'docs: evento' -m 'Trabalho: plan'
 g -C "$aux/s1p" switch -q main
@@ -522,9 +537,9 @@ b_p="$(git -C "$aux/s1p" rev-parse HEAD)"
 g -C "$aux/s1p" cherry-pick "$(git -C "$aux/s1p" merge-base main feature/plan)..feature/plan" >/dev/null
 registra_e_retoma "$aux/s1p" "$(git -C "$aux/s1p" rev-parse main)" "$b_p"
 v9 "$aux/s1p"
-[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
-confere 'V9 depois de rebase-merge de dois commits so de docs: passa' $?
-[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out"
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'não é a base comprovável' "$aux/v9.out"
+confere 'V9 depois de rebase-merge de dois commits so de docs: falha sem prova da base' $?
+[ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
 
 # merge comum de uma branch que sincronizou a main no meio: o merge de sincronização
 # traz produto da main, mas não é produto do planejamento (só o que ele mesmo muda conta)
@@ -542,7 +557,7 @@ v9 "$aux/s1q"
 confere 'V9 com o planejamento que sincronizou a main antes do merge: passa' $?
 [ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out"
 
-# um merge dentro do intervalo que acrescenta produto por conta própria (merge "mau"): v9_sem_prova
+# fast-forward de um merge lateral nao prova a base da integracao: v9_sem_prova
 repo_planejamento "$aux/s1r"
 g -C "$aux/s1r" switch -q main
 printf 'o\n' > "$aux/s1r/src/o.ts"; g -C "$aux/s1r" add -A; g -C "$aux/s1r" commit -q -m 'outra coisa na main'
@@ -553,8 +568,8 @@ b_r="$(git -C "$aux/s1r" rev-parse HEAD)"
 g -C "$aux/s1r" merge -q --ff-only feature/plan
 registra_e_retoma "$aux/s1r" "$(git -C "$aux/s1r" rev-parse main)" "$b_r"
 v9 "$aux/s1r"
-[ "$rc" = 3 ] && grep -q 'src/mau.ts' "$aux/v9.out"
-confere 'V9 com merge no intervalo do planejamento que acrescenta produto: v9_sem_prova' $?
+[ "$rc" = 3 ] && grep -Eq 'src/mau\.ts|não é a base comprovável' "$aux/v9.out"
+confere 'V9 com fast-forward de merge lateral: base nao comprovavel' $?
 [ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out"
 
 # o merge do planejamento registrado sem base_sha (gravado antes da DM-269): v9_sem_prova
@@ -575,6 +590,18 @@ e0r "$aux/s1t"; reancora "$aux/s1t"; sprint1 "$aux/s1t"
 v9 "$aux/s1t"
 [ "$rc" = 3 ] && grep -q 'base_sha' "$aux/v9.out"
 confere 'V9 com base_sha que nao e ancestral do merge do planejamento: v9_sem_prova' $?
+
+# base_sha ancestral, mas forjada no segundo pai: nao define a fronteira do PR
+repo_mergeado "$aux/s1u" merge
+m_u="$(sed -n 's/^    merge_sha: //p' "$aux/s1u/docs/entregas/plan/ENTREGA.md" | sed -n 1p)"
+b_u="$(git -C "$aux/s1u" rev-parse "$m_u^2")"
+sed "s/^    base_sha: .*/    base_sha: $b_u/" "$aux/s1u/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/s1u/docs/entregas/plan/ENTREGA.md"
+g -C "$aux/s1u" add -A; g -C "$aux/s1u" commit -q -m 'base_sha ancestral forjada'
+e0r "$aux/s1u"; reancora "$aux/s1u"; sprint1 "$aux/s1u"
+v9 "$aux/s1u"
+[ "$rc" = 3 ] && grep -q 'não é a base comprovável' "$aux/v9.out"
+confere 'V9 recusa base_sha ancestral, mas diferente do primeiro pai: v9_sem_prova' $?
 
 echo '== E8 e E9: o registro do PR de planejamento =='
 
@@ -677,7 +704,16 @@ bloco "$ref/09-revisao.md" 'gh pr view "$pr_url" --json state,mergeCommit' \
   | sed "s#bash \.claude/skills/mergex/scripts/entrega-de-planejamento\.sh#bash '$leitor'#" > "$aux/e9.sh"
 [ -s "$aux/e9.sh" ]; confere '09-revisao tem o bloco que le o PR de planejamento no servico' $?
 mkdir -p "$aux/gh-falso"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\n[ -z "${GH_RESPOSTA:-}" ] || printf "%%s\\n" "$GH_RESPOSTA"\nexit "${GH_RC:-0}"\n' > "$aux/gh-falso/gh"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "%s\\n" "$*" >> "$GH_CHAMADAS"' \
+  'read -r estado merge base <<< "${GH_RESPOSTA:-}"' \
+  'case "$1" in' \
+  '  pr) commits="[{}]"; [ "${GH_TOTAL_COMMITS:-1}" = 1 ] || commits="[{},{}]"; printf "{\"state\":\"%s\",\"mergeCommit\":{\"oid\":\"%s\"},\"commits\":%s}\\n" "$estado" "$merge" "$commits" ;;' \
+  '  api) if [ -n "$base" ] && [ "${GH_ONE_PARENT:-0}" = 1 ]; then printf "{\"parents\":[{\"sha\":\"%s\"}]}\\n" "$base";' \
+  '       elif [ -n "$base" ]; then printf "{\"parents\":[{\"sha\":\"%s\"},{\"sha\":\"%s\"}]}\\n" "$base" "${GH_OTHER_SHA:-0123456789012345678901234567890123456789}"; else printf "{\"parents\":[]}\\n"; fi ;;' \
+  'esac' \
+  'exit "${GH_RC:-0}"' > "$aux/gh-falso/gh"
 chmod +x "$aux/gh-falso/gh"
 repo_e9() { # <dir> — a entrega de planejamento com o PR aberto
   mkdir -p "$1"
@@ -695,8 +731,20 @@ e9 "$aux/e9a" GH_RESPOSTA="MERGED $SHA_M $SHA_B"
 (cd "$aux/e9a" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
 [ "$rc" = 0 ] && grep -qx 'estado=merged' "$aux/out" && grep -qx "merge_sha=$SHA_M" "$aux/out" \
   && grep -qx "base_sha=$SHA_B" "$aux/out" \
-  && grep -q 'pr view https://github.com/dono/repo/pull/9 --json state,mergeCommit,baseRefOid' "$aux/gh-chamadas"
-confere 'E9 com o PR de planejamento mergeado pelo servico: grava prs[0] merged com o mergeCommit e a base (baseRefOid)' $?
+  && grep -q 'pr view https://github.com/dono/repo/pull/9 --json state,mergeCommit,commits' "$aux/gh-chamadas" \
+  && grep -q "api repos/dono/repo/commits/$SHA_M" "$aux/gh-chamadas"
+confere 'E9 com PR mergeado: deriva base do primeiro pai do commit integrado' $?
+repo_e9 "$aux/e9linear"
+e9 "$aux/e9linear" GH_RESPOSTA="MERGED $SHA_M $SHA_B" GH_ONE_PARENT=1
+(cd "$aux/e9linear" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
+[ "$rc" = 0 ] && grep -qx "base_sha=$SHA_B" "$aux/out"
+confere 'E9 com integração linear de um commit: o pai único comprova a base' $?
+repo_e9 "$aux/e9multi"; cp "$aux/e9multi/docs/entregas/login/ENTREGA.md" "$aux/e9multi-antes.md"
+e9 "$aux/e9multi" GH_RESPOSTA="MERGED $SHA_M $SHA_B" GH_ONE_PARENT=1 GH_TOTAL_COMMITS=2
+cmp -s "$aux/e9multi/docs/entregas/login/ENTREGA.md" "$aux/e9multi-antes.md" \
+  && [ "$rc" != 0 ] && grep -q 'não comprovável' "$aux/e9.out"
+confere 'E9 com integração linear de múltiplos commits: falha fechado sem base comprovável' $?
+
 repo_e9 "$aux/e9b"; cp "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md"
 e9 "$aux/e9b" GH_RC=1
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
@@ -709,7 +757,7 @@ cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" 
 confere 'MERGED sem mergeCommit: nao grava' $?
 e9 "$aux/e9b" GH_RESPOSTA="MERGED $SHA_M "
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
-confere 'MERGED sem a base do PR (baseRefOid): nao grava' $?
+confere 'MERGED sem pais comprovaveis do commit: nao grava' $?
 # Entrega legada já retomada: o E9 usa a URL do item histórico e completa só
 # a base ausente do planejamento, sem depender de sprint_atual.
 mkdir -p "$aux/e9h/docs/entregas/login"
@@ -737,20 +785,20 @@ e9 "$aux/e9g" \
   && grep -q 'api projects/:id/merge_requests/9' "$aux/gh-chamadas" \
   && grep -q "api projects/:id/repository/commits/$SHA_M" "$aux/gh-chamadas" && ! grep -q '^pr view' "$aux/gh-chamadas"
 confere 'E9 no GitLab deriva a base do commit integrado, nao de diff_refs.start_sha antigo' $?
-# Em fast-forward/rebase, o commit integrado tem um pai do próprio MR; a base
-# é o único pai externo da linhagem completa, nunca start_sha.
+# Em fast-forward/rebase de varios commits, a base nao e comprovavel offline.
+# O E9 consulta a lista, mas falha fechado sem gravar.
 repo_e9 "$aux/e9ff"
 sed 's#https://github.com/dono/repo/pull/9#https://gitlab.com/dono/repo/-/merge_requests/10#' "$aux/e9ff/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
   && mv "$aux/e.tmp" "$aux/e9ff/docs/entregas/login/ENTREGA.md"
 : > "$aux/gh-chamadas"
+cp "$aux/e9ff/docs/entregas/login/ENTREGA.md" "$aux/e9ff-antes.md"
 e9 "$aux/e9ff" \
   GLAB_RESPOSTA="{\"iid\": 10, \"state\": \"merged\", \"merge_commit_sha\": \"$SHA_FF2\", \"diff_refs\": {\"start_sha\": \"$SHA_OLD\"}}" \
   GLAB_COMMIT_RESPOSTA="{\"id\": \"$SHA_FF2\", \"parent_ids\": [\"$SHA_FF1\"]}" \
   GLAB_COMMITS_RESPOSTA="[{\"id\":\"$SHA_FF1\",\"parent_ids\":[\"$SHA_B\"]},{\"id\":\"$SHA_FF2\",\"parent_ids\":[\"$SHA_FF1\"]}]"
-(cd "$aux/e9ff" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
-[ "$rc" = 0 ] && grep -qx "merge_sha=$SHA_FF2" "$aux/out" && grep -qx "base_sha=$SHA_B" "$aux/out" \
-  && grep -q 'merge_requests/10/commits?per_page=100' "$aux/gh-chamadas"
-confere 'E9 no GitLab deriva a base unica da linhagem no fast-forward ou rebase' $?
+[ "$rc" = 3 ] && cmp -s "$aux/e9ff/docs/entregas/login/ENTREGA.md" "$aux/e9ff-antes.md" \
+  && grep -q 'merge linear com múltiplos commits não comprovável' "$aux/e9.out"
+confere 'E9 no GitLab falha fechado no fast-forward ou rebase de varios commits' $?
 # pr_url entre aspas (YAML valido): o servico recebe a URL sem elas
 repo_e9 "$aux/e9q"
 sed 's#^pr_url: \(.*\)$#pr_url: "\1"#' "$aux/e9q/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \

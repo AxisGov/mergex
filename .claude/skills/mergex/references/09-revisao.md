@@ -143,22 +143,55 @@ EOF
       elif [ "$n_pais" = 1 ]; then
         commits_api="$(glab api --paginate "projects/:id/merge_requests/$iid/commits?per_page=100")" \
           || { echo "os commits do MR $iid não foram lidos no GitLab: nada gravado"; exit 3; }
-        base_sha="$(printf '%s\n' "$commits_api" | jq -sr --arg m "$merge_sha" '
+        total_comprovavel="$(printf '%s\n' "$commits_api" | jq -sr --arg m "$merge_sha" '
           (if length == 1 and ((.[0] | type) == "array") then .[0] else add end) as $cs
-          | [$cs[].id] as $ids
-          | if ($ids | index($m)) == null then ""
-            else [$cs[] | .parent_ids[]? | select(. as $p | ($ids | index($p)) == null)] | unique
-              | if length == 1 then .[0] else "" end
-            end')" \
+          | if ($cs | length) == 1 and $cs[0].id == $m then 1 else 0 end')" \
           || { echo "a linhagem do MR $iid é ilegível: nada gravado"; exit 3; }
+        if [ "$total_comprovavel" = 1 ]; then
+          base_sha="$(printf '%s\n' "$pais" | sed -n 1p)"
+        else
+          echo "base histórica de merge linear com múltiplos commits não comprovável offline: nada gravado"
+          exit 3
+        fi
       fi
       resposta="$estado_pr $merge_sha $base_sha"
     fi
     ;;
   *)
-    command -v gh >/dev/null 2>&1 || { echo "sem gh: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
-    resposta="$(gh pr view "$pr_url" --json state,mergeCommit,baseRefOid --jq '[.state, (.mergeCommit.oid // ""), (.baseRefOid // "")] | join(" ")')" \
-      || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; } ;;
+    command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+      || { echo "sem gh ou jq: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
+    repositorio="$(printf '%s\n' "$pr_url" | sed -nE 's#^https://github.com/([^/]+)/([^/]+)/pull/[0-9]+/?$#\1/\2#p')"
+    [ -n "$repositorio" ] || { echo "pr_url do GitHub fora da forma /org/repo/pull/N: nada gravado"; exit 3; }
+    pr_api="$(gh pr view "$pr_url" --json state,mergeCommit,commits)" \
+      || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; }
+    resposta="$(printf '%s\n' "$pr_api" | jq -r '[.state, (.mergeCommit.oid // ""), (.commits | length)] | join(" ")')" \
+      || { echo "o PR do GitHub é ilegível: nada gravado"; exit 3; }
+    read -r estado_pr merge_sha total_commits _ <<EOF
+$resposta
+EOF
+    if [ "$estado_pr" = MERGED ]; then
+      [ -n "$merge_sha" ] || { echo "MERGED sem commit de merge: nada gravado"; exit 3; }
+      commit_api="$(gh api "repos/$repositorio/commits/$merge_sha")" \
+        || { echo "o commit integrado $merge_sha não foi lido no GitHub: nada gravado"; exit 3; }
+      pais="$(printf '%s\n' "$commit_api" | jq -r '.parents[].sha')" \
+        || { echo "pais do commit integrado $merge_sha ilegíveis: nada gravado"; exit 3; }
+      n_pais="$(printf '%s\n' "$pais" | grep -c .)"
+      base_sha=""
+      if [ "$n_pais" -eq 2 ]; then
+        # Merge commit: o primeiro pai é a base exata antes da integração.
+        base_sha="$(printf '%s\n' "$pais" | sed -n 1p)"
+      elif [ "$n_pais" -eq 1 ] && [ "$total_commits" -eq 1 ]; then
+        # Um único commit: tanto squash como rebase/fast-forward têm base
+        # comprovável no pai desse commit integrado.
+        base_sha="$(printf '%s\n' "$pais" | sed -n 1p)"
+      else
+        # Um PR com vários commits squashados/rebaseados em histórico linear
+        # não oferece pelo último commit prova suficiente da base inicial.
+        echo "base histórica de merge linear com $total_commits commits não comprovável: nada gravado"
+        exit 3
+      fi
+      resposta="$estado_pr $merge_sha $base_sha"
+    fi ;;
 esac
 read -r estado_pr merge_sha base_sha _ <<EOF
 $resposta
@@ -175,19 +208,29 @@ else
 fi
 ```
 
+No GitHub, **nunca** use `baseRefOid` depois do merge: ele pode refletir a ponta
+atual da branch base, avançada por PRs posteriores. O bloco usa os pais do commit
+integrado: dois pais indicam merge comum e o primeiro é a base histórica; um
+único pai só é aceito quando o PR tinha exatamente **um** commit, pois nesse caso
+o pai comprova a base tanto de squash como de rebase/fast-forward. Um PR linear
+com múltiplos commits (squash ou rebase) falha fechado enquanto a base exata não
+puder ser comprovada independentemente; jamais registra o pai do último commit
+como se fosse necessariamente a base inicial.
+
 No GitLab (`pr_url` com `/-/merge_requests/`), o bloco lê o MR pela API do projeto e o commit
 integrado pela API de commits. Em merge comum ou squash, a base é o primeiro pai do resultado; em
-fast-forward/rebase, é o único pai externo da linhagem completa devolvida por `/commits`. Zero ou
-mais de uma base possível falha fechado. `diff_refs.start_sha` é só a base da versão do diff e
-**não** prova a base no instante do merge (DM-267). O registro é o do passo 7,
+fast-forward/rebase linear, o pai só é aceito quando o MR tem exatamente um commit. Histórico
+linear com múltiplos commits falha fechado: a V9 offline não teria como distinguir a base real de
+um `base_sha` forjado dentro da própria linhagem. `diff_refs.start_sha` é só a base da versão
+do diff e **não** prova a base no instante do merge (DM-267). O registro é o do passo 7,
 item 7: no item atual de `prs`, `estado: merged`, `merge_sha`, `merge: humano` e `base_sha`
 (a ponta comprovada da base quando o PR foi integrado), e `pr_estado: merged` no topo — o script
 grava só isso e confere a gravação. Num item histórico anterior à DM-269, o E9 usa a URL gravada
 nele e `--completar-base` preenche exclusivamente o `base_sha: null`, sem reabrir nem alterar a
 sprint atual. **Sem ferramenta, sem resposta,
 sem o commit de merge ou sem a base, não grava nada** e diz o motivo; PR ainda aberto também
-não grava. A V9 da primeira sprint confere todo commit de `base_sha..merge_sha`: num
-rebase-merge ou fast-forward, o PR de planejamento é o intervalo inteiro, não só o último commit. O E0 da primeira sprint depende desse
+não grava. A V9 da primeira sprint exige que `base_sha` seja exatamente o primeiro pai de
+`merge_sha` e só então confere `base_sha..merge_sha`. O E0 da primeira sprint depende desse
 registro (`00-abertura.md`, "Retomada depois do PR de planejamento"), e o da sprint seguinte, do
 registro do PR da anterior ("A entrega por sprint"); o E0 nunca consulta o serviço. O item
 gravado é o da sprint que o E0 registrou (`sprint_atual`), nunca relida do plano.

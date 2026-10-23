@@ -110,6 +110,28 @@ case "$ACAO" in
     case "$PROJETO" in por_trabalho|por_sprint) ;; *) uso "modo do projeto fora de por_trabalho|por_sprint: ${PROJETO:-ausente}" ;; esac ;;
 esac
 
+# Antes da primeira leitura de uma escrita, serializar todo ciclo de leitura/validação/
+# alteração/rename. mkdir é atômico também em Bash 3.2 (macOS); leitores não bloqueiam.
+# Lock órfão é falha fechada: nunca apagar automaticamente o lock de outra execução.
+LOCK_DIR=""
+libera_lock() {
+  [ -z "$LOCK_DIR" ] || rmdir "$LOCK_DIR" 2>/dev/null || :
+}
+case "$ACAO" in
+  registrar-merge|completar-base|registrar-pr|abrir-sprint)
+    LOCK_DIR="$ENTREGA.lock"
+    tentativas=0
+    until mkdir "$LOCK_DIR" 2>/dev/null; do
+      tentativas=$((tentativas + 1))
+      [ "$tentativas" -lt 100 ] || recusa "entrega ocupada ou lock órfão: $LOCK_DIR (verifique antes de removê-lo)"
+      sleep 0.1
+    done
+    trap 'libera_lock' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM ;;
+esac
+
 # antes de ler: um link quebrado também é link, e a recusa é a mesma
 case "$ACAO" in registrar-merge|completar-base|registrar-pr|abrir-sprint)
   [ ! -L "$ENTREGA" ] || recusa "$ENTREGA é link simbólico: o registro só grava um arquivo regular" ;;
@@ -338,8 +360,10 @@ esac
 # --- as gravações (únicos escritores de `entrega`, `sprint_atual` e `prs`) ---
 hoje="$(date +%Y-%m-%d)" || ilegivel 'data do sistema indisponível'
 tmp="$ENTREGA.tmp.$$"
-trap 'rm -f "$tmp"' EXIT
-trap 'exit 2' HUP INT TERM
+trap 'rm -f "$tmp"; libera_lock' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # grava <posição do item alvo (0: nenhum)> <k=v;… do item> <k=v;… do topo> <NN do item novo ou vazio>
 # Troca só as linhas das chaves dadas, no frontmatter; a chave que falta no item
@@ -446,7 +470,19 @@ case "$ACAO" in
       "$(printf 'pr=%s\tmerged\t%s\t%s' "$u_sprint" "$MERGE_SHA" "$BASE_SHA")"
     printf 'registrado=merged\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA" ;;
   registrar-pr)
-    # o E8 grava o PR no item da sprint que o E0 registrou (nunca relida do plano)
+    # Em por_trabalho já retomado (sprint_atual: null), o E8 atualiza somente
+    # o PR de topo; o histórico de planejamento em prs permanece imutável.
+    if [ "$sprint" = null ] && [ "$MODO_EF" = por_trabalho ]; then
+      grava 0 "" "pr_url=$URL;pr_estado=$ESTADO;atualizado_em=$hoje" ''
+      awk -v u="pr_url: $URL" -v e="pr_estado: $ESTADO" '
+        { sub(/\r$/, ""); if ($0 == u) viu_url = 1; if ($0 == e) viu_estado = 1 }
+        END { exit !(viu_url && viu_estado) }' "$tmp" ||
+        ilegivel "a gravação do PR por trabalho não preservou os campos de topo"
+      confere_e_troca 'sprint_atual=null' 'entrega=por_trabalho'
+      printf 'registrado=%s\nsprint=null\n' "$ESTADO"
+      exit 0
+    fi
+    # O E8 grava o PR no item da sprint que o E0 registrou (nunca relida do plano)
     case "$sprint" in
       planejamento|[0-9][0-9]) ;;
       *) recusa 'a entrega não é a do PR de planejamento nem a de uma sprint: o E8 não grava prs' ;;

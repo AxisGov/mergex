@@ -550,6 +550,11 @@ if [ -n "$EXCL" ]; then
     || sem_prova "a base_sha do PR de planejamento ($B_PLAN_REG) não é um commit deste repositório" # guarda:V9PLAN
   [ "$B_PLAN" != "$M_PLAN" ] && g merge-base --is-ancestor "$B_PLAN" "$M_PLAN" 2>/dev/null \
     || sem_prova "a base_sha do PR de planejamento ($B_PLAN) não é ancestral própria do merge $M_PLAN" # guarda:V9PLAN
+  B_PLAN_PROVADO="$(g rev-parse --verify -q "$M_PLAN^1" 2>/dev/null)" \
+    || sem_prova "o merge do planejamento $M_PLAN não tem pai que comprove a base do PR" # guarda:V9PLAN
+  [ "$B_PLAN" = "$B_PLAN_PROVADO" ] \
+    || sem_prova "a base_sha do PR de planejamento ($B_PLAN) não é a base comprovável pelo pai do merge $M_PLAN ($B_PLAN_PROVADO); histórico linear com vários commits não é verificável offline" # guarda:V9PLAN
+
   g rev-list --parents "$B_PLAN..$M_PLAN" > "$TMP_DIR/intervalo" 2>/dev/null \
     || sem_prova "intervalo $B_PLAN..$M_PLAN do PR de planejamento ilegível" # guarda:V9PLAN
   while read -r cpl _pai1 pai2 _ <&3; do
