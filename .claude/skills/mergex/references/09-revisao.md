@@ -156,9 +156,40 @@ EOF
     fi
     ;;
   *)
-    command -v gh >/dev/null 2>&1 || { echo "sem gh: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
-    resposta="$(gh pr view "$pr_url" --json state,mergeCommit,baseRefOid --jq '[.state, (.mergeCommit.oid // ""), (.baseRefOid // "")] | join(" ")')" \
-      || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; } ;;
+    command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 \
+      || { echo "sem gh ou jq: o merge do PR de planejamento não foi lido, nada gravado"; exit 3; }
+    repositorio="$(printf '%s\n' "$pr_url" | sed -nE 's#^https://github.com/([^/]+)/([^/]+)/pull/[0-9]+/?$#\1/\2#p')"
+    [ -n "$repositorio" ] || { echo "pr_url do GitHub fora da forma /org/repo/pull/N: nada gravado"; exit 3; }
+    pr_api="$(gh pr view "$pr_url" --json state,mergeCommit,commits)" \
+      || { echo "o serviço não respondeu sobre $pr_url: nada gravado"; exit 3; }
+    resposta="$(printf '%s\n' "$pr_api" | jq -r '[.state, (.mergeCommit.oid // ""), (.commits | length)] | join(" ")')" \
+      || { echo "o PR do GitHub é ilegível: nada gravado"; exit 3; }
+    read -r estado_pr merge_sha total_commits _ <<EOF
+$resposta
+EOF
+    if [ "$estado_pr" = MERGED ]; then
+      [ -n "$merge_sha" ] || { echo "MERGED sem commit de merge: nada gravado"; exit 3; }
+      commit_api="$(gh api "repos/$repositorio/commits/$merge_sha")" \
+        || { echo "o commit integrado $merge_sha não foi lido no GitHub: nada gravado"; exit 3; }
+      pais="$(printf '%s\n' "$commit_api" | jq -r '.parents[].sha')" \
+        || { echo "pais do commit integrado $merge_sha ilegíveis: nada gravado"; exit 3; }
+      n_pais="$(printf '%s\n' "$pais" | grep -c .)"
+      base_sha=""
+      if [ "$n_pais" -eq 2 ]; then
+        # Merge commit: o primeiro pai é a base exata antes da integração.
+        base_sha="$(printf '%s\n' "$pais" | sed -n 1p)"
+      elif [ "$n_pais" -eq 1 ] && [ "$total_commits" -eq 1 ]; then
+        # Um único commit: tanto squash como rebase/fast-forward têm base
+        # comprovável no pai desse commit integrado.
+        base_sha="$(printf '%s\n' "$pais" | sed -n 1p)"
+      else
+        # Um PR com vários commits squashados/rebaseados em histórico linear
+        # não oferece pelo último commit prova suficiente da base inicial.
+        echo "base histórica de merge linear com $total_commits commits não comprovável: nada gravado"
+        exit 3
+      fi
+      resposta="$estado_pr $merge_sha $base_sha"
+    fi ;;
 esac
 read -r estado_pr merge_sha base_sha _ <<EOF
 $resposta
@@ -174,6 +205,15 @@ else
   bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega "$entrega" --merge-sha "$merge_sha" --base-sha "$base_sha"
 fi
 ```
+
+No GitHub, **nunca** use `baseRefOid` depois do merge: ele pode refletir a ponta
+atual da branch base, avançada por PRs posteriores. O bloco usa os pais do commit
+integrado: dois pais indicam merge comum e o primeiro é a base histórica; um
+único pai só é aceito quando o PR tinha exatamente **um** commit, pois nesse caso
+o pai comprova a base tanto de squash como de rebase/fast-forward. Um PR linear
+com múltiplos commits (squash ou rebase) falha fechado enquanto a base exata não
+puder ser comprovada independentemente; jamais registra o pai do último commit
+como se fosse necessariamente a base inicial.
 
 No GitLab (`pr_url` com `/-/merge_requests/`), o bloco lê o MR pela API do projeto e o commit
 integrado pela API de commits. Em merge comum ou squash, a base é o primeiro pai do resultado; em
