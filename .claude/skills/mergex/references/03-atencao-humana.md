@@ -16,7 +16,7 @@ e o que saiu de primeira parece dispensável. Nenhuma das duas sensações é
 evidência.
 
 É a mesma lógica dos outros agentes de veredito do ecossistema (`auditor-plano`,
-`revisor-testes`, `qa`): quem produz não avalia.
+`sprintx-revisor-testes`, `runx-revisor-testes`, `qa`): quem produz não avalia.
 
 Passe a ele:
 
