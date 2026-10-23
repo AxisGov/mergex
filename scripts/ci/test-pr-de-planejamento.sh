@@ -171,6 +171,21 @@ printf 'novo\n' > "$aux/e0/docs/sprintx/features/plan/01-tasks.md"
 e0_escreve "$aux/e0"
 [ "$rc" = 1 ] && grep -q '01-tasks.md' "$aux/err" && [ ! -e "$aux/e0/docs/entregas" ]
 confere 'E0 --planejamento com artefato do planejamento fora do indice: recusa sem escrever' $?
+g -C "$aux/e0" checkout -q -- .
+rm -f "$aux/e0/docs/sprintx/features/plan/01-tasks.md"
+printf '%s\n' '.DS_Store' '01-IGNORADO.md' > "$aux/e0/.git/info/exclude"
+printf 'auxiliar\n' > "$aux/e0/docs/sprintx/features/plan/.DS_Store"
+e0_escreve "$aux/e0"
+[ "$rc" = 0 ] && [ -d "$aux/e0/docs/entregas/plan" ]
+confere 'E0 --planejamento ignora auxiliar ignorado que não é artefato Markdown' $?
+rm -rf "$aux/e0/docs/entregas"
+rm -f "$aux/e0/docs/sprintx/features/plan/.DS_Store"
+printf 'plano ignorado\n' > "$aux/e0/docs/sprintx/features/plan/01-IGNORADO.md"
+e0_escreve "$aux/e0"
+[ "$rc" = 1 ] && grep -q '01-IGNORADO.md' "$aux/err" && [ ! -e "$aux/e0/docs/entregas" ]
+confere 'E0 --planejamento bloqueia artefato Markdown ignorado' $?
+rm -f "$aux/e0/docs/sprintx/features/plan/01-IGNORADO.md"
+
 # so a pasta canonica serve: com so a pasta antiga (docs/<slug>/), suja ou nao, recusa
 git init -q -b main "$aux/e0-legado"
 mkdir -p "$aux/e0-legado/docs/plan"; printf 'plano\n' > "$aux/e0-legado/docs/plan/ORQUESTRADOR.md"
@@ -682,8 +697,9 @@ printf '%s\n' \
   'printf "%s\\n" "$*" >> "$GH_CHAMADAS"' \
   'read -r estado merge base <<< "${GH_RESPOSTA:-}"' \
   'case "$1" in' \
-  '  pr) printf "{\"state\":\"%s\",\"mergeCommit\":{\"oid\":\"%s\"},\"commits\":[{}]}\\n" "$estado" "$merge" ;;' \
-  '  api) if [ -n "$base" ]; then printf "{\"parents\":[{\"sha\":\"%s\"},{\"sha\":\"%s\"}]}\\n" "$base" "${GH_OTHER_SHA:-0123456789012345678901234567890123456789}"; else printf "{\"parents\":[]}\\n"; fi ;;' \
+  '  pr) commits="[{}]"; [ "${GH_TOTAL_COMMITS:-1}" = 1 ] || commits="[{},{}]"; printf "{\"state\":\"%s\",\"mergeCommit\":{\"oid\":\"%s\"},\"commits\":%s}\\n" "$estado" "$merge" "$commits" ;;' \
+  '  api) if [ -n "$base" ] && [ "${GH_ONE_PARENT:-0}" = 1 ]; then printf "{\"parents\":[{\"sha\":\"%s\"}]}\\n" "$base";' \
+  '       elif [ -n "$base" ]; then printf "{\"parents\":[{\"sha\":\"%s\"},{\"sha\":\"%s\"}]}\\n" "$base" "${GH_OTHER_SHA:-0123456789012345678901234567890123456789}"; else printf "{\"parents\":[]}\\n"; fi ;;' \
   'esac' \
   'exit "${GH_RC:-0}"' > "$aux/gh-falso/gh"
 chmod +x "$aux/gh-falso/gh"
@@ -703,9 +719,20 @@ e9 "$aux/e9a" GH_RESPOSTA="MERGED $SHA_M $SHA_B"
 (cd "$aux/e9a" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
 [ "$rc" = 0 ] && grep -qx 'estado=merged' "$aux/out" && grep -qx "merge_sha=$SHA_M" "$aux/out" \
   && grep -qx "base_sha=$SHA_B" "$aux/out" \
-  && grep -q 'pr view https://github.com/dono/repo/pull/9 --json state,mergeCommit,commits' "$aux/gh-chamadas"
+  && grep -q 'pr view https://github.com/dono/repo/pull/9 --json state,mergeCommit,commits' "$aux/gh-chamadas" \
   && grep -q "api repos/dono/repo/commits/$SHA_M" "$aux/gh-chamadas"
 confere 'E9 com PR mergeado: deriva base do primeiro pai do commit integrado' $?
+repo_e9 "$aux/e9linear"
+e9 "$aux/e9linear" GH_RESPOSTA="MERGED $SHA_M $SHA_B" GH_ONE_PARENT=1
+(cd "$aux/e9linear" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
+[ "$rc" = 0 ] && grep -qx "base_sha=$SHA_B" "$aux/out"
+confere 'E9 com integração linear de um commit: o pai único comprova a base' $?
+repo_e9 "$aux/e9multi"; cp "$aux/e9multi/docs/entregas/login/ENTREGA.md" "$aux/e9multi-antes.md"
+e9 "$aux/e9multi" GH_RESPOSTA="MERGED $SHA_M $SHA_B" GH_ONE_PARENT=1 GH_TOTAL_COMMITS=2
+cmp -s "$aux/e9multi/docs/entregas/login/ENTREGA.md" "$aux/e9multi-antes.md" \
+  && [ "$rc" != 0 ] && grep -q 'não comprovável' "$aux/e9.out"
+confere 'E9 com integração linear de múltiplos commits: falha fechado sem base comprovável' $?
+
 repo_e9 "$aux/e9b"; cp "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md"
 e9 "$aux/e9b" GH_RC=1
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]

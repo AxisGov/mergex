@@ -367,7 +367,15 @@ confere 'V9 da sprint 02 com a base de volta a da sprint 01 (rebaixamento): v9_s
 
 # o E9 lê o PR da sprint atual no serviço, como o de planejamento
 mkdir -p "$aux/gh-falso"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\n[ -z "${GH_RESPOSTA:-}" ] || printf "%%s\\n" "$GH_RESPOSTA"\nexit "${GH_RC:-0}"\n' > "$aux/gh-falso/gh"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "%s\\n" "$*" >> "$GH_CHAMADAS"' \
+  'read -r estado merge base <<< "${GH_RESPOSTA:-}"' \
+  'case "$1" in' \
+  '  pr) printf "{\"state\":\"%s\",\"mergeCommit\":{\"oid\":\"%s\"},\"commits\":[{}]}\\n" "$estado" "$merge" ;;' \
+  '  api) printf "{\"parents\":[{\"sha\":\"%s\"},{\"sha\":\"0123456789012345678901234567890123456789\"}]}\\n" "$base" ;;' \
+  'esac' \
+  'exit "${GH_RC:-0}"' > "$aux/gh-falso/gh"
 chmod +x "$aux/gh-falso/gh"
 bloco "$ref/09-revisao.md" 'gh pr view "$pr_url" --json state,mergeCommit' \
   | sed 's|<trabalho_id>|plan|g' \
@@ -386,12 +394,12 @@ $(item planejamento merged $SHA_A humano $SHA_B)
 sed 's#^pr_url: null#pr_url: https://github.com/dono/repo/pull/2#' "$aux/e9/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
   && mv "$aux/e.tmp" "$aux/e9/docs/entregas/plan/ENTREGA.md"
 : > "$aux/gh-chamadas"
-(cd "$aux/e9" && env PATH="$aux/gh-falso:$PATH" GH_CHAMADAS="$aux/gh-chamadas" GH_RESPOSTA="MERGED $SHA_C $SHA_A" bash "$aux/e9.sh") >"$aux/e9.out" 2>&1; rc=$?
+(cd "$aux/e9" && env PATH="$aux/gh-falso:$PATH" GH_CHAMADAS="$aux/gh-chamadas" GH_RESPOSTA="MERGED $SHA_C $SHA_A" bash "$aux/e9.sh") >"$aux/e9.out" 2>&1; e9_rc=$?
 le_repo "$aux/e9"
-[ "$rc" = 0 ] && [ "$(linha fechada)" = 01 ] && [ "$(linha fechada_merge_sha)" = $SHA_C ] \
+[ "$e9_rc" = 0 ] && [ "$rc" = 0 ] && [ "$(linha fechada)" = 01 ] && [ "$(linha fechada_merge_sha)" = $SHA_C ] \
   && grep -q 'pr view https://github.com/dono/repo/pull/2 ' "$aux/gh-chamadas"
 confere 'E9 com o PR da sprint atual mergeado pelo servico: grava o item da sprint' $?
-[ "$rc" = 0 ] || mostra "$aux/e9.out"
+[ "$e9_rc" = 0 ] || mostra "$aux/e9.out"
 
 echo '== os references =='
 awk '/^### O PR já existe/ || /PR já existe para esta branch/ { a = 1 } a' "$ref/07-abertura-pr.md" > "$aux/e7.txt"
