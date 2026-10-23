@@ -236,7 +236,7 @@ prs:
 | `estado` | O enum da tabela; o E8 grava o do E7, o E9 grava `merged` |
 | `merge_sha` | O commit de merge, só com `estado: merged`; `null` antes |
 | `merge` | `humano` quando o E9 registra o merge; `automatico` só quando o modo automático fizer o merge de uma sprint; **nunca** `automatico` no planejamento |
-| `base_sha` | A ponta comprovada da base quando o PR foi integrado (no GitHub, primeiro pai do merge commit, ou pai único quando o PR tem exatamente um commit; no GitLab, derivada dos pais do commit integrado e, no fast-forward/rebase, da linhagem exata dos commits do MR; casos lineares não comprováveis falham fechado), gravada pelo E9 com o merge (DM-269 e DM-267); `null` antes. `diff_refs.start_sha` não serve: é da versão do diff, não do instante do merge. Item sem a chave (gravado antes dela) lê como `null`. A V9 confere todo commit de `base_sha..merge_sha` |
+| `base_sha` | A ponta comprovada da base quando o PR foi integrado: primeiro pai do commit de merge ou squash; num resultado linear, pai único somente quando o serviço prova que o PR/MR tinha um commit. Histórico linear com múltiplos commits falha fechado. Gravada pelo E9 com o merge (DM-269 e DM-267); `null` antes. `diff_refs.start_sha` não serve: é da versão do diff, não do instante do merge. Item sem a chave lê como `null`. A V9 exige `base_sha == merge_sha^1` antes de conferir `base_sha..merge_sha` |
 
 - `prs` é sempre YAML de bloco; a forma em fluxo (`prs: [{...}]`) é ilegível. Lista vazia é `prs: []`.
 - Uma chave sem a outra é incoerente: `sprint_atual: planejamento` ou `NN` sem o item
