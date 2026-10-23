@@ -677,7 +677,15 @@ bloco "$ref/09-revisao.md" 'gh pr view "$pr_url" --json state,mergeCommit' \
   | sed "s#bash \.claude/skills/mergex/scripts/entrega-de-planejamento\.sh#bash '$leitor'#" > "$aux/e9.sh"
 [ -s "$aux/e9.sh" ]; confere '09-revisao tem o bloco que le o PR de planejamento no servico' $?
 mkdir -p "$aux/gh-falso"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$GH_CHAMADAS"\n[ -z "${GH_RESPOSTA:-}" ] || printf "%%s\\n" "$GH_RESPOSTA"\nexit "${GH_RC:-0}"\n' > "$aux/gh-falso/gh"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf "%s\\n" "$*" >> "$GH_CHAMADAS"' \
+  'read -r estado merge base <<< "${GH_RESPOSTA:-}"' \
+  'case "$1" in' \
+  '  pr) printf "{\"state\":\"%s\",\"mergeCommit\":{\"oid\":\"%s\"},\"commits\":[{}]}\\n" "$estado" "$merge" ;;' \
+  '  api) if [ -n "$base" ]; then printf "{\"parents\":[{\"sha\":\"%s\"},{\"sha\":\"%s\"}]}\\n" "$base" "${GH_OTHER_SHA:-0123456789012345678901234567890123456789}"; else printf "{\"parents\":[]}\\n"; fi ;;' \
+  'esac' \
+  'exit "${GH_RC:-0}"' > "$aux/gh-falso/gh"
 chmod +x "$aux/gh-falso/gh"
 repo_e9() { # <dir> — a entrega de planejamento com o PR aberto
   mkdir -p "$1"
@@ -695,8 +703,9 @@ e9 "$aux/e9a" GH_RESPOSTA="MERGED $SHA_M $SHA_B"
 (cd "$aux/e9a" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
 [ "$rc" = 0 ] && grep -qx 'estado=merged' "$aux/out" && grep -qx "merge_sha=$SHA_M" "$aux/out" \
   && grep -qx "base_sha=$SHA_B" "$aux/out" \
-  && grep -q 'pr view https://github.com/dono/repo/pull/9 --json state,mergeCommit,baseRefOid' "$aux/gh-chamadas"
-confere 'E9 com o PR de planejamento mergeado pelo servico: grava prs[0] merged com o mergeCommit e a base (baseRefOid)' $?
+  && grep -q 'pr view https://github.com/dono/repo/pull/9 --json state,mergeCommit,commits' "$aux/gh-chamadas"
+  && grep -q "api repos/dono/repo/commits/$SHA_M" "$aux/gh-chamadas"
+confere 'E9 com PR mergeado: deriva base do primeiro pai do commit integrado' $?
 repo_e9 "$aux/e9b"; cp "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md"
 e9 "$aux/e9b" GH_RC=1
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
@@ -709,7 +718,7 @@ cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" 
 confere 'MERGED sem mergeCommit: nao grava' $?
 e9 "$aux/e9b" GH_RESPOSTA="MERGED $SHA_M "
 cmp -s "$aux/e9b/docs/entregas/login/ENTREGA.md" "$aux/e9b-antes.md" && [ "$rc" != 0 ]
-confere 'MERGED sem a base do PR (baseRefOid): nao grava' $?
+confere 'MERGED sem pais comprovaveis do commit: nao grava' $?
 # Entrega legada já retomada: o E9 usa a URL do item histórico e completa só
 # a base ausente do planejamento, sem depender de sprint_atual.
 mkdir -p "$aux/e9h/docs/entregas/login"
