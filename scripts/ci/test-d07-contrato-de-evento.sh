@@ -47,7 +47,7 @@ pula()  { PULADOS=$((PULADOS+1)); printf '  pulado %s\n' "$1"; }
 CHAVES='ts expx_eventos trabalho_id ferramenta origem evento fase task agente resultado detalhe arquivos'
 
 # O enum `Agente`. `principal` é o valor quando não há subagente.
-AGENTES='principal auditor-plano revisor-testes qa investigador cartografo revisor-diff analista-de-conflito avaliador-de-raio'
+AGENTES='principal auditor-plano sprintx-revisor-testes sprintx-investigador runx-revisor-testes runx-investigador qa legadox-cartografo avaliador-de-raio stackx-cartografo revisor-diff analista-de-conflito auditor-design cartografo-visual'
 
 # O enum `EventoNome`, na cópia conferida. `artefato_gravado` é o da mergex
 # (DM-227): a gravação de um artefato derivado falhou.
@@ -190,7 +190,7 @@ echo
 echo 'Regressão: nenhum evento inventado além do enum (DM-227)'
 
 # A cópia dos enums é conferida contra o tamanho canônico: 23 eventos (os 22 do
-# `780cc5cc` mais `artefato_gravado`) e 9 agentes. Ampliar a cópia aqui
+# `780cc5cc` mais `artefato_gravado`) e 14 identidades de agente (incluindo principal). Ampliar a cópia aqui
 # afrouxaria o contrato de um lado só, e é a primeira coisa que esta bancada
 # barra — inclusive para `null`, que não é valor de enum em lugar nenhum.
 n_ev="$(printf '%s\n' $EVENTOS | grep -c .)"
@@ -198,9 +198,9 @@ n_ev="$(printf '%s\n' $EVENTOS | grep -c .)"
   && ok "o vocabulário desta bancada tem os 23 eventos canônicos" \
   || falha "o vocabulário desta bancada tem $n_ev eventos, não os 23"
 n_ag="$(printf '%s\n' $AGENTES | grep -c .)"
-[ "$n_ag" = 9 ] \
-  && ok "o enum de agente desta bancada tem os 9 valores canônicos" \
-  || falha "o enum de agente desta bancada tem $n_ag valores, não os 9 canônicos"
+[ "$n_ag" = 14 ] \
+  && ok "o enum de agente desta bancada tem os 14 valores canônicos" \
+  || falha "o enum de agente desta bancada tem $n_ag valores, não os 14 canônicos"
 if em_lista null "$AGENTES"; then
   falha 'null entrou no enum de agente desta bancada'
 else
