@@ -48,6 +48,13 @@ if [ -n "$sujo" ]; then
   printf 'mergex E0 BLOQUEADO — planejamento não commitado:\n%s\n' "$sujo" >&2
   exit 1
 fi
+# git status não mostra conteúdo ignorado; um diretório ignorado pode parecer limpo.
+ignorados="$(git ls-files --others --ignored --exclude-standard -- "docs/sprintx/features/<slug>/")" || exit 2
+rastreados="$(git ls-files -- "docs/sprintx/features/<slug>/")" || exit 2
+if [ -n "$ignorados" ] || [ -z "$rastreados" ]; then
+  printf 'mergex E0 BLOQUEADO — planejamento ignorado ou sem arquivos rastreados:\n%s\n' "$ignorados" >&2
+  exit 1
+fi
 ```
 
 Saída diferente de zero: `mergex E0 BLOQUEADO — planejamento não commitado`, com a lista. O E0
