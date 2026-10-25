@@ -105,7 +105,9 @@ revisa() {
 }
 evidencia() { printf '%s\n' "$P/docs/entregas/w/revisao/$1.json"; }
 commita() { g add -A && g commit -q -m "feat: $1" && ITENS="$ITENS $1:$(g rev-parse --short HEAD)"; }
-# entrega [<versionado>] [<linhas extras>] — $aux/ENTREGA.md com os ITENS
+# entrega [<versionado>] [<linhas extras>] — $aux/ENTREGA.md com os ITENS e, dentro de um projeto,
+# a mesma ENTREGA em docs/entregas/w/, commitada sozinha (a V12 lê a entrega do HEAD, como o E2).
+# ENTREGA_SO_NO_DISCO=1 grava no projeto sem commitar.
 entrega() {
   local par
   {
@@ -119,6 +121,11 @@ entrega() {
     [ -z "${2:-}" ] || printf '%s\n' "$2"
     printf -- '---\n\n# Entrega\n'
   } > "$aux/ENTREGA.md"
+  if [ -n "${P:-}" ] && [ -d "$P/.git" ]; then
+    mkdir -p "$P/docs/entregas/w" && cp "$aux/ENTREGA.md" "$P/docs/entregas/w/ENTREGA.md"
+    [ "${ENTREGA_SO_NO_DISCO:-0}" = 1 ] && return 0
+    g add docs/entregas/w/ENTREGA.md && { g diff --cached --quiet || g commit -q -m "docs: entrega"; }
+  fi
 }
 # tarefas <id:status>... — $aux/tasks.md (kind: tasks, formato da sprintx)
 tarefas() {
@@ -129,10 +136,11 @@ tarefas() {
     printf -- '---\n\n# Tasks\n'
   } > "$aux/tasks.md"
 }
-# roda [VAR=valor...] — a V12 no projeto atual; saída em $aux/out e $aux/err, código em $rc
+# roda [VAR=valor...] — a V12 no projeto atual; saída em $aux/out e $aux/err, código em $rc.
+# A entrega é $ENTREGA_ARG (padrão: o caminho relativo commitado no projeto).
 roda() {
   rm -f "$aux/node.log"
-  (cd "$P" && env "$@" "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w --raiz "$P" \
+  (cd "$P" && env "$@" "$BASH" "$V12" --verificar --entrega "${ENTREGA_ARG:-docs/entregas/w/ENTREGA.md}" --trabalho w --raiz "$P" \
      -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
 }
 primeira() { head -n 1 "$aux/out"; }
@@ -255,6 +263,29 @@ roda PATH="$aux/espia:$PATH"
 [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=nenhuma-task-concluida' && ! conferiu \
   && passa 'nenhuma task concluida: n/a' || quebra "nenhuma task concluida: $(mostra)"
 
+echo '== V12: a entrega e a do HEAD, como no E2 (correcao P1 do Login) =='
+
+# disco diverge do HEAD: a marca de planejamento só no disco não muda o portão
+projeto disco obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+ENTREGA_SO_NO_DISCO=1 entrega true "$PLAN"
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' \
+  && passa 'planejamento so no disco: a V12 le o HEAD e confere a task' || quebra "planejamento so no disco: $(mostra)"
+# caminho absoluto dentro da raiz: o mesmo arquivo
+projeto absoluto obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+ENTREGA_ARG="$P/docs/entregas/w/ENTREGA.md" roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' \
+  && passa 'entrega por caminho absoluto dentro da raiz: conferida' || quebra "absoluto dentro: $(mostra)"
+# caminho fora da raiz: não está em commit nenhum do projeto
+ENTREGA_ARG="$aux/ENTREGA.md" roda
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=entrega-de-planejamento-ilegivel' \
+  && passa 'entrega fora da raiz: SEM_PROVA' || quebra "entrega fora da raiz: $(mostra)"
+# entrega só no disco, nunca commitada: SEM_PROVA
+projeto sem-commit obrigatoria; escreve src/a.ts; commita T-01.01; ENTREGA_SO_NO_DISCO=1 entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=entrega-de-planejamento-ilegivel' \
+  && passa 'entrega fora do HEAD: SEM_PROVA' || quebra "entrega fora do HEAD: $(mostra)"
+
 echo '== V12: o conferir do nucleo =='
 
 # sem evidência: FALHA em obrigatoria, AVISO (código 0) em se_disponivel
@@ -312,7 +343,7 @@ roda PATH="$aux/troca:$PATH"
 
 # --raiz relativa ao diretorio de quem chama
 projeto relativa obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
-(cd "$aux" && "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w --raiz relativa \
+(cd "$aux" && "$BASH" "$V12" --verificar --entrega relativa/docs/entregas/w/ENTREGA.md --trabalho w --raiz relativa \
    -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
 [ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' \
   && passa '--raiz relativa: conferida' || quebra "--raiz relativa: $(mostra)"
