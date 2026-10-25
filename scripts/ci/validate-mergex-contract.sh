@@ -1727,4 +1727,20 @@ fi
 # que ela não cobre fica com as varreduras por executável acima e com os testes.
 if grep -nE -- '--(force|sem-prova|bypass)' "$SKILL_DIR"/scripts/*.sh; then fail "flag de bypass encontrada"; fi
 
+# ---------------------------------------------------------------------------
+# Número citado bate com a tabela que ele conta, e o exemplo mostra o item como
+# ele é gravado hoje (correções P1 do Login: o texto envelheceu quando a V12 entrou)
+# ---------------------------------------------------------------------------
+schema_ref='.claude/skills/mergex/references/00-schema.md'
+registro_ref='.claude/skills/mergex/references/08-registro.md'
+n_causas="$(awk '/^### O enum — uma causa por verificação/ { t = 1; next }
+  t && /^\| [0-9]+ \|/ { n++ } t && /^$/ && n { exit } END { print n + 0 }' "$schema_ref")"
+por_extenso() { case "$1" in 10) echo dez ;; 11) echo onze ;; 12) echo doze ;; 13) echo treze ;; *) echo "$1" ;; esac; }
+[ "$n_causas" -gt 0 ] || fail '00-schema.md: enum de causas não encontrado'
+grep -Fq "as $(por_extenso "$n_causas") causas de \`references/00-schema.md\`" "$registro_ref" \
+  || fail "08-registro.md não cita as $n_causas causas do enum de 00-schema.md"
+awk '/^commits:$/ { c = 1; next } c && /^  - seq:/ { i++ } c && /^    revisao:/ { r++ }
+  c && /^[a-z_]+:/ { exit } END { exit !(i > 0 && i == r) }' "$schema_ref" \
+  || fail '00-schema.md: o exemplo de commits da entrega omite a chave revisao do item'
+
 printf 'contract checks passed\n'
