@@ -14,7 +14,7 @@
 #      SEM_PROVA (nunca o commit de um item anterior).
 #   3. A entrega de planejamento (`entrega-de-planejamento.sh`, antes de tudo) não tem
 #      task executada: `n/a`. Entrega incoerente: SEM_PROVA.
-#   4. O modo vem de `leitor-do-projeto.sh --rev HEAD` (consumo com `set -a`). Sem
+#   4. O modo vem de `leitor-do-projeto.sh --rev <o HEAD lido uma vez>` (com `set -a`). Sem
 #      `.expx/fatiamento.json`: `n/a`, sem node. Leitor que não lê (configuração
 #      inválida, `FATIA_*` no ambiente, núcleo ausente ou antigo, node ausente):
 #      SEM_PROVA em qualquer modo, porque o modo não pode ser lido.
@@ -155,9 +155,10 @@ case "$marca" in
   *) repassa; sem_prova 'entrega-de-planejamento-ilegivel' ;;
 esac
 
-# 3. o modo, pelo leitor do projeto, do commit (HEAD).
+# 3. o modo, pelo leitor do projeto, do mesmo commit da entrega: o HEAD pode ter andado desde o
+# passo 2, e a V12 não decide com dois snapshots.
 EXPX_REVISAO_POR_TASK=""; EXPX_FATIAMENTO_ORIGEM=""
-fatia="$("$SH" "$AQUI/leitor-do-projeto.sh" --raiz "$RAIZ" --rev HEAD 2> "$tmp/err")" \
+fatia="$("$SH" "$AQUI/leitor-do-projeto.sh" --raiz "$RAIZ" --rev "$rev_leitura" 2> "$tmp/err")" \
   || { rc=$?; repassa; sem_prova "configuracao-nao-lida:$rc"; }
 set -a; eval "$fatia"; set +a
 [ "$EXPX_FATIAMENTO_ORIGEM" != padrao ] || na 'sem-fatiamento-json'

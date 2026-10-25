@@ -269,6 +269,32 @@ roda PATH="$aux/espia:$PATH"
 echo '== V12: a entrega e a do HEAD, como no E2 (correcao P1 do Login) =='
 
 # disco diverge do HEAD: a marca de planejamento só no disco não muda o portão
+# o HEAD anda depois de fixado o snapshot da entrega: o modo sai do MESMO snapshot, não do HEAD
+# novo. O git do PATH, logo depois do `show` da entrega, commita `modo: desligada` no projeto.
+# Do snapshot sai obrigatoria e versionado false (n/a sem-versionador); do HEAD novo sairia o
+# n/a da revisão desligada.
+mkdir -p "$aux/avanca"; git_real="$(command -v git)"
+cat > "$aux/avanca/git" <<AVANCA
+#!$BASH
+"$git_real" "\$@"; rc=\$?
+case " \$* " in
+  *" show "*":docs/entregas/w/ENTREGA.md "*)
+    if [ ! -e "$aux/avanca.marco" ]; then
+      : > "$aux/avanca.marco"
+      printf '{"expx_fatiamento": 2, "revisao_por_task": {"modo": "desligada"}}\n' > "\$AVANCA_P/.expx/fatiamento.json"
+      "$git_real" -C "\$AVANCA_P" -c user.email=t@t -c user.name=t -c commit.gpgsign=false \\
+        commit -q -am 'o HEAD anda no meio da V12' >/dev/null 2>&1
+    fi ;;
+esac
+exit \$rc
+AVANCA
+chmod +x "$aux/avanca/git"
+projeto avanca obrigatoria; escreve src/a.ts; commita T-01.01; entrega false; tarefas T-01.01:concluida
+rm -f "$aux/avanca.marco"
+roda AVANCA_P="$P" PATH="$aux/avanca:$PATH"
+[ -e "$aux/avanca.marco" ] && [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-versionador' \
+  && passa 'HEAD que anda no meio da V12: o modo sai do snapshot da entrega' || quebra "HEAD que anda no meio: $(mostra)"
+
 projeto disco obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
 ENTREGA_SO_NO_DISCO=1 entrega true "$PLAN"
 roda
