@@ -2,7 +2,9 @@
 # Correções P1 do Login no E7 (references/07-abertura-pr.md), contra os blocos reais do
 # reference, extraídos e executados como em test-fatiamento-e7.sh:
 #   - o provedor sai do remoto de upstream da branch, não de `origin`;
-#   - a branch_base entra por heredoc com delimitador entre aspas: nada nela é avaliado;
+#   - a branch_base e o título chegam por arquivo (DM-270), fora do corpo dos blocos: nada neles é
+#     avaliado, e quebra de linha não injeta comando;
+#   - o passo 2 só abre o que o passo 1.5 mediu (upstream, HEAD e ponta remota);
 #   - falha de medição sai 2, nunca 1 (1 é "reprovado pelo fatiamento");
 #   - o PR abre no projeto do remoto-base, com a origem explícita (fork: `dono:branch`);
 #   - a retomada da MR filtra projeto de origem e base, paginando;
@@ -10,6 +12,11 @@
 set -uo pipefail
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 e7="$raiz/.claude/skills/mergex/references/07-abertura-pr.md"
+# canal <nome> <padrão> — a primeira linha dos blocos de teste: grava ${CANAL-<padrão>} no arquivo
+# do canal (o papel da ferramenta de escrita do agente), antes do bloco. CANAL=__ausente__ não grava.
+canal() {
+  printf '[ "${CANAL-%s}" = __ausente__ ] || printf '"'"'%%s\\n'"'"' "${CANAL-%s}" > "$(git rev-parse --path-format=absolute --git-path %s)" || exit 99\n' "$2" "$2" "$1"
+}
 OK=0; FALHOU=0
 passa()  { OK=$((OK+1)); printf '  ok    %s\n' "$1"; }
 quebra() { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; }
@@ -78,13 +85,14 @@ printf '%s\n' '---' 'kind: entrega' 'trabalho_id: x' 'sprint_atual: null' 'prs: 
 printf 'base\n' > "$aux/dev/base.txt"; g "$aux/dev" add -A; g "$aux/dev" commit -q -m base; g "$aux/dev" push -q origin main 2>/dev/null
 g "$aux/dev" switch -q -c feature/x; printf 'linha\n' > "$aux/dev/a.md"; g "$aux/dev" add -A; g "$aux/dev" commit -q -m a
 g "$aux/dev" push -q -u origin feature/x 2>/dev/null
-passo15() { # <branch_base> — o bloco do passo 1.5, com a base trocada literalmente
+passo15() { # <branch_base> — o bloco do passo 1.5, com a base gravada no canal (__ausente__: sem gravar)
   local b; b="$(bloco_do_e7 'fatiamento-da-pr.sh "$@" "$base" "$publicado"')"
-  b="${b//'<branch_base>'/$1}"; b="${b//'<trabalho_id>'/x}"
+  b="${b//'<trabalho_id>'/x}"
   b="${b//'bash .claude/skills/mergex/scripts/'/bash $raiz/.claude/skills/mergex/scripts/}"
-  printf '%s\n' "$b" > "$aux/passo15.sh"
-  (cd "$aux/dev" && bash "$aux/passo15.sh" > "$aux/p15.out" 2>&1)
+  { canal mergex-e7-branch-base main; printf '%s\n' "$b"; } > "$aux/passo15.sh"
+  (cd "$aux/dev" && CANAL="$1" bash "$aux/passo15.sh" > "$aux/p15.out" 2>&1)
 }
+canal_de() { git -C "$1" rev-parse --path-format=absolute --git-path "$2"; }
 rm -f "$aux/sentinela"
 passo15 'main$(touch '"$aux"'/sentinela)`touch '"$aux"'/sentinela`'
 [ ! -e "$aux/sentinela" ] && passa 'branch_base com $(...) e crase nao executa nada no shell' \
@@ -94,6 +102,25 @@ passo15 main; rc=$?
 [ "$rc" = 2 ] && passa 'busca do upstream que falha: sai 2 (nao medido), nunca 1 (reprovado)' \
   || quebra "busca do upstream que falha saiu $rc, esperado 2: $(tr '\n' '|' < "$aux/p15.out")"
 g "$aux/dev" remote set-url origin "$aux/remoto.git"
+
+echo '== E7: branch_base e titulo chegam por arquivo, nunca pelo texto do bloco =='
+# por substituicao no bloco, uma quebra de linha seguida do delimitador do heredoc antigo fechava-o
+# e o resto rodava como comando: a entrada do caller vem de um arquivo, lido como dado
+fora_dos_blocos="$(awk '/^```/ { dentro = !dentro; next } dentro && (index($0, "<branch_base>") || index($0, "<título>")) { print NR": "$0 }' "$e7")"
+[ -z "$fora_dos_blocos" ] && passa 'nenhum <branch_base> ou <título> dentro de bloco do E7' \
+  || quebra "placeholder do caller dentro de bloco executavel: $fora_dos_blocos"
+rm -f "$aux/sent15"
+passo15 "$(printf 'main\nBRANCH_BASE__INVALIDA~\ntouch %s' "$aux/sent15")"; rc=$?
+[ "$rc" = 2 ] && [ ! -e "$aux/sent15" ] && [ ! -e "$(canal_de "$aux/dev" mergex-e7-base)" ] \
+  && [ ! -e "$(canal_de "$aux/dev" mergex-e7-branch-base)" ] \
+  && passa 'branch_base com quebra de linha e o delimitador antigo: nada roda, sai 2, sem estado' \
+  || quebra "branch_base multilinha (rc $rc, sentinela $( [ -e "$aux/sent15" ] && echo criada || echo ausente)): $(tr '\n' '|' < "$aux/p15.out")"
+passo15 __ausente__; rc=$?
+[ "$rc" = 2 ] && passa 'sem o arquivo da branch_base: sai 2 (nao medido)' || quebra "sem o arquivo da branch_base saiu $rc"
+passo15 main; rc_lf=$?; passo15 "$(printf 'main\r')"; rc_crlf=$?
+[ "$rc_lf" = "$rc_crlf" ] && [ ! -e "$(canal_de "$aux/dev" mergex-e7-branch-base)" ] \
+  && passa "branch_base com CRLF vale o mesmo que sem (rc $rc_lf), e o arquivo e apagado depois de lido" \
+  || quebra "CRLF mudou o resultado (rc $rc_lf x $rc_crlf) ou o arquivo sobrou"
 
 echo '== E7: passo 2 (destino, origem e rascunho) =='
 mkdir -p "$aux/bin"
@@ -134,9 +161,9 @@ projeto_pr() { # <dir> <url origin> <url fork> <remoto do upstream> — branch f
   printf 'origin\nmain\n%s/feature/x\n%s\n' "$4" "$(git -C "$d" rev-parse HEAD)" \
     > "$(git -C "$d" rev-parse --path-format=absolute --git-path mergex-e7-base)"
 }
-passo2() { # <dir> <trecho do bloco> — roda o bloco do passo 2 no projeto
-  local b; b="$(bloco_do_e7 "$2")"; b="${b//'<título>'/titulo}"; b="${b//'<trabalho_id>'/x}"
-  printf '%s\n' "$b" > "$aux/passo2.sh"
+passo2() { # <dir> <trecho do bloco> — roda o bloco do passo 2 no projeto; o titulo vem de ${CANAL-titulo}
+  local b; b="$(bloco_do_e7 "$2")"; b="${b//'<trabalho_id>'/x}"
+  { canal mergex-e7-titulo titulo; printf '%s\n' "$b"; } > "$aux/passo2.sh"
   rm -f "$aux/args-gh" "$aux/args-glab"
   (cd "$1" && PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" ARGS_GLAB="$aux/args-glab" GLAB_PAGINAS="$aux/paginas" \
      bash "$aux/passo2.sh" > "$aux/p2.out" 2>&1)
@@ -159,6 +186,26 @@ case "$(args "$aux/args-gh")" in *--draft*) passa 'QA nao aprovado: rascunho' ;;
 mkdir -p "$aux/mesmo/docs/manutencao/x"; printf 'VEREDITO: APROVADO\n' > "$aux/mesmo/docs/manutencao/x/QA.md"
 passo2 "$aux/mesmo" 'gh pr create'
 case "$(args "$aux/args-gh")" in *--draft*) quebra 'QA aprovado e o PR ainda saiu rascunho' ;; '') quebra "QA aprovado: gh nao chamado $(tr '\n' '|' < "$aux/p2.out")" ;; *) passa 'QA aprovado: sem --draft' ;; esac
+
+echo '== E7: titulo pelo canal de arquivo =='
+for cmd in 'gh pr create' 'glab mr create'; do
+  projeto_pr "$aux/tit" https://github.com/acme/login.git git@github.com:ana/login.git origin
+  mkdir -p "$aux/paginas"; printf '[]\n' > "$aux/paginas/1.json"; rm -f "$aux/sent-tit"
+  export CANAL; CANAL="$(printf 'fix: x\nTITULO_DO_PR\ntouch %s' "$aux/sent-tit")"
+  passo2 "$aux/tit" "$cmd"; rc=$?; unset CANAL
+  [ "$rc" = 1 ] && [ ! -e "$aux/sent-tit" ] && [ ! -e "$aux/args-gh" ] && [ ! -e "$aux/args-glab" ] \
+    && [ ! -e "$(canal_de "$aux/tit" mergex-e7-titulo)" ] \
+    && passa "$cmd: titulo com quebra de linha e o delimitador antigo: nada roda, sai 1, nada aberto" \
+    || quebra "$cmd: titulo multilinha (rc $rc, sentinela $( [ -e "$aux/sent-tit" ] && echo criada || echo ausente)) $(tr '\n' '|' < "$aux/p2.out")"
+  export CANAL=__ausente__; passo2 "$aux/tit" "$cmd"; rc=$?; unset CANAL
+  [ "$rc" = 1 ] && [ ! -e "$aux/args-gh" ] && [ ! -e "$aux/args-glab" ] \
+    && passa "$cmd: sem o arquivo do titulo, sai 1 sem abrir" || quebra "$cmd: sem o arquivo do titulo (rc $rc)"
+  passo2 "$aux/tit" "$cmd"; rc=$?
+  [ ! -e "$(canal_de "$aux/tit" mergex-e7-titulo)" ] && { [ -e "$aux/args-gh" ] || [ -e "$aux/args-glab" ]; } \
+    && passa "$cmd: titulo valido abre, e o arquivo e apagado depois de lido" \
+    || quebra "$cmd: titulo valido (rc $rc) nao abriu ou deixou o arquivo $(tr '\n' '|' < "$aux/p2.out")"
+  rm -rf "$aux/tit"
+done
 
 echo '== E7: passo 2 abre so o que o passo 1.5 mediu =='
 # entre as duas chamadas do shell, a pessoa troca de branch, commita, ou a branch remota anda: o

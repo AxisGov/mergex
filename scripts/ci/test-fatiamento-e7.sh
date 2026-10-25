@@ -11,6 +11,11 @@ set -uo pipefail
 raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 script="$raiz/.claude/skills/mergex/scripts/fatiamento-da-pr.sh"
 e7="$raiz/.claude/skills/mergex/references/07-abertura-pr.md"
+# canal <nome> <padrão> — a primeira linha dos blocos de teste: grava ${CANAL-<padrão>} no arquivo
+# do canal (o papel da ferramenta de escrita do agente), antes do bloco. CANAL=__ausente__ não grava.
+canal() {
+  printf '[ "${CANAL-%s}" = __ausente__ ] || printf '"'"'%%s\\n'"'"' "${CANAL-%s}" > "$(git rev-parse --path-format=absolute --git-path %s)" || exit 99\n' "$2" "$2" "$1"
+}
 
 ok=0; falhou=0
 passa()  { ok=$((ok+1)); printf '  ok    %s\n' "$1"; }
@@ -76,7 +81,7 @@ grep -Fq 'Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre 
   && grep -Fq '| `fatiamento-da-pr.sh` saiu `2`' "$e7" \
   && passa 'medicao impossivel (saida 2) tambem impede a abertura' \
   || quebra 'o E7 so trata as saidas 0 e 1 do fatiamento; a 2 (nao mediu) abriria sem medir'
-grep -Fxq 'rb="$remoto"' "$e7" && grep -Fq "IFS= read -r bb <<'BRANCH_BASE__INVALIDA~'" "$e7" && grep -Fq 'git fetch "$rb" "$bb"' "$e7" \
+grep -Fxq 'rb="$remoto"' "$e7" && grep -Fq 'a="$(git rev-parse --path-format=absolute --git-path mergex-e7-branch-base)"' "$e7" && grep -Fq 'git fetch "$rb" "$bb"' "$e7" \
   && grep -Fq 'git rev-parse --verify "FETCH_HEAD^{commit}"' "$e7" \
   && passa 'a base vem do remoto do upstream, buscada agora' \
   || quebra 'a base nao e buscada no remoto do upstream (ref antiga ou fork mediria errado)'
@@ -216,8 +221,8 @@ git init -q --bare "$aux/fork-vazio.git"
 git -C "$aux/clone" remote add origin "$aux/fork-vazio.git"
 git -C "$aux/clone" remote add upstream https://exemplo.invalid/principal.git
 resolve_base() { # <branch_base> [dir] — imprime "<remoto> <branch>" como o E7 resolve
-  sed -n '/^rb="\$remoto"/,/^if \[ "\$bb" = HEAD/p' "$e7" | sed '$d' | sed "s|<branch_base>|$1|" > "$aux/resolve.sh"
-  (cd "${2:-$aux/clone}" && remoto=origin && . "$aux/resolve.sh" && printf '%s %s' "$rb" "$bb")
+  { canal mergex-e7-branch-base main; sed -n '/^rb="\$remoto"/,/^if \[ "\$bb" = HEAD/p' "$e7" | sed '$d'; } > "$aux/resolve.sh"
+  (cd "${2:-$aux/clone}" && CANAL="$1" && remoto=origin && . "$aux/resolve.sh" && printf '%s %s' "$rb" "$bb")
 }
 # ls-remote que falha (rede, credencial) nao prova que a branch nao existe: o E7
 # para, em vez de trocar de remoto e medir contra a base errada
@@ -260,8 +265,8 @@ atual="$(git -C "$aux/principal.git" rev-parse main)"
 [ "$atual" != "$(git -C "$aux/dev" rev-parse refs/remotes/origin/HEAD)" ] \
   || quebra 'fixture: o remoto nao avancou depois do clone (o caso da ref velha nao seria testado)'
 base_do_e7() { # <branch_base> — roda o trecho do E7 ate o calculo da base, imprime $base
-  sed -n '/^rb="\$remoto"/,/^base=/p' "$e7" | sed "s|<branch_base>|$1|" > "$aux/base.sh"
-  (cd "$aux/dev" && remoto=origin && . "$aux/base.sh" >/dev/null 2>&1 && printf '%s' "$base")
+  { canal mergex-e7-branch-base main; sed -n '/^rb="\$remoto"/,/^base=/p' "$e7"; } > "$aux/base.sh"
+  (cd "$aux/dev" && CANAL="$1" && remoto=origin && . "$aux/base.sh" >/dev/null 2>&1 && printf '%s' "$base")
 }
 for bb in main origin/HEAD upstream/main refs/remotes/upstream/main estreito/main feature/main; do
   [ "$(base_do_e7 "$bb")" = "$atual" ] && passa "branch_base $bb mede contra a ponta atual do remoto" \
@@ -273,8 +278,8 @@ done
 git -C "$aux/principal.git" branch padrao main
 git -C "$aux/principal.git" symbolic-ref HEAD refs/heads/padrao
 bb_do_e7() { # <branch_base> — roda o trecho do E7 ate o calculo da base, imprime $bb
-  sed -n '/^rb="\$remoto"/,/^base=/p' "$e7" | sed "s|<branch_base>|$1|" > "$aux/bb.sh"
-  (cd "$aux/dev" && remoto=origin && . "$aux/bb.sh" >/dev/null 2>&1 && printf '%s' "$bb")
+  { canal mergex-e7-branch-base main; sed -n '/^rb="\$remoto"/,/^base=/p' "$e7"; } > "$aux/bb.sh"
+  (cd "$aux/dev" && CANAL="$1" && remoto=origin && . "$aux/bb.sh" >/dev/null 2>&1 && printf '%s' "$bb")
 }
 for par in 'origin/HEAD|padrao' 'refs/remotes/upstream/HEAD|padrao' 'main|main' \
            'feature/x|feature/x' 'refs/heads/feature/x|feature/x' 'refs/remotes/feature/main|main'; do
@@ -302,7 +307,7 @@ printf 'base\n' > "$aux/m2-dev/base.txt"; entrega_comum "$aux/m2-dev"
 d add -A; d commit -q -m base; d push -q origin main 2>/dev/null
 d switch -q -c feature/x; printf 'linha\n' > "$aux/m2-dev/a.md"; d add -A; d commit -q -m a
 d push -q -u origin feature/x 2>/dev/null
-bloco_do_e7 'fatiamento-da-pr.sh "$@" "$base" "$publicado"' | sed "s|<branch_base>|main|; s|<trabalho_id>|x|g" \
+{ canal mergex-e7-branch-base main; bloco_do_e7 'fatiamento-da-pr.sh "$@" "$base" "$publicado"'; } | sed "s|<trabalho_id>|x|g" \
   | sed "s#bash \.claude/skills/mergex/scripts/entrega-de-planejamento\.sh#bash '$raiz/.claude/skills/mergex/scripts/entrega-de-planejamento.sh'#" \
   | sed 's#bash \.claude/skills/mergex/scripts/fatiamento-da-pr\.sh#bash "$script"#' \
   | sed "s#bash \.claude/skills/mergex/scripts/leitor-do-projeto\.sh#bash '$leitor'#" > "$aux/passo15.sh"
@@ -319,7 +324,7 @@ printf '#!/usr/bin/env bash\nif [ "${1:-}" = ls-remote ]; then printf "%%s\\t%%s
 # o passo 2 exige um remoto normalizavel (HOST/OWNER/REPO): o caminho local do remoto de teste
 # falharia fechado. O passo 1.5 volta a usar o remoto local depois.
 git -C "$aux/m2-dev" remote set-url origin https://github.com/acme/x.git
-bloco_do_e7 'gh pr create' | sed 's|<título>|titulo simples|; s|<trabalho_id>|x|' > "$aux/passo2.sh"
+{ canal mergex-e7-titulo 'titulo simples'; bloco_do_e7 'gh pr create'; } | sed 's|<trabalho_id>|x|' > "$aux/passo2.sh"
 rm -f "$aux/args-gh"
 saida="$(cd "$aux/m2-dev" && env -u bb PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/passo2.sh" 2>&1)"; rc=$?
 args="$(tr '\n' ' ' 2>/dev/null < "$aux/args-gh")"
@@ -341,9 +346,9 @@ chmod +x "$aux/bin/glab"
 titulo_mau='fix: $(touch sentinela-1) e `touch sentinela-2` com $HOME, "aspas", '"'"'apostrofo'"'"' & \barra'
 for cmd in 'gh pr create' 'glab mr create'; do
   bloco="$(bloco_do_e7 "$cmd")"
-  bloco="${bloco//'<título>'/"$titulo_mau"}"; printf '%s\n' "${bloco//'<trabalho_id>'/x}" > "$aux/titulo.sh"
+  { canal mergex-e7-titulo titulo; printf '%s\n' "${bloco//'<trabalho_id>'/x}"; } > "$aux/titulo.sh"
   rm -f "$aux/args-gh" "$aux/m2-dev/sentinela-1" "$aux/m2-dev/sentinela-2"
-  (cd "$aux/m2-dev" && PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/titulo.sh" >/dev/null 2>&1)
+  (cd "$aux/m2-dev" && CANAL="$titulo_mau" PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/titulo.sh" >/dev/null 2>&1)
   recebido="$(awk 'pega { print; exit } $0 == "--title" { pega = 1 }' "$aux/args-gh" 2>/dev/null)"
   if [ -e "$aux/m2-dev/sentinela-1" ] || [ -e "$aux/m2-dev/sentinela-2" ]; then
     quebra "$cmd: o titulo com \$(...) ou crase executou comando na abertura do PR"
