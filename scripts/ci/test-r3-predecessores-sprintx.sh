@@ -872,6 +872,60 @@ grupo_mp27b() {
   cd "$REPO" || return
 }
 
+# `predecessores: []` é o que o template da SprintX emite. Ele só vale como ausência provada: nenhum
+# docs/superpowers/** em commit estritamente anterior ao nascimento do planejamento (correção P1 do
+# Login, db19655). A v0.12.2 recusava a lista vazia sempre, e a SprintX e a MergeX não fechavam.
+repo_lista_vazia() { # <diretorio> <com superpowers antes do nascimento: 0|1> — imprime o OID do nascimento
+  local d="$1"
+  git init -q -b main "$d" || return 1
+  gc() { git -C "$d" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+  printf 'base\n' > "$d/base.txt"; gc add -A; gc commit -q -m base
+  if [ "$2" = 1 ]; then
+    mkdir -p "$d/docs/superpowers/specs"; printf 'spec\n' > "$d/docs/superpowers/specs/x.md"
+    gc add -A; gc commit -q -m 'docs: spec superpowers'
+  fi
+  mkdir -p "$d/docs/sprintx/features/ft-vazia"
+  printf -- '---\nkind: planejamento\n---\n' > "$d/docs/sprintx/features/ft-vazia/00-PLANEJAMENTO.md"
+  gc add -A; gc commit -q -m 'docs: nascimento do planejamento'
+  git -C "$d" rev-parse HEAD
+  printf -- '---\nexpx_schema: 1\nexpx_tool: sprintx\nkind: predecessores\ntrabalho_id: ft-vazia\npredecessores: []\ncriado_em: 2026-10-25\natualizado_em: 2026-10-25\n---\n\n# Predecessores — ft-vazia\n' \
+    > "$d/docs/sprintx/features/ft-vazia/00-PREDECESSORES.md"
+  gc add -A; gc commit -q -m 'docs: predecessores'
+}
+
+grupo_lista_vazia() {
+  local d nasc out rc wrapper esperado
+  d="$(mktemp -d)" || return; TMPS+=("$d")
+  nasc="$(repo_lista_vazia "$d/sem" 0)" || { falha 'repositório sem superpowers não montou'; return; }
+  esperado="$(printf 'prova_n_a\tsem_predecessor_elegivel\t%s' "$nasc")"
+  out="$(cd "$d/sem" && bash "$PREDS" --verificar --rev HEAD --trabalho ft-vazia 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | sed -n '1p')" = resultado=n_a ] \
+    && printf '%s\n' "$out" | grep -Fxq "$esperado" \
+    && ok 'lista vazia sem superpowers anterior: n_a com a prova do nascimento' \
+    || falha "lista vazia sem histórico — rc=$rc, saída=$out"
+  repo_lista_vazia "$d/com" 1 > /dev/null || { falha 'repositório com superpowers não montou'; return; }
+  out="$(cd "$d/com" && bash "$PREDS" --verificar --rev HEAD --trabalho ft-vazia 2>&1)"; rc=$?
+  [ "$rc" = 3 ] && [ "$(printf '%s\n' "$out" | sed -n '1p')" = resultado=v9_sem_prova ] \
+    && printf '%s\n' "$out" | grep -Fq 'predecessor elegível' \
+    && ok 'lista vazia com superpowers anterior ao nascimento: sem prova, pelo predecessor elegível' \
+    || falha "lista vazia com histórico aceita — rc=$rc, saída=$out"
+  fixture || { falha 'fixture do V9 não montou'; return; }
+  cd "$FIXTURE_DIR" || return
+  wrapper="$FIXTURE_DIR/produtor-n-a.sh"
+  {
+    printf '%s\n' '#!/usr/bin/env bash' "printf '%s\\n' resultado=n_a"
+    printf "printf 'prova_n_a\\\\tsem_predecessor_elegivel\\\\t%s\\\\n'\n" "$FX_PRE_NASCIMENTO"
+  } > "$wrapper"
+  out="$(v9_com_produtor "$wrapper" 2>&1)"; rc=$?
+  # o protocolo vale (nada de v9_sem_prova), e sem predecessor declarado os docs superpowers que a
+  # fixture traz no diff ficam fora do plano: a lista vazia não os legitima
+  [ "$rc" = 1 ] && printf '%s\n' "$out" | grep -Fxq 'resultado=v9' \
+    && printf '%s\n' "$out" | grep -Fxq "$(printf 'fora_do_plano\tdocs/superpowers/specs/exemplo-design.md')" \
+    && ok 'V9 aceita a ausência provada; sem predecessor, os docs superpowers do diff ficam fora do plano' \
+    || falha "V9 recusou a ausência provada — rc=$rc, saída=$out"
+  cd "$REPO" || return
+}
+
 roda_grupo() {
   case "$1" in
     verificador) grupo_verificador ;;
@@ -882,12 +936,13 @@ roda_grupo() {
     retomada) grupo_retomada ;;
     contrato) grupo_contrato ;;
     mp27b) grupo_mp27b ;;
+    lista_vazia) grupo_lista_vazia ;;
     *) printf 'grupo desconhecido: %s\n' "$1" >&2; exit 64 ;;
   esac
 }
 
 if [ "$#" -eq 0 ]; then set -- todos; fi
-if [ "$1" = todos ]; then set -- verificador protocolo v9 consumidor checkpoint retomada contrato mp27b; fi
+if [ "$1" = todos ]; then set -- verificador protocolo v9 consumidor checkpoint retomada contrato mp27b lista_vazia; fi
 for grupo in "$@"; do
   printf '\n%s\n' "== $grupo =="
   roda_grupo "$grupo"
