@@ -34,6 +34,9 @@ OK=0; FALHOU=0
 passa()  { OK=$((OK+1)); printf '  ok    %s\n' "$1"; }
 quebra() { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; }
 aux="$(mktemp -d)"; trap 'rm -rf "$aux"' EXIT
+# P é o projeto da fixture, e só `projeto` o define: herdado de quem chama, `entrega` gravaria e
+# commitaria a ENTREGA no checkout dele.
+P=""
 
 NODE_REAL="$(command -v node 2>/dev/null || true)"
 [ -n "$NODE_REAL" ] || { echo 'test-portao-v12: node ausente (o conferir do nucleo e node)' >&2; exit 1; }
@@ -105,7 +108,9 @@ revisa() {
 }
 evidencia() { printf '%s\n' "$P/docs/entregas/w/revisao/$1.json"; }
 commita() { g add -A && g commit -q -m "feat: $1" && ITENS="$ITENS $1:$(g rev-parse --short HEAD)"; }
-# entrega [<versionado>] [<linhas extras>] — $aux/ENTREGA.md com os ITENS
+# entrega [<versionado>] [<linhas extras>] — $aux/ENTREGA.md com os ITENS e, dentro de um projeto,
+# a mesma ENTREGA em docs/entregas/w/, commitada sozinha (a V12 lê a entrega do HEAD, como o E2).
+# ENTREGA_SO_NO_DISCO=1 grava no projeto sem commitar.
 entrega() {
   local par
   {
@@ -119,6 +124,11 @@ entrega() {
     [ -z "${2:-}" ] || printf '%s\n' "$2"
     printf -- '---\n\n# Entrega\n'
   } > "$aux/ENTREGA.md"
+  if [ -n "${P:-}" ] && [ -d "$P/.git" ]; then
+    mkdir -p "$P/docs/entregas/w" && cp "$aux/ENTREGA.md" "$P/docs/entregas/w/ENTREGA.md"
+    [ "${ENTREGA_SO_NO_DISCO:-0}" = 1 ] && return 0
+    g add docs/entregas/w/ENTREGA.md && { g diff --cached --quiet || g commit -q -m "docs: entrega"; }
+  fi
 }
 # tarefas <id:status>... — $aux/tasks.md (kind: tasks, formato da sprintx)
 tarefas() {
@@ -129,10 +139,11 @@ tarefas() {
     printf -- '---\n\n# Tasks\n'
   } > "$aux/tasks.md"
 }
-# roda [VAR=valor...] — a V12 no projeto atual; saída em $aux/out e $aux/err, código em $rc
+# roda [VAR=valor...] — a V12 no projeto atual; saída em $aux/out e $aux/err, código em $rc.
+# A entrega é $ENTREGA_ARG (padrão: o caminho relativo commitado no projeto).
 roda() {
   rm -f "$aux/node.log"
-  (cd "$P" && env "$@" "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w --raiz "$P" \
+  (cd "$P" && env "$@" "$BASH" "$V12" --verificar --entrega "${ENTREGA_ARG:-docs/entregas/w/ENTREGA.md}" --trabalho w --raiz "$P" \
      -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
 }
 primeira() { head -n 1 "$aux/out"; }
@@ -255,6 +266,55 @@ roda PATH="$aux/espia:$PATH"
 [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=nenhuma-task-concluida' && ! conferiu \
   && passa 'nenhuma task concluida: n/a' || quebra "nenhuma task concluida: $(mostra)"
 
+echo '== V12: a entrega e a do HEAD, como no E2 (correcao P1 do Login) =='
+
+# disco diverge do HEAD: a marca de planejamento só no disco não muda o portão
+# o HEAD anda depois de fixado o snapshot da entrega: o modo sai do MESMO snapshot, não do HEAD
+# novo. O git do PATH, logo depois do `show` da entrega, commita `modo: desligada` no projeto.
+# Do snapshot sai obrigatoria e versionado false (n/a sem-versionador); do HEAD novo sairia o
+# n/a da revisão desligada.
+mkdir -p "$aux/avanca"; git_real="$(command -v git)"
+cat > "$aux/avanca/git" <<AVANCA
+#!$BASH
+"$git_real" "\$@"; rc=\$?
+case " \$* " in
+  *" show "*":docs/entregas/w/ENTREGA.md "*)
+    if [ ! -e "$aux/avanca.marco" ]; then
+      : > "$aux/avanca.marco"
+      printf '{"expx_fatiamento": 2, "revisao_por_task": {"modo": "desligada"}}\n' > "\$AVANCA_P/.expx/fatiamento.json"
+      "$git_real" -C "\$AVANCA_P" -c user.email=t@t -c user.name=t -c commit.gpgsign=false \\
+        commit -q -am 'o HEAD anda no meio da V12' >/dev/null 2>&1
+    fi ;;
+esac
+exit \$rc
+AVANCA
+chmod +x "$aux/avanca/git"
+projeto avanca obrigatoria; escreve src/a.ts; commita T-01.01; entrega false; tarefas T-01.01:concluida
+rm -f "$aux/avanca.marco"
+roda AVANCA_P="$P" PATH="$aux/avanca:$PATH"
+[ -e "$aux/avanca.marco" ] && [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-versionador' \
+  && passa 'HEAD que anda no meio da V12: o modo sai do snapshot da entrega' || quebra "HEAD que anda no meio: $(mostra)"
+
+projeto disco obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+ENTREGA_SO_NO_DISCO=1 entrega true "$PLAN"
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' \
+  && passa 'planejamento so no disco: a V12 le o HEAD e confere a task' || quebra "planejamento so no disco: $(mostra)"
+# caminho absoluto dentro da raiz: o mesmo arquivo
+projeto absoluto obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
+ENTREGA_ARG="$P/docs/entregas/w/ENTREGA.md" roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' \
+  && passa 'entrega por caminho absoluto dentro da raiz: conferida' || quebra "absoluto dentro: $(mostra)"
+# caminho fora da raiz: não está em commit nenhum do projeto
+ENTREGA_ARG="$aux/ENTREGA.md" roda
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=entrega-de-planejamento-ilegivel' \
+  && passa 'entrega fora da raiz: SEM_PROVA' || quebra "entrega fora da raiz: $(mostra)"
+# entrega só no disco, nunca commitada: SEM_PROVA
+projeto sem-commit obrigatoria; escreve src/a.ts; commita T-01.01; ENTREGA_SO_NO_DISCO=1 entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=entrega-de-planejamento-ilegivel' \
+  && passa 'entrega fora do HEAD: SEM_PROVA' || quebra "entrega fora do HEAD: $(mostra)"
+
 echo '== V12: o conferir do nucleo =='
 
 # sem evidência: FALHA em obrigatoria, AVISO (código 0) em se_disponivel
@@ -312,7 +372,7 @@ roda PATH="$aux/troca:$PATH"
 
 # --raiz relativa ao diretorio de quem chama
 projeto relativa obrigatoria; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
-(cd "$aux" && "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w --raiz relativa \
+(cd "$aux" && "$BASH" "$V12" --verificar --entrega relativa/docs/entregas/w/ENTREGA.md --trabalho w --raiz relativa \
    -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
 [ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-ausente' \
   && passa '--raiz relativa: conferida' || quebra "--raiz relativa: $(mostra)"

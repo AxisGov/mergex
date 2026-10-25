@@ -76,15 +76,16 @@ grep -Fq 'Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre 
   && grep -Fq '| `fatiamento-da-pr.sh` saiu `2`' "$e7" \
   && passa 'medicao impossivel (saida 2) tambem impede a abertura' \
   || quebra 'o E7 so trata as saidas 0 e 1 do fatiamento; a 2 (nao mediu) abriria sem medir'
-grep -Fq 'rb="$remoto"; bb="<branch_base>"' "$e7" && grep -Fq 'git fetch "$rb" "$bb"' "$e7" \
+grep -Fxq 'rb="$remoto"' "$e7" && grep -Fq "IFS= read -r bb <<'BRANCH_BASE__INVALIDA~'" "$e7" && grep -Fq 'git fetch "$rb" "$bb"' "$e7" \
   && grep -Fq 'git rev-parse --verify "FETCH_HEAD^{commit}"' "$e7" \
   && passa 'a base vem do remoto do upstream, buscada agora' \
   || quebra 'a base nao e buscada no remoto do upstream (ref antiga ou fork mediria errado)'
-grep -Fq 'gh pr create --base "$bb"' "$e7" && ! grep -Fq 'gh pr create --base <branch-base>' "$e7" \
+grep -Fq 'gh pr create --repo "$destino" --base "$bb"' "$e7" && ! grep -Fq 'gh pr create --base <branch-base>' "$e7" \
   && passa 'o gh pr create recebe a base sem o remoto ($bb do passo 1.5)' \
   || quebra 'o gh pr create recebe a branch_base crua (upstream/main nao e branch no GitHub)'
 # o passo 1 reconhece `glab`: o passo 2 tem de ter o comando dele, ou o GitLab cai no manual
-grep -Fq 'glab mr create --target-branch "$bb"' "$e7" && grep -Fq -- '--draft --yes' "$e7" \
+grep -Fq -- '--target-branch "$bb" --source-branch "$branch_fonte"' "$e7" && grep -Fq 'glab mr create --repo' "$e7" \
+  && grep -Fq -- '"${opcao_rascunho[@]}" --yes' "$e7" \
   && passa 'o GitLab (glab) tem o comando de abertura, com a base do passo 1.5 e sem confirmacao interativa' \
   || quebra 'o passo 1 reconhece glab, mas o passo 2 so tem o comando do gh'
 grep -Fq 'o passo 1.5 roda do mesmo jeito, e só depois dele vá para o passo 3' "$e7" \
@@ -310,6 +311,14 @@ saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" b
   || quebra "o bloco do passo 1.5 depende de variavel de outra chamada (rc $rc): $saida"
 mkdir -p "$aux/bin"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$ARGS_GH"\n' > "$aux/bin/gh"; chmod +x "$aux/bin/gh"
+# o passo 2 confere a ponta remota com `git ls-remote`, e o remoto dele e uma URL do GitHub: so o
+# ls-remote e falso, sem rede, e responde o HEAD (o medido continua publicado)
+git_real="$(command -v git)"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = ls-remote ]; then printf "%%s\\t%%s\\n" "$("%s" rev-parse HEAD)" "${3:-}"; exit 0; fi\nexec "%s" "$@"\n' \
+  "$git_real" "$git_real" > "$aux/bin/git"; chmod +x "$aux/bin/git"
+# o passo 2 exige um remoto normalizavel (HOST/OWNER/REPO): o caminho local do remoto de teste
+# falharia fechado. O passo 1.5 volta a usar o remoto local depois.
+git -C "$aux/m2-dev" remote set-url origin https://github.com/acme/x.git
 bloco_do_e7 'gh pr create' | sed 's|<título>|titulo simples|; s|<trabalho_id>|x|' > "$aux/passo2.sh"
 rm -f "$aux/args-gh"
 saida="$(cd "$aux/m2-dev" && env -u bb PATH="$aux/bin:$PATH" ARGS_GH="$aux/args-gh" bash "$aux/passo2.sh" 2>&1)"; rc=$?
@@ -319,7 +328,16 @@ args="$(tr '\n' ' ' 2>/dev/null < "$aux/args-gh")"
   || quebra "o bloco do gh pr create nao tem a base do passo 1.5 (rc $rc, args '$args'): $saida"
 # o titulo vem do ORQUESTRADOR.md e e texto, nao comando: com $(...) e crases, nada roda
 # (nenhum arquivo-sentinela nasce) e o gh/glab recebe o titulo literal
-cp "$aux/bin/gh" "$aux/bin/glab"
+# o glab do passo 2 consulta o projeto da origem e lista as MRs abertas antes de criar
+cat > "$aux/bin/glab" <<'GLAB'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "api projects/"*) printf '{"id":42}\n' ;;
+  "mr list") printf '[]\n' ;;
+  *) printf '%s\n' "$@" > "$ARGS_GH" ;;
+esac
+GLAB
+chmod +x "$aux/bin/glab"
 titulo_mau='fix: $(touch sentinela-1) e `touch sentinela-2` com $HOME, "aspas", '"'"'apostrofo'"'"' & \barra'
 for cmd in 'gh pr create' 'glab mr create'; do
   bloco="$(bloco_do_e7 "$cmd")"
@@ -335,6 +353,7 @@ for cmd in 'gh pr create' 'glab mr create'; do
     passa "$cmd: titulo com \$(...) e crases chega literal, sem executar nada"
   fi
 done
+git -C "$aux/m2-dev" remote set-url origin "$aux/m2-remoto.git"
 estado="$(git -C "$aux/m2-dev" rev-parse --path-format=absolute --git-path mergex-e7-base)"
 [ -s "$estado" ] || quebra 'fixture: o passo 1.5 aprovado nao gravou o estado'
 # a branch remota anda entre a chamada dos pre-requisitos e a do passo 1.5: a ref de
@@ -344,8 +363,8 @@ printf 'outro\n' > "$aux/m2-outro/b.md"
 git -C "$aux/m2-outro" add -A; git -C "$aux/m2-outro" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m b
 git -C "$aux/m2-outro" push -q origin feature/x 2>/dev/null
 saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" bash "$aux/passo15.sh" 2>&1)"; rc=$?
-[ "$rc" = 1 ] && case "$saida" in *'não é o HEAD'*) true ;; *) false ;; esac \
-  && passa 'passo 1.5 busca o upstream de novo: ponta remota que andou para o E7' \
+[ "$rc" = 2 ] && case "$saida" in *'não é o HEAD'*) true ;; *) false ;; esac \
+  && passa 'passo 1.5 busca o upstream de novo: ponta remota que andou para o E7, sem medir (2)' \
   || quebra "passo 1.5 mediu a ref de rastreio velha (rc $rc): $saida"
 # estado de uma execucao anterior bem-sucedida + fetch do upstream que falha agora: o
 # passo 1.5 para, e o passo 2 nao acha base nenhuma, entao nao abre o PR

@@ -138,6 +138,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-fatiamento-e7.sh
 
+      - name: Test E7 remotes, base and step-2 coherence
+        shell: bash
+        run: bash scripts/ci/test-e7-remotos-e-base.sh
+
       - name: Test the expx nucleo copy used by the tests
         shell: bash
         run: bash scripts/ci/test-nucleo-expx.sh
