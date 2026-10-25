@@ -34,6 +34,9 @@ OK=0; FALHOU=0
 passa()  { OK=$((OK+1)); printf '  ok    %s\n' "$1"; }
 quebra() { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; }
 aux="$(mktemp -d)"; trap 'rm -rf "$aux"' EXIT
+# P é o projeto da fixture, e só `projeto` o define: herdado de quem chama, `entrega` gravaria e
+# commitaria a ENTREGA no checkout dele.
+P=""
 
 NODE_REAL="$(command -v node 2>/dev/null || true)"
 [ -n "$NODE_REAL" ] || { echo 'test-portao-v12: node ausente (o conferir do nucleo e node)' >&2; exit 1; }
