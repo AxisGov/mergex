@@ -311,8 +311,13 @@ saida="$(cd "$aux/m2-dev" && env -u remoto -u publicado -u bb script="$script" b
   || quebra "o bloco do passo 1.5 depende de variavel de outra chamada (rc $rc): $saida"
 mkdir -p "$aux/bin"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$ARGS_GH"\n' > "$aux/bin/gh"; chmod +x "$aux/bin/gh"
-# o passo 2 nao busca nada, mas exige um remoto normalizavel (HOST/OWNER/REPO): o caminho local do
-# remoto de teste falharia fechado. O passo 1.5 volta a usar o remoto local depois.
+# o passo 2 confere a ponta remota com `git ls-remote`, e o remoto dele e uma URL do GitHub: so o
+# ls-remote e falso, sem rede, e responde o HEAD (o medido continua publicado)
+git_real="$(command -v git)"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = ls-remote ]; then printf "%%s\\t%%s\\n" "$("%s" rev-parse HEAD)" "${3:-}"; exit 0; fi\nexec "%s" "$@"\n' \
+  "$git_real" "$git_real" > "$aux/bin/git"; chmod +x "$aux/bin/git"
+# o passo 2 exige um remoto normalizavel (HOST/OWNER/REPO): o caminho local do remoto de teste
+# falharia fechado. O passo 1.5 volta a usar o remoto local depois.
 git -C "$aux/m2-dev" remote set-url origin https://github.com/acme/x.git
 bloco_do_e7 'gh pr create' | sed 's|<título>|titulo simples|; s|<trabalho_id>|x|' > "$aux/passo2.sh"
 rm -f "$aux/args-gh"

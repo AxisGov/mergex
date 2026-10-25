@@ -89,8 +89,9 @@ agora, no remoto, para o nome da branch padrão (`refs/heads/main` → `main`).
 Cada bloco de comandos deste reference roda numa chamada própria do shell, e variável de um
 bloco não chega ao seguinte: este bloco recalcula o `$remoto` e o `$publicado` dos
 pré-requisitos — e busca a branch de novo, conferida, porque a ref remota pode ter andado
-desde aquela chamada; a ponta continua tendo de ser o `HEAD` —, e grava o remoto-base `$rb` e o
-`$bb` resolvido, nessa ordem, num arquivo de estado do Git, que o passo 2 lê. O estado só
+desde aquela chamada; a ponta continua tendo de ser o `HEAD` —, e grava o remoto-base `$rb`, o
+`$bb` resolvido, o `$upstream` e o `$publicado` medido, nessa ordem, num arquivo de estado do
+Git, que o passo 2 lê. O estado só
 é gravado quando a medição sai `0`, e o de uma execução anterior é apagado na primeira linha,
 antes de qualquer busca ou conferência: qualquer falha do bloco, reprovado (`1`) ou não medido
 (`2`), deixa o arquivo ausente, e o passo 2 não tem base para abrir o PR:
@@ -132,7 +133,7 @@ for parte in $EXPX_EXCLUIR_DA_REVISAO; do [ -n "$parte" ] && set -- "$@" --exclu
 IFS="$ifs_antes"; set +f
 case "$planejamento" in planejamento=sim*) set -- --planejamento "$@" ;; esac
 bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$@" "$base" "$publicado"
-rc_fatia=$?; [ "$rc_fatia" = 0 ] && { printf '%s\n%s\n' "$rb" "$bb" > "$estado_bb" || exit 2; }; exit "$rc_fatia"
+rc_fatia=$?; [ "$rc_fatia" = 0 ] && { printf '%s\n%s\n%s\n%s\n' "$rb" "$bb" "$upstream" "$publicado" > "$estado_bb" || exit 2; }; exit "$rc_fatia"
 ```
 
 Os limites são os do CodeAnt, **fixos**: vêm dos perfis do núcleo do expx, e nenhum projeto os
@@ -217,8 +218,11 @@ A base é o `$bb` do passo 1.5 — a `branch_base` já sem o remoto e sem `refs/
 `branch_base` crua: o serviço não conhece `upstream/main` como branch, e a abertura falharia.
 O destino é o projeto do remoto-base `$rb` medido, e a origem é o projeto do remoto do upstream;
 os dois são passados explicitamente à CLI. O comando roda noutra chamada do shell, então `$rb` e
-`$bb` vêm do arquivo de estado que o passo 1.5 gravou (sem ambos, o passo 1.5 não chegou à
-medição, e o PR não abre), e a branch vem do upstream. URLs HTTP(S), SSH e SCP são normalizadas
+`$bb` vêm do arquivo de estado que o passo 1.5 gravou (sem eles, o passo 1.5 não chegou à
+medição, e o PR não abre), e a branch vem do upstream. O passo 2 só abre o que foi medido: o
+upstream e o `HEAD` têm de ser os do estado, e a ponta remota (`git ls-remote`), o SHA medido.
+Trocar de branch, commitar ou ver a branch remota andar entre as duas chamadas recusa a abertura;
+meça de novo pelo passo 1.5. URLs HTTP(S), SSH e SCP são normalizadas
 para `HOST/OWNER/REPO`; formato desconhecido falha fechado em vez de abrir no projeto errado. O
 `gh` aceita essa forma no `--repo`; o `glab` não a documenta (lê `HOST/…` como grupo), e por isso
 recebe a URL completa, `https://HOST/OWNER/REPO`, no `--repo` e no `--head`.
@@ -233,9 +237,15 @@ No GitHub (`gh`, do passo 1):
 ```bash
 estado_bb="$(git rev-parse --git-path mergex-e7-base)"
 rb="$(sed -n '1p' "$estado_bb")"; bb="$(sed -n '2p' "$estado_bb")"
-[ -n "$rb" ] && [ -n "$bb" ] || { echo "sem remoto e base do passo 1.5: o E7 não abre o PR"; exit 1; }
+upstream_medido="$(sed -n '3p' "$estado_bb")"; publicado="$(sed -n '4p' "$estado_bb")"
+[ -n "$rb" ] && [ -n "$bb" ] && [ -n "$upstream_medido" ] && [ -n "$publicado" ] \
+  || { echo "sem remoto, base, upstream e SHA medidos no passo 1.5: o E7 não abre o PR"; exit 1; }
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1
-remoto="${upstream%%/*}"
+[ "$upstream" = "$upstream_medido" ] && [ "$(git rev-parse HEAD)" = "$publicado" ] \
+  || { echo "a branch ou o HEAD mudaram desde a medição do passo 1.5: o E7 não abre o PR"; exit 1; }
+remoto="${upstream%%/*}"; ref_remota="refs/heads/${upstream#*/}"
+ponta="$(git ls-remote "$remoto" "$ref_remota" | awk -v r="$ref_remota" '$2 == r { print $1; exit }')"
+[ "$ponta" = "$publicado" ] || { echo "a ponta de $upstream não é mais o SHA medido ($publicado): o E7 não abre o PR"; exit 1; }
 identidade_remota() {
   local url resto autoridade host caminho
   url="$(git remote get-url "$1")" || return 1
@@ -280,9 +290,15 @@ interativa do `glab`, que de outro modo esperaria uma resposta:
 ```bash
 estado_bb="$(git rev-parse --git-path mergex-e7-base)"
 rb="$(sed -n '1p' "$estado_bb")"; bb="$(sed -n '2p' "$estado_bb")"
-[ -n "$rb" ] && [ -n "$bb" ] || { echo "sem remoto e base do passo 1.5: o E7 não abre o PR"; exit 1; }
+upstream_medido="$(sed -n '3p' "$estado_bb")"; publicado="$(sed -n '4p' "$estado_bb")"
+[ -n "$rb" ] && [ -n "$bb" ] && [ -n "$upstream_medido" ] && [ -n "$publicado" ] \
+  || { echo "sem remoto, base, upstream e SHA medidos no passo 1.5: o E7 não abre o PR"; exit 1; }
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')" || exit 1
-remoto="${upstream%%/*}"
+[ "$upstream" = "$upstream_medido" ] && [ "$(git rev-parse HEAD)" = "$publicado" ] \
+  || { echo "a branch ou o HEAD mudaram desde a medição do passo 1.5: o E7 não abre o PR"; exit 1; }
+remoto="${upstream%%/*}"; ref_remota="refs/heads/${upstream#*/}"
+ponta="$(git ls-remote "$remoto" "$ref_remota" | awk -v r="$ref_remota" '$2 == r { print $1; exit }')"
+[ "$ponta" = "$publicado" ] || { echo "a ponta de $upstream não é mais o SHA medido ($publicado): o E7 não abre o PR"; exit 1; }
 identidade_remota() {
   local url resto autoridade host caminho
   url="$(git remote get-url "$1")" || return 1

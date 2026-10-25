@@ -112,6 +112,17 @@ case "$1 ${2:-}" in
 esac
 EOF
 chmod +x "$aux/bin/gh" "$aux/bin/glab"
+# o git do passo 2: só o ls-remote é falso, porque o remoto do teste é uma URL do GitHub ou do
+# GitLab, sem rede. A ponta remota é $PONTA_REMOTA, ou o HEAD (o medido continua publicado).
+git_real="$(command -v git)"
+cat > "$aux/bin/git" <<GIT
+#!/usr/bin/env bash
+if [ "\${1:-}" = ls-remote ]; then
+  printf '%s\t%s\n' "\${PONTA_REMOTA:-\$("$git_real" rev-parse HEAD)}" "\${3:-}"; exit 0
+fi
+exec "$git_real" "\$@"
+GIT
+chmod +x "$aux/bin/git"
 projeto_pr() { # <dir> <url origin> <url fork> <remoto do upstream> — branch feature/x com upstream
   local d="$1"; git init -q -b main "$d"; printf 'x\n' > "$d/x"; g "$d" add -A; g "$d" commit -q -m x
   g "$d" switch -q -c feature/x
@@ -119,7 +130,9 @@ projeto_pr() { # <dir> <url origin> <url fork> <remoto do upstream> — branch f
   git -C "$d" update-ref "refs/remotes/$4/feature/x" HEAD
   git -C "$d" config branch.feature/x.remote "$4"; git -C "$d" config branch.feature/x.merge refs/heads/feature/x
   mkdir -p "$d/docs/entregas/x"; printf 'corpo\n' > "$d/docs/entregas/x/PR.md"
-  printf 'origin\nmain\n' > "$(git -C "$d" rev-parse --path-format=absolute --git-path mergex-e7-base)"
+  # o estado do passo 1.5: remoto-base, base, upstream e o SHA medido
+  printf 'origin\nmain\n%s/feature/x\n%s\n' "$4" "$(git -C "$d" rev-parse HEAD)" \
+    > "$(git -C "$d" rev-parse --path-format=absolute --git-path mergex-e7-base)"
 }
 passo2() { # <dir> <trecho do bloco> — roda o bloco do passo 2 no projeto
   local b; b="$(bloco_do_e7 "$2")"; b="${b//'<título>'/titulo}"; b="${b//'<trabalho_id>'/x}"
@@ -146,6 +159,38 @@ case "$(args "$aux/args-gh")" in *--draft*) passa 'QA nao aprovado: rascunho' ;;
 mkdir -p "$aux/mesmo/docs/manutencao/x"; printf 'VEREDITO: APROVADO\n' > "$aux/mesmo/docs/manutencao/x/QA.md"
 passo2 "$aux/mesmo" 'gh pr create'
 case "$(args "$aux/args-gh")" in *--draft*) quebra 'QA aprovado e o PR ainda saiu rascunho' ;; '') quebra "QA aprovado: gh nao chamado $(tr '\n' '|' < "$aux/p2.out")" ;; *) passa 'QA aprovado: sem --draft' ;; esac
+
+echo '== E7: passo 2 abre so o que o passo 1.5 mediu =='
+# entre as duas chamadas do shell, a pessoa troca de branch, commita, ou a branch remota anda: o
+# PR abriria com conteudo que o fatiamento nao mediu, ou a branch nova contra a base da antiga
+nao_abriu() { [ "$1" != 0 ] && [ ! -e "$aux/args-gh" ] && [ ! -e "$aux/args-glab" ]; }
+for cmd in 'gh pr create' 'glab mr create'; do
+  projeto_pr "$aux/troca" https://github.com/acme/login.git git@github.com:ana/login.git origin
+  g "$aux/troca" switch -q -c feature/y; git -C "$aux/troca" update-ref refs/remotes/origin/feature/y HEAD
+  git -C "$aux/troca" config branch.feature/y.remote origin; git -C "$aux/troca" config branch.feature/y.merge refs/heads/feature/y
+  mkdir -p "$aux/paginas"; printf '[]\n' > "$aux/paginas/1.json"
+  passo2 "$aux/troca" "$cmd"; rc=$?
+  nao_abriu "$rc" && passa "$cmd: outra branch depois da medicao nao abre" \
+    || quebra "$cmd: abriu com a branch trocada (rc $rc) $(tr '\n' '|' < "$aux/p2.out")"
+  rm -rf "$aux/troca"
+done
+projeto_pr "$aux/andou" https://github.com/acme/login.git git@github.com:ana/login.git origin
+printf 'y\n' > "$aux/andou/y"; g "$aux/andou" add -A; g "$aux/andou" commit -q -m y
+git -C "$aux/andou" update-ref refs/remotes/origin/feature/x HEAD
+passo2 "$aux/andou" 'gh pr create'; rc=$?
+nao_abriu "$rc" && passa 'HEAD que andou depois da medicao nao abre' \
+  || quebra "abriu com o HEAD que andou (rc $rc) $(tr '\n' '|' < "$aux/p2.out")"
+projeto_pr "$aux/remota" https://github.com/acme/login.git git@github.com:ana/login.git origin
+export PONTA_REMOTA=0123456789abcdef0123456789abcdef01234567
+passo2 "$aux/remota" 'gh pr create'; rc=$?
+unset PONTA_REMOTA
+nao_abriu "$rc" && passa 'ponta remota que andou depois da medicao nao abre' \
+  || quebra "abriu com a ponta remota que andou (rc $rc) $(tr '\n' '|' < "$aux/p2.out")"
+projeto_pr "$aux/antigo" https://github.com/acme/login.git git@github.com:ana/login.git origin
+printf 'origin\nmain\n' > "$(git -C "$aux/antigo" rev-parse --path-format=absolute --git-path mergex-e7-base)"
+passo2 "$aux/antigo" 'gh pr create'; rc=$?
+nao_abriu "$rc" && passa 'estado sem upstream e SHA medidos nao abre' \
+  || quebra "abriu com o estado de duas linhas (rc $rc) $(tr '\n' '|' < "$aux/p2.out")"
 
 projeto_pr "$aux/gl" https://gitlab.example.com/acme/login.git git@gitlab.example.com:ana/login.git fork
 mkdir -p "$aux/paginas"
