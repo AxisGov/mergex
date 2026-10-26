@@ -57,9 +57,10 @@ case "$FERRAMENTA" in
     # na dúvida, o hook barra (um segredo não preparado de outro arquivo também).
     # --no-ext-diff e --no-textconv: um diff.external, GIT_EXTERNAL_DIFF ou textconv
     # configurado trocaria o texto do diff (com /bin/true, por nada) e o segredo
-    # passaria sem ser visto (conselhos#210, P7).
-    ALVO="$( { git -C "$RAIZ" diff --cached --no-ext-diff --no-textconv --no-color -U0
-               git -C "$RAIZ" diff --no-ext-diff --no-textconv --no-color -U0; } 2>/dev/null \
+    # passaria sem ser visto (conselhos#210, P7). --text: arquivo binário ou com
+    # atributo -diff sairia como "Binary files differ", sem bloco @@ (login#30).
+    ALVO="$( { git -C "$RAIZ" diff --cached --text --no-ext-diff --no-textconv --no-color -U0
+               git -C "$RAIZ" diff --text --no-ext-diff --no-textconv --no-color -U0; } 2>/dev/null \
       | awk '/^diff --git / { h = 0; next } /^@@/ { h = 1; next } h && /^\+/ { print substr($0, 2) }')"
     # Some a mensagem inline, que também vai para o histórico.
     ALVO="$ALVO
@@ -89,16 +90,42 @@ $(cat -- "$arq_f" 2>/dev/null)"
     done <<EXPX_ARQ_F
 $(printf '%s' "$CMD" | grep -aEo -e "(^|[[:space:]])(--file(=|[[:space:]]+)|-[aeinopqsvz]*F[[:space:]]*)(\"[^\"]*\"|'[^']*'|[^[:space:];&|]+)" | sed 's/^[[:space:]]*//')
 EXPX_ARQ_F
+    # Não rastreado que o MESMO comando adiciona (`git add novo.env && git commit`)
+    # não está em diff nenhum quando este hook roda (login#30). Com `add` e `commit`
+    # no comando, os não rastreados e não ignorados entram na varredura, todos (o
+    # pathspec do add não é interpretado: na dúvida, varre). Link não é seguido (o
+    # commit leva o alvo, não o conteúdo). Acima de 1 MiB por arquivo, ou de 8 MiB
+    # somados, barra: o que não se lê não passa. Sem `add`, não rastreado não entra.
+    if printf '%s' "$CMD" | grep -E '(^|[;&|[:space:]])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+add([[:space:]]|$)' >/dev/null; then
+      total_nr=0
+      while IFS= read -r -d '' nr; do
+        caminho_nr="$RAIZ/$nr"
+        [ -L "$caminho_nr" ] && continue
+        [ -f "$caminho_nr" ] || continue
+        tam_nr="$(wc -c < "$caminho_nr" 2>/dev/null | tr -d ' ')"
+        case "$tam_nr" in ''|*[!0-9]*) MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - não rastreado ilegível: ${nr}
+"; continue ;; esac
+        total_nr=$((total_nr + tam_nr))
+        if [ "$tam_nr" -gt 1048576 ] || [ "$total_nr" -gt 8388608 ]; then
+          MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - não rastreado grande demais para varrer: ${nr}
+"; continue
+        fi
+        ALVO="$ALVO
+$(cat -- "$caminho_nr" 2>/dev/null | tr -d '\000')"
+      done < <(git -C "$RAIZ" ls-files -o --exclude-standard -z 2>/dev/null)
+    fi
     if [ -n "$MSG_NAO_VARRIDA" ]; then
-      expx_barra "$MODO" "$RAIZ" "$HOOK" "mensagem do commit por arquivo não varrida" \
-"mergex/sem-segredo — a mensagem do commit não pôde ser varrida
+      expx_barra "$MODO" "$RAIZ" "$HOOK" "conteúdo do commit não varrido" \
+"mergex/sem-segredo — parte do que entra no commit não pôde ser varrida
 
 ${MSG_NAO_VARRIDA}
 A mensagem vem de stdin (\`-F -\`) ou de um arquivo que não se lê a partir
-do diretório do comando. Ela iria para o histórico sem passar pela varredura.
+do diretório do comando, ou um arquivo não rastreado que o mesmo comando
+adiciona é grande demais para varrer. Isso iria para o histórico sem passar
+pela varredura.
 
 O que fazer: grave a mensagem num arquivo legível e passe o caminho em -F, ou
-use -m."
+use -m; adicione o arquivo grande num comando separado, depois de conferido."
     fi
     ORIGEM="o que está em preparação ou alterado nos arquivos rastreados"
     ;;
@@ -137,7 +164,13 @@ eh_placeholder() {
   # que por acaso contenha "example", "sample" ou outro fragmento. O valor pode
   # juntar mais de uma (`sk-example-placeholder`), mas só delas é feito.
   local w='(x{4,}|0{4,}|your[-_](key|token|secret)([-_]here)?([-_](x{4,}|0{4,}))?|example|changeme|troque|placeholder|dummy|fake|sample|redacted|test[-_]?key|coloque)'
-  printf '%s' "$v" | grep -aEiq -e "^(sk-|gh[pousr]_|github_pat_|xox[baprs]-)?$w([-_]$w)*\$"
+  # O valor inteiro (chave de API, sem `:`/`=`) ou só a cauda (credencial em
+  # atribuição, que chega com a chave junto: `token: "placeholder`) — login#30.
+  local alvo_w
+  for alvo_w in "$v" "$cauda"; do
+    printf '%s' "$alvo_w" | grep -aEiq -e "^(sk-|gh[pousr]_|github_pat_|xox[baprs]-)?$w([-_]$w)*\$" && return 0
+  done
+  return 1
 }
 
 achou() {

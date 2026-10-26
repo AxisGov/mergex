@@ -203,6 +203,10 @@ caso "secret com \$ e ! barra"          comum/sem-segredo.sh "$(write_json "$(pr
 caso "password=\$VAR passa"            comum/sem-segredo.sh "$(write_json 'password=$DB_PASSWORD')" 0
 caso "password: \"%(senha)s\" passa"   comum/sem-segredo.sh "$(write_json 'password: "%(senha)s"')" 0
 caso "password: ******** passa"          comum/sem-segredo.sh "$(write_json 'password: ********')" 0
+# A palavra reservada vale para o valor, nao so para a ocorrencia com a chave (login#30).
+caso "token: \"placeholder\" passa"      comum/sem-segredo.sh "$(write_json 'token: "placeholder"')" 0
+caso "password: 'changeme' passa"        comum/sem-segredo.sh "$(write_json "password: 'changeme'")" 0
+caso "placeholder colado em valor real barra" comum/sem-segredo.sh "$(write_json "token: \"placeholder-$(printf 'abcd1234efgh')\"")" 2
 caso "senha: !Ref Segredo passa"         comum/sem-segredo.sh "$(write_json 'senha: !Ref Segredo')" 0
 echo "sem-segredo — tem que PASSAR"
 caso "variavel de ambiente" comum/sem-segredo.sh "$(write_json 'const k = process.env.API_KEY')" 0
@@ -290,6 +294,30 @@ printf '*.pem diff=vazio\n' > "$SEG_T/.gitattributes"; seg_git config diff.vazio
 caso "textconv nao esconde o segredo: barra"      comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
 seg_git config --unset diff.vazio.textconv; rm -f "$SEG_T/.gitattributes"
 seg_git reset -q --hard
+# Nao rastreado que o mesmo comando adiciona (`git add ... && git commit`) nao esta em
+# nenhum diff na hora do PreToolUse (katosmv/login#30). Com `add` e `commit` no mesmo
+# comando, os nao rastreados nao ignorados sao varridos; sem o `add`, nao entram no commit.
+printf 'CHAVE=%s\n' "$SK" > "$SEG_T/novo.env"
+caso "git add novo && git commit: barra"          comum/sem-segredo.sh "$(bash_json 'git add novo.env && git commit -m x')" 2
+caso "git add -A; git commit: barra"              comum/sem-segredo.sh "$(bash_json 'git add -A; git commit -m x')" 2
+printf 'linha benigna\n' >> "$SEG_T/chave.pem"; seg_git add chave.pem
+caso "nao rastreado sem add no comando: passa"    comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
+seg_git reset -q --hard; rm -f "$SEG_T/novo.env"
+head -c 1100000 /dev/zero | tr '\0' 'a' > "$SEG_T/grande.txt"
+caso "nao rastreado acima de 1 MiB: barra"        comum/sem-segredo.sh "$(bash_json 'git add . && git commit -m x')" 2
+rm -f "$SEG_T/grande.txt"
+FORA_T="$(mktemp -d)"; printf 'CHAVE=%s\n' "$SK" > "$FORA_T/segredo.txt"
+ln -s "$FORA_T/segredo.txt" "$SEG_T/link.txt"
+caso "link nao rastreado nao e seguido: passa"    comum/sem-segredo.sh "$(bash_json 'git add -A && git commit -m x')" 0
+rm -f "$SEG_T/link.txt"; rm -rf "$FORA_T"
+# Binario ou atributo -diff: o diff sairia sem bloco @@ (login#30); --text forca as linhas.
+{ printf 'cab\000eca\n'; printf 'CHAVE=%s\n' "$SK"; } > "$SEG_T/dado.bin"; seg_git add dado.bin
+caso "segredo depois de NUL (binario): barra"     comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+seg_git rm -q --cached dado.bin; rm -f "$SEG_T/dado.bin"
+printf '*.txt -diff\n' > "$SEG_T/.gitattributes"; seg_git add .gitattributes; seg_git commit -q -m attrs
+printf 'CHAVE=%s\n' "$SK" > "$SEG_T/nota.txt"; seg_git add nota.txt
+caso "segredo em arquivo -diff: barra"            comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+seg_git rm -q --cached nota.txt; rm -f "$SEG_T/nota.txt"; seg_git reset -q --hard HEAD~1
 HOOK_CWD="$HOOK_CWD_ANTES"; rm -rf "$SEG_T"
 # Prefixo de chave no meio de um identificador nao e chave. Falso positivo do
 # conselho #204: "ta" + "sk-fora-do-plano-..." (nome de um caso da bancada da
