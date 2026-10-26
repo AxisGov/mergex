@@ -185,3 +185,6 @@ jobs:
       - name: Test entrega sequencial por sprint
         shell: bash
         run: bash scripts/ci/test-entrega-por-sprint.sh
+      - name: Test varredura de segredo no pre-push (P3)
+        shell: bash
+        run: bash scripts/ci/test-p3-segredo-no-push.sh

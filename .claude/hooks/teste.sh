@@ -208,6 +208,14 @@ caso "token: \"placeholder\" passa"      comum/sem-segredo.sh "$(write_json 'tok
 caso "password: 'changeme' passa"        comum/sem-segredo.sh "$(write_json "password: 'changeme'")" 0
 caso "placeholder colado em valor real barra" comum/sem-segredo.sh "$(write_json "token: \"placeholder-$(printf 'abcd1234efgh')\"")" 2
 caso "senha: !Ref Segredo passa"         comum/sem-segredo.sh "$(write_json 'senha: !Ref Segredo')" 0
+# A tabela vive em skills/mergex/scripts/segredo-tabela.sh (DM-279): sem ela, o hook de
+# seguranca barra (falha fechada), mesmo com conteudo limpo.
+SEMTAB_T="$(mktemp -d)"; mkdir -p "$SEMTAB_T/.claude/hooks/comum"
+cp "$H/comum/sem-segredo.sh" "$H/comum/base.sh" "$SEMTAB_T/.claude/hooks/comum/"
+printf '%s' "$(write_json 'texto limpo')" | bash "$SEMTAB_T/.claude/hooks/comum/sem-segredo.sh" >/dev/null 2>&1; rc_semtab=$?
+if [ "$rc_semtab" = 2 ]; then OK=$((OK+1)); printf '  ok    %s\n' "sem a tabela de segredo: barra"
+else FALHOU=$((FALHOU+1)); printf '  FALHA %s (esperava 2, obteve %s)\n' "sem a tabela de segredo: barra" "$rc_semtab"; fi
+rm -rf "$SEMTAB_T"
 echo "sem-segredo — tem que PASSAR"
 caso "variavel de ambiente" comum/sem-segredo.sh "$(write_json 'const k = process.env.API_KEY')" 0
 caso "placeholder <>"       comum/sem-segredo.sh "$(write_json 'password: <coloque-a-senha>')" 0

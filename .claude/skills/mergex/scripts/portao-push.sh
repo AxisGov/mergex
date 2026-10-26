@@ -91,6 +91,100 @@ cat > "$TMP_DIR/entrada" || { diag "$AMBIENTE: entrada padrão ilegível; push b
 RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || { diag "$AMBIENTE: fora de um repositório Git com árvore de trabalho; push barrado"; exit 1; }
 
+# --------------------------------------------------------------------------
+# Segredo no que o push publica (conselhos#210, P3; DM-279)
+# --------------------------------------------------------------------------
+# O PreToolUse do sem-segredo vê o commit antes de ele existir e não vê o que o
+# próprio comando gera nem o commit feito por fora; o V10 do portão é instrução,
+# não script. Aqui, com a MESMA tabela (segredo-tabela.sh), varre-se o que o push
+# publica: a mensagem e as linhas adicionadas (contra o primeiro pai, também em
+# merge: a resolução de conflito publica conteúdo) de cada commit que o remoto
+# não tem, e a mensagem da tag anotada. Modo: o do `sem-segredo` em
+# .expx/hooks.json, pela expx_modo do base.sh (nasce bloqueio); `desligado` não
+# varre e não exige a tabela. Sem base.sh, o modo não se lê: vale bloqueio.
+# Qualquer falha de leitura (tabela, rev-list, objeto, diff) em modo ativo não
+# libera: barra em bloqueio, avisa em aviso. Acima de 300 commits, a varredura
+# não roda e isso também barra em bloqueio — dividir a publicação ou desligar
+# conscientemente; não existe varredura manual que libere o push.
+SEG_LIMITE=300
+SEG_MODO=bloqueio
+BASE_SH="$AQUI/../../../hooks/comum/base.sh"
+# shellcheck source=../../../hooks/comum/base.sh
+if [ -r "$BASE_SH" ] && . "$BASE_SH" 2>/dev/null && command -v expx_modo >/dev/null 2>&1; then
+  SEG_MODO="$(expx_modo sem-segredo bloqueio "$RAIZ")"
+  set +e
+fi
+SEG_TABELA_OK=1
+if [ "$SEG_MODO" != desligado ]; then
+  # shellcheck source=segredo-tabela.sh
+  { [ -r "$AQUI/segredo-tabela.sh" ] && . "$AQUI/segredo-tabela.sh" && command -v segredo_varrer >/dev/null 2>&1; } \
+    || SEG_TABELA_OK=0
+fi
+_seg_nulo() { case "$1" in *[!0]*) return 1 ;; esac; return 0; }
+_seg_mais() { awk '/^diff --git / { h = 0; next } /^@@/ { h = 1; next } h && /^\+/ { print substr($0, 2) }'; }
+# _seg_commit <sha> — mensagem e linhas adicionadas do commit, contra o primeiro pai
+_seg_commit() {
+  local c="$1" pai
+  git log -1 --format=%B "$c" -- 2>/dev/null || return 1
+  pai="$(git rev-list --parents -n 1 "$c" 2>/dev/null)" || return 1
+  pai="$(printf '%s' "$pai" | awk '{ print $2 }')"
+  if [ -n "$pai" ]; then
+    git diff --text --no-ext-diff --no-textconv --no-color -U0 "$pai" "$c" -- 2>/dev/null | _seg_mais
+  else
+    git diff-tree --root -p --text --no-ext-diff --no-textconv --no-color -U0 "$c" -- 2>/dev/null | _seg_mais
+  fi
+  [ "${PIPESTATUS[0]}" = 0 ]
+}
+# segredo_da_ref <ref remota> <sha local> <sha remoto> — SEG_RES: limpo | achou | erro | grande;
+# SEG_DIAG: o que dizer
+segredo_da_ref() {
+  local rr="$1" sl="$2" sr="$3" tipo alvo_commit lista n c curto texto_tag="" achados_ref=""
+  SEG_RES=limpo; SEG_DIAG=""
+  _seg_nulo "$sl" && return 0
+  [ "$SEG_TABELA_OK" = 1 ] || { SEG_RES=erro; SEG_DIAG="a tabela de segredo (segredo-tabela.sh) não está disponível ao lado do portão"; return 0; }
+  tipo="$(git cat-file -t "$sl" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="o objeto $sl não se lê"; return 0; }
+  case "$tipo" in
+    commit) alvo_commit="$sl" ;;
+    tag)
+      texto_tag="$(git cat-file tag "$sl" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="a tag $sl não se lê"; return 0; }
+      alvo_commit="$(git rev-parse --verify --quiet "$sl^{commit}")" \
+        || { SEG_RES=erro; SEG_DIAG="a tag $sl não aponta para um commit (objeto não suportado na varredura)"; return 0; } ;;
+    *) SEG_RES=erro; SEG_DIAG="objeto $tipo ($sl) não suportado na varredura"; return 0 ;;
+  esac
+  set -- "$alvo_commit" --not --remotes="$REMOTO"
+  if ! _seg_nulo "$sr" && git cat-file -e "$sr^{commit}" 2>/dev/null; then set -- "$@" "^$sr"; fi
+  lista="$(git rev-list "$@" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="o intervalo publicado não se lê (rev-list)"; return 0; }
+  n="$(printf '%s' "$lista" | grep -c .)"
+  if [ "$n" -gt "$SEG_LIMITE" ]; then
+    SEG_RES=grande
+    SEG_DIAG="intervalo grande demais para varrer segredo ($n commits, limite $SEG_LIMITE): divida a publicação em pushes menores ou, conscientemente, ponha sem-segredo em desligado"
+    return 0
+  fi
+  # Uma varredura do intervalo inteiro; só com achado, commit a commit, para dizer onde.
+  ALVO="$texto_tag"
+  for c in $lista; do
+    texto="$(_seg_commit "$c")" || { SEG_RES=erro; SEG_DIAG="o commit $c não se lê"; return 0; }
+    ALVO="$ALVO
+$texto"
+  done
+  segredo_varrer
+  [ -n "$ACHADOS" ] || return 0
+  if [ -n "$texto_tag" ]; then
+    ALVO="$texto_tag"; segredo_varrer
+    [ -z "$ACHADOS" ] || achados_ref="${achados_ref}  na tag ${sl:0:12}:
+$ACHADOS"
+  fi
+  for c in $lista; do
+    ALVO="$(_seg_commit "$c")"; segredo_varrer
+    curto="${c:0:12}"
+    [ -z "$ACHADOS" ] || achados_ref="${achados_ref}  no commit ${curto}:
+$ACHADOS"
+  done
+  SEG_RES=achou
+  SEG_DIAG="segredo no que o push publica (valores mascarados):
+${achados_ref}  Segredo publicado não sai por reverter o commit: reescreva o intervalo local e rotacione a credencial"
+}
+
 BARRA=0
 while IFS=' ' read -r ref_local sha_local ref_remota sha_remoto resto <&3; do
   [ -n "$ref_local$sha_local$ref_remota$sha_remoto$resto" ] || continue
@@ -102,6 +196,19 @@ while IFS=' ' read -r ref_local sha_local ref_remota sha_remoto resto <&3; do
   : > "$TMP_DIR/decisao"
   pr_decide_ref "$RAIZ" "$ref_local" "$sha_local" "$ref_remota" "$sha_remoto" "$REMOTO" > "$TMP_DIR/decisao" # guarda:PPSHA
   decisao="$(sed -n 's/^decisao=//p' "$TMP_DIR/decisao")"
+  # a varredura de segredo entra na decisão da ref antes do sinal (DM-279)
+  if [ "$SEG_MODO" != desligado ]; then
+    segredo_da_ref "$ref_remota" "$sha_local" "$sha_remoto"
+    if [ "$SEG_RES" != limpo ]; then
+      if [ "$SEG_MODO" = aviso ]; then
+        diag "$ref_remota: sem-segredo (aviso, o push segue): $SEG_DIAG"
+        [ "$decisao" != passa ] || { decisao=avisa; PR_DIAG="segredo no que o push publica (aviso, ver acima)"; }
+      else
+        diag "$ref_remota: sem-segredo: $SEG_DIAG; push barrado"
+        decisao=barra; PR_DIAG="${PR_DIAG:-segredo no que o push publica}"
+      fi
+    fi
+  fi
   case "$decisao" in
     passa) ;;
     avisa) diag "$ref_remota: $PR_DIAG" ;;
