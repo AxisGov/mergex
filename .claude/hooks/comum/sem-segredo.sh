@@ -77,8 +77,10 @@ eh_placeholder() {
     *'${'*|*'{{'*|*\<*\>*) return 0 ;;
   esac
   # Palavras reservadas só dispensam o valor inteiro, não uma credencial real
-  # que por acaso contenha "example", "sample" ou outro fragmento.
-  printf '%s' "$v" | grep -aEiq -e '^(sk-|gh[pousr]_|github_pat_|xox[baprs]-)?(x{4,}|0{4,}|your[-_](key|token|secret)([-_]here)?([-_](x{4,}|0{4,}))?|example|changeme|troque|placeholder|dummy|fake|sample|redacted|test[-_]?key|coloque)$'
+  # que por acaso contenha "example", "sample" ou outro fragmento. O valor pode
+  # juntar mais de uma (`sk-example-placeholder`), mas só delas é feito.
+  local w='(x{4,}|0{4,}|your[-_](key|token|secret)([-_]here)?([-_](x{4,}|0{4,}))?|example|changeme|troque|placeholder|dummy|fake|sample|redacted|test[-_]?key|coloque)'
+  printf '%s' "$v" | grep -aEiq -e "^(sk-|gh[pousr]_|github_pat_|xox[baprs]-)?$w([-_]$w)*\$"
 }
 
 achou() {
@@ -119,8 +121,9 @@ achou "chave de API"        'AIza[0-9A-Za-z_-]{35}' '(^|[^A-Za-z0-9_-])' '($|[^A
 # letra, digito ou _ e identificador mais longo, nao chave. Mesmo padrao do
 # segredo.sh da sprintx.
 achou "chave de API"        'A[KS]IA[0-9A-Z]{16}' '(^|[^A-Za-z0-9_])' '($|[^A-Za-z0-9_])'
-# 2. Credencial em atribuição
-achou "credencial"          '([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*['"'"'"]?[A-Za-z0-9/+_.=-]{8,}'
+# 2. Credencial em atribuição. O valor seguido de `(` é chamada de função
+# (`token: randomUUID()`), não credencial: o limite a direita o exclui.
+achou "credencial"          '([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*['"'"'"]?[A-Za-z0-9/+_.=-]{8,}' '' '($|[^A-Za-z0-9/+_.=(-])'
 # 3. Chave privada
 achou "chave privada"       '-----BEGIN [A-Z ]*PRIVATE KEY-----'
 # 4. Conexão com credencial embutida

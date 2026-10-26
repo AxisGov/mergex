@@ -198,6 +198,12 @@ caso "placeholder <>"       comum/sem-segredo.sh "$(write_json 'password: <coloq
 caso "marcador de template" comum/sem-segredo.sh "$(write_json 'token: {{seu_token}}')" 0
 caso "variavel de shell"    comum/sem-segredo.sh "$(write_json 'SECRET=${MINHA_VAR}')" 0
 caso "prosa sobre senha"    comum/sem-segredo.sh "$(write_json 'O campo senha e validado no login')" 0
+# Falsos positivos da 0.12.3, ao commitar o proprio update (relato do Login): placeholder feito
+# de duas palavras reservadas, e chamada de funcao no lugar do valor.
+caso "placeholder composto passa"         comum/sem-segredo.sh "$(write_json 'exemplo=sk-example-placeholder')" 0
+caso "chamada de funcao nao e credencial" comum/sem-segredo.sh "$(write_json 'const dono = { pid: 1, token: randomUUID(), em: 0 }')" 0
+caso "token literal sem aspas barra"      comum/sem-segredo.sh "$(write_json "TOKEN=$(printf 'abcd1234efgh5678')")" 2
+caso "palavra reservada colada em valor real barra" comum/sem-segredo.sh "$(write_json "k=sk-example-$(printf 'abcdef1234567890')")" 2
 caso "comando comum"        comum/sem-segredo.sh "$(bash_json 'npm test')" 0
 # SIGPIPE sob pipefail (rodada extra da revisao): a saida antecipada
 # `printf | grep -q … || exit 0` devolvia 141 quando o grep casava na 1a linha e
