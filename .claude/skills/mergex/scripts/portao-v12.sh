@@ -118,6 +118,31 @@ if ! git -C "$raiz_leitura" rev-parse --git-dir >/dev/null 2>&1; then
   [ "$(limpa "$(escalar "$ENTREGA" versionado)")" != false ] || na 'sem-versionador'
   sem_prova 'fora-de-um-repositorio-git'
 fi
+# 1b. O ambiente do Git (GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE) vence o `-C`:
+# apontando outro repositório, a V12 leria outro HEAD (conselhos#210, P1). Não se apaga o
+# ambiente: o Git o exporta nos hooks (pre-push), e ali ele é o mesmo repositório. Com qualquer
+# um definido, a árvore e o git-common-dir resolvidos com e sem ele têm de ser os mesmos.
+# `sem_repositorio_git`, acima, fica igual byte a byte às outras cópias (DM-186).
+if [ -n "${GIT_DIR:-}${GIT_WORK_TREE:-}${GIT_COMMON_DIR:-}${GIT_INDEX_FILE:-}" ]; then
+  identidade_git() { # <com|sem> — "<toplevel>|<git-common-dir>", absolutos e físicos
+    local saida topo comum
+    if [ "$1" = sem ]; then
+      saida="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+        git -C "$raiz_leitura" rev-parse --show-toplevel --git-common-dir 2>/dev/null)" || return 1
+    else
+      saida="$(git -C "$raiz_leitura" rev-parse --show-toplevel --git-common-dir 2>/dev/null)" || return 1
+    fi
+    topo="${saida%%$'\n'*}"; comum="${saida#*$'\n'}"
+    case "$comum" in /*) ;; *) comum="$raiz_leitura/$comum" ;; esac
+    topo="$(cd "$topo" 2>/dev/null && pwd -P)" && comum="$(cd "$comum" 2>/dev/null && pwd -P)" || return 1
+    printf '%s|%s\n' "$topo" "$comum"
+  }
+  com_ambiente="$(identidade_git com)" && sem_ambiente="$(identidade_git sem)" \
+    && [ "$com_ambiente" = "$sem_ambiente" ] || {
+      printf 'portao-v12: o ambiente do Git (GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR ou GIT_INDEX_FILE) aponta outro repositório que não o de --raiz\n' >&2
+      sem_prova 'ambiente-git-divergente'
+    }
+fi
 if [ -z "$RAIZ" ]; then
   RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || sem_prova 'git-falhou'
 fi

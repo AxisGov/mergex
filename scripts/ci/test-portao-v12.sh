@@ -190,6 +190,20 @@ projeto sem-arquivo -; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.
 roda PATH="$aux/sem-node"
 [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-fatiamento-json' \
   && passa 'sem .expx/fatiamento.json: n/a sem node' || quebra "sem .expx/fatiamento.json: $(mostra)"
+# GIT_DIR/GIT_WORK_TREE no ambiente vencem o `git -C`: apontando outro repositório, a V12
+# leria outro HEAD (conselhos#210, P1). Divergente: SEM_PROVA. O mesmo repositório (o caso
+# do pre-push, em que o Git exporta GIT_DIR): segue como sem o ambiente.
+outro_git="$aux/outro-repo"; git init -q -b main "$outro_git"
+git -C "$outro_git" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m outro
+roda PATH="$aux/sem-node" GIT_DIR="$outro_git/.git"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=ambiente-git-divergente' \
+  && passa 'GIT_DIR de outro repositorio: SEM_PROVA' || quebra "GIT_DIR de outro repositorio: $(mostra)"
+roda PATH="$aux/sem-node" GIT_WORK_TREE="$outro_git"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=ambiente-git-divergente' \
+  && passa 'GIT_WORK_TREE de outro repositorio: SEM_PROVA' || quebra "GIT_WORK_TREE de outro repositorio: $(mostra)"
+roda PATH="$aux/sem-node" GIT_DIR="$P/.git"
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-fatiamento-json' \
+  && passa 'GIT_DIR do proprio repositorio (pre-push): segue' || quebra "GIT_DIR do proprio repositorio: $(mostra)"
 
 # desligada: n/a sem conferir (o leitor roda, com node)
 projeto desligada desligada; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida

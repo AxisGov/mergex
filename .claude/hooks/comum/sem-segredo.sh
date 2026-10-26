@@ -55,11 +55,51 @@ case "$FERRAMENTA" in
     # está na árvore de trabalho, e reconhecer cada forma do comando seria
     # frágil. As alterações não preparadas dos arquivos rastreados entram sempre:
     # na dúvida, o hook barra (um segredo não preparado de outro arquivo também).
-    ALVO="$( { git -C "$RAIZ" diff --cached --no-color -U0; git -C "$RAIZ" diff --no-color -U0; } 2>/dev/null \
+    # --no-ext-diff e --no-textconv: um diff.external, GIT_EXTERNAL_DIFF ou textconv
+    # configurado trocaria o texto do diff (com /bin/true, por nada) e o segredo
+    # passaria sem ser visto (conselhos#210, P7).
+    ALVO="$( { git -C "$RAIZ" diff --cached --no-ext-diff --no-textconv --no-color -U0
+               git -C "$RAIZ" diff --no-ext-diff --no-textconv --no-color -U0; } 2>/dev/null \
       | awk '/^diff --git / { h = 0; next } /^@@/ { h = 1; next } h && /^\+/ { print substr($0, 2) }')"
     # Some a mensagem inline, que também vai para o histórico.
     ALVO="$ALVO
 $CMD"
+    # E a mensagem por arquivo (`-F <arq>`, `-F<arq>`, `--file <arq>`,
+    # `--file=<arq>`, `-F` ao fim de opções curtas sem argumento, como `-aF`),
+    # todas as ocorrências (conselhos#210, P4). O caminho é relativo ao cwd do
+    # evento. `-F -` (stdin), arquivo ilegível ou forma que não se resolve: na
+    # dúvida, barra — a mensagem iria para o histórico sem ser vista.
+    MSG_NAO_VARRIDA=""
+    while IFS= read -r arg_f; do
+      [ -n "$arg_f" ] || continue
+      arq_f="${arg_f#--file=}"; arq_f="${arq_f#--file}"
+      case "$arq_f" in -*F*) arq_f="${arq_f#*F}" ;; esac
+      arq_f="${arq_f#"${arq_f%%[![:space:]]*}"}"
+      case "$arq_f" in \"*\") arq_f="${arq_f#\"}"; arq_f="${arq_f%\"}" ;; \'*\') arq_f="${arq_f#\'}"; arq_f="${arq_f%\'}" ;; esac
+      case "$arq_f" in ''|-) MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - ${arg_f}
+"; continue ;; esac
+      case "$arq_f" in /*) ;; *) arq_f="${CWD:-$PWD}/$arq_f" ;; esac
+      if [ -f "$arq_f" ] && [ -r "$arq_f" ]; then
+        ALVO="$ALVO
+$(cat -- "$arq_f" 2>/dev/null)"
+      else
+        MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - ${arg_f}
+"
+      fi
+    done <<EXPX_ARQ_F
+$(printf '%s' "$CMD" | grep -aEo -e "(^|[[:space:]])(--file(=|[[:space:]]+)|-[aeinopqsvz]*F[[:space:]]*)(\"[^\"]*\"|'[^']*'|[^[:space:];&|]+)" | sed 's/^[[:space:]]*//')
+EXPX_ARQ_F
+    if [ -n "$MSG_NAO_VARRIDA" ]; then
+      expx_barra "$MODO" "$RAIZ" "$HOOK" "mensagem do commit por arquivo não varrida" \
+"mergex/sem-segredo — a mensagem do commit não pôde ser varrida
+
+${MSG_NAO_VARRIDA}
+A mensagem vem de stdin (\`-F -\`) ou de um arquivo que não se lê a partir
+do diretório do comando. Ela iria para o histórico sem passar pela varredura.
+
+O que fazer: grave a mensagem num arquivo legível e passe o caminho em -F, ou
+use -m."
+    fi
     ORIGEM="o que está em preparação ou alterado nos arquivos rastreados"
     ;;
   Write|Edit|NotebookEdit)
@@ -86,6 +126,13 @@ eh_placeholder() {
   case "$v" in
     *'${'*|*'{{'*|*\<*\>*) return 0 ;;
   esac
+  # O valor depois do primeiro `:` ou `=` (na credencial em atribuição o candidato
+  # traz a chave junto), sem aspas: variável de shell sem chaves, formatação e
+  # máscara são referência, não valor (conselhos#210, P8).
+  local cauda="${v#*[:=]}"
+  cauda="${cauda#"${cauda%%[![:space:]\'\"]*}"}"; cauda="${cauda%[\'\"]}"
+  case "$cauda" in '%s'|'%('*')s') return 0 ;; esac
+  printf '%s' "$cauda" | grep -aEq -e '^(\$[A-Za-z_][A-Za-z0-9_]*|[*]+|[?]+)$' && return 0
   # Palavras reservadas só dispensam o valor inteiro, não uma credencial real
   # que por acaso contenha "example", "sample" ou outro fragmento. O valor pode
   # juntar mais de uma (`sk-example-placeholder`), mas só delas é feito.
@@ -98,7 +145,7 @@ achou() {
   # Os limites (opcionais) exigem o que vem antes e depois do valor: prefixo de
   # chave no meio de um identificador nao e chave, nem chave de tamanho fixo
   # seguida de mais caracteres. Entram na busca, nunca no valor mostrado.
-  local cat="$1" re="${3:-}$2${4:-}" esq="${3:-}${4:-}" linha valor fim
+  local cat="$1" re="${3:-}$2${4:-}" esq="${3:-}${4:-}" linha valor fim ph
   # Examine todos os candidatos: placeholder anterior nunca dispensa segredo posterior.
   while IFS= read -r linha; do
     [ -n "$linha" ] || continue
@@ -106,8 +153,11 @@ achou() {
       [ -n "$valor" ] || continue
       [ -n "$esq" ] && valor="$(printf '%s' "$valor" | grep -aEo -e "$2" | head -1)"
       [ -n "$valor" ] || continue
-      # Placeholder dispensa somente este candidato.
-      eh_placeholder "$valor" && continue
+      # Placeholder dispensa somente este candidato. Na URL, só a senha decide:
+      # um `${USER}` no usuário não torna placeholder a senha real (conselhos#210, P5).
+      ph="$valor"
+      if [ "$cat" = "credencial em URL" ]; then ph="${valor#*://}"; ph="${ph#*:}"; ph="${ph%@}"; fi
+      eh_placeholder "$ph" && continue
       fim="${valor: -4}"
       ACHADOS="${ACHADOS}  - ${cat}: …${fim} (linha ${linha%%:*})
 "
@@ -133,8 +183,11 @@ achou "chave de API"        'AIza[0-9A-Za-z_-]{35}' '(^|[^A-Za-z0-9_-])' '($|[^A
 achou "chave de API"        'A[KS]IA[0-9A-Z]{16}' '(^|[^A-Za-z0-9_])' '($|[^A-Za-z0-9_])'
 # 2. Credencial em atribuição. O valor seguido de `(` é chamada de função
 # (`token: randomUUID()`), não credencial: o limite a direita o exclui...
-CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*['"'"'"]?[A-Za-z0-9/+_.=-]{8,}'
-achou "credencial"          "$CREDENCIAL" '' '($|[^A-Za-z0-9/+_.=(-])'
+# O alfabeto do valor e o do limite a direita sao o mesmo, com os simbolos que
+# senha tem (`!@#$%^&*~?`): sem eles uma senha que começa com `!` passava, e com o
+# limite diferente o valor seria cortado no meio (conselhos#210, P8).
+CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*['"'"'"]?[A-Za-z0-9/+_.=!@#$%^&*~?-]{8,}'
+achou "credencial"          "$CREDENCIAL" '' '($|[^A-Za-z0-9/+_.=!@#$%^&*~?(-])'
 # ...salvo quando o valor tem dígito: identificador de função comum não tem
 # (`randomUUID`, `getToken`), e um valor aleatório quase sempre tem. Uma função
 # com dígito (`getToken2()`) barra — falso positivo assumido; valor sem dígito

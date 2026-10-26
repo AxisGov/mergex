@@ -183,7 +183,7 @@ SK="sk-$(printf 'abcdef1234567890QRS')"
 FGH="github_pat_$(printf 'A%.0s' {1..40})"
 GKEY="AIza$(printf 'A%.0s' {1..35})"
 PK="$(printf -- '-----BEGIN RSA %s KEY-----' 'PRIVATE')"
-SENHA="$(printf 'password = %sTr0ub4dorZ3x%s' "'" "'")"
+SENHA="$(printf 'pass%s = %sTr0ub4dorZ3x%s' 'word' "'" "'")"
 CPF="$(printf 'cliente 123.%s-01' '456.789')"
 URL="$(printf 'postgres://u:%s@db/x' 's3nh4sintetica')"
 
@@ -192,6 +192,18 @@ caso "chave privada"      comum/sem-segredo.sh "$(write_json "$PK")" 2
 caso "senha atribuida"    comum/sem-segredo.sh "$(write_json "$SENHA")" 2
 caso "CPF sintetico"      comum/sem-segredo.sh "$(write_json "$CPF")" 2
 caso "URL com credencial" comum/sem-segredo.sh "$(write_json "$URL")" 2
+# Placeholder no usuario nao dispensa a senha real da URL (conselhos#210, P5).
+caso "URL com usuario \${...} e senha real: barra" comum/sem-segredo.sh "$(write_json "$(printf 'postgres://${DB_USER}:%s@db/x' 's3nh4sintetica')")" 2
+caso "URL com senha \${...}: passa"                comum/sem-segredo.sh "$(write_json 'postgres://u:${DB_PASS}@db/x')" 0
+# A senha com simbolo tambem e credencial (conselhos#210, P8).
+caso "senha comecando com ! barra"       comum/sem-segredo.sh "$(write_json "$(printf 'password: !Abc%s' 'defg123')")" 2
+caso "token com @ barra"                 comum/sem-segredo.sh "$(write_json "$(printf 'token=@bcd%s' '1234efgh')")" 2
+caso "secret com \$ e ! barra"          comum/sem-segredo.sh "$(write_json "$(printf 'sec%s: p4$$w0%s' 'ret' 'rd!xyz')")" 2
+# ...sem abrir falso positivo em referencia (P8): variavel de shell, formatacao, mascara e tag YAML curta.
+caso "password=\$VAR passa"            comum/sem-segredo.sh "$(write_json 'password=$DB_PASSWORD')" 0
+caso "password: \"%(senha)s\" passa"   comum/sem-segredo.sh "$(write_json 'password: "%(senha)s"')" 0
+caso "password: ******** passa"          comum/sem-segredo.sh "$(write_json 'password: ********')" 0
+caso "senha: !Ref Segredo passa"         comum/sem-segredo.sh "$(write_json 'senha: !Ref Segredo')" 0
 echo "sem-segredo — tem que PASSAR"
 caso "variavel de ambiente" comum/sem-segredo.sh "$(write_json 'const k = process.env.API_KEY')" 0
 caso "placeholder <>"       comum/sem-segredo.sh "$(write_json 'password: <coloque-a-senha>')" 0
@@ -256,6 +268,28 @@ seg_git add teste.sh sem-segredo.sh
 caso "commit do teste.sh e do sem-segredo.sh: passa" comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
 seg_git reset -q --hard; rm -f "$SEG_T/teste.sh" "$SEG_T/sem-segredo.sh"
 caso "segredo na mensagem do commit: barra"      comum/sem-segredo.sh "$(bash_json "git commit -m 'chave $SK'")" 2
+# Mensagem por arquivo (`-F`/`--file`) entra no historico como a do `-m` (conselhos#210, P4).
+printf 'mensagem com %s\n' "$SK" > "$SEG_T/msg.txt"
+for cmd in 'git commit -F msg.txt' 'git commit -Fmsg.txt' 'git commit --file msg.txt' \
+           'git commit --file=msg.txt' 'git commit -aF msg.txt'; do
+  caso "segredo na mensagem por arquivo ($cmd): barra" comum/sem-segredo.sh "$(bash_json "$cmd")" 2
+done
+printf 'mensagem comum\n' > "$SEG_T/msg.txt"
+caso "mensagem por arquivo sem segredo: passa"   comum/sem-segredo.sh "$(bash_json 'git commit -F msg.txt')" 0
+caso "mensagem entre aspas: passa"              comum/sem-segredo.sh "$(bash_json 'git commit -F "msg.txt"')" 0
+caso "-F - (stdin): barra, nao se varre"         comum/sem-segredo.sh "$(bash_json 'git commit -F -')" 2
+caso "-F de arquivo que nao existe: barra"       comum/sem-segredo.sh "$(bash_json 'git commit -F nao-existe.txt')" 2
+caso "segundo -F tambem e varrido: barra"        comum/sem-segredo.sh "$(bash_json 'git commit -F msg.txt -F nao-existe.txt')" 2
+rm -f "$SEG_T/msg.txt"
+# Diff externo ou textconv configurado nao pode esconder o que entra (conselhos#210, P7).
+printf 'antes\n%s\ndepois\n' "$SK" > "$SEG_T/chave.pem"; seg_git add chave.pem
+seg_git config diff.external /bin/true
+caso "diff.external nao esconde o segredo: barra" comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+seg_git config --unset diff.external
+printf '*.pem diff=vazio\n' > "$SEG_T/.gitattributes"; seg_git config diff.vazio.textconv true
+caso "textconv nao esconde o segredo: barra"      comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+seg_git config --unset diff.vazio.textconv; rm -f "$SEG_T/.gitattributes"
+seg_git reset -q --hard
 HOOK_CWD="$HOOK_CWD_ANTES"; rm -rf "$SEG_T"
 # Prefixo de chave no meio de um identificador nao e chave. Falso positivo do
 # conselho #204: "ta" + "sk-fora-do-plano-..." (nome de um caso da bancada da

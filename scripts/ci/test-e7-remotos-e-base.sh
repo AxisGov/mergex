@@ -263,5 +263,31 @@ passo2 "$aux/gl" 'glab mr create'; rc=$?
 [ "$rc" != 0 ] && [ ! -e "$aux/args-glab" ] && passa 'GitLab: duas MRs abertas da origem falham fechado' \
   || quebra "GitLab duas MRs: rc $rc"
 
+echo '== E7: a URL do remoto nao vaza credencial (conselhos#210, P6) =='
+rp="$aux/remoto-com-token"; git init -q -b main "$rp"
+g "$rp" commit -q --allow-empty -m base
+TOK="tok$(printf 'en1234')"   # montado: o sem-segredo nao deve ver o valor no arquivo
+g "$rp" remote add origin "https://usuario:$TOK@github.com/dono/repo.git"
+g "$rp" config branch.main.remote origin; g "$rp" config branch.main.merge refs/heads/main
+bloco_do_e7 'remoto="$(resolver_remoto_upstream)"' > "$aux/e7-remoto.sh"
+(cd "$rp" && bash "$aux/e7-remoto.sh") > "$aux/e7-remoto.out" 2>&1; rc=$?
+[ "$rc" = 0 ] && ! grep -q "$TOK" "$aux/e7-remoto.out" && grep -q 'github.com/dono/repo' "$aux/e7-remoto.out" \
+  && passa 'deteccao do provedor imprime a URL sem o token' \
+  || quebra "URL do remoto: rc $rc $(tr '\n' '|' < "$aux/e7-remoto.out")"
+
+echo '== E7: o bloco "PR ja existe" nao roda com head/destino vazios (conselhos#210, P2) =='
+mkdir -p "$aux/gh-p2"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\necho https://x/pull/1\n' "$aux/gh-p2.log" > "$aux/gh-p2/gh"; chmod +x "$aux/gh-p2/gh"
+bloco_do_e7 'gh pr view "$head" --repo "$destino"' > "$aux/e7-existe.sh"
+rm -f "$aux/gh-p2.log"
+(env -u head -u destino PATH="$aux/gh-p2:$PATH" bash "$aux/e7-existe.sh") > "$aux/e7-existe.out" 2>&1; rc=$?
+[ "$rc" != 0 ] && [ ! -e "$aux/gh-p2.log" ] && grep -q 'mesma shell' "$aux/e7-existe.out" \
+  && passa 'PR ja existe: sem head/destino, falha explicita sem consultar o servico' \
+  || quebra "PR ja existe sem head/destino: rc $rc gh $( [ -e "$aux/gh-p2.log" ] && cat "$aux/gh-p2.log")"
+(head=feature/x destino=dono/repo PATH="$aux/gh-p2:$PATH" bash "$aux/e7-existe.sh") > "$aux/e7-existe.out" 2>&1; rc=$?
+[ "$rc" = 0 ] && grep -q 'pr view feature/x --repo dono/repo' "$aux/gh-p2.log" \
+  && passa 'PR ja existe: com head/destino da mesma shell, consulta o destino' \
+  || quebra "PR ja existe com head/destino: rc $rc"
+
 printf -- '---------------------------------------------\n%s ok, %s falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = 0 ]
