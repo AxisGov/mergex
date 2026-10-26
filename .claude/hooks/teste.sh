@@ -216,6 +216,25 @@ caso "commit + 70 KB de linhas: a varredura continua, barra"      comum/sem-segr
 caso "commit + 200 KB de linhas: barra"                           comum/sem-segredo.sh "$(json_grande "git commit -m x"$'\n'"$LINHAS200")" 2
 caso "comando legitimo + 200 KB de linhas: passa"                 comum/sem-segredo.sh "$(json_grande "npm test"$'\n'"$LINHAS200")" 0
 git rm -q --cached segredo.pem && rm -f segredo.pem
+# So o que ENTRA no historico e varrido: a linha adicionada e a mensagem. A linha removida
+# (tirar um segredo) e o contexto do diff nao sao conteudo novo, e barrar a remocao impediria
+# a remediacao. Repositorio proprio, para nao mexer no HEAD dos outros casos.
+SEG_T="$(mktemp -d)"
+git -C "$SEG_T" init -q -b feature/seg
+seg_git() { git -C "$SEG_T" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+printf 'antes\n%s\ndepois\n' "$PK" > "$SEG_T/chave.pem"; seg_git add chave.pem; seg_git commit -q -m base
+HOOK_CWD_ANTES="$HOOK_CWD"; HOOK_CWD="$SEG_T"
+printf 'antes\n%s\ndepois\nmais uma linha\n' "$PK" > "$SEG_T/chave.pem"; seg_git add chave.pem
+caso "segredo so no contexto do diff: passa"     comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
+printf 'antes\ndepois\n' > "$SEG_T/chave.pem"; seg_git add chave.pem
+caso "remover o segredo: passa"                  comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
+printf 'antes\n%s\ndepois\n' "$SK" > "$SEG_T/chave.pem"; seg_git add chave.pem
+caso "trocar por outro segredo: barra"           comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+printf 'antes\n++ %s\ndepois\n' "$SK" > "$SEG_T/chave.pem"; seg_git add chave.pem
+caso "linha adicionada que comeca com ++: barra" comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+seg_git reset -q --hard
+caso "segredo na mensagem do commit: barra"      comum/sem-segredo.sh "$(bash_json "git commit -m 'chave $SK'")" 2
+HOOK_CWD="$HOOK_CWD_ANTES"; rm -rf "$SEG_T"
 # Prefixo de chave no meio de um identificador nao e chave. Falso positivo do
 # conselho #204: "ta" + "sk-fora-do-plano-..." (nome de um caso da bancada da
 # sprintx) casava com sk-, e barrou os commits de instalacao do framework. O

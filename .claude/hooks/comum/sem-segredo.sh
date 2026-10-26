@@ -45,8 +45,14 @@ case "$FERRAMENTA" in
     # `git commit -m x` seguido de 70 KB de linhas — com chave privada em
     # preparação (rodada extra da revisão). Sem `-q` o grep lê até o fim.
     printf '%s' "$CMD" | grep -E '(^|[;&|[:space:]])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' >/dev/null || exit 0
-    # A varredura é sobre o que está preparado, não sobre a linha de comando.
-    ALVO="$(git -C "$RAIZ" diff --cached 2>/dev/null)"
+    # A varredura é sobre o que ENTRA no histórico: as linhas adicionadas do que
+    # está preparado. A removida (tirar um segredo é a remediação) e o contexto
+    # do diff não são conteúdo novo. Só dentro de um bloco `@@` uma linha com `+`
+    # é conteúdo — fora dele, `+++ b/<arquivo>` é cabeçalho, e uma linha
+    # adicionada que começa com `++ ` também chega como `+++ `. O `+` inicial
+    # sai, para os limites à esquerda valerem.
+    ALVO="$(git -C "$RAIZ" diff --cached --no-color -U0 2>/dev/null \
+      | awk '/^diff --git / { h = 0; next } /^@@/ { h = 1; next } h && /^\+/ { print substr($0, 2) }')"
     # Some a mensagem inline, que também vai para o histórico.
     ALVO="$ALVO
 $CMD"
