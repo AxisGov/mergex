@@ -208,6 +208,8 @@ caso "literal com digito seguido de ( barra" comum/sem-segredo.sh "$(write_json 
 FUNC2="getToken$(printf '2')"   # montada aqui: escrita no caso, o proprio teste.sh barraria no commit
 caso "funcao com digito barra (assumido)"   comum/sem-segredo.sh "$(write_json "token: $FUNC2()")" 2
 caso "valor sem digito seguido de ( passa (limite)" comum/sem-segredo.sh "$(write_json 'token: abcdefghijkl()')" 0
+B64="$(printf 'YWJjMTIzNDU2Nzg5MA')=="   # base64 com padding: o `=` do valor nao e o da atribuicao
+caso "base64 com = seguido de ( barra"     comum/sem-segredo.sh "$(write_json "token: $B64()")" 2
 caso "token literal sem aspas barra"      comum/sem-segredo.sh "$(write_json "TOKEN=$(printf 'abcd1234efgh5678')")" 2
 caso "palavra reservada colada em valor real barra" comum/sem-segredo.sh "$(write_json "k=sk-example-$(printf 'abcdef1234567890')")" 2
 caso "comando comum"        comum/sem-segredo.sh "$(bash_json 'npm test')" 0

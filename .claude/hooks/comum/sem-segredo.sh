@@ -141,7 +141,7 @@ achou "credencial"          "$CREDENCIAL" '' '($|[^A-Za-z0-9/+_.=(-])'
 # seguido de `(` é o limite declarado.
 while IFS= read -r chamada; do
   [ -n "$chamada" ] || continue
-  valor="${chamada%(}"; valor="${valor##*[:=]}"; valor="${valor#"${valor%%[![:space:]\'\"]*}"}"
+  valor="${chamada%(}"; valor="${valor#*[:=]}"; valor="${valor#"${valor%%[![:space:]\'\"]*}"}"
   case "$valor" in *[0-9]*) ;; *) continue ;; esac
   eh_placeholder "$valor" && continue
   ACHADOS="${ACHADOS}  - credencial: …${valor: -4}
