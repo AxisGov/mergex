@@ -292,7 +292,18 @@ caso "mensagem entre aspas: passa"              comum/sem-segredo.sh "$(bash_jso
 caso "-F - (stdin): barra, nao se varre"         comum/sem-segredo.sh "$(bash_json 'git commit -F -')" 2
 caso "-F de arquivo que nao existe: barra"       comum/sem-segredo.sh "$(bash_json 'git commit -F nao-existe.txt')" 2
 caso "segundo -F tambem e varrido: barra"        comum/sem-segredo.sh "$(bash_json 'git commit -F msg.txt -F nao-existe.txt')" 2
+# Opcao global com argumento antes do subcomando (`-C <dir>`, `-c k=v`) nao esconde o commit.
+printf 'mensagem com %s\n' "$SK" > "$SEG_T/msg.txt"
+caso "git -C . commit -F msg.txt: barra"          comum/sem-segredo.sh "$(bash_json 'git -C . commit -F msg.txt')" 2
+caso "git -c user.name=x commit -F msg.txt: barra" comum/sem-segredo.sh "$(bash_json 'git -c user.name=x commit -F msg.txt')" 2
 rm -f "$SEG_T/msg.txt"
+printf 'antes\n%s\ndepois\n' "$SK" > "$SEG_T/chave.pem"; seg_git add chave.pem
+caso "git --git-dir=.git -c a=b commit com segredo preparado: barra" comum/sem-segredo.sh "$(bash_json 'git --git-dir=.git -c a=b commit -m x')" 2
+caso "git -C . commit com segredo preparado: barra" comum/sem-segredo.sh "$(bash_json 'git -C . commit -m x')" 2
+seg_git reset -q --hard
+printf 'CHAVE=%s\n' "$SK" > "$SEG_T/novo.env"
+caso "git -C . add novo && git -C . commit: barra" comum/sem-segredo.sh "$(bash_json 'git -C . add novo.env && git -C . commit -m x')" 2
+rm -f "$SEG_T/novo.env"
 # Diff externo ou textconv configurado nao pode esconder o que entra (conselhos#210, P7).
 printf 'antes\n%s\ndepois\n' "$SK" > "$SEG_T/chave.pem"; seg_git add chave.pem
 seg_git config diff.external /bin/true

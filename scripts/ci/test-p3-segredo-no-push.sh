@@ -86,6 +86,11 @@ printf 'refs/tags/v2 %s refs/tags/v2 %s\n' "$(g rev-parse v2)" $ZERO \
   | (cd "$R" && bash "$PUSH" --pre-push origin "$aux/x.git") > "$aux/out" 2> "$aux/err"; rc=$?
 [ "$rc" = 1 ] && diz 'tag' && passa 'segredo so na mensagem da tag anotada: barra' || quebra "tag anotada: $(mostra)"
 
+repo tagcadeia; g tag -a interna -m "interna $SK"; g tag -a externa -m "externa limpa" interna
+printf 'refs/tags/externa %s refs/tags/externa %s\n' "$(g rev-parse externa)" $ZERO \
+  | (cd "$R" && bash "$PUSH" --pre-push origin "$aux/x.git") > "$aux/out" 2> "$aux/err"; rc=$?
+[ "$rc" = 1 ] && passa 'segredo na tag anotada interna de uma cadeia de tags: barra' || quebra "cadeia de tags: $(mostra)"
+
 repo exclusao
 printf 'refs/heads/velha %s refs/heads/velha %s\n' $ZERO "$(g rev-parse main)" \
   | (cd "$R" && bash "$PUSH" --pre-push origin "$aux/x.git") > "$aux/out" 2> "$aux/err"; rc=$?

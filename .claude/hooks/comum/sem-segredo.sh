@@ -44,7 +44,11 @@ case "$FERRAMENTA" in
     # do pipe; o pipeline devolvia 141 e este `|| exit 0` pulava a varredura de
     # `git commit -m x` seguido de 70 KB de linhas — com chave privada em
     # preparação (rodada extra da revisão). Sem `-q` o grep lê até o fim.
-    printf '%s' "$CMD" | grep -E '(^|[;&|[:space:]])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' >/dev/null || exit 0
+    # Opções globais antes do subcomando, inclusive as que levam argumento separado
+    # (`git -C <dir> commit`, `git -c k=v commit`): sem elas no padrão, o hook saía
+    # antes de varrer (revisão do Codex no lote do conselhos#210).
+    GIT_ANTES='(^|[;&|[:space:]])git([[:space:]]+(-C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path|--super-prefix)[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*[[:space:]]+'
+    printf '%s' "$CMD" | grep -E "${GIT_ANTES}commit([[:space:]]|\$)" >/dev/null || exit 0
     # A varredura é sobre o que ENTRA no histórico: as linhas adicionadas do que
     # está preparado. A removida (tirar um segredo é a remediação) e o contexto
     # do diff não são conteúdo novo. Só dentro de um bloco `@@` uma linha com `+`
@@ -96,7 +100,7 @@ EXPX_ARQ_F
     # pathspec do add não é interpretado: na dúvida, varre). Link não é seguido (o
     # commit leva o alvo, não o conteúdo). Acima de 1 MiB por arquivo, ou de 8 MiB
     # somados, barra: o que não se lê não passa. Sem `add`, não rastreado não entra.
-    if printf '%s' "$CMD" | grep -E '(^|[;&|[:space:]])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+add([[:space:]]|$)' >/dev/null; then
+    if printf '%s' "$CMD" | grep -E "${GIT_ANTES}add([[:space:]]|\$)" >/dev/null; then
       total_nr=0
       while IFS= read -r -d '' nr; do
         caminho_nr="$RAIZ/$nr"

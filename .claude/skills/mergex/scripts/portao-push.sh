@@ -110,9 +110,12 @@ SEG_LIMITE=300
 SEG_MODO=bloqueio
 BASE_SH="$AQUI/../../../hooks/comum/base.sh"
 # shellcheck source=../../../hooks/comum/base.sh
-if [ -r "$BASE_SH" ] && . "$BASE_SH" 2>/dev/null && command -v expx_modo >/dev/null 2>&1; then
-  SEG_MODO="$(expx_modo sem-segredo bloqueio "$RAIZ")"
-  set +e
+# Numa subshell: o base.sh liga opções do shell e define funções, e nada disso deve
+# vazar para o portão; só o modo volta.
+if [ -r "$BASE_SH" ]; then
+  SEG_MODO="$( . "$BASE_SH" 2>/dev/null && command -v expx_modo >/dev/null 2>&1 \
+    && expx_modo sem-segredo bloqueio "$RAIZ")" || SEG_MODO=bloqueio
+  case "$SEG_MODO" in aviso|bloqueio|desligado) ;; *) SEG_MODO=bloqueio ;; esac
 fi
 SEG_TABELA_OK=1
 if [ "$SEG_MODO" != desligado ]; then
@@ -146,7 +149,18 @@ segredo_da_ref() {
   case "$tipo" in
     commit) alvo_commit="$sl" ;;
     tag)
-      texto_tag="$(git cat-file tag "$sl" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="a tag $sl não se lê"; return 0; }
+      # Toda a cadeia de tags anotadas é publicada: a mensagem de cada uma entra,
+      # não só a da externa (tag que aponta para tag). Profundidade limitada.
+      local obj="$sl" passo=0 corpo_tag
+      while [ "$(git cat-file -t "$obj" 2>/dev/null)" = tag ]; do
+        passo=$((passo + 1))
+        [ "$passo" -le 10 ] || { SEG_RES=erro; SEG_DIAG="cadeia de tags anotadas longa demais a partir de $sl"; return 0; }
+        corpo_tag="$(git cat-file tag "$obj" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="a tag $obj não se lê"; return 0; }
+        texto_tag="$texto_tag
+$corpo_tag"
+        obj="$(printf '%s\n' "$corpo_tag" | sed -n 's/^object //p' | head -1)"
+        [ -n "$obj" ] || { SEG_RES=erro; SEG_DIAG="a tag $sl tem um elo sem objeto"; return 0; }
+      done
       alvo_commit="$(git rev-parse --verify --quiet "$sl^{commit}")" \
         || { SEG_RES=erro; SEG_DIAG="a tag $sl não aponta para um commit (objeto não suportado na varredura)"; return 0; } ;;
     *) SEG_RES=erro; SEG_DIAG="objeto $tipo ($sl) não suportado na varredura"; return 0 ;;
