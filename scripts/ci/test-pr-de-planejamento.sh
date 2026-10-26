@@ -799,6 +799,20 @@ e9 "$aux/e9ff" \
 [ "$rc" = 3 ] && cmp -s "$aux/e9ff/docs/entregas/login/ENTREGA.md" "$aux/e9ff-antes.md" \
   && grep -q 'merge linear com múltiplos commits não comprovável' "$aux/e9.out"
 confere 'E9 no GitLab falha fechado no fast-forward ou rebase de varios commits' $?
+# Squash sem commit de merge (merge_commit_sha nulo): o squash_commit_sha nao pode cair na
+# variavel do merge. Antes, o `read` por espaco deslocava o squash para o merge e deixava o
+# squash vazio, e o MR caia na prova de commit unico, que reprova o MR de varios commits.
+repo_e9 "$aux/e9sq"
+sed 's#https://github.com/dono/repo/pull/9#https://gitlab.com/dono/repo/-/merge_requests/11#' "$aux/e9sq/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
+  && mv "$aux/e.tmp" "$aux/e9sq/docs/entregas/login/ENTREGA.md"
+: > "$aux/gh-chamadas"
+e9 "$aux/e9sq" \
+  GLAB_RESPOSTA="{\"iid\": 11, \"state\": \"merged\", \"merge_commit_sha\": null, \"squash_commit_sha\": \"$SHA_FF2\", \"diff_refs\": {\"start_sha\": \"$SHA_OLD\"}}" \
+  GLAB_COMMIT_RESPOSTA="{\"id\": \"$SHA_FF2\", \"parent_ids\": [\"$SHA_B\"]}" \
+  GLAB_COMMITS_RESPOSTA="[{\"id\":\"$SHA_FF1\",\"parent_ids\":[\"$SHA_B\"]},{\"id\":\"$SHA_OTHER\",\"parent_ids\":[\"$SHA_FF1\"]}]"
+(cd "$aux/e9sq" && bash "$leitor" --entrega docs/entregas/login/ENTREGA.md) > "$aux/out" 2>&1
+[ "$rc" = 0 ] && grep -qx "merge_sha=$SHA_FF2" "$aux/out" && grep -qx "base_sha=$SHA_B" "$aux/out"
+confere 'E9 no GitLab: squash sem merge_commit_sha usa o squash, com a base do pai' $?
 # pr_url entre aspas (YAML valido): o servico recebe a URL sem elas
 repo_e9 "$aux/e9q"
 sed 's#^pr_url: \(.*\)$#pr_url: "\1"#' "$aux/e9q/docs/entregas/login/ENTREGA.md" > "$aux/e.tmp" \
