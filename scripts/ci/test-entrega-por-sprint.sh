@@ -391,8 +391,11 @@ $(item planejamento merged $SHA_A humano $SHA_B)
     merge_sha: null
     merge: null
     base_sha: null"
-sed 's#^pr_url: null#pr_url: https://github.com/dono/repo/pull/2#' "$aux/e9/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
-  && mv "$aux/e.tmp" "$aux/e9/docs/entregas/plan/ENTREGA.md"
+# O topo fica com `pr_url: null`, como o --abrir-sprint o deixa: a URL do PR da sprint
+# vive so no item (conselhos#208, M10). Antes, este teste reescrevia o topo e escondia
+# que o E9 lia o lugar errado.
+grep -qx 'pr_url: null' "$aux/e9/docs/entregas/plan/ENTREGA.md"
+confere 'E9: o topo da ENTREGA fica com pr_url null na entrega por sprint' $?
 : > "$aux/gh-chamadas"
 (cd "$aux/e9" && env PATH="$aux/gh-falso:$PATH" GH_CHAMADAS="$aux/gh-chamadas" GH_RESPOSTA="MERGED $SHA_C $SHA_A" bash "$aux/e9.sh") >"$aux/e9.out" 2>&1; e9_rc=$?
 le_repo "$aux/e9"

@@ -601,6 +601,124 @@ espera sem-nnn.ts 'OLHO OBRIGATÓRIO' 'O10:' "$O10TXT" "CRLF: casa sem NNN"
 SAIDA="$(printf 'tests/ui/novo.test.tsx\tD1: x\n' | bash "$CLASSIFICADOR" --base main)"
 espera tests/ui/novo.test.tsx 'DISPENSÁVEL' 'D1:' 'x' "sem a opção, o O10 não existe"
 
+# ---------------------------------------------------------------------------
+echo
+echo "Cenário R — reconciliação, planejamento, predecessores e preflight (login #27/#28)"
+# ---------------------------------------------------------------------------
+# Antes, os quatro caíam em OLHO OBRIGATÓRIO pelo padrão: o classificador não os tinha no
+# catálogo, e o catalogo-de-metodo.sh (que os commita) os tinha. DM-280.
+novo_repo; trabalho_sprintx ft-r
+S=docs/sprintx/features/ft-r; E=docs/entregas/ft-r
+fm planejamento ft-r | escreve "$S/00-PLANEJAMENTO.md"
+fm predecessores ft-r | escreve "$S/00-PREDECESSORES.md"
+printf '# Preflight\n\nok\n' | escreve "$S/PREFLIGHT.md"
+fm reconciliacao_base ft-r | escreve "$E/RECONCILIACAO-BASE-001.md"
+fm reconciliacao_base ft-r | escreve "$E/RECONCILIACAO-BASE-002.md"
+fm reconciliacao_base ft-r | escreve "$E/RECONCILIACAO-BASE-1.md"
+fm entrega ft-r "branch: feature/ft-r" | escreve "$E/RECONCILIACAO-BASE-003.md"
+commit_tudo
+D="$(mktemp -d)"; TMPS="$TMPS $D"
+printf 'src/reconciliado.ts\t001\n' > "$D/reconc.txt"
+SAIDA="$(bash "$CLASSIFICADOR" --raiz "$R" --base main --reconciliados "$D/reconc.txt" <<EOF
+$S/00-PLANEJAMENTO.md
+$S/00-PREDECESSORES.md
+$S/PREFLIGHT.md
+$E/RECONCILIACAO-BASE-001.md
+$E/RECONCILIACAO-BASE-002.md
+$E/RECONCILIACAO-BASE-1.md
+$E/RECONCILIACAO-BASE-003.md
+EOF
+)"
+espera "$S/00-PLANEJAMENTO.md" "LEITURA RÁPIDA" "L4" "planejamento" "00-PLANEJAMENTO.md: L4"
+espera "$S/00-PREDECESSORES.md" "LEITURA RÁPIDA" "L4" "predecessores" "00-PREDECESSORES.md: L4"
+espera "$S/PREFLIGHT.md" "LEITURA RÁPIDA" "L4" "preflight" "PREFLIGHT.md: L4"
+espera "$E/RECONCILIACAO-BASE-001.md" "DISPENSÁVEL" "D4" "prova mecânica" "reconciliação coberta pelo --verificar (001): D4"
+espera "$E/RECONCILIACAO-BASE-002.md" "LEITURA RÁPIDA" "L4" "D4 não provado" "reconciliação sem linha do --verificar (002): L4"
+espera "$E/RECONCILIACAO-BASE-1.md" "OLHO OBRIGATÓRIO" "padrão" "fora da forma RECONCILIACAO-BASE-NNN.md" "nome de reconciliação malformado: padrão"
+espera "$E/RECONCILIACAO-BASE-003.md" "OLHO OBRIGATÓRIO" "padrão" "kind" "reconciliação com kind errado: padrão"
+# sem a lista, o --verificar não rodou (ou não cobriu nada): L4
+SAIDA="$(printf '%s\n' "$E/RECONCILIACAO-BASE-001.md" | bash "$CLASSIFICADOR" --raiz "$R" --base main)"
+espera "$E/RECONCILIACAO-BASE-001.md" "LEITURA RÁPIDA" "L4" "D4 não provado" "reconciliação sem --reconciliados: L4"
+# linha sem caminho não prova nada (reconciliação com arquivos: [] também fica em L4)
+printf '\t001\n' > "$D/sem-caminho.txt"
+SAIDA="$(printf '%s\n' "$E/RECONCILIACAO-BASE-001.md" | bash "$CLASSIFICADOR" --raiz "$R" --base main --reconciliados "$D/sem-caminho.txt" 2>/dev/null)"
+espera "$E/RECONCILIACAO-BASE-001.md" "LEITURA RÁPIDA" "L4" "D4 não provado" "lista com NNN mas sem caminho: L4"
+# critério O vence D4
+SAIDA="$(printf '%s\tO4: altera a regra de cálculo\n' "$E/RECONCILIACAO-BASE-001.md" | bash "$CLASSIFICADOR" --raiz "$R" --base main --reconciliados "$D/reconc.txt")"
+espera "$E/RECONCILIACAO-BASE-001.md" "OLHO OBRIGATÓRIO" "O4" "regra de cálculo" "O vence D4 na reconciliação"
+
+# ---------------------------------------------------------------------------
+echo
+echo "Consistência — tudo o que o catalogo-de-metodo.sh commita, o classificador reconhece"
+# ---------------------------------------------------------------------------
+# Os dois catálogos divergiram uma vez (login #27/#28): o checkpoint commitava artefato que o
+# E3 mandava para OLHO OBRIGATÓRIO pelo padrão. Aqui a classificação real roda sobre cada
+# caminho que o catalogo_metodo emite, por origem e checkpoint, com o frontmatter que o
+# próprio catálogo do classificador declara. Nenhum pode cair no padrão.
+CATMET="$REPO/.claude/skills/mergex/scripts/catalogo-de-metodo.sh"
+CATCLS="$(bash "$CLASSIFICADOR" --catalogo)"
+kind_de() { # <origem> <chave> — o kind que o catálogo do classificador declara, ou vazio
+  printf '%s\n' "$CATCLS" | awk -F'|' -v o="$1" -v c="$2" '$1 == o && $2 == c { print $3; exit }'
+}
+for origem in sprintx runx; do
+  novo_repo
+  id="cons-$origem"
+  if [ "$origem" = sprintx ]; then trabalho_sprintx "$id"; P="docs/sprintx/features/$id"; else trabalho_runx "$id"; P="docs/manutencao/$id"; fi
+  TOOL=$origem fm entrega "$id" "branch: $(git -C "$R" branch --show-current)" "entregue_por: mergex" \
+    "reconciliacoes:" "  - arquivo: RECONCILIACAO-BASE-001.md" | escreve "docs/entregas/$id/ENTREGA.md"
+  mkdir -p "$R/$P/sprint-01"
+  TOOL=$origem fm base_indice "$id" "areas: [dominio.md]" | escreve "$P/base/00-INDICE.md"
+  printf '# dominio\n' | escreve "$P/base/dominio.md"
+  for ck in pre-e2 reconciliacao-base predecessores retomar-v9-predecessores pre-e6 e8; do
+    lista="$( (. "$CATMET" && catalogo_metodo "$R" "$origem" "$id" "$P" "$ck") 2>/dev/null)"; rc=$?
+    if [ "$origem" = runx ] && { [ "$ck" = predecessores ] || [ "$ck" = retomar-v9-predecessores ]; }; then
+      [ "$rc" != 0 ] && { OK=$((OK+1)); echo "  ok    runx recusa o checkpoint $ck (exclusivo da sprintx)"; } \
+        || { FALHOU=$((FALHOU+1)); echo "  FALHA runx aceitou o checkpoint $ck"; }
+      continue
+    fi
+    [ "$rc" = 0 ] || { FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_metodo $origem $ck falhou"; continue; }
+    while IFS= read -r c; do
+      [ -n "$c" ] || continue
+      [ -e "$R/$c" ] && continue
+      case "$c" in
+        docs/entregas/"$id"/RECONCILIACAO-BASE-*) chave="docs/entregas/<trabalho_id>/RECONCILIACAO-BASE-NNN.md"; o=mergex ;;
+        docs/entregas/"$id"/*) chave="docs/entregas/<trabalho_id>/${c#docs/entregas/$id/}"; o=mergex ;;
+        docs/sprintx/estimativas/HISTORICO.md) chave="$c"; o=$origem ;;
+        "$P"/sprint-*/*) chave="sprint-NN/${c##*/}"; o=$origem ;;
+        "$P"/base/00-*) chave="base/${c##*/}"; o=$origem ;;
+        "$P"/base/*) chave="base/<area>.md"; o=$origem ;;
+        *) chave="${c#$P/}"; o=$origem ;;
+      esac
+      k="$(kind_de "$o" "$chave" | cut -d, -f1)"
+      case "$k" in
+        ''|-) printf '# %s\n' "${c##*/}" | escreve "$c" ;;
+        estimativa_historico) TOOL=$origem fm "$k" null | escreve "$c" ;;
+        entrega) ;;
+        *) TOOL=$origem fm "$k" "$id" | escreve "$c" ;;
+      esac
+    done <<EOF
+$lista
+EOF
+  done
+  commit_tudo
+  printf 'src/x.ts\t001\n' > "$R/.reconc"
+  todos="$(for ck in pre-e2 reconciliacao-base predecessores retomar-v9-predecessores pre-e6 e8; do
+    (. "$CATMET" && catalogo_metodo "$R" "$origem" "$id" "$P" "$ck") 2>/dev/null; done | sort -u)"
+  SAIDA="$(printf '%s\n' "$todos" | bash "$CLASSIFICADOR" --raiz "$R" --base main --reconciliados "$R/.reconc")"
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    [ "$c" = src/x.ts ] && continue
+    l="$(printf '%s\n' "$SAIDA" | awk -F'\t' -v c="$c" '$1 == c { print; exit }')"
+    case "$l" in
+      *"$T"'OLHO OBRIGATÓRIO'"$T"*) FALHOU=$((FALHOU+1)); printf '  FALHA %s (%s): %s\n' "$c" "$origem" "$(printf '%s' "$l" | cut -f3)" ;;
+      '') FALHOU=$((FALHOU+1)); printf '  FALHA %s (%s): ausente da saída\n' "$c" "$origem" ;;
+      *) OK=$((OK+1)); printf '  ok    %s (%s) — %s\n' "${c#$P/}" "$origem" "$(printf '%s' "$l" | cut -f2)" ;;
+    esac
+  done <<EOF
+$todos
+EOF
+done
+
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
