@@ -22,14 +22,15 @@
 
 eh_placeholder() {
   local v="$1"
-  case "$v" in
-    *'${'*|*'{{'*|*\<*\>*) return 0 ;;
-  esac
   # O valor depois do primeiro `:` ou `=` (na credencial em atribuição o candidato
   # traz a chave junto), sem aspas: variável de shell sem chaves, formatação e
   # máscara são referência, não valor (conselhos#210, P8).
   local cauda="${v#*[:=]}"
   cauda="${cauda#"${cauda%%[![:space:]\'\"]*}"}"; cauda="${cauda%[\'\"]}"
+  # `${...}`, `{{...}}` e `<...>` só são referência quando são o valor inteiro: um
+  # `${X}` no meio de uma senha real não a dispensa (CodeAnt no mergex#54).
+  printf '%s\n%s\n' "$v" "$cauda" \
+    | grep -aEq -e '^(\$\{[^}]*\}|\{\{[^}]*\}\}|<[^<>]*>)$' && return 0
   case "$cauda" in '%s'|'%('*')s') return 0 ;; esac
   printf '%s' "$cauda" | grep -aEq -e '^(\$[A-Za-z_][A-Za-z0-9_]*|[*]+|[?]+)$' && return 0
   # Palavras reservadas só dispensam o valor inteiro, não uma credencial real

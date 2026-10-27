@@ -195,6 +195,10 @@ caso "URL com credencial" comum/sem-segredo.sh "$(write_json "$URL")" 2
 # Placeholder no usuario nao dispensa a senha real da URL (conselhos#210, P5).
 caso "URL com usuario \${...} e senha real: barra" comum/sem-segredo.sh "$(write_json "$(printf 'postgres://${DB_USER}:%s@db/x' 's3nh4sintetica')")" 2
 caso "URL com senha \${...}: passa"                comum/sem-segredo.sh "$(write_json 'postgres://u:${DB_PASS}@db/x')" 0
+# So o valor inteiro `${...}`, `{{...}}` ou `<...>` e placeholder; um `${` no meio de uma
+# senha real nao dispensa o resto (CodeAnt no mergex#54).
+caso "URL com senha real contendo \${...}: barra"  comum/sem-segredo.sh "$(write_json "$(printf 'postgres://u:%s@db/x' 's3nh4${X}sintetica')")" 2
+caso "URL com senha <...>: passa"                  comum/sem-segredo.sh "$(write_json 'postgres://u:<senha>@db/x')" 0
 # A senha com simbolo tambem e credencial (conselhos#210, P8).
 caso "senha comecando com ! barra"       comum/sem-segredo.sh "$(write_json "$(printf 'password: !Abc%s' 'defg123')")" 2
 caso "token com @ barra"                 comum/sem-segredo.sh "$(write_json "$(printf 'token=@bcd%s' '1234efgh')")" 2
@@ -337,6 +341,51 @@ printf '*.txt -diff\n' > "$SEG_T/.gitattributes"; seg_git add .gitattributes; se
 printf 'CHAVE=%s\n' "$SK" > "$SEG_T/nota.txt"; seg_git add nota.txt
 caso "segredo em arquivo -diff: barra"            comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
 seg_git rm -q --cached nota.txt; rm -f "$SEG_T/nota.txt"; seg_git reset -q --hard HEAD~1
+# Revisao do CodeAnt no mergex#54. Opcao global entre aspas com espaco (`git -C 'a b'
+# commit`) tambem e commit; o repositorio varrido e o que o comando atinge (`-C`, `cd`),
+# nao so o do cwd do evento; o `-F` relativo vale para o diretorio em que o Git roda.
+mkdir -p "$SEG_T/a b"
+printf 'antes\n%s\ndepois\n' "$SK" > "$SEG_T/chave.pem"; seg_git add chave.pem
+caso "git -C 'a b' commit (aspas com espaco): barra" comum/sem-segredo.sh "$(bash_json "git -C 'a b' commit -m x")" 2
+caso "git -C \"a b\" commit (aspas duplas): barra"   comum/sem-segredo.sh "$(bash_json 'git -C "a b" commit -m x')" 2
+seg_git reset -q --hard
+OUTRO_T="$(mktemp -d)"; git -C "$OUTRO_T" init -q -b feature/outro
+printf 'CHAVE=%s\n' "$SK" > "$OUTRO_T/k.env"; git -C "$OUTRO_T" add k.env
+caso "git -C <outro repo> commit com segredo la: barra" comum/sem-segredo.sh "$(bash_json "git -C $OUTRO_T commit -m x")" 2
+caso "cd <outro repo> && git commit: barra"             comum/sem-segredo.sh "$(bash_json "cd $OUTRO_T && git commit -m x")" 2
+caso "cd sem alvo resolvivel && git commit: barra"      comum/sem-segredo.sh "$(bash_json 'cd "$DESTINO" && git commit -m x')" 2
+caso "cd <repo limpo> && git commit: passa"             comum/sem-segredo.sh "$(bash_json "cd '$SEG_T/a b' && git commit -m x")" 0
+caso "cd com escape de shell && git commit: barra"      comum/sem-segredo.sh "$(bash_json 'cd a\ b && git commit -m x')" 2
+caso "GIT_INDEX_FILE=... git commit: barra"              comum/sem-segredo.sh "$(bash_json 'GIT_INDEX_FILE=/tmp/i git commit -m x')" 2
+caso "git --work-tree=. commit: barra"                   comum/sem-segredo.sh "$(bash_json 'git --work-tree=. commit -m x')" 2
+caso "git -c core.worktree=. commit: barra"              comum/sem-segredo.sh "$(bash_json 'git -c core.worktree=. commit -m x')" 2
+# Chave de configuracao nao diferencia maiusculas, e ha outras portas para ela.
+caso "git -c core.WorkTree=. commit: barra"              comum/sem-segredo.sh "$(bash_json 'git -c core.WorkTree=. commit -m x')" 2
+caso "GIT_CONFIG_COUNT=1 ... git commit: barra"          comum/sem-segredo.sh "$(bash_json 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=. git commit -m x')" 2
+caso "git -c include.path=x commit: barra"               comum/sem-segredo.sh "$(bash_json 'git -c include.path=/tmp/x commit -m x')" 2
+caso "git --config-env=... commit: barra"                comum/sem-segredo.sh "$(bash_json 'git --config-env=core.worktree=W commit -m x')" 2
+# `~` entre aspas e literal no shell: o diretorio `~` dentro do cwd, nao o $HOME.
+mkdir -p "$SEG_T/~"; git -C "$SEG_T/~" init -q -b feature/til
+printf 'CHAVE=%s\n' "$SK" > "$SEG_T/~/k.env"; git -C "$SEG_T/~" add k.env
+caso "git -C '~' commit (til literal): barra"            comum/sem-segredo.sh "$(bash_json "git -C '~' commit -m x")" 2
+rm -rf "$SEG_T/~"
+rm -rf "$OUTRO_T"
+printf 'mensagem comum\n' > "$SEG_T/msg.txt"; printf 'mensagem com %s\n' "$SK" > "$SEG_T/a b/msg.txt"
+caso "cd sub && git commit -F msg.txt (o do sub): barra" comum/sem-segredo.sh "$(bash_json "cd 'a b' && git commit -F msg.txt")" 2
+caso "git -C sub commit -F msg.txt (o do sub): barra"    comum/sem-segredo.sh "$(bash_json "git -C 'a b' commit -F msg.txt")" 2
+rm -f "$SEG_T/msg.txt" "$SEG_T/a b/msg.txt"; rmdir "$SEG_T/a b"
+# O link nao e seguido, mas o texto do alvo vira o blob: e varrido.
+ln -s "CHAVE=$SK" "$SEG_T/link-alvo"
+caso "link nao rastreado com segredo no alvo: barra" comum/sem-segredo.sh "$(bash_json 'git add -A && git commit -m x')" 2
+rm -f "$SEG_T/link-alvo"
+# Ignorado so entra no commit com `add -f`: so entao e varrido.
+printf 'ignorado.env\n.gitignore\n' > "$SEG_T/.gitignore"; printf 'CHAVE=%s\n' "$SK" > "$SEG_T/ignorado.env"
+caso "git add -f ignorado && git commit: barra"     comum/sem-segredo.sh "$(bash_json 'git add -f ignorado.env && git commit -m x')" 2
+caso "git add --force ignorado && git commit: barra" comum/sem-segredo.sh "$(bash_json 'git add --force ignorado.env && git commit -m x')" 2
+caso "git add -fA && git commit: barra"             comum/sem-segredo.sh "$(bash_json 'git add -fA && git commit -m x')" 2
+caso "git add -Af && git commit: barra"             comum/sem-segredo.sh "$(bash_json 'git add -Af && git commit -m x')" 2
+caso "git add -A com ignorado (sem -f): passa"      comum/sem-segredo.sh "$(bash_json 'git add -A && git commit -m x')" 0
+rm -f "$SEG_T/.gitignore" "$SEG_T/ignorado.env"
 HOOK_CWD="$HOOK_CWD_ANTES"; rm -rf "$SEG_T"
 # Prefixo de chave no meio de um identificador nao e chave. Falso positivo do
 # conselho #204: "ta" + "sk-fora-do-plano-..." (nome de um caso da bancada da

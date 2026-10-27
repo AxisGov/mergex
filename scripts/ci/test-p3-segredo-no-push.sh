@@ -30,9 +30,11 @@ commita() { g add -A && g commit -q -m "${1:-x}"; }
 # empurra <ref local> <ref remota> [VAR=valor...] — o protocolo do pre-push, como o Git o entrega
 empurra() {
   local rl="$1" rr="$2" sl sr; shift 2
-  sl="$(g rev-parse "$rl")"; sr="$(g rev-parse --verify --quiet "refs/remotes/origin/${rr#refs/heads/}" || echo $ZERO)"
+  # O SHA remoto é o que o servidor anuncia, como o Git o entrega ao hook — não a ref
+  # de rastreio, que é cache local (CodeAnt no mergex#54).
+  sl="$(g rev-parse "$rl")"; sr="$(g ls-remote origin "$rr" | awk 'NR == 1 { print $1 }')"; sr="${sr:-$ZERO}"
   printf '%s %s %s %s\n' "$rl" "$sl" "$rr" "$sr" \
-    | (cd "$R" && env "$@" bash "$PUSH" --pre-push origin "$aux/x.git") > "$aux/out" 2> "$aux/err"; rc=$?
+    | (cd "$R" && env "$@" bash "$PUSH" --pre-push origin "${URL_PUSH:-$(g remote get-url origin)}") > "$aux/out" 2> "$aux/err"; rc=$?
 }
 modo() { mkdir -p "$R/.expx"; printf '{"expx_hooks":1,"hooks":{"sem-segredo":{"modo":"%s"}}}\n' "$1" > "$R/.expx/hooks.json"; }
 diz() { grep -q -- "$1" "$aux/err"; }
@@ -95,6 +97,33 @@ repo exclusao
 printf 'refs/heads/velha %s refs/heads/velha %s\n' $ZERO "$(g rev-parse main)" \
   | (cd "$R" && bash "$PUSH" --pre-push origin "$aux/x.git") > "$aux/out" 2> "$aux/err"; rc=$?
 [ "$rc" = 0 ] && passa 'exclusao de ref: nada a varrer, passa' || quebra "exclusao: $(mostra)"
+
+echo '== o que o servidor ja tem (nao a ref de rastreio) =='
+# A ref de rastreio e cache local: adiantada sobre o servidor (ou de outra URL), ela
+# esconderia um commit que o servidor nao tem (CodeAnt no mergex#54).
+repo adiantada; printf 'K=%s\n' "$SK" > "$R/a.txt"; commita; g update-ref refs/remotes/origin/main HEAD
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && diz 'chave de API' && passa 'ref de rastreio adiantada sobre o servidor: barra' || quebra "adiantada: $(mostra)"
+repo adiantada-nova; g checkout -q -b feature/y; printf 'K=%s\n' "$SK" > "$R/a.txt"; commita
+g update-ref refs/remotes/origin/feature/y HEAD
+empurra refs/heads/feature/y refs/heads/feature/y
+[ "$rc" = 1 ] && passa 'branch nova com rastreio falso apontando para ela: barra' || quebra "adiantada nova: $(mostra)"
+# Branch nova num repositorio maduro: o que o servidor anuncia delimita o intervalo,
+# sem ref de rastreio nenhuma, e o limite de 300 nao e atingido pelo que ja e dele.
+repo maduro; for i in $(seq 1 305); do g commit -q --allow-empty -m "c$i"; done; g push -q origin main 2>/dev/null
+for r in $(g for-each-ref --format='%(refname)' refs/remotes); do g update-ref -d "$r"; done
+g checkout -q -b feature/z; printf 'ok\n' > "$R/z.txt"; commita
+empurra refs/heads/feature/z refs/heads/feature/z
+[ "$rc" = 0 ] && passa 'branch nova limpa sobre 305 commits ja publicados, sem rastreio: passa' || quebra "maduro: $(mostra)"
+URL_PUSH="$aux/nao-existe.git" empurra refs/heads/feature/z refs/heads/feature/z
+[ "$rc" = 1 ] && diz 'ls-remote' && passa 'consulta ao servidor que falha: barra (falha fechada)' || quebra "ls-remote: $(mostra)"
+
+# A prova funcional do E0 empurra commits soltos sobre o HEAD para `file:///dev/null`,
+# que nao publica nada: o controle positivo tem de passar mesmo num repositorio maduro.
+c_prova="$(g commit-tree "$(g mktree </dev/null)" -p HEAD -m prova)"
+printf 'refs/heads/mergex-prova-livre-1 %s refs/heads/mergex-prova-livre-1 %s\n' "$c_prova" $ZERO \
+  | (cd "$R" && bash "$PUSH" --pre-push prova-mergex file:///dev/null) > "$aux/out" 2> "$aux/err"; rc=$?
+[ "$rc" = 0 ] && passa 'prova do E0 (file:///dev/null) sobre 306 commits: passa' || quebra "prova E0: $(mostra)"
 
 echo '== modo, limite e sinal =='
 repo aviso; modo aviso; printf 'K=%s\n' "$SK" > "$R/a.txt"; commita

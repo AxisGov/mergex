@@ -59,6 +59,7 @@ uso() {
 [ "$#" -eq 3 ] || uso 'esperava --pre-push <remoto> <url>'
 [ "$1" = --pre-push ] || uso "opção desconhecida: $1"
 REMOTO="$2"
+REMOTO_URL="$3"
 
 diag() { printf 'mergex pre-push: %s\n' "$1" >&2; }
 AMBIENTE='erro de ambiente (erro_ambiente): a validade do portão não pôde ser avaliada'
@@ -138,12 +139,35 @@ _seg_commit() {
   fi
   [ "${PIPESTATUS[0]}" = 0 ]
 }
+# _seg_anunciados — "^<sha>" de cada ref (branch e tag) que o servidor anuncia e que
+# existe aqui, em $TMP_DIR/anunciados; uma consulta por push. Falha: devolve 1.
+SEG_ANUNC=""
+_seg_anunciados() {
+  if [ -z "$SEG_ANUNC" ]; then
+    local brutos
+    if brutos="$(git ls-remote --heads --tags "${REMOTO_URL:-$REMOTO}" 2>/dev/null)"; then
+      printf '%s\n' "$brutos" | awk 'NF { print $1 "^{commit}" }' \
+        | git cat-file --batch-check='%(objectname)' 2>/dev/null \
+        | awk '$2 != "missing" && NF == 1 { print "^" $1 }' | sort -u > "$TMP_DIR/anunciados" \
+        && SEG_ANUNC=ok || SEG_ANUNC=falhou
+    else
+      SEG_ANUNC=falhou
+    fi
+  fi
+  [ "$SEG_ANUNC" = ok ]
+}
 # segredo_da_ref <ref remota> <sha local> <sha remoto> — SEG_RES: limpo | achou | erro | grande;
 # SEG_DIAG: o que dizer
 segredo_da_ref() {
   local rr="$1" sl="$2" sr="$3" tipo alvo_commit lista n c curto texto_tag="" achados_ref=""
   SEG_RES=limpo; SEG_DIAG=""
   _seg_nulo "$sl" && return 0
+  # `file:///dev/null` não é repositório: o push não publica nada ali (o Git
+  # falha depois do hook), e não há servidor a consultar. É o destino da prova
+  # funcional do E0 (ativacao-pre-push.sh), que sobe commits soltos sobre o HEAD:
+  # sem isto, a consulta falharia e barraria o controle positivo — e, antes da
+  # consulta, a história inteira do HEAD batia o limite num repositório maduro.
+  [ "${REMOTO_URL:-}" = file:///dev/null ] && return 0
   [ "$SEG_TABELA_OK" = 1 ] || { SEG_RES=erro; SEG_DIAG="a tabela de segredo (segredo-tabela.sh) não está disponível ao lado do portão"; return 0; }
   tipo="$(git cat-file -t "$sl" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="o objeto $sl não se lê"; return 0; }
   case "$tipo" in
@@ -165,9 +189,21 @@ $corpo_tag"
         || { SEG_RES=erro; SEG_DIAG="a tag $sl não aponta para um commit (objeto não suportado na varredura)"; return 0; } ;;
     *) SEG_RES=erro; SEG_DIAG="objeto $tipo ($sl) não suportado na varredura"; return 0 ;;
   esac
-  set -- "$alvo_commit" --not --remotes="$REMOTO"
-  if ! _seg_nulo "$sr" && git cat-file -e "$sr^{commit}" 2>/dev/null; then set -- "$@" "^$sr"; fi
-  lista="$(git rev-list "$@" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="o intervalo publicado não se lê (rev-list)"; return 0; }
+  # O que o servidor já tem, e não entra: o SHA remoto do protocolo, quando há um
+  # e ele existe aqui. As refs de rastreio (`refs/remotes/<remoto>`) não contam:
+  # são cache local, podem estar velhas ou vir de outra URL, e esconderiam commit
+  # que o servidor atual não tem (CodeAnt no mergex#54). Na branch nova (SHA remoto
+  # zero), ou com um SHA remoto que não existe aqui, vale o que o servidor anuncia
+  # agora (`ls-remote` na URL do push), filtrado pelo que existe aqui. Consulta
+  # que falha não libera. Nada anunciado aqui: toda a ancestralidade é varrida.
+  : > "$TMP_DIR/excluir"
+  if ! _seg_nulo "$sr" && git cat-file -e "$sr^{commit}" 2>/dev/null; then
+    printf '^%s\n' "$sr" > "$TMP_DIR/excluir"
+  else
+    _seg_anunciados || { SEG_RES=erro; SEG_DIAG="a consulta ao servidor das refs que ele já tem (ls-remote) falhou: sem ela, o intervalo publicado não se delimita"; return 0; }
+    cat "$TMP_DIR/anunciados" > "$TMP_DIR/excluir"
+  fi
+  lista="$(git rev-list --stdin "$alvo_commit" < "$TMP_DIR/excluir" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="o intervalo publicado não se lê (rev-list)"; return 0; }
   n="$(printf '%s' "$lista" | grep -c .)"
   if [ "$n" -gt "$SEG_LIMITE" ]; then
     SEG_RES=grande
