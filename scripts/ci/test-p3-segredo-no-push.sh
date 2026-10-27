@@ -71,6 +71,14 @@ repo nova; g checkout -q -b feature/x; printf 'K=%s\n' "$SK" > "$R/a.txt"; commi
 empurra refs/heads/feature/x refs/heads/feature/x
 [ "$rc" = 1 ] && passa 'branch nova (remoto sem a ref): barra' || quebra "branch nova: $(mostra)"
 
+repo referencia; printf 'const u = { pass%s: hashedPassword, nome }\n' word > "$R/a.ts"; commita
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 0 ] && passa 'referencia de codigo seguida de virgula: passa (DM-283)' || quebra "referencia: $(mostra)"
+
+repo referencia-fim; printf 'pass%s: SuperSecret\n' word > "$R/a.yml"; commita
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && diz 'credencial' && passa 'mesmo valor no fim da linha: barra' || quebra "referencia no fim: $(mostra)"
+
 echo '== merge, tag e exclusao =='
 repo evil; g checkout -q -b lado; printf 'lado\n' > "$R/l.txt"; commita lado
 g checkout -q main; printf 'main\n' > "$R/m.txt"; commita main
