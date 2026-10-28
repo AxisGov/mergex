@@ -199,6 +199,11 @@ caso "URL com senha \${...}: passa"                comum/sem-segredo.sh "$(write
 # senha real nao dispensa o resto (CodeAnt no mergex#54).
 caso "URL com senha real contendo \${...}: barra"  comum/sem-segredo.sh "$(write_json "$(printf 'postgres://u:%s@db/x' 's3nh4${X}sintetica')")" 2
 caso "URL com senha <...>: passa"                  comum/sem-segredo.sh "$(write_json 'postgres://u:<senha>@db/x')" 0
+# Na senha da URL, so o valor inteiro e placeholder: o corte no primeiro `:`/`=` deixava
+# `S:placeholder` e `S=placeholder` passarem (A1 e A5 do CodeAnt no conselhos#211).
+caso "URL com senha S:placeholder barra"   comum/sem-segredo.sh "$(write_json "$(printf 'postgres://u:%s@db/x' 's3nh4sintetica:placeholder')")" 2
+caso "URL com senha S=placeholder barra"   comum/sem-segredo.sh "$(write_json "$(printf 'postgres://u:%s@db/x' 's3nh4sintetica=placeholder')")" 2
+caso "URL com senha changeme inteira: passa" comum/sem-segredo.sh "$(write_json 'postgres://u:changeme@db/x')" 0
 # A senha com simbolo tambem e credencial (conselhos#210, P8).
 caso "senha comecando com ! barra"       comum/sem-segredo.sh "$(write_json "$(printf 'password: !Abc%s' 'defg123')")" 2
 caso "token com @ barra"                 comum/sem-segredo.sh "$(write_json "$(printf 'token=@bcd%s' '1234efgh')")" 2
@@ -286,6 +291,13 @@ caso "valor sem digito seguido de ( passa (limite)" comum/sem-segredo.sh "$(writ
 B64="$(printf 'YWJjMTIzNDU2Nzg5MA')=="   # base64 com padding: o `=` do valor nao e o da atribuicao
 caso "base64 com = seguido de ( barra"     comum/sem-segredo.sh "$(write_json "token: $B64()")" 2
 caso "token literal sem aspas barra"      comum/sem-segredo.sh "$(write_json "TOKEN=$(printf 'abcd1234efgh5678')")" 2
+# `:` no valor sem aspa: o casamento parava nele, e `password=ab:S` passava (A2 do CodeAnt
+# no conselhos#211). Uma URL como valor passa a ser acusada: falso positivo assumido.
+caso "senha com : depois de dois caracteres barra" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s=ab:%s' word 's3nh4sintetica')")" 2
+caso "valor com : seguido de ( barra"     comum/sem-segredo.sh "$(write_json "$(printf 'token: ab:%s()' 's3nh4sintetica9')")" 2
+caso "chamada com S:placeholder( barra"   comum/sem-segredo.sh "$(write_json "$(printf 'token=%s:placeholder(' 's3nh4sintetica9')")" 2
+caso "token apontando para URL barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'token=%s' 'https://host.example/x')")" 2
+caso "caminho Token::Identificador passa"  comum/sem-segredo.sh "$(write_json 'let k = Token::Identificador;')" 0
 caso "palavra reservada colada em valor real barra" comum/sem-segredo.sh "$(write_json "k=sk-example-$(printf 'abcdef1234567890')")" 2
 caso "comando comum"        comum/sem-segredo.sh "$(bash_json 'npm test')" 0
 # SIGPIPE sob pipefail (rodada extra da revisao): a saida antecipada

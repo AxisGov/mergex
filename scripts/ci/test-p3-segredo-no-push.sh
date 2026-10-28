@@ -176,6 +176,21 @@ printf 'refs/heads/nova %s refs/heads/nova %s\n' "$sl" "$ZERO" \
 [ "$rc" = 1 ] && diz 'git fetch' && ! diz 's3nh4Xpto' \
   && passa 'push para URL com credencial: o diagnostico nao repete a URL' || quebra "push para URL: $(mostra)"
 
+echo '== cada commit e lido uma vez so =='
+# Com achado, a segunda fase dizia onde relendo cada commit no Git: log, rev-list e diff
+# de novo, ~1.800 processos em 300 commits (A4 do CodeAnt no conselhos#211). Agora ela le
+# o que a primeira fase guardou. Um wrapper no PATH conta as chamadas, so durante o portao.
+repo umavez
+for i in $(seq 1 12); do printf '%s\n' "$i" > "$R/n.txt"; commita "c$i"; done
+printf 'K=%s\n' "$SK" > "$R/a.txt"; commita
+mkdir -p "$aux/bin"; GIT_REAL="$(command -v git)"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/chamadas"\nexec "%s" "$@"\n' "$aux" "$GIT_REAL" > "$aux/bin/git"
+chmod +x "$aux/bin/git"; : > "$aux/chamadas"
+empurra refs/heads/main refs/heads/main PATH="$aux/bin:$PATH"
+n_log="$(grep -c '^log -1 --format=%B' "$aux/chamadas")"; n_par="$(grep -c '^rev-list --parents' "$aux/chamadas")"
+[ "$rc" = 1 ] && diz 'chave de API' && [ "$n_log" = 13 ] && [ "$n_par" = 13 ] \
+  && passa 'com achado, 13 commits: uma leitura de cada no Git' || quebra "uma vez: log $n_log, parents $n_par (esperava 13) | $(mostra)"
+
 echo '== falha fechada =='
 copia="$aux/instalacao"; mkdir -p "$copia/.claude/skills/mergex" "$copia/.claude/hooks"
 cp -R "$raiz/.claude/skills/mergex/scripts" "$copia/.claude/skills/mergex/"
