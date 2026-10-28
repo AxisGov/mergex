@@ -415,6 +415,8 @@ grep -q '`prs`' "$aux/e9-proprio.txt"
 confere '09-revisao: a marcacao de trabalho proprio olha os itens de prs' $?
 ! grep -q 'PR atual sem pr_url' "$ref/09-revisao.md" && grep -q 'PR atual sem \$campo_url' "$ref/09-revisao.md"
 confere '09-revisao: a mensagem nomeia o campo lido (atual_url ou planejamento_url)' $?
+grep -F '| Aberto pela mergex nesta máquina |' "$ref/09-revisao.md" | grep -q '`prs`'
+confere '09-revisao: a tabela do passo diz que a marcacao olha os itens de prs' $?
 grep -q 'atual_url' "$ref/10-estado.md"
 confere '10-estado: o PR do trabalho atual pela atual_url na entrega por sprint' $?
 awk '/^### O PR já existe/ || /PR já existe para esta branch/ { a = 1 } a' "$ref/07-abertura-pr.md" > "$aux/e7.txt"

@@ -160,6 +160,13 @@ repo limite-nova; g checkout -q -b nova; for i in $(seq 1 301); do g commit -q -
 empurra refs/heads/nova refs/heads/nova
 [ "$rc" = 1 ] && diz 'grande demais' && diz 'git fetch origin' \
   && passa 'acima do limite em branch nova: manda rodar git fetch' || quebra "limite em branch nova: $(mostra)"
+# Push direto para uma URL: o Git passa a URL como nome do remoto, e ela pode trazer credencial.
+# O diagnostico manda buscar sem repetir a URL (revisao do Codex).
+sl="$(g rev-parse refs/heads/nova)"
+printf 'refs/heads/nova %s refs/heads/nova %s\n' "$sl" "$ZERO" \
+  | (cd "$R" && bash "$PUSH" --pre-push "https://u:$(printf 's3nh4%s' Xpto)@exemplo.invalid/r.git" "$(g remote get-url origin)") > "$aux/out" 2> "$aux/err"; rc=$?
+[ "$rc" = 1 ] && diz 'git fetch' && ! diz 's3nh4Xpto' \
+  && passa 'push para URL com credencial: o diagnostico nao repete a URL' || quebra "push para URL: $(mostra)"
 
 echo '== falha fechada =='
 copia="$aux/instalacao"; mkdir -p "$copia/.claude/skills/mergex" "$copia/.claude/hooks"

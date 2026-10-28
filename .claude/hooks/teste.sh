@@ -253,6 +253,20 @@ caso "senha entre aspas com virgula barra"   comum/sem-segredo.sh "$(write_json 
 caso "senha entre aspas simples com ; e : barra" comum/sem-segredo.sh "$(write_json "$(printf "sen%s = 'a,b;c:d=e'" ha)")" 2
 caso "placeholder <...> entre aspas com virgula passa" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: "<senha,nova>"' word)")" 0
 caso "prosa entre aspas com espaco passa"    comum/sem-segredo.sh "$(write_json "$(printf 'sen%s: "nao use a mesma senha"' ha)")" 0
+# Revisao do Codex: aspa que nao fecha, aspas tipograficas, chave entre aspas (JSON) e o literal
+# entre aspas seguido de `(`, que nao e chamada de funcao.
+caso "senha entre aspas que nao fecham barra"  comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: "abc,defgh' word)")" 2
+caso "senha entre aspas tipograficas barra"    comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: \xe2\x80\x9cabc,defgh\xe2\x80\x9d' word)")" 2
+caso "chave JSON entre aspas barra"            comum/sem-segredo.sh "$(write_json "$(printf '{"pass%s": "abc,defgh"}' word)")" 2
+caso "substituicao de comando passa"         comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="$(cat /run/secrets/x)"' HA)")" 0
+caso "substituicao por crase passa"          comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="`cat /run/secrets/x`"' HA)")" 0
+caso "chave JSON com placeholder passa"        comum/sem-segredo.sh "$(write_json "$(printf '{"pass%s": "<senha>"}' word)")" 0
+caso "literal entre aspas seguido de ( barra"  comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: "abc,defgh"(x)' word)")" 2
+# A mascara mostra os quatro ultimos caracteres do VALOR, sem a aspa de fechamento.
+MASC_T="$(printf 'pass%s: "abc,defgh"' word)"
+MASC="$(bash -c '. "$1"; ALVO="$2"; segredo_varrer; printf "%s" "$ACHADOS"' _ "$H/../skills/mergex/scripts/segredo-tabela.sh" "$MASC_T")"
+case "$MASC" in *'…efgh '*) OK=$((OK+1)); printf '  ok    %s\n' "mascara sem a aspa final" ;;
+  *) FALHOU=$((FALHOU+1)); printf '  FALHA %s (%s)\n' "mascara sem a aspa final" "$MASC" ;; esac
 # Um achado por credencial: a forma entre aspas e a sem aspas nao contam duas vezes.
 UMA_T="$(printf 'pass%s: "abcdefgh123"' word)"
 UMA_N="$(bash -c '. "$1"; ALVO="$2"; segredo_varrer; printf "%s" "$ACHADOS" | grep -c "credencial"' _ "$H/../skills/mergex/scripts/segredo-tabela.sh" "$UMA_T")"

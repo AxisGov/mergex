@@ -130,6 +130,7 @@ cat > "$aux/bin/gh" <<'EOF'
 if [ "$1 $2" = "pr view" ]; then printf '%s\n' "$*" >> "$ARGS_GH.view"; echo https://github.com/acme/login/pull/7; exit 0; fi
 printf '%s\n' "$@" > "$ARGS_GH"
 if [ "${GH_JA_EXISTE:-}" = 1 ]; then echo 'a pull request for branch "feature/x" into branch "main" already exists' >&2; exit 1; fi
+if [ "${GH_OUTRA_FALHA:-}" = 1 ]; then echo 'HTTP 403: Resource not accessible by integration' >&2; exit 1; fi
 EOF
 cat > "$aux/bin/glab" <<'EOF'
 #!/usr/bin/env bash
@@ -288,6 +289,13 @@ GH_JA_EXISTE=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
   && grep -q 'https://github.com/acme/login/pull/7' "$aux/p2.out" \
   && passa 'PR ja existe: o bloco do create consulta o destino com head/destino dele e retoma a URL' \
   || quebra "PR ja existe: rc $rc view '$(cat "$aux/args-gh.view" 2>/dev/null)' $(tr '\n' '|' < "$aux/p2.out")"
+# Outra falha (rede, permissao, base): nunca vira consulta ao PR existente, e o erro literal do
+# create chega ao passo 3 (revisao do Codex).
+rm -f "$aux/args-gh.view"
+GH_OUTRA_FALHA=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
+[ "$rc" != 0 ] && [ ! -e "$aux/args-gh.view" ] && grep -q 'HTTP 403: Resource not accessible' "$aux/p2.out" \
+  && passa 'outra falha do create: nao consulta o existente e mostra o erro literal' \
+  || quebra "outra falha do create: rc $rc view '$(cat "$aux/args-gh.view" 2>/dev/null)' $(tr '\n' '|' < "$aux/p2.out")"
 rm -f "$aux/args-gh.view"
 passo2 "$aux/existe" 'gh pr create'; rc=$?
 [ "$rc" = 0 ] && [ ! -e "$aux/args-gh.view" ] && passa 'PR criado: nao consulta o existente' || quebra "PR criado consultou o existente (rc $rc)"

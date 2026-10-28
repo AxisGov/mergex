@@ -203,7 +203,12 @@ $corpo_tag"
   else
     # Num clone defasado, o que o servidor tem e falta aqui não delimita nada: dividir o
     # push não muda a conta, buscar muda (katosmv/login#34).
-    busca="rode git fetch $REMOTO antes (o que o servidor já tem e ainda não está aqui não delimita o intervalo); se continuar, "
+    # Push direto para uma URL: o Git a passa como nome do remoto, e ela pode trazer
+    # credencial — o diagnóstico só repete um nome de remoto, nunca uma URL.
+    case "$REMOTO" in
+      *[!A-Za-z0-9._-]*|'') busca="busque o remoto antes (git fetch pelo nome do remote; o que o servidor já tem e ainda não está aqui não delimita o intervalo); se continuar, " ;;
+      *) busca="rode git fetch $REMOTO antes (o que o servidor já tem e ainda não está aqui não delimita o intervalo); se continuar, " ;;
+    esac
     _seg_anunciados || { SEG_RES=erro; SEG_DIAG="a consulta ao servidor das refs que ele já tem (ls-remote) falhou: sem ela, o intervalo publicado não se delimita"; return 0; }
     cat "$TMP_DIR/anunciados" > "$TMP_DIR/excluir"
   fi
