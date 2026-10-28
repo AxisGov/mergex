@@ -257,6 +257,10 @@ caso "prosa entre aspas com espaco passa"    comum/sem-segredo.sh "$(write_json 
 # entre aspas seguido de `(`, que nao e chamada de funcao.
 caso "senha entre aspas que nao fecham barra"  comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: "abc,defgh' word)")" 2
 caso "senha entre aspas tipograficas barra"    comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: \xe2\x80\x9cabc,defgh\xe2\x80\x9d' word)")" 2
+caso "aspa tipografica aberta e nao fechada barra" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: \xe2\x80\x9cabc,defgh' word)")" 2
+caso "chave entre aspas tipograficas barra"   comum/sem-segredo.sh "$(write_json "$(printf '\xe2\x80\x9cpass%s\xe2\x80\x9d: "abc,defgh"' word)")" 2
+caso "aspas simples tipograficas barra"       comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: \xe2\x80\x98abc,defgh\xe2\x80\x99' word)")" 2
+caso "placeholder entre aspas tipograficas passa" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: \xe2\x80\x9cchangeme\xe2\x80\x9d' word)")" 0
 caso "chave JSON entre aspas barra"            comum/sem-segredo.sh "$(write_json "$(printf '{"pass%s": "abc,defgh"}' word)")" 2
 caso "substituicao de comando passa"         comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="$(cat /run/secrets/x)"' HA)")" 0
 caso "substituicao por crase passa"          comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="`cat /run/secrets/x`"' HA)")" 0

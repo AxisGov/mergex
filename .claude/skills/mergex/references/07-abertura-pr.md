@@ -293,14 +293,16 @@ if [ "$fonte" != "$destino" ]; then
   [ -n "$dono_fonte" ] && [ "${projeto_fonte#*/}" != "$projeto_fonte" ] || { echo "projeto da origem inválido: o E7 não abre o PR"; exit 1; }
   head="$dono_fonte:$head"
 fi
-if saida_pr="$(gh pr create --repo "$destino" --base "$bb" --head "$head" --title "$titulo" --body-file docs/entregas/<trabalho_id>/PR.md "${opcao_rascunho[@]}" 2>&1)"; then
-  printf '%s\n' "$saida_pr"
-else
-  printf '%s\n' "$saida_pr"
+saida_pr="$(gh pr create --repo "$destino" --base "$bb" --head "$head" --title "$titulo" --body-file docs/entregas/<trabalho_id>/PR.md "${opcao_rascunho[@]}" 2>&1)"; rc_pr=$?
+printf '%s\n' "$saida_pr"
+if [ "$rc_pr" != 0 ]; then
   # Só "PR já existe para esta branch" vira retomada, e aqui mesmo, onde `head` e `destino`
   # existem — numa chamada de shell separada eles não sobrevivem (katosmv/login#34). Outra
-  # falha (rede, permissão, base) sai com o erro literal acima, para o passo 3.
-  case "$saida_pr" in *"already exists"*) ;; *) exit 1 ;; esac
+  # falha (rede, permissão, base) sai com o código e o erro literal do gh, para o passo 3.
+  case "$saida_pr" in
+    *"already exists"*) ;;
+    *) echo "gh pr create falhou (rc $rc_pr): registre o erro literal acima no passo 3 e siga"; exit "$rc_pr" ;;
+  esac
   pr_url="$(gh pr view "$head" --repo "$destino" --json url --jq '.url')" || { echo "PR existente não recuperado no destino"; exit 1; }
   linhas_url="$(printf '%s\n' "$pr_url" | awk 'END { print NR }')"
   [ -n "$pr_url" ] && [ "$linhas_url" = 1 ] || { echo "recuperação do PR retornou zero ou múltiplas URLs"; exit 1; }

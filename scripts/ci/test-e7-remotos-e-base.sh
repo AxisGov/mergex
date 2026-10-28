@@ -293,7 +293,8 @@ GH_JA_EXISTE=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
 # create chega ao passo 3 (revisao do Codex).
 rm -f "$aux/args-gh.view"
 GH_OUTRA_FALHA=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
-[ "$rc" != 0 ] && [ ! -e "$aux/args-gh.view" ] && grep -q 'HTTP 403: Resource not accessible' "$aux/p2.out" \
+[ "$rc" = 1 ] && [ ! -e "$aux/args-gh.view" ] && grep -q 'HTTP 403: Resource not accessible' "$aux/p2.out" \
+  && grep -q 'rc 1' "$aux/p2.out" && grep -q 'passo 3' "$aux/p2.out" \
   && passa 'outra falha do create: nao consulta o existente e mostra o erro literal' \
   || quebra "outra falha do create: rc $rc view '$(cat "$aux/args-gh.view" 2>/dev/null)' $(tr '\n' '|' < "$aux/p2.out")"
 rm -f "$aux/args-gh.view"

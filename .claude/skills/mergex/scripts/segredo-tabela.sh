@@ -28,7 +28,7 @@ eh_placeholder() {
   local cauda="${v#*[:=]}"
   cauda="${cauda#"${cauda%%[![:space:]\'\"]*}"}"; cauda="${cauda%[\'\"]}"
   # as aspas tipográficas também envolvem o valor
-  cauda="${cauda#“}"; cauda="${cauda%”}"
+  cauda="${cauda#“}"; cauda="${cauda%”}"; cauda="${cauda#‘}"; cauda="${cauda%’}"
   # `${...}`, `{{...}}` e `<...>` só são referência quando são o valor inteiro: um
   # `${X}` no meio de uma senha real não a dispensa (CodeAnt no mergex#54).
   printf '%s\n%s\n' "$v" "$cauda" \
@@ -98,7 +98,7 @@ achou() {
         continue
       fi
       # os quatro últimos caracteres do valor, sem a aspa de fechamento
-      fim="$valor"; fim="${fim%\"}"; fim="${fim%\'}"; fim="${fim%”}"; fim="${fim: -4}"
+      fim="$valor"; fim="${fim%\"}"; fim="${fim%\'}"; fim="${fim%”}"; fim="${fim%’}"; fim="${fim: -4}"
       ACHADOS="${ACHADOS}  - ${cat}: …${fim} (linha ${linha%%:*})
 "
     done <<EXPX_MATCHES
@@ -138,7 +138,7 @@ segredo_varrer() {
   # aspas vence a sem aspas quando existe, e a credencial conta uma vez só. Espaço fica
   # fora: prosa entre aspas não é senha. A chave pode vir entre aspas, como no JSON
   # (`"password": ...`), e o literal entre aspas seguido de `(` não é chamada de função.
-  CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])['"'"'"”]?[[:space:]]*[:=][[:space:]]*("[^"[:space:]]{8,}"|'"'"'[^'"'"'[:space:]]{8,}'"'"'|“[^”[:space:]]{8,}”|["“'"'"'][A-Za-z0-9/+_.=!@#$%^&*~?,;:-]{8,}|['"'"'"]?[A-Za-z0-9/+_.=!@#$%^&*~?-]{8,})'
+  CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])("|'"'"'|”|’)?[[:space:]]*[:=][[:space:]]*("[^"[:space:]]{8,}"|'"'"'[^'"'"'[:space:]]{8,}'"'"'|“[^”[:space:]]{8,}”|‘[^’[:space:]]{8,}’|("|'"'"'|“|‘)[A-Za-z0-9/+_.=!@#$%^&*~?,;:-]{8,}|("|'"'"')?[A-Za-z0-9/+_.=!@#$%^&*~?-]{8,})'
   achou "credencial"          "$CREDENCIAL" '' '($|[^A-Za-z0-9/+_.=!@#$%^&*~?(-])'
   # ...salvo quando o valor tem dígito: identificador de função comum não tem
   # (`randomUUID`, `getToken`), e um valor aleatório quase sempre tem. Uma função
