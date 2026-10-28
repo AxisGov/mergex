@@ -126,7 +126,11 @@ echo '== E7: passo 2 (destino, origem e rascunho) =='
 mkdir -p "$aux/bin"
 cat > "$aux/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+# GH_JA_EXISTE=1: o `pr create` falha como "PR já existe" e o `pr view` devolve a URL dele
+if [ "$1 $2" = "pr view" ]; then printf '%s\n' "$*" >> "$ARGS_GH.view"; echo https://github.com/acme/login/pull/7; exit 0; fi
 printf '%s\n' "$@" > "$ARGS_GH"
+if [ "${GH_JA_EXISTE:-}" = 1 ]; then echo 'a pull request for branch "feature/x" into branch "main" already exists' >&2; exit 1; fi
+if [ "${GH_OUTRA_FALHA:-}" = 1 ]; then echo 'HTTP 403: Resource not accessible by integration' >&2; exit 1; fi
 EOF
 cat > "$aux/bin/glab" <<'EOF'
 #!/usr/bin/env bash
@@ -275,19 +279,27 @@ bloco_do_e7 'remoto="$(resolver_remoto_upstream)"' > "$aux/e7-remoto.sh"
   && passa 'deteccao do provedor imprime a URL sem o token' \
   || quebra "URL do remoto: rc $rc $(tr '\n' '|' < "$aux/e7-remoto.out")"
 
-echo '== E7: o bloco "PR ja existe" nao roda com head/destino vazios (conselhos#210, P2) =='
-mkdir -p "$aux/gh-p2"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\necho https://x/pull/1\n' "$aux/gh-p2.log" > "$aux/gh-p2/gh"; chmod +x "$aux/gh-p2/gh"
-bloco_do_e7 'gh pr view "$head" --repo "$destino"' > "$aux/e7-existe.sh"
-rm -f "$aux/gh-p2.log"
-(env -u head -u destino PATH="$aux/gh-p2:$PATH" bash "$aux/e7-existe.sh") > "$aux/e7-existe.out" 2>&1; rc=$?
-[ "$rc" != 0 ] && [ ! -e "$aux/gh-p2.log" ] && grep -q 'mesma shell' "$aux/e7-existe.out" \
-  && passa 'PR ja existe: sem head/destino, falha explicita sem consultar o servico' \
-  || quebra "PR ja existe sem head/destino: rc $rc gh $( [ -e "$aux/gh-p2.log" ] && cat "$aux/gh-p2.log")"
-(head=feature/x destino=dono/repo PATH="$aux/gh-p2:$PATH" bash "$aux/e7-existe.sh") > "$aux/e7-existe.out" 2>&1; rc=$?
-[ "$rc" = 0 ] && grep -q 'pr view feature/x --repo dono/repo' "$aux/gh-p2.log" \
-  && passa 'PR ja existe: com head/destino da mesma shell, consulta o destino' \
-  || quebra "PR ja existe com head/destino: rc $rc"
+echo '== E7: "PR ja existe" e recuperado no mesmo bloco que tenta criar (conselhos#210 P2; katosmv/login#34) =='
+# Em chamadas de shell separadas, `head` e `destino` nao sobrevivem: a recuperacao mora no proprio
+# bloco do `gh pr create`, que os define, e nunca consulta com valores vazios.
+projeto_pr "$aux/existe" https://github.com/acme/login.git git@github.com:ana/login.git origin
+rm -f "$aux/args-gh.view"
+GH_JA_EXISTE=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
+[ "$rc" = 0 ] && grep -qx 'pr view feature/x --repo github.com/acme/login --json url --jq .url' "$aux/args-gh.view" \
+  && grep -q 'https://github.com/acme/login/pull/7' "$aux/p2.out" \
+  && passa 'PR ja existe: o bloco do create consulta o destino com head/destino dele e retoma a URL' \
+  || quebra "PR ja existe: rc $rc view '$(cat "$aux/args-gh.view" 2>/dev/null)' $(tr '\n' '|' < "$aux/p2.out")"
+# Outra falha (rede, permissao, base): nunca vira consulta ao PR existente, e o erro literal do
+# create chega ao passo 3 (revisao do Codex).
+rm -f "$aux/args-gh.view"
+GH_OUTRA_FALHA=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
+[ "$rc" = 1 ] && [ ! -e "$aux/args-gh.view" ] && grep -q 'HTTP 403: Resource not accessible' "$aux/p2.out" \
+  && grep -q 'rc 1' "$aux/p2.out" && grep -q 'passo 3' "$aux/p2.out" \
+  && passa 'outra falha do create: nao consulta o existente e mostra o erro literal' \
+  || quebra "outra falha do create: rc $rc view '$(cat "$aux/args-gh.view" 2>/dev/null)' $(tr '\n' '|' < "$aux/p2.out")"
+rm -f "$aux/args-gh.view"
+passo2 "$aux/existe" 'gh pr create'; rc=$?
+[ "$rc" = 0 ] && [ ! -e "$aux/args-gh.view" ] && passa 'PR criado: nao consulta o existente' || quebra "PR criado consultou o existente (rc $rc)"
 
 printf -- '---------------------------------------------\n%s ok, %s falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = 0 ]

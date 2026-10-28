@@ -405,6 +405,20 @@ confere 'E9 com o PR da sprint atual mergeado pelo servico: grava o item da spri
 [ "$e9_rc" = 0 ] || mostra "$aux/e9.out"
 
 echo '== os references =='
+# Na entrega por sprint o `pr_url` do topo e null: toda comparacao do E9 com "o PR atual" usa a
+# URL do item (`atual_url`), e a marcacao de trabalho proprio olha os itens de `prs` (katosmv/login#34).
+awk '/O PR é do trabalho atual quando/ { a = 1 } a { print } /Não toque em `branch`/ { exit }' "$ref/09-revisao.md" > "$aux/e9-atual.txt"
+grep -q 'atual_url' "$aux/e9-atual.txt"
+confere '09-revisao: o PR mergeado e o do trabalho atual pela URL do item (atual_url) na entrega por sprint' $?
+awk '/^### A marcação de trabalho próprio/ { a = 1; next } a && /^### / { exit } a' "$ref/09-revisao.md" > "$aux/e9-proprio.txt"
+grep -q '`prs`' "$aux/e9-proprio.txt"
+confere '09-revisao: a marcacao de trabalho proprio olha os itens de prs' $?
+! grep -q 'PR atual sem pr_url' "$ref/09-revisao.md" && grep -q 'PR atual sem \$campo_url' "$ref/09-revisao.md"
+confere '09-revisao: a mensagem nomeia o campo lido (atual_url ou planejamento_url)' $?
+grep -F '| Aberto pela mergex nesta máquina |' "$ref/09-revisao.md" | grep -q '`prs`'
+confere '09-revisao: a tabela do passo diz que a marcacao olha os itens de prs' $?
+grep -q 'atual_url' "$ref/10-estado.md"
+confere '10-estado: o PR do trabalho atual pela atual_url na entrega por sprint' $?
 awk '/^### O PR já existe/ || /PR já existe para esta branch/ { a = 1 } a' "$ref/07-abertura-pr.md" > "$aux/e7.txt"
 grep -q 'sprint anterior' "$aux/e7.txt" && grep -q 'não é retomada' "$aux/e7.txt"
 confere 'PR merged da sprint anterior nao e retomada (07-abertura-pr)' $?

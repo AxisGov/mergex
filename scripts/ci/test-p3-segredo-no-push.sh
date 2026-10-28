@@ -150,8 +150,31 @@ empurra refs/heads/main refs/heads/main
 repo limite; for i in $(seq 1 301); do g commit -q --allow-empty -m "c$i"; done
 empurra refs/heads/main refs/heads/main
 [ "$rc" = 1 ] && diz 'grande demais' && passa 'acima de 300 commits em bloqueio: barra' || quebra "limite bloqueio: $(mostra)"
+# Com o SHA remoto conhecido aqui, buscar nao muda a conta: o diagnostico nao manda rodar fetch.
+! diz 'git fetch' && passa 'acima do limite com o remoto conhecido: sem sugerir git fetch' || quebra "limite com remoto conhecido: $(mostra)"
 modo aviso; empurra refs/heads/main refs/heads/main
 [ "$rc" = 0 ] && diz 'grande demais' && passa 'acima de 300 commits em aviso: diagnostica e segue' || quebra "limite aviso: $(mostra)"
+# Branch nova: o intervalo e delimitado pelo que o servidor anuncia E existe aqui. So quando o
+# servidor anuncia algo que falta aqui (clone defasado) buscar muda a conta, e so ai o diagnostico
+# manda rodar git fetch (katosmv/login#34; nitpick do CodeAnt no mergex#56).
+repo limite-nova; g checkout -q -b nova; for i in $(seq 1 301); do g commit -q --allow-empty -m "n$i"; done
+empurra refs/heads/nova refs/heads/nova
+[ "$rc" = 1 ] && diz 'grande demais' && ! diz 'git fetch' \
+  && passa 'acima do limite, tudo o que o servidor anuncia ja esta aqui: sem sugerir git fetch' || quebra "limite sem defasagem: $(mostra)"
+# o servidor tem um commit que este clone nao tem: buscar delimita o intervalo
+outro="$aux/limite-nova-outro"; git clone -q "$aux/limite-nova.git" "$outro"
+git -C "$outro" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m remoto
+git -C "$outro" push -q origin HEAD:refs/heads/so-no-servidor 2>/dev/null
+empurra refs/heads/nova refs/heads/nova
+[ "$rc" = 1 ] && diz 'grande demais' && diz 'git fetch origin' \
+  && passa 'acima do limite com clone defasado: manda rodar git fetch' || quebra "limite com clone defasado: $(mostra)"
+# Push direto para uma URL: o Git passa a URL como nome do remoto, e ela pode trazer credencial.
+# O diagnostico manda buscar sem repetir a URL (revisao do Codex).
+sl="$(g rev-parse refs/heads/nova)"
+printf 'refs/heads/nova %s refs/heads/nova %s\n' "$sl" "$ZERO" \
+  | (cd "$R" && bash "$PUSH" --pre-push "https://u:$(printf 's3nh4%s' Xpto)@exemplo.invalid/r.git" "$(g remote get-url origin)") > "$aux/out" 2> "$aux/err"; rc=$?
+[ "$rc" = 1 ] && diz 'git fetch' && ! diz 's3nh4Xpto' \
+  && passa 'push para URL com credencial: o diagnostico nao repete a URL' || quebra "push para URL: $(mostra)"
 
 echo '== falha fechada =='
 copia="$aux/instalacao"; mkdir -p "$copia/.claude/skills/mergex" "$copia/.claude/hooks"
@@ -166,6 +189,13 @@ modo desligado
 printf 'refs/heads/main %s refs/heads/main %s\n' "$(g rev-parse main)" "$(g rev-parse origin/main)" \
   | (cd "$R" && bash "$copia/.claude/skills/mergex/scripts/portao-push.sh" --pre-push origin "$aux/x.git") > "$aux/out" 2> "$aux/err"; rc=$?
 [ "$rc" = 0 ] && passa 'sem a tabela, mas desligado: nao exige a tabela' || quebra "sem tabela desligado: $(mostra)"
+
+echo '== o reference diz o que o modo faz com a falha de leitura =='
+# Em `aviso`, falha de leitura avisa e o push segue, como o portao faz; o reference prometia
+# bloqueio em todo modo (katosmv/login#34).
+ref12="$raiz/.claude/skills/mergex/references/12-barreira-de-push.md"
+! grep -q 'Qualquer falha de leitura' "$ref12" && grep -q 'falha de leitura nunca conta como limpo' "$ref12" \
+  && passa '12-barreira: falha de leitura barra em bloqueio e avisa em aviso' || quebra '12-barreira: a frase da falha de leitura promete bloqueio em todo modo'
 
 printf -- '---------------------------------------------\n%s ok, %s falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = 0 ]

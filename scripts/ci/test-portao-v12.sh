@@ -204,6 +204,14 @@ roda PATH="$aux/sem-node" GIT_WORK_TREE="$outro_git"
 roda PATH="$aux/sem-node" GIT_DIR="$P/.git"
 [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-fatiamento-json' \
   && passa 'GIT_DIR do proprio repositorio (pre-push): segue' || quebra "GIT_DIR do proprio repositorio: $(mostra)"
+# Worktree irma (katosmv/login#34): o GIT_DIR dela tem o mesmo toplevel resolvido e o mesmo
+# git-common-dir, mas outro HEAD. A identidade inclui o git-dir: divergente.
+irma="$aux/irma-wt"; git -C "$P" worktree add -q --detach "$irma" HEAD
+git -C "$irma" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m irma
+roda PATH="$aux/sem-node" GIT_DIR="$(git -C "$irma" rev-parse --absolute-git-dir)"
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=ambiente-git-divergente' \
+  && passa 'GIT_DIR de worktree irma: SEM_PROVA' || quebra "GIT_DIR de worktree irma: $(mostra)"
+git -C "$P" worktree remove --force "$irma"
 
 # desligada: n/a sem conferir (o leitor roda, com node)
 projeto desligada desligada; escreve src/a.ts; commita T-01.01; entrega; tarefas T-01.01:concluida
