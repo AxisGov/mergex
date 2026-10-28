@@ -204,6 +204,10 @@ caso "URL com senha <...>: passa"                  comum/sem-segredo.sh "$(write
 caso "URL com senha S:placeholder barra"   comum/sem-segredo.sh "$(write_json "$(printf 'postgres://u:%s@db/x' 's3nh4sintetica:placeholder')")" 2
 caso "URL com senha S=placeholder barra"   comum/sem-segredo.sh "$(write_json "$(printf 'postgres://u:%s@db/x' 's3nh4sintetica=placeholder')")" 2
 caso "URL com senha changeme inteira: passa" comum/sem-segredo.sh "$(write_json 'postgres://u:changeme@db/x')" 0
+# Com `@` cru na senha, o parser de URL fica com o ultimo `@`; o casamento parava no
+# primeiro e julgava so `changeme` (CodeAnt no mergex#57).
+caso "URL com senha changeme@S barra"      comum/sem-segredo.sh "$(write_json "$(printf 'postgres://u:%s@db/x' 'changeme@s3nh4sintetica')")" 2
+caso "URL com usuario e senha <...> e @ no caminho: passa" comum/sem-segredo.sh "$(write_json 'postgres://u:<senha>@db/x?dono=a@b')" 0
 # A senha com simbolo tambem e credencial (conselhos#210, P8).
 caso "senha comecando com ! barra"       comum/sem-segredo.sh "$(write_json "$(printf 'password: !Abc%s' 'defg123')")" 2
 caso "token com @ barra"                 comum/sem-segredo.sh "$(write_json "$(printf 'token=@bcd%s' '1234efgh')")" 2

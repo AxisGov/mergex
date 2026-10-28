@@ -231,7 +231,7 @@ $corpo_tag"
     if [ ! -f "$TMP_DIR/seg-commit/$c" ]; then
       _seg_commit "$c" > "$TMP_DIR/seg-commit/$c.parcial" \
         && mv "$TMP_DIR/seg-commit/$c.parcial" "$TMP_DIR/seg-commit/$c" \
-        || { SEG_RES=erro; SEG_DIAG="o commit $c não se lê"; return 0; }
+        || { SEG_RES=erro; SEG_DIAG="o commit $c não se lê ou não se guarda no diretório temporário (${TMPDIR:-/tmp} cheio?)"; return 0; }
     fi
     texto="$(cat "$TMP_DIR/seg-commit/$c")" || { SEG_RES=erro; SEG_DIAG="o commit $c não se lê"; return 0; }
     ALVO="$ALVO
