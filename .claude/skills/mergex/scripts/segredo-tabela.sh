@@ -57,9 +57,9 @@ eh_placeholder() {
 
 # eh_referencia_de_codigo <candidato com a chave> <texto da linha depois do valor>
 # Na credencial em atribuição, valor sem aspas que é só identificador ou cadeia
-# `a.b.c` ou `A::B` sem dígito, seguido de `,` `;` `)` ou `}`, é referência de código
-# (`senha: SENHA_PADRAO,`, `password: process.env.DB_PASS)`, `token: Token::Nome,`),
-# não credencial (DM-283; o `::` desde a DM-285, quando o valor passou a aceitar `:`).
+# `a.b.c` sem dígito, seguido de `,` `;` `)` ou `}`, é referência de código
+# (`senha: SENHA_PADRAO,`, `password: process.env.DB_PASS)`), não credencial
+# (DM-283). `A::B` não entra: é indistinguível de uma senha com `::` (DM-285).
 # No fim da linha (YAML, .env), entre aspas, com dígito ou símbolo,
 # continua credencial. Falso negativo assumido: senha sem dígito, sem símbolo e
 # sem aspas seguida de um desses terminadores (`password: SuperSecret,`).
@@ -67,7 +67,7 @@ eh_referencia_de_codigo() {
   local v="${1#*[:=]}" d="$2"
   v="${v#"${v%%[![:space:]]*}"}"
   case "$v" in \"*|\'*) return 1 ;; esac
-  printf '%s' "$v" | grep -aEq -e '^[A-Za-z_$][A-Za-z_$]*((\.|::)[A-Za-z_$][A-Za-z_$]*)*$' || return 1
+  printf '%s' "$v" | grep -aEq -e '^[A-Za-z_$][A-Za-z_$]*(\.[A-Za-z_$][A-Za-z_$]*)*$' || return 1
   d="${d#"${d%%[![:space:]]*}"}"
   case "$d" in ,*|\;*|\)*|\}*) return 0 ;; esac
   return 1

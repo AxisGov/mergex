@@ -298,9 +298,11 @@ caso "valor com : seguido de ( barra"     comum/sem-segredo.sh "$(write_json "$(
 caso "chamada com S:placeholder( barra"   comum/sem-segredo.sh "$(write_json "$(printf 'token=%s:placeholder(' 's3nh4sintetica9')")" 2
 caso "token apontando para URL barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'token=%s' 'https://host.example/x')")" 2
 caso "caminho Token::Identificador passa"  comum/sem-segredo.sh "$(write_json 'let k = Token::Identificador;')" 0
-# `A::B` sem digito seguido de `,` `;` `)` ou `}` e referencia de codigo, como `a.b.c` (DM-283).
-caso "atribuicao Rust token: Token::Nome, passa" comum/sem-segredo.sh "$(write_json "$(printf 'tok%s: Token::Identificador,' en)")" 0
-caso "atribuicao C++ token = Token::Nome; passa" comum/sem-segredo.sh "$(write_json "$(printf 'tok%s = Token::Identificador;' en)")" 0
+# `A::B` numa atribuicao nao e referencia de codigo: e indistinguivel de uma senha com `::`
+# (DM-285). A atribuicao Rust/C++/PHP barra, falso positivo assumido.
+caso "senha com :: seguida de , barra"      comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: Segredo::Producao,' word)")" 2
+caso "atribuicao Rust com A::B e virgula barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'tok%s: Token::Identificador,' en)")" 2
+caso "atribuicao C++ com A::B e ponto e virgula barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'tok%s = Token::Identificador;' en)")" 2
 # Falsos positivos assumidos com o `:` no valor (DM-285): chave Redis, exemplo YAML, hora.
 caso "chave Redis secret:key:... barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'sec%s:key:redis-cache' ret)")" 2
 caso "exemplo YAML com : no valor barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'api_%s: abc:1234' key)")" 2
