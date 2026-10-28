@@ -154,12 +154,20 @@ empurra refs/heads/main refs/heads/main
 ! diz 'git fetch' && passa 'acima do limite com o remoto conhecido: sem sugerir git fetch' || quebra "limite com remoto conhecido: $(mostra)"
 modo aviso; empurra refs/heads/main refs/heads/main
 [ "$rc" = 0 ] && diz 'grande demais' && passa 'acima de 300 commits em aviso: diagnostica e segue' || quebra "limite aviso: $(mostra)"
-# Branch nova: o intervalo e delimitado pelo que o servidor anuncia E existe aqui. Num clone
-# defasado, dividir o push nao muda a conta; o diagnostico manda buscar antes (katosmv/login#34).
+# Branch nova: o intervalo e delimitado pelo que o servidor anuncia E existe aqui. So quando o
+# servidor anuncia algo que falta aqui (clone defasado) buscar muda a conta, e so ai o diagnostico
+# manda rodar git fetch (katosmv/login#34; nitpick do CodeAnt no mergex#56).
 repo limite-nova; g checkout -q -b nova; for i in $(seq 1 301); do g commit -q --allow-empty -m "n$i"; done
 empurra refs/heads/nova refs/heads/nova
+[ "$rc" = 1 ] && diz 'grande demais' && ! diz 'git fetch' \
+  && passa 'acima do limite, tudo o que o servidor anuncia ja esta aqui: sem sugerir git fetch' || quebra "limite sem defasagem: $(mostra)"
+# o servidor tem um commit que este clone nao tem: buscar delimita o intervalo
+outro="$aux/limite-nova-outro"; git clone -q "$aux/limite-nova.git" "$outro"
+git -C "$outro" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m remoto
+git -C "$outro" push -q origin HEAD:refs/heads/so-no-servidor 2>/dev/null
+empurra refs/heads/nova refs/heads/nova
 [ "$rc" = 1 ] && diz 'grande demais' && diz 'git fetch origin' \
-  && passa 'acima do limite em branch nova: manda rodar git fetch' || quebra "limite em branch nova: $(mostra)"
+  && passa 'acima do limite com clone defasado: manda rodar git fetch' || quebra "limite com clone defasado: $(mostra)"
 # Push direto para uma URL: o Git passa a URL como nome do remoto, e ela pode trazer credencial.
 # O diagnostico manda buscar sem repetir a URL (revisao do Codex).
 sl="$(g rev-parse refs/heads/nova)"

@@ -146,9 +146,11 @@ _seg_anunciados() {
   if [ -z "$SEG_ANUNC" ]; then
     local brutos
     if brutos="$(git ls-remote --heads --tags "${REMOTO_URL:-$REMOTO}" 2>/dev/null)"; then
+      # O que falta aqui fica contado: so entao buscar o remoto muda o intervalo.
       printf '%s\n' "$brutos" | awk 'NF { print $1 "^{commit}" }' \
-        | git cat-file --batch-check='%(objectname)' 2>/dev/null \
-        | awk '$2 != "missing" && NF == 1 { print "^" $1 }' | sort -u > "$TMP_DIR/anunciados" \
+        | git cat-file --batch-check='%(objectname)' > "$TMP_DIR/checados" 2>/dev/null \
+        && awk '$2 != "missing" && NF == 1 { print "^" $1 }' "$TMP_DIR/checados" | sort -u > "$TMP_DIR/anunciados" \
+        && awk '$2 == "missing" { n++ } END { print n + 0 }' "$TMP_DIR/checados" > "$TMP_DIR/ausentes" \
         && SEG_ANUNC=ok || SEG_ANUNC=falhou
     else
       SEG_ANUNC=falhou
@@ -201,16 +203,17 @@ $corpo_tag"
   if ! _seg_nulo "$sr" && git cat-file -e "$sr^{commit}" 2>/dev/null; then
     printf '^%s\n' "$sr" > "$TMP_DIR/excluir"
   else
+    _seg_anunciados || { SEG_RES=erro; SEG_DIAG="a consulta ao servidor das refs que ele já tem (ls-remote) falhou: sem ela, o intervalo publicado não se delimita"; return 0; }
+    cat "$TMP_DIR/anunciados" > "$TMP_DIR/excluir"
     # Num clone defasado, o que o servidor tem e falta aqui não delimita nada: dividir o
-    # push não muda a conta, buscar muda (katosmv/login#34).
+    # push não muda a conta, buscar muda (katosmv/login#34). Só quando falta algo: com
+    # tudo aqui, buscar não muda nada (CodeAnt no mergex#56).
     # Push direto para uma URL: o Git a passa como nome do remoto, e ela pode trazer
     # credencial — o diagnóstico só repete um nome de remoto, nunca uma URL.
-    case "$REMOTO" in
+    [ "$(cat "$TMP_DIR/ausentes" 2>/dev/null || echo 0)" -gt 0 ] 2>/dev/null && case "$REMOTO" in
       *[!A-Za-z0-9._-]*|'') busca="busque o remoto antes (git fetch pelo nome do remote; o que o servidor já tem e ainda não está aqui não delimita o intervalo); se continuar, " ;;
       *) busca="rode git fetch $REMOTO antes (o que o servidor já tem e ainda não está aqui não delimita o intervalo); se continuar, " ;;
     esac
-    _seg_anunciados || { SEG_RES=erro; SEG_DIAG="a consulta ao servidor das refs que ele já tem (ls-remote) falhou: sem ela, o intervalo publicado não se delimita"; return 0; }
-    cat "$TMP_DIR/anunciados" > "$TMP_DIR/excluir"
   fi
   lista="$(git rev-list --stdin "$alvo_commit" < "$TMP_DIR/excluir" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="o intervalo publicado não se lê (rev-list)"; return 0; }
   n="$(printf '%s' "$lista" | grep -c .)"

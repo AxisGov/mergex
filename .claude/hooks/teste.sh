@@ -263,6 +263,9 @@ caso "aspas simples tipograficas barra"       comum/sem-segredo.sh "$(write_json
 caso "placeholder entre aspas tipograficas passa" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: \xe2\x80\x9cchangeme\xe2\x80\x9d' word)")" 0
 caso "chave JSON entre aspas barra"            comum/sem-segredo.sh "$(write_json "$(printf '{"pass%s": "abc,defgh"}' word)")" 2
 caso "substituicao de comando passa"         comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="$(cat /run/secrets/x)"' HA)")" 0
+# ...mas so quando ela e o valor inteiro: senha colada depois da substituicao barra (CodeAnt no mergex#56).
+caso "senha depois de substituicao de comando barra" comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="$(cat/x)S3nh4Real9"' HA)")" 2
+caso "senha depois de crase barra"           comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="`cat/x`S3nh4Real9"' HA)")" 2
 caso "substituicao por crase passa"          comum/sem-segredo.sh "$(write_json "$(printf 'SEN%s="`cat /run/secrets/x`"' HA)")" 0
 caso "chave JSON com placeholder passa"        comum/sem-segredo.sh "$(write_json "$(printf '{"pass%s": "<senha>"}' word)")" 0
 caso "literal entre aspas seguido de ( barra"  comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: "abc,defgh"(x)' word)")" 2

@@ -36,7 +36,8 @@ eh_placeholder() {
   case "$cauda" in '%s'|'%('*')s') return 0 ;; esac
   # Substituição de comando do shell (`SENHA="$(cat arquivo)"`, crase) é código, não valor:
   # com a aspa que não fecha, a forma entre aspas a pegava (revisão do Codex no login#34).
-  case "$cauda" in '$('*|'`'*) return 0 ;; esac
+  # Só a substituição inteira: senha colada depois dela é credencial (CodeAnt no mergex#56).
+  case "$cauda" in '$('*')'|'`'*'`') printf '%s' "$cauda" | grep -aEq -e '^(\$\([^()]*\)|`[^`]*`)$' && return 0 ;; esac
   printf '%s' "$cauda" | grep -aEq -e '^(\$[A-Za-z_][A-Za-z0-9_]*|[*]+|[?]+)$' && return 0
   # Palavras reservadas só dispensam o valor inteiro, não uma credencial real
   # que por acaso contenha "example", "sample" ou outro fragmento. O valor pode
