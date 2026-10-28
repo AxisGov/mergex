@@ -187,9 +187,18 @@ mkdir -p "$aux/bin"; GIT_REAL="$(command -v git)"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/chamadas"\nexec "%s" "$@"\n' "$aux" "$GIT_REAL" > "$aux/bin/git"
 chmod +x "$aux/bin/git"; : > "$aux/chamadas"
 empurra refs/heads/main refs/heads/main PATH="$aux/bin:$PATH"
-n_log="$(grep -c '^log -1 --format=%B' "$aux/chamadas")"; n_par="$(grep -c '^rev-list --parents' "$aux/chamadas")"
-[ "$rc" = 1 ] && diz 'chave de API' && [ "$n_log" = 13 ] && [ "$n_par" = 13 ] \
-  && passa 'com achado, 13 commits: uma leitura de cada no Git' || quebra "uma vez: log $n_log, parents $n_par (esperava 13) | $(mostra)"
+conta() { n_log="$(grep -c '^log -1 --format=%B' "$aux/chamadas")"; n_par="$(grep -c '^rev-list --parents' "$aux/chamadas")"; n_dif="$(grep -c '^diff --text' "$aux/chamadas")"; }
+conta
+[ "$rc" = 1 ] && diz 'chave de API' && [ "$n_log" = 13 ] && [ "$n_par" = 13 ] && [ "$n_dif" = 13 ] \
+  && passa 'com achado, 13 commits: uma leitura de cada no Git' || quebra "uma vez: log $n_log, parents $n_par, diff $n_dif (esperava 13) | $(mostra)"
+# Duas refs com os mesmos 13 commits no mesmo push: a segunda le o que a primeira guardou.
+g branch outra main; : > "$aux/chamadas"
+printf 'refs/heads/main %s refs/heads/main %s\nrefs/heads/outra %s refs/heads/outra %s\n' \
+  "$(g rev-parse main)" "$(g ls-remote origin refs/heads/main | awk '{print $1}')" "$(g rev-parse outra)" "$ZERO" \
+  | (cd "$R" && PATH="$aux/bin:$PATH" bash "$PUSH" --pre-push origin "$(g remote get-url origin)") > "$aux/out" 2> "$aux/err"; rc=$?
+conta
+[ "$rc" = 1 ] && [ "$(grep -c 'no commit' "$aux/err")" -ge 2 ] && [ "$n_log" = 13 ] && [ "$n_par" = 13 ] && [ "$n_dif" = 13 ] \
+  && passa 'duas refs com os mesmos commits: uma leitura de cada no push' || quebra "duas refs: log $n_log, parents $n_par, diff $n_dif (esperava 13) | $(mostra)"
 
 echo '== falha fechada =='
 copia="$aux/instalacao"; mkdir -p "$copia/.claude/skills/mergex" "$copia/.claude/hooks"
