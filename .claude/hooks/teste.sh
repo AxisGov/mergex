@@ -303,6 +303,11 @@ caso "caminho Token::Identificador passa"  comum/sem-segredo.sh "$(write_json 'l
 caso "senha com :: seguida de , barra"      comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: Segredo::Producao,' word)")" 2
 caso "atribuicao Rust com A::B e virgula barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'tok%s: Token::Identificador,' en)")" 2
 caso "atribuicao C++ com A::B e ponto e virgula barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'tok%s = Token::Identificador;' en)")" 2
+# Senha que comeca com `:` depois de `=`, ou de `:` com espaco, tambem e credencial; colado
+# na chave (`Token::Nome`) continua caminho (DM-285, terceira revisao do Codex).
+caso "senha comecando com : depois de = barra"       comum/sem-segredo.sh "$(write_json "$(printf 'pass%s=:%s,' word 's3nh4sintetica')")" 2
+caso "senha comecando com :: depois de : e espaco barra" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: ::%s,' word 'ProducaoMais')")" 2
+caso "chave colada em :: continua caminho: passa"    comum/sem-segredo.sh "$(write_json "$(printf 'x = Tok%s::ProducaoMais;' en)")" 0
 # Falsos positivos assumidos com o `:` no valor (DM-285): chave Redis, exemplo YAML, hora.
 caso "chave Redis secret:key:... barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'sec%s:key:redis-cache' ret)")" 2
 caso "exemplo YAML com : no valor barra (assumido)" comum/sem-segredo.sh "$(write_json "$(printf 'api_%s: abc:1234' key)")" 2

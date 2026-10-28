@@ -150,8 +150,9 @@ segredo_varrer() {
   # Sem aspa, o valor aceita `:` depois do primeiro caractere: `password=ab:S` parava no
   # `:` e passava (A2 no conselhos#211). Uma URL como valor da chave passa a ser
   # acusada, falso positivo assumido; o primeiro caractere sem `:` deixa
-  # `Token::Identifier` fora.
-  CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])("|'"'"'|”|’)?[[:space:]]*[:=][[:space:]]*("[^"[:space:]]{8,}"|'"'"'[^'"'"'[:space:]]{8,}'"'"'|“[^”[:space:]]{8,}”|‘[^’[:space:]]{8,}’|("|'"'"'|“|‘)[A-Za-z0-9/+_.=!@#$%^&*~?,;:-]{8,}|("|'"'"')?[A-Za-z0-9/+_.=!@#$%^&*~?-][A-Za-z0-9/+_.=!@#$%^&*~?:-]{7,})'
+  # `Token::Identifier` fora. Senha que começa com `:` só depois de `=` ou de `:` com
+  # espaço: colado na chave, `Token::Nome` é caminho, não atribuição.
+  CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])("|'"'"'|”|’)?[[:space:]]*([:=][[:space:]]*("[^"[:space:]]{8,}"|'"'"'[^'"'"'[:space:]]{8,}'"'"'|“[^”[:space:]]{8,}”|‘[^’[:space:]]{8,}’|("|'"'"'|“|‘)[A-Za-z0-9/+_.=!@#$%^&*~?,;:-]{8,}|("|'"'"')?[A-Za-z0-9/+_.=!@#$%^&*~?-][A-Za-z0-9/+_.=!@#$%^&*~?:-]{7,})|(=[[:space:]]*|:[[:space:]]+):[A-Za-z0-9/+_.=!@#$%^&*~?:-]{7,})'
   achou "credencial"          "$CREDENCIAL" '' '($|[^A-Za-z0-9/+_.=!@#$%^&*~?(:-])'
   # ...salvo quando o valor tem dígito: identificador de função comum não tem
   # (`randomUUID`, `getToken`), e um valor aleatório quase sempre tem. Uma função
