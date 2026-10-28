@@ -122,7 +122,12 @@ segredo_varrer() {
   # O alfabeto do valor e o do limite a direita sao o mesmo, com os simbolos que
   # senha tem (`!@#$%^&*~?`): sem eles uma senha que começa com `!` passava, e com o
   # limite diferente o valor seria cortado no meio (conselhos#210, P8).
-  CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*['"'"'"]?[A-Za-z0-9/+_.=!@#$%^&*~?-]{8,}'
+  # Entre aspas, o valor vai até a aspa de fechamento, com qualquer símbolo menos espaço:
+  # sem isso, `"abc,defgh"` era cortado na vírgula abaixo de oito caracteres e passava
+  # (katosmv/login#34). O `grep -E` fica com o casamento mais longo, então a forma entre
+  # aspas vence a sem aspas quando existe, e a credencial conta uma vez só. Espaço fica
+  # fora: prosa entre aspas não é senha.
+  CREDENCIAL='([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Nn][Hh][Aa]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*("[^"[:space:]]{8,}"|'"'"'[^'"'"'[:space:]]{8,}'"'"'|['"'"'"]?[A-Za-z0-9/+_.=!@#$%^&*~?-]{8,})'
   achou "credencial"          "$CREDENCIAL" '' '($|[^A-Za-z0-9/+_.=!@#$%^&*~?(-])'
   # ...salvo quando o valor tem dígito: identificador de função comum não tem
   # (`randomUUID`, `getToken`), e um valor aleatório quase sempre tem. Uma função

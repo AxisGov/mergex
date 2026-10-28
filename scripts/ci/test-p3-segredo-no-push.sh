@@ -150,8 +150,16 @@ empurra refs/heads/main refs/heads/main
 repo limite; for i in $(seq 1 301); do g commit -q --allow-empty -m "c$i"; done
 empurra refs/heads/main refs/heads/main
 [ "$rc" = 1 ] && diz 'grande demais' && passa 'acima de 300 commits em bloqueio: barra' || quebra "limite bloqueio: $(mostra)"
+# Com o SHA remoto conhecido aqui, buscar nao muda a conta: o diagnostico nao manda rodar fetch.
+! diz 'git fetch' && passa 'acima do limite com o remoto conhecido: sem sugerir git fetch' || quebra "limite com remoto conhecido: $(mostra)"
 modo aviso; empurra refs/heads/main refs/heads/main
 [ "$rc" = 0 ] && diz 'grande demais' && passa 'acima de 300 commits em aviso: diagnostica e segue' || quebra "limite aviso: $(mostra)"
+# Branch nova: o intervalo e delimitado pelo que o servidor anuncia E existe aqui. Num clone
+# defasado, dividir o push nao muda a conta; o diagnostico manda buscar antes (katosmv/login#34).
+repo limite-nova; g checkout -q -b nova; for i in $(seq 1 301); do g commit -q --allow-empty -m "n$i"; done
+empurra refs/heads/nova refs/heads/nova
+[ "$rc" = 1 ] && diz 'grande demais' && diz 'git fetch origin' \
+  && passa 'acima do limite em branch nova: manda rodar git fetch' || quebra "limite em branch nova: $(mostra)"
 
 echo '== falha fechada =='
 copia="$aux/instalacao"; mkdir -p "$copia/.claude/skills/mergex" "$copia/.claude/hooks"
@@ -166,6 +174,13 @@ modo desligado
 printf 'refs/heads/main %s refs/heads/main %s\n' "$(g rev-parse main)" "$(g rev-parse origin/main)" \
   | (cd "$R" && bash "$copia/.claude/skills/mergex/scripts/portao-push.sh" --pre-push origin "$aux/x.git") > "$aux/out" 2> "$aux/err"; rc=$?
 [ "$rc" = 0 ] && passa 'sem a tabela, mas desligado: nao exige a tabela' || quebra "sem tabela desligado: $(mostra)"
+
+echo '== o reference diz o que o modo faz com a falha de leitura =='
+# Em `aviso`, falha de leitura avisa e o push segue, como o portao faz; o reference prometia
+# bloqueio em todo modo (katosmv/login#34).
+ref12="$raiz/.claude/skills/mergex/references/12-barreira-de-push.md"
+! grep -q 'Qualquer falha de leitura' "$ref12" && grep -q 'falha de leitura nunca conta como limpo' "$ref12" \
+  && passa '12-barreira: falha de leitura barra em bloqueio e avisa em aviso' || quebra '12-barreira: a frase da falha de leitura promete bloqueio em todo modo'
 
 printf -- '---------------------------------------------\n%s ok, %s falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = 0 ]

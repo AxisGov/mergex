@@ -246,6 +246,18 @@ caso "referencia seguida de ] barra"         comum/sem-segredo.sh "$(write_json 
 caso "valor entre aspas com virgula barra"   comum/sem-segredo.sh "$(write_json "$(printf "sen%s: 'hashedPassword'," ha)")" 2
 caso "valor com digito e virgula barra"      comum/sem-segredo.sh "$(write_json "$(printf 'tok%s: abcdefg1,' en)")" 2
 caso "valor com simbolo e virgula barra"     comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: Abcdefg!,' word)")" 2
+# Valor entre aspas com virgula ou outro simbolo fora do alfabeto (katosmv/login#34): a virgula
+# cortava o valor abaixo de oito caracteres, e a senha passava. Entre aspas, o valor vai ate a
+# aspa de fechamento; espaco continua fora (prosa entre aspas nao e senha).
+caso "senha entre aspas com virgula barra"   comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: "abc,defgh"' word)")" 2
+caso "senha entre aspas simples com ; e : barra" comum/sem-segredo.sh "$(write_json "$(printf "sen%s = 'a,b;c:d=e'" ha)")" 2
+caso "placeholder <...> entre aspas com virgula passa" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: "<senha,nova>"' word)")" 0
+caso "prosa entre aspas com espaco passa"    comum/sem-segredo.sh "$(write_json "$(printf 'sen%s: "nao use a mesma senha"' ha)")" 0
+# Um achado por credencial: a forma entre aspas e a sem aspas nao contam duas vezes.
+UMA_T="$(printf 'pass%s: "abcdefgh123"' word)"
+UMA_N="$(bash -c '. "$1"; ALVO="$2"; segredo_varrer; printf "%s" "$ACHADOS" | grep -c "credencial"' _ "$H/../skills/mergex/scripts/segredo-tabela.sh" "$UMA_T")"
+if [ "$UMA_N" = 1 ]; then OK=$((OK+1)); printf '  ok    %s\n' "senha entre aspas: um achado so"
+else FALHOU=$((FALHOU+1)); printf '  FALHA %s (esperava 1, obteve %s)\n' "senha entre aspas: um achado so" "$UMA_N"; fi
 caso "a segunda ocorrencia no fim da linha barra" comum/sem-segredo.sh "$(write_json "$(printf 'pass%s: hashedPassword; pass%s: hashedPassword' word word)")" 2
 FUNC2="getToken$(printf '2')"   # montada aqui: escrita no caso, o proprio teste.sh barraria no commit
 caso "funcao com digito barra (assumido)"   comum/sem-segredo.sh "$(write_json "token: $FUNC2()")" 2

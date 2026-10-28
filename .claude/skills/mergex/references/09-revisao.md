@@ -105,14 +105,16 @@ if [ -n "$p_merge" ] && [ "$p_base" = null ]; then
   # Registro anterior à DM-269: o planejamento já é histórico, mas o E9 ainda
   # consegue completar exclusivamente a base ausente pelo PR gravado no item.
   reparo=sim; alvo=planejamento; merge_esperado="$p_merge"
+  campo_url=planejamento_url
   pr_url="$(printf '%s\n' "$marca" | sed -n 's/^planejamento_url=//p')"
 else
   alvo="$(printf '%s\n' "$marca" | sed -n 's/^sprint_atual=//p')"
   case "$alvo" in planejamento|[0-9][0-9]) ;; *) exit 0 ;; esac
   case "$(printf '%s\n' "$marca" | sed -n 's/^atual_estado=//p')" in merged) exit 0 ;; esac
+  campo_url=atual_url
   pr_url="$(printf '%s\n' "$marca" | sed -n 's/^atual_url=//p')"
 fi
-case "$pr_url" in ''|null) echo "PR atual sem pr_url: nada a ler no serviço"; exit 0 ;; esac
+case "$pr_url" in ''|null) echo "PR atual sem $campo_url: nada a ler no serviço"; exit 0 ;; esac
 case "$pr_url" in
   */-/merge_requests/*)   # GitLab: a API do projeto do remoto, como no passo 1
     iid="${pr_url##*/-/merge_requests/}"; iid="${iid%%[!0-9]*}"
@@ -244,7 +246,7 @@ ficam fora da revisão por desenho e são conferidos pelos portões das skills.
 
 ### A marcação de trabalho próprio
 
-Se o PR foi aberto pela mergex **na mesma máquina** — a `pr_url` de algum `ENTREGA.md` local casa com a URL do PR —, marque-o na lista:
+Se o PR foi aberto pela mergex **na mesma máquina** — a URL de algum PR de um `ENTREGA.md` local casa com a URL do PR —, marque-o na lista. Na entrega por trabalho, essa URL é a `pr_url`; na entrega por sprint, a `pr_url` do topo fica `null`, e valem as URLs dos itens de `prs` (o de planejamento e o de cada sprint):
 
 ```
 [aberto por esta instalação da mergex — a skill não aprova o próprio trabalho]
@@ -1262,7 +1264,9 @@ Sem essa confirmação, **não ofereça o merge** deste PR. Passe para o próxim
    PR de outro trabalho não muda o estado do seu.
 
    O PR é do trabalho atual quando existe trabalho atual (ver "Trabalho atual no E9", no
-   passo 2) e a URL do PR mergeado casa com a `pr_url` do `ENTREGA.md` desse trabalho. Sem
+   passo 2) e a URL do PR mergeado casa com a URL do PR atual desse trabalho: a `pr_url` do
+   `ENTREGA.md` na entrega por trabalho; na entrega por sprint, onde a `pr_url` do topo fica
+   `null`, a `atual_url` que o `entrega-de-planejamento.sh` devolve (o item da `sprint_atual`). Sem
    trabalho atual, ou se a correspondência não for certa, **não grave nada** — na dúvida,
    deixe a barra como está. O `estado.json` só é escrito depois dessa decisão; nunca é lido
    para tomá-la.

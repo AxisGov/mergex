@@ -197,9 +197,13 @@ $corpo_tag"
   # agora (`ls-remote` na URL do push), filtrado pelo que existe aqui. Consulta
   # que falha não libera. Nada anunciado aqui: toda a ancestralidade é varrida.
   : > "$TMP_DIR/excluir"
+  local busca=""
   if ! _seg_nulo "$sr" && git cat-file -e "$sr^{commit}" 2>/dev/null; then
     printf '^%s\n' "$sr" > "$TMP_DIR/excluir"
   else
+    # Num clone defasado, o que o servidor tem e falta aqui não delimita nada: dividir o
+    # push não muda a conta, buscar muda (katosmv/login#34).
+    busca="rode git fetch $REMOTO antes (o que o servidor já tem e ainda não está aqui não delimita o intervalo); se continuar, "
     _seg_anunciados || { SEG_RES=erro; SEG_DIAG="a consulta ao servidor das refs que ele já tem (ls-remote) falhou: sem ela, o intervalo publicado não se delimita"; return 0; }
     cat "$TMP_DIR/anunciados" > "$TMP_DIR/excluir"
   fi
@@ -207,7 +211,7 @@ $corpo_tag"
   n="$(printf '%s' "$lista" | grep -c .)"
   if [ "$n" -gt "$SEG_LIMITE" ]; then
     SEG_RES=grande
-    SEG_DIAG="intervalo grande demais para varrer segredo ($n commits, limite $SEG_LIMITE): divida a publicação em pushes menores ou, conscientemente, ponha sem-segredo em desligado"
+    SEG_DIAG="intervalo grande demais para varrer segredo ($n commits, limite $SEG_LIMITE): ${busca}divida a publicação em pushes menores ou, conscientemente, ponha sem-segredo em desligado"
     return 0
   fi
   # Uma varredura do intervalo inteiro; só com achado, commit a commit, para dizer onde.
