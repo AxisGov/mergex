@@ -480,6 +480,9 @@ FW=".claude/hooks/fw.sh"; mkdir -p "$LCK_T/.claude/hooks"
 printf 'K=%s\n' "$SK" > "$LCK_T/$FW"
 lck_lock 2 "$FW" "$(lck_sha "$LCK_T/$FW")"; lck_git add -A
 caso "lock: arquivo do framework com o hash do lock: passa"     comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
+# Com `-o` ou pathspec, o commit leva o arquivo sem o lock preparado. O conteudo e o que o
+# lock preparado declara; o pre-push o confere contra o lock do proprio commit (test-p3).
+caso "lock: commit -o do arquivo com o lock so no indice: passa" comum/sem-segredo.sh "$(bash_json "git commit -m x -o $FW")" 0
 caso "lock: segredo na mensagem continua barrando"              comum/sem-segredo.sh "$(bash_json "git commit -m 'chave $SK'")" 2
 printf 'K=%s\nT=%s\n' "$SK" "$SK" > "$LCK_T/$FW"
 caso "lock: alteracao nao preparada no mesmo arquivo: barra"    comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2

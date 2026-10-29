@@ -199,6 +199,13 @@ repo locktag; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lo
 g tag -a v1 -m "chave $SK"
 empurra refs/tags/v1 refs/tags/v1
 [ "$rc" = 1 ] && passa 'lock: tag anotada com segredo sobre commit dispensado: barra' || quebra "lock tag: $(mostra)"
+# `git commit -o` leva o arquivo sem o lock preparado: o hook do commit o dispensou pelo lock
+# do indice, e o push o confere contra o lock do proprio commit, que nao o declara (Codex).
+repo lockonly; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"
+g add -A; g commit -q -m x -o "$FWP"
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && [ -n "$(g diff --cached --name-only -- .expx/expx-lock.json)" ] \
+  && passa 'lock: commit -o sem o lock preparado: o push varre o arquivo e barra' || quebra "lock commit -o: $(mostra)"
 repo lockruim; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"
 jq --arg k "$(printf '.claude/hooks/a\nb')" --arg h "$(printf '%064d' 0)" '.instalacao.arquivos[$k] = $h' "$R/.expx/expx-lock.json" > "$aux/l.tmp" \
   && mv "$aux/l.tmp" "$R/.expx/expx-lock.json"; commita

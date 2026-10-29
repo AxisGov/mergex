@@ -7,8 +7,10 @@
 # `instalacao.arquivos` é o que o ExpxDev instalou: não é varrido.
 #
 # A dispensa é estreita, e qualquer dúvida a desliga (a varredura segue normal):
-# - o lock e o blob vêm do MESMO estado que vai para o histórico: o índice no
-#   commit, o próprio commit no push; nunca a árvore de trabalho nem o HEAD;
+# - o lock e o blob vêm do índice na análise do commit e do próprio commit no
+#   push; nunca da árvore de trabalho nem do HEAD. Com `git commit -o` ou
+#   pathspec, o commit pode levar o arquivo sem o lock preparado: o conteúdo é o
+#   que esse lock declara, e o push o confere contra o lock do próprio commit;
 # - só caminhos em .claude/{hooks,skills,commands,agents}/ e .expx/marketplace/,
 #   relativos, sem `.`/`..`, segmento vazio, barra invertida ou controle;
 # - só blob regular (100644/100755), no estágio 0;
