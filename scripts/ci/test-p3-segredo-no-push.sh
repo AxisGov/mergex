@@ -176,6 +176,54 @@ printf 'refs/heads/nova %s refs/heads/nova %s\n' "$sl" "$ZERO" \
 [ "$rc" = 1 ] && diz 'git fetch' && ! diz 's3nh4Xpto' \
   && passa 'push para URL com credencial: o diagnostico nao repete a URL' || quebra "push para URL: $(mostra)"
 
+echo '== o arquivo do framework que o lock do commit confere nao e varrido (DM-286) =='
+# Com o lock v2 DO PROPRIO COMMIT: um lock posterior nao perdoa um commit anterior.
+sha_de() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'; }
+lock_em() { mkdir -p "$R/.expx"; jq -n --arg p "$1" --arg h "$2" \
+  '{lock_version:2,cli_version:"0.12.9",harness:["claude"],skills:{},instalacao:{arquivos:{($p):$h}}}' > "$R/.expx/expx-lock.json"; }
+FWP=".claude/hooks/fw.sh"
+repo lockok; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 0 ] && passa 'lock: arquivo do framework com o hash do lock do commit: passa' || quebra "lock ok: $(mostra)"
+repo lockmsg; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita "chave $SK"
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && passa 'lock: segredo na mensagem continua barrando' || quebra "lock msg: $(mostra)"
+repo lockdiv; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(printf '%064d' 0)"; commita
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && passa 'lock: hash que nao bate: barra' || quebra "lock divergente: $(mostra)"
+repo lockdepois; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; commita a
+lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita b
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && passa 'lock: lock posterior nao perdoa o commit anterior: barra' || quebra "lock posterior: $(mostra)"
+repo locktag; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita
+g tag -a v1 -m "chave $SK"
+empurra refs/tags/v1 refs/tags/v1
+[ "$rc" = 1 ] && passa 'lock: tag anotada com segredo sobre commit dispensado: barra' || quebra "lock tag: $(mostra)"
+repo lockruim; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"
+jq --arg k "$(printf '.claude/hooks/a\nb')" --arg h "$(printf '%064d' 0)" '.instalacao.arquivos[$k] = $h' "$R/.expx/expx-lock.json" > "$aux/l.tmp" \
+  && mv "$aux/l.tmp" "$R/.expx/expx-lock.json"; commita
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && passa 'lock: chave malformada invalida o lock do commit: barra' || quebra "lock chave ruim: $(mostra)"
+repo locksemsha; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita
+mkdir -p "$aux/semsha"; printf '#!/bin/sh\nexit 1\n' > "$aux/semsha/sha256sum"; cp "$aux/semsha/sha256sum" "$aux/semsha/shasum"
+chmod +x "$aux/semsha/sha256sum" "$aux/semsha/shasum"
+empurra refs/heads/main refs/heads/main PATH="$aux/semsha:$PATH"
+[ "$rc" = 1 ] && passa 'lock: sem sha256 que funcione: barra' || quebra "lock sem sha: $(mostra)"
+mkdir -p "$aux/shaerr"
+printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$(command -v sha256sum || command -v shasum)" > "$aux/shaerr/sha256sum"
+cp "$aux/shaerr/sha256sum" "$aux/shaerr/shasum"; chmod +x "$aux/shaerr/sha256sum" "$aux/shaerr/shasum"
+empurra refs/heads/main refs/heads/main PATH="$aux/shaerr:$PATH"
+[ "$rc" = 1 ] && passa 'lock: sha256 que imprime o hash mas sai com erro: barra' || quebra "lock sha com erro: $(mostra)"
+# O orcamento de bytes conferidos vale para o push inteiro, nao por commit (CodeAnt no
+# mergex#58): 300 commits nao multiplicam os 32 MiB. Baixado aqui para caber num commit so.
+repo orcamento; mkdir -p "$R/.claude/hooks"
+printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita c1
+printf 'K=%s\nB=%s\n' "$SK" "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita c2
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 0 ] && passa 'lock: dois commits dentro do orcamento do push: passa' || quebra "orcamento ok: $(mostra)"
+empurra refs/heads/main refs/heads/main EXPX_SEGREDO_DISP_MAX_PUSH=40
+[ "$rc" = 1 ] && passa 'lock: alem do orcamento do push, o commit seguinte e varrido: barra' || quebra "orcamento estourado: $(mostra)"
+
 echo '== cada commit e lido uma vez so =='
 # Com achado, a segunda fase dizia onde relendo cada commit no Git: log, rev-list e diff
 # de novo, ~1.800 processos em 300 commits (A4 do CodeAnt no conselhos#211). Agora ela le
@@ -187,10 +235,14 @@ mkdir -p "$aux/bin"; GIT_REAL="$(command -v git)"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/chamadas"\nexec "%s" "$@"\n' "$aux" "$GIT_REAL" > "$aux/bin/git"
 chmod +x "$aux/bin/git"; : > "$aux/chamadas"
 empurra refs/heads/main refs/heads/main PATH="$aux/bin:$PATH"
-conta() { n_log="$(grep -c '^log -1 --format=%B' "$aux/chamadas")"; n_par="$(grep -c '^rev-list --parents' "$aux/chamadas")"; n_dif="$(grep -c '^diff --text' "$aux/chamadas")"; }
+conta() { n_log="$(grep -c '^log -1 --format=%B' "$aux/chamadas")"; n_par="$(grep -c '^rev-list --parents' "$aux/chamadas")"; n_dif="$(grep -c '^diff --text' "$aux/chamadas")"
+  n_lck="$(grep -c '^cat-file -s .*:\.expx/expx-lock\.json$' "$aux/chamadas")"; n_nom="$(grep -cE '^diff(-tree)? .*--name-only' "$aux/chamadas")"; n_lst="$(grep -c '^ls-tree' "$aux/chamadas")"; }
 conta
 [ "$rc" = 1 ] && diz 'chave de API' && [ "$n_log" = 13 ] && [ "$n_par" = 13 ] && [ "$n_dif" = 13 ] \
   && passa 'com achado, 13 commits: uma leitura de cada no Git' || quebra "uma vez: log $n_log, parents $n_par, diff $n_dif (esperava 13) | $(mostra)"
+# Sem lock nos commits, a dispensa (DM-286) custa uma consulta ao lock por commit, e so.
+[ "$n_lck" = 13 ] && [ "$n_nom" = 0 ] && [ "$n_lst" = 0 ] \
+  && passa 'sem lock: uma consulta ao lock por commit, nenhuma lista nem ls-tree' || quebra "sem lock: lock $n_lck, nomes $n_nom, ls-tree $n_lst (esperava 13, 0, 0)"
 # Duas refs com os mesmos 13 commits no mesmo push: a segunda le o que a primeira guardou.
 g branch outra main; : > "$aux/chamadas"
 printf 'refs/heads/main %s refs/heads/main %s\nrefs/heads/outra %s refs/heads/outra %s\n' \
@@ -199,6 +251,15 @@ printf 'refs/heads/main %s refs/heads/main %s\nrefs/heads/outra %s refs/heads/ou
 conta
 [ "$rc" = 1 ] && [ "$(grep -c 'no commit' "$aux/err")" -ge 2 ] && [ "$n_log" = 13 ] && [ "$n_par" = 13 ] && [ "$n_dif" = 13 ] \
   && passa 'duas refs com os mesmos commits: uma leitura de cada no push' || quebra "duas refs: log $n_log, parents $n_par, diff $n_dif (esperava 13) | $(mostra)"
+# Com lock em cada commit: o lock e a lista de alterados uma vez por commit, e um ls-tree por
+# arquivo elegivel alterado.
+repo comlock; mkdir -p "$R/.claude/hooks"
+for i in $(seq 1 5); do printf 'v%s\n' "$i" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita "c$i"; done
+printf 'K=%s\n' "$SK" > "$R/a.txt"; commita; : > "$aux/chamadas"
+empurra refs/heads/main refs/heads/main PATH="$aux/bin:$PATH"
+conta
+[ "$rc" = 1 ] && [ "$n_log" = 6 ] && [ "$n_lck" = 6 ] && [ "$n_nom" = 6 ] && [ "$n_lst" = 5 ] \
+  && passa 'com lock: uma consulta ao lock e uma lista por commit, um ls-tree por arquivo' || quebra "com lock: log $n_log, lock $n_lck, nomes $n_nom, ls-tree $n_lst (esperava 6, 6, 6, 5) | $(mostra)"
 
 echo '== falha fechada =='
 copia="$aux/instalacao"; mkdir -p "$copia/.claude/skills/mergex" "$copia/.claude/hooks"
