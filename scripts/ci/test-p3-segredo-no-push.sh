@@ -209,6 +209,11 @@ mkdir -p "$aux/semsha"; printf '#!/bin/sh\nexit 1\n' > "$aux/semsha/sha256sum"; 
 chmod +x "$aux/semsha/sha256sum" "$aux/semsha/shasum"
 empurra refs/heads/main refs/heads/main PATH="$aux/semsha:$PATH"
 [ "$rc" = 1 ] && passa 'lock: sem sha256 que funcione: barra' || quebra "lock sem sha: $(mostra)"
+mkdir -p "$aux/shaerr"
+printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$(command -v sha256sum || command -v shasum)" > "$aux/shaerr/sha256sum"
+cp "$aux/shaerr/sha256sum" "$aux/shaerr/shasum"; chmod +x "$aux/shaerr/sha256sum" "$aux/shaerr/shasum"
+empurra refs/heads/main refs/heads/main PATH="$aux/shaerr:$PATH"
+[ "$rc" = 1 ] && passa 'lock: sha256 que imprime o hash mas sai com erro: barra' || quebra "lock sha com erro: $(mostra)"
 
 echo '== cada commit e lido uma vez so =='
 # Com achado, a segunda fase dizia onde relendo cada commit no Git: log, rev-list e diff

@@ -545,6 +545,17 @@ chmod +x "$SEMSHA_T/sha256sum" "$SEMSHA_T/shasum"
 PATH_ANTES="$PATH"; export PATH="$SEMSHA_T:$PATH"
 caso "lock: sem sha256 que funcione: barra"                     comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
 export PATH="$PATH_ANTES"; rm -rf "$SEMSHA_T"
+# O hash certo com saida de erro tambem nao vale: so o exito do executavel conta (Codex).
+SHAERR_T="$(mktemp -d)"
+printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$(command -v sha256sum || command -v shasum)" > "$SHAERR_T/sha256sum"
+cp "$SHAERR_T/sha256sum" "$SHAERR_T/shasum"; chmod +x "$SHAERR_T/sha256sum" "$SHAERR_T/shasum"
+export PATH="$SHAERR_T:$PATH"
+caso "lock: sha256 que imprime o hash mas sai com erro: barra"  comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+# ...nem num chamador sem pipefail: o helper exige o exito por conta propria.
+SHA_RC="$(set +o pipefail; . "$H/../skills/mergex/scripts/segredo-dispensa.sh"; printf 'x' | _disp_sha256 >/dev/null 2>&1; echo $?)"
+if [ "$SHA_RC" != 0 ]; then OK=$((OK+1)); printf '  ok    %s\n' "lock: _disp_sha256 sem pipefail devolve o erro do executavel"
+else FALHOU=$((FALHOU+1)); printf '  FALHA %s (rc %s)\n' "lock: _disp_sha256 sem pipefail devolve o erro do executavel" "$SHA_RC"; fi
+export PATH="$PATH_ANTES"; rm -rf "$SHAERR_T"
 HOOK_CWD="$HOOK_CWD_ANTES"; rm -rf "$LCK_T"
 # Prefixo de chave no meio de um identificador nao e chave. Falso positivo do
 # conselho #204: "ta" + "sk-fora-do-plano-..." (nome de um caso da bancada da
