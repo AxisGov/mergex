@@ -204,7 +204,7 @@ empurra refs/tags/v1 refs/tags/v1
 repo lockonly; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"
 g add -A; g commit -q -m x -o "$FWP"
 empurra refs/heads/main refs/heads/main
-[ "$rc" = 1 ] && [ -n "$(g diff --cached --name-only -- .expx/expx-lock.json)" ] \
+[ "$rc" = 1 ] && diz 'chave de API' && diz "no commit $(g rev-parse --short=12 HEAD):" && [ -n "$(g diff --cached --name-only -- .expx/expx-lock.json)" ] \
   && passa 'lock: commit -o sem o lock preparado: o push varre o arquivo e barra' || quebra "lock commit -o: $(mostra)"
 repo lockruim; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"
 jq --arg k "$(printf '.claude/hooks/a\nb')" --arg h "$(printf '%064d' 0)" '.instalacao.arquivos[$k] = $h' "$R/.expx/expx-lock.json" > "$aux/l.tmp" \
