@@ -214,6 +214,15 @@ printf '#!/bin/sh\n"%s" "$@"\nexit 1\n' "$(command -v sha256sum || command -v sh
 cp "$aux/shaerr/sha256sum" "$aux/shaerr/shasum"; chmod +x "$aux/shaerr/sha256sum" "$aux/shaerr/shasum"
 empurra refs/heads/main refs/heads/main PATH="$aux/shaerr:$PATH"
 [ "$rc" = 1 ] && passa 'lock: sha256 que imprime o hash mas sai com erro: barra' || quebra "lock sha com erro: $(mostra)"
+# O orcamento de bytes conferidos vale para o push inteiro, nao por commit (CodeAnt no
+# mergex#58): 300 commits nao multiplicam os 32 MiB. Baixado aqui para caber num commit so.
+repo orcamento; mkdir -p "$R/.claude/hooks"
+printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita c1
+printf 'K=%s\nB=%s\n' "$SK" "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita c2
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 0 ] && passa 'lock: dois commits dentro do orcamento do push: passa' || quebra "orcamento ok: $(mostra)"
+empurra refs/heads/main refs/heads/main EXPX_SEGREDO_DISP_MAX_PUSH=40
+[ "$rc" = 1 ] && passa 'lock: alem do orcamento do push, o commit seguinte e varrido: barra' || quebra "orcamento estourado: $(mostra)"
 
 echo '== cada commit e lido uma vez so =='
 # Com achado, a segunda fase dizia onde relendo cada commit no Git: log, rev-list e diff

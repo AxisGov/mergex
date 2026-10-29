@@ -130,6 +130,13 @@ if [ "$SEG_MODO" != desligado ]; then
   { [ -r "$AQUI/segredo-dispensa.sh" ] && . "$AQUI/segredo-dispensa.sh" \
     && command -v segredo_dispensaveis_commit >/dev/null 2>&1; } && SEG_DISP_OK=1
 fi
+# O saldo de bytes conferidos pela dispensa vale para o push inteiro (CodeAnt no mergex#58).
+# Sem gravar o saldo, nada é dispensado.
+SEG_DISP_ORCAMENTO=""
+if [ "$SEG_DISP_OK" = 1 ]; then
+  SEG_DISP_ORCAMENTO="$TMP_DIR/disp-orcamento"
+  _disp_lim 67108864 "${EXPX_SEGREDO_DISP_MAX_PUSH:-}" > "$SEG_DISP_ORCAMENTO" 2>/dev/null || SEG_DISP_OK=0
+fi
 _seg_nulo() { case "$1" in *[!0]*) return 1 ;; esac; return 0; }
 _seg_mais() { awk '/^diff --git / { h = 0; next } /^@@/ { h = 1; next } h && /^\+/ { print substr($0, 2) }'; }
 # _seg_commit <sha> — mensagem e linhas adicionadas do commit, contra o primeiro pai

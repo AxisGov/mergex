@@ -537,7 +537,7 @@ caso "lock: mais bytes que o limite: barra"                     comum/sem-segred
 unset EXPX_SEGREDO_DISP_MAX_BYTES; export EXPX_SEGREDO_DISP_MAX_LOCK=10
 caso "lock: lock maior que o limite: barra"                     comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
 unset EXPX_SEGREDO_DISP_MAX_LOCK; export EXPX_SEGREDO_DISP_MAX_ARQUIVOS=99999
-caso "lock: variavel nao sobe o limite (99999 ainda e 256): passa" comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
+caso "lock: variavel nao sobe o limite (99999 ainda e 1024): passa" comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
 unset EXPX_SEGREDO_DISP_MAX_ARQUIVOS
 # Sem sha256 que funcione, nada e dispensado.
 SEMSHA_T="$(mktemp -d)"; printf '#!/bin/sh\nexit 1\n' > "$SEMSHA_T/sha256sum"; cp "$SEMSHA_T/sha256sum" "$SEMSHA_T/shasum"

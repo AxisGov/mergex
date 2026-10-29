@@ -14,10 +14,12 @@
 # - só blob regular (100644/100755), no estágio 0;
 # - lock v2 legível, até 1 MiB e 4.096 entradas, todo hash com 64 hex e toda chave
 #   bem formada (uma chave com controle, barra invertida, `.`/`..`, `//` ou absoluta
-#   invalida o lock inteiro); até 256 arquivos dispensados e 32 MiB de blobs
-#   conferidos por estado. As variáveis EXPX_SEGREDO_DISP_MAX_{LOCK,ENTRADAS,
-#   ARQUIVOS,BYTES} só baixam esses limites (os testes as usam): baixar só reduz a
-#   dispensa.
+#   invalida o lock inteiro); até 1.024 arquivos dispensados e 32 MiB de blobs
+#   conferidos por estado (a instalação inteira tem cerca de 650 arquivos); no push,
+#   64 MiB conferidos no total, que os commits vão consumindo (SEG_DISP_ORCAMENTO,
+#   um arquivo com o saldo). As variáveis EXPX_SEGREDO_DISP_MAX_{LOCK,ENTRADAS,
+#   ARQUIVOS,BYTES,PUSH} só baixam esses limites (os testes as usam): baixar só
+#   reduz a dispensa.
 # Quem falsifica o lock para casar com um segredo passa: o hook existe contra o
 # vazamento acidental, e o lock é declaração local, não prova de procedência.
 #
@@ -84,8 +86,15 @@ _disp_lock() {
 # nada: a lista só sai inteira, no fim.
 _disp_filtra() {
   local lock="$1" pref="$2" c esperado modo obj h n=0 soma=0 tam saida="" max_n max_b
-  max_n="$(_disp_lim 256 "${EXPX_SEGREDO_DISP_MAX_ARQUIVOS:-}")"
+  max_n="$(_disp_lim 1024 "${EXPX_SEGREDO_DISP_MAX_ARQUIVOS:-}")"
   max_b="$(_disp_lim 33554432 "${EXPX_SEGREDO_DISP_MAX_BYTES:-}")"
+  # O saldo do push, quando há: o estado só confere o que ainda cabe nele.
+  local saldo=""
+  if [ -n "${SEG_DISP_ORCAMENTO:-}" ]; then
+    saldo="$(cat "$SEG_DISP_ORCAMENTO" 2>/dev/null)"
+    case "$saldo" in ''|*[!0-9]*) return 1 ;; esac
+    max_b="$(_disp_lim "$max_b" "$saldo")"
+  fi
   while IFS= read -r -d '' c; do
     _disp_caminho_ok "$c" || continue
     esperado="$(printf '%s\n' "$lock" | awk -F '\t' -v c="$c" '$1 == c { print $2; exit }')"
@@ -109,6 +118,7 @@ _disp_filtra() {
     saida="${saida}${c}
 "
   done
+  if [ -n "$saldo" ]; then printf '%s\n' "$((saldo - soma))" > "$SEG_DISP_ORCAMENTO" || return 1; fi
   printf '%s' "$saida"
 }
 
