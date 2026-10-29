@@ -464,6 +464,46 @@ caso "git add -Af && git commit: barra"             comum/sem-segredo.sh "$(bash
 caso "git add -A com ignorado (sem -f): passa"      comum/sem-segredo.sh "$(bash_json 'git add -A && git commit -m x')" 0
 rm -f "$SEG_T/.gitignore" "$SEG_T/ignorado.env"
 HOOK_CWD="$HOOK_CWD_ANTES"; rm -rf "$SEG_T"
+# O arquivo do framework que o lock da instalacao confere por hash nao e varrido no commit:
+# a atualizacao do framework barrava no proprio hook (conselhos, 0.12.5 para 0.12.8; DM-286).
+# Vale so para o blob preparado, com o lock v2 do indice, nas pastas do framework.
+LCK_T="$(mktemp -d)"
+git -C "$LCK_T" init -q -b feature/lock
+lck_git() { git -C "$LCK_T" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+lck_sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'; }
+# lck_lock <versao> <caminho> <hash> — grava o lock com uma entrada em instalacao.arquivos
+lck_lock() { mkdir -p "$LCK_T/.expx"; jq -n --argjson v "$1" --arg p "$2" --arg h "$3" \
+  '{lock_version:$v,cli_version:"0.12.9",harness:["claude"],skills:{},instalacao:{arquivos:{($p):$h}}}' > "$LCK_T/.expx/expx-lock.json"; }
+printf 'base\n' > "$LCK_T/base.txt"; lck_git add base.txt; lck_git commit -q -m base
+HOOK_CWD_ANTES="$HOOK_CWD"; HOOK_CWD="$LCK_T"
+FW=".claude/hooks/fw.sh"; mkdir -p "$LCK_T/.claude/hooks"
+printf 'K=%s\n' "$SK" > "$LCK_T/$FW"
+lck_lock 2 "$FW" "$(lck_sha "$LCK_T/$FW")"; lck_git add -A
+caso "lock: arquivo do framework com o hash do lock: passa"     comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 0
+caso "lock: segredo na mensagem continua barrando"              comum/sem-segredo.sh "$(bash_json "git commit -m 'chave $SK'")" 2
+printf 'K=%s\nT=%s\n' "$SK" "$SK" > "$LCK_T/$FW"
+caso "lock: alteracao nao preparada no mesmo arquivo: barra"    comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+lck_git add -A
+caso "lock: hash que nao bate: barra"                           comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+lck_lock 2 "$FW" "$(lck_sha "$LCK_T/$FW")"
+caso "lock: o lock certo so na arvore, nao no indice: barra"    comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+lck_git add -A; lck_lock 1 "$FW" "$(lck_sha "$LCK_T/$FW")"; lck_git add -A
+caso "lock: versao 1 nao dispensa: barra"                       comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+printf '{ nao e json' > "$LCK_T/.expx/expx-lock.json"; lck_git add -A
+caso "lock: malformado nao dispensa: barra"                     comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+printf 'K=%s\n' "$SK" > "$LCK_T/app.env"; lck_lock 2 "app.env" "$(lck_sha "$LCK_T/app.env")"; lck_git add -A
+caso "lock: caminho fora das pastas do framework: barra"        comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+lck_git rm -q --cached app.env; rm -f "$LCK_T/app.env"
+printf 'ok\n' > "$LCK_T/$FW"; lck_lock 2 "$FW" "$(lck_sha "$LCK_T/$FW")"
+jq --arg n "$SK" '.nota = $n' "$LCK_T/.expx/expx-lock.json" > "$LCK_T/l.tmp" && mv "$LCK_T/l.tmp" "$LCK_T/.expx/expx-lock.json"; lck_git add -A
+caso "lock: segredo dentro do proprio lock: barra"              comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+lck_git reset -q --hard; lck_git clean -qfd; mkdir -p "$LCK_T/.claude/hooks"
+printf 'K=%s\n' "$SK" > "$LCK_T/$FW"; lck_lock 2 "$FW" "$(lck_sha "$LCK_T/$FW")"
+caso "lock: add e commit no mesmo comando nao dispensa: barra"  comum/sem-segredo.sh "$(bash_json 'git add -A && git commit -m x')" 2
+ln -s "K=$SK" "$LCK_T/.claude/hooks/link"; printf 'K=%s' "$SK" > "$LCK_T/alvo.txt"
+lck_lock 2 ".claude/hooks/link" "$(lck_sha "$LCK_T/alvo.txt")"; rm -f "$LCK_T/alvo.txt" "$LCK_T/$FW"; lck_git add -A
+caso "lock: link simbolico nao dispensa: barra"                 comum/sem-segredo.sh "$(bash_json 'git commit -m x')" 2
+HOOK_CWD="$HOOK_CWD_ANTES"; rm -rf "$LCK_T"
 # Prefixo de chave no meio de um identificador nao e chave. Falso positivo do
 # conselho #204: "ta" + "sk-fora-do-plano-..." (nome de um caso da bancada da
 # sprintx) casava com sk-, e barrou os commits de instalacao do framework. O

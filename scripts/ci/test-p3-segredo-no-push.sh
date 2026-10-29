@@ -176,6 +176,30 @@ printf 'refs/heads/nova %s refs/heads/nova %s\n' "$sl" "$ZERO" \
 [ "$rc" = 1 ] && diz 'git fetch' && ! diz 's3nh4Xpto' \
   && passa 'push para URL com credencial: o diagnostico nao repete a URL' || quebra "push para URL: $(mostra)"
 
+echo '== o arquivo do framework que o lock do commit confere nao e varrido (DM-286) =='
+# Com o lock v2 DO PROPRIO COMMIT: um lock posterior nao perdoa um commit anterior.
+sha_de() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'; }
+lock_em() { mkdir -p "$R/.expx"; jq -n --arg p "$1" --arg h "$2" \
+  '{lock_version:2,cli_version:"0.12.9",harness:["claude"],skills:{},instalacao:{arquivos:{($p):$h}}}' > "$R/.expx/expx-lock.json"; }
+FWP=".claude/hooks/fw.sh"
+repo lockok; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 0 ] && passa 'lock: arquivo do framework com o hash do lock do commit: passa' || quebra "lock ok: $(mostra)"
+repo lockmsg; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita "chave $SK"
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && passa 'lock: segredo na mensagem continua barrando' || quebra "lock msg: $(mostra)"
+repo lockdiv; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(printf '%064d' 0)"; commita
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && passa 'lock: hash que nao bate: barra' || quebra "lock divergente: $(mostra)"
+repo lockdepois; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; commita a
+lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita b
+empurra refs/heads/main refs/heads/main
+[ "$rc" = 1 ] && passa 'lock: lock posterior nao perdoa o commit anterior: barra' || quebra "lock posterior: $(mostra)"
+repo locktag; mkdir -p "$R/.claude/hooks"; printf 'K=%s\n' "$SK" > "$R/$FWP"; lock_em "$FWP" "$(sha_de "$R/$FWP")"; commita
+g tag -a v1 -m "chave $SK"
+empurra refs/tags/v1 refs/tags/v1
+[ "$rc" = 1 ] && passa 'lock: tag anotada com segredo sobre commit dispensado: barra' || quebra "lock tag: $(mostra)"
+
 echo '== cada commit e lido uma vez so =='
 # Com achado, a segunda fase dizia onde relendo cada commit no Git: log, rev-list e diff
 # de novo, ~1.800 processos em 300 commits (A4 do CodeAnt no conselhos#211). Agora ela le
