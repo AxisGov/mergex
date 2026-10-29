@@ -27,8 +27,10 @@ camada: pega o segredo que o próprio comando gerou e o commit feito por fora do
 (em `.claude/hooks/`, `.claude/skills/`, `.claude/commands/`, `.claude/agents/` ou
 `.expx/marketplace/`) cujo blob bate com o sha256 que o `.expx/expx-lock.json` v2 registra é o que
 o ExpxDev instalou. No commit, contam o blob preparado e o lock do índice; no pre-push, o blob e o
-lock do próprio commit. A mensagem, o lock, o que não está preparado e qualquer outro caminho
-continuam varridos. Para a atualização do framework passar, prepare os arquivos e o lock num
+lock do próprio commit. Com `git commit -o` ou pathspec, o lock pode ficar preparado fora do
+commit: o arquivo entra com o conteúdo que esse lock declara, e o pre-push o confere contra o lock
+do próprio commit, que não o declara, e o varre. A mensagem, o lock, o que não está preparado e
+qualquer outro caminho continuam varridos. Para a atualização do framework passar, prepare os arquivos e o lock num
 comando (`git add`) e commite em outro: no mesmo comando, o índice ainda não tem o que o lock
 confere.
 
