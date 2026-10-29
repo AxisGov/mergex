@@ -12,8 +12,12 @@
 # - só caminhos em .claude/{hooks,skills,commands,agents}/ e .expx/marketplace/,
 #   relativos, sem `.`/`..`, segmento vazio, barra invertida ou controle;
 # - só blob regular (100644/100755), no estágio 0;
-# - lock v2 legível, até 1 MiB e 4.096 entradas, todo hash com 64 hex; até 256
-#   arquivos dispensados e 32 MiB de blobs conferidos por estado.
+# - lock v2 legível, até 1 MiB e 4.096 entradas, todo hash com 64 hex e toda chave
+#   bem formada (uma chave com controle, barra invertida, `.`/`..`, `//` ou absoluta
+#   invalida o lock inteiro); até 256 arquivos dispensados e 32 MiB de blobs
+#   conferidos por estado. As variáveis EXPX_SEGREDO_DISP_MAX_{LOCK,ENTRADAS,
+#   ARQUIVOS,BYTES} só baixam esses limites (os testes as usam): baixar só reduz a
+#   dispensa.
 # Quem falsifica o lock para casar com um segredo passa: o hook existe contra o
 # vazamento acidental, e o lock é declaração local, não prova de procedência.
 #
@@ -27,6 +31,11 @@ _disp_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{ print $1 }'
   elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{ print $1 }'
   else return 1; fi
+}
+
+# _disp_lim <padrão> <valor da variável> — o menor dos dois; valor fora de número, o padrão
+_disp_lim() {
+  case "$2" in ''|*[!0-9]*) printf '%s' "$1" ;; *) if [ "$2" -lt "$1" ]; then printf '%s' "$2"; else printf '%s' "$1"; fi ;; esac
 }
 
 _disp_caminho_ok() {
@@ -46,12 +55,20 @@ _disp_lock() {
   local obj="$1" tam
   command -v jq >/dev/null 2>&1 || return 1
   tam="$(git cat-file -s "$obj" 2>/dev/null)" || return 1
-  [ "$tam" -le 1048576 ] 2>/dev/null || return 1
-  git cat-file blob "$obj" 2>/dev/null | jq -r '
+  [ "$tam" -le "$(_disp_lim 1048576 "${EXPX_SEGREDO_DISP_MAX_LOCK:-}")" ] 2>/dev/null || return 1
+  # Toda chave bem formada, ou o lock inteiro sai: uma quebra de linha na chave
+  # corromperia a lista "caminho<TAB>hash". Chave bem formada fora das pastas do
+  # framework só não é elegível.
+  git cat-file blob "$obj" 2>/dev/null | jq -r --argjson max "$(_disp_lim 4096 "${EXPX_SEGREDO_DISP_MAX_ENTRADAS:-}")" '
+    def malformada: . == "" or startswith("/") or test("[[:cntrl:]]") or test("\\\\")
+      or test("(^|/)\\.{1,2}(/|$)") or test("//");
     if .lock_version == 2 and (.instalacao.arquivos | type) == "object"
-       and (.instalacao.arquivos | length) <= 4096
+       and (.instalacao.arquivos | length) <= $max
        and all(.instalacao.arquivos[]; type == "string" and test("^[0-9a-f]{64}$"))
-    then .instalacao.arquivos | to_entries[] | "\(.key)\t\(.value)"
+       and all(.instalacao.arquivos | keys[]; malformada | not)
+    then .instalacao.arquivos | to_entries[]
+      | select(.key | test("^(\\.claude/(hooks|skills|commands|agents)|\\.expx/marketplace)/."))
+      | "\(.key)\t\(.value)"
     else error("fora do contrato") end' 2>/dev/null
 }
 
@@ -60,7 +77,9 @@ _disp_lock() {
 # lock. `<prefixo>` é `:` (índice, estágio 0) ou `<sha>:` (commit). Acima dos limites,
 # nada: a lista só sai inteira, no fim.
 _disp_filtra() {
-  local lock="$1" pref="$2" c esperado modo obj n=0 soma=0 tam saida=""
+  local lock="$1" pref="$2" c esperado modo obj n=0 soma=0 tam saida="" max_n max_b
+  max_n="$(_disp_lim 256 "${EXPX_SEGREDO_DISP_MAX_ARQUIVOS:-}")"
+  max_b="$(_disp_lim 33554432 "${EXPX_SEGREDO_DISP_MAX_BYTES:-}")"
   while IFS= read -r -d '' c; do
     _disp_caminho_ok "$c" || continue
     esperado="$(printf '%s\n' "$lock" | awk -F '\t' -v c="$c" '$1 == c { print $2; exit }')"
@@ -77,9 +96,9 @@ _disp_filtra() {
       obj="$(printf '%s' "$modo" | awk '{ print $3 }')"
     fi
     tam="$(git cat-file -s "$obj" 2>/dev/null)" || continue
-    soma=$((soma + tam)); [ "$soma" -le 33554432 ] || return 1
+    soma=$((soma + tam)); [ "$soma" -le "$max_b" ] || return 1
     [ "$(git cat-file blob "$obj" 2>/dev/null | _disp_sha256)" = "$esperado" ] || continue
-    n=$((n + 1)); [ "$n" -le 256 ] || return 1
+    n=$((n + 1)); [ "$n" -le "$max_n" ] || return 1
     saida="${saida}${c}
 "
   done
