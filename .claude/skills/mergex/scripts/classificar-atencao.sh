@@ -62,7 +62,7 @@ ORDEM='O1 O2 O3 O4 O5 O6 O7 O8 O9 O10 L1 L2 L3 L4 D1 D2 D3 D4 PADRAO'
 
 # origem|caminho|kind|critério|função
 #   caminho sem `docs/` na frente é relativo à pasta do trabalho;
-#   `sprint-NN` é só `sprint-` seguido de dígitos; `base/<area>.md` só vale para
+#   `sprint-NN` é só `sprint-` seguido de dígitos; `base/<area>.md` (`<area>` pode ter subpasta) só vale para
 #   arquivo listado no `base/00-INDICE.md` do mesmo trabalho;
 #   kind `-` = o contrato não define frontmatter, e o arquivo não pode declarar kind
 #   (salvo a evidência de revisão, $CHAVE_EVIDENCIA: o conteúdo nunca é lido);
@@ -367,7 +367,8 @@ reconhece() {
   local caminho="$1" arq chave origem_linha linha kind_esperado criterio funcao kind_real rel dir nome modo
 
   case "$caminho" in
-    /*|*\\*|./*|*/./*|*..*|'') nao_reconhecido "caminho fora da forma canônica"; return ;;
+    # Segmento `.` ou `..`, não `..` dentro de um nome (`v1..v2.md`): a mesma forma do catalogo_base.
+    /*|*\\*|*//*|.|./*|*/.|*/./*|..|../*|*/..|*/../*|'') nao_reconhecido "caminho fora da forma canônica"; return ;;
   esac
   [ "$CONTEXTO_OK" = 1 ] || { nao_reconhecido "$CONTEXTO_MOTIVO"; return; }
 

@@ -657,17 +657,20 @@ echo "Cenário — base em subpasta (DM-288): a área listada vale como a da rai
 CATBASE="$REPO/.claude/skills/mergex/scripts/catalogo-de-metodo.sh"
 novo_repo; trabalho_sprintx ft-sub
 S=docs/sprintx/features/ft-sub
-fm base_indice ft-sub 'areas:' '  - arquivo: modulo.md' '  - arquivo: dominio/regras.md' | escreve "$S/base/00-INDICE.md"
+fm base_indice ft-sub 'areas:' '  - arquivo: modulo.md' '  - arquivo: dominio/regras.md' '  - arquivo: dominio/v1..v2.md' | escreve "$S/base/00-INDICE.md"
 printf '# Módulo\n' | escreve "$S/base/modulo.md"
 printf '# Regras\n' | escreve "$S/base/dominio/regras.md"
 printf '# solta\n' | escreve "$S/base/dominio/solta.md"
+printf '# Versões\n' | escreve "$S/base/dominio/v1..v2.md"
 commit_tudo
 classifica main <<LISTA
 $S/base/00-INDICE.md
 $S/base/dominio/regras.md
 $S/base/dominio/solta.md
+$S/base/dominio/v1..v2.md
 LISTA
-espera "$S/base/00-INDICE.md" "DISPENSÁVEL" "D4" "as 2 área(s) listadas existem" "índice com área em subpasta"
+espera "$S/base/00-INDICE.md" "DISPENSÁVEL" "D4" "as 3 área(s) listadas existem" "índice com área em subpasta"
+espera "$S/base/dominio/v1..v2.md" "LEITURA RÁPIDA" "L4" "listada no índice" "\`..\` dentro do nome não é segmento"
 espera "$S/base/dominio/regras.md" "LEITURA RÁPIDA" "L4" "listada no índice" "área em subpasta listada"
 espera "$S/base/dominio/solta.md" "OLHO OBRIGATÓRIO" "padrão" "não listado no base/00-INDICE.md" "subpasta fora do índice"
 base_cat="$( (. "$CATBASE" && catalogo_base "$R" ft-sub "$S") 2>&1)"; rc=$?
@@ -676,7 +679,8 @@ if [ "$rc" = 0 ] && printf '%s\n' "$base_cat" | grep -qxF "$S/base/dominio/regra
 else
   FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_base com área em subpasta (rc=$rc): $base_cat"
 fi
-for fora in '../fora.md' 'dominio/../../fora.md' '/abs/fora.md' 'dominio\regras.md'; do
+for fora in '../fora.md' 'dominio/../../fora.md' '/abs/fora.md' 'dominio\regras.md' \
+  'dominio//regras.md' './regras.md' 'dominio/./regras.md' 'dominio/.' 'dominio/..' '.' '..'; do
   fm base_indice ft-sub 'areas:' "  - arquivo: $fora" | escreve "$S/base/00-INDICE.md"
   base_cat="$( (. "$CATBASE" && catalogo_base "$R" ft-sub "$S" >/dev/null; printf '%s' "$CATALOGO_ERRO") 2>&1)"
   if printf '%s' "$base_cat" | grep -qF 'fora da base'; then
