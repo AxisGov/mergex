@@ -264,15 +264,23 @@ prova_reconciliacao_verificada() {
 }
 
 prova_indice_consistente() {
-  local arq="$RAIZ/$1" dir area n=0
+  local arq="$RAIZ/$1" dir area parte resto n=0
   dir="$(dirname "$arq")"
   while IFS= read -r area; do
     [ -n "$area" ] || continue
+    # A mesma forma do catalogo_base: subpasta da base vale (DM-288).
     case "$area" in
-      */*|*..*|00-INDICE.md|00-LACUNAS.md) PROVA_MOTIVO="o índice lista caminho fora da forma '<area>.md': $area"; return 1 ;;
+      /*|*\\*|*//*|.|./*|*/.|*/./*|..|../*|*/..|*/../*|00-INDICE.md|00-LACUNAS.md) PROVA_MOTIVO="o índice lista caminho fora da base: $area"; return 1 ;;
       *.md) ;;
       *) PROVA_MOTIVO="o índice lista arquivo que não é .md: $area"; return 1 ;;
     esac
+    parte="$dir"; resto="$area"
+    while :; do
+      parte="$parte/${resto%%/*}"
+      [ ! -L "$parte" ] || { PROVA_MOTIVO="o índice lista área atrás de link simbólico: $area"; return 1; }
+      [ "${resto#*/}" != "$resto" ] || break
+      resto="${resto#*/}"
+    done
     [ -f "$dir/$area" ] || { PROVA_MOTIVO="o índice lista arquivo inexistente: $area"; return 1; }
     n=$((n+1))
   done <<EOF
@@ -396,11 +404,12 @@ reconhece() {
         chave="$rel"
       elif printf '%s' "$dir" | grep -Eq '^sprint-[0-9]{2,}$' && [ "${nome#*/}" = "$nome" ]; then
         chave="sprint-NN/$nome"
-      elif [ "$dir" = base ] && [ "${nome#*/}" = "$nome" ]; then
+      elif [ "$dir" = base ]; then
+        # a área pode estar numa subpasta da base, se o índice a lista assim (DM-288)
         case "$nome" in
           00-INDICE.md|00-LACUNAS.md) chave="$rel" ;;
           *)
-            if ! areas_do_indice "$RAIZ/$PASTA/base/00-INDICE.md" | grep -Fxq "$nome" \
+            if ! areas_do_indice "$RAIZ/$PASTA/base/00-INDICE.md" | grep -Fxq -- "$nome" \
                || [ "$(fm "$RAIZ/$PASTA/base/00-INDICE.md" kind)" != base_indice ] \
                || [ "$(fm "$RAIZ/$PASTA/base/00-INDICE.md" trabalho_id)" != "$TRABALHO" ]; then
               nao_reconhecido "arquivo da base não listado no base/00-INDICE.md deste trabalho"; return

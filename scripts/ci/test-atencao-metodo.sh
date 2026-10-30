@@ -258,7 +258,7 @@ espera "$S/regra.js" "OLHO OBRIGATÓRIO" "padrão" "fora do catálogo" "código 
 espera docs/sprintx/estimativas/CALIBRAGEM.md "OLHO OBRIGATÓRIO" "padrão" "fora do catálogo" "vizinho do HISTORICO"
 espera docs/sprintx/LEIA.md "OLHO OBRIGATÓRIO" "padrão" "fora do catálogo" "arquivo solto em docs/sprintx"
 espera "$S/sprint-1/tasks.md" "OLHO OBRIGATÓRIO" "padrão" "fora do catálogo" "sprint sem dois dígitos"
-espera "$S/base/extra/area.md" "OLHO OBRIGATÓRIO" "padrão" "fora do catálogo" "subpasta da base"
+espera "$S/base/extra/area.md" "OLHO OBRIGATÓRIO" "padrão" "não listado no base/00-INDICE.md" "subpasta da base fora do índice"
 espera "$S/base/nao-listada.md" "OLHO OBRIGATÓRIO" "padrão" "não listado no base/00-INDICE.md" "base fora do índice"
 espera docs/sprintx/features/ft-outra/00-DECISOES.md "OLHO OBRIGATÓRIO" "padrão" "fora do catálogo" "decisões de OUTRO trabalho"
 
@@ -646,6 +646,61 @@ espera "$E/RECONCILIACAO-BASE-001.md" "LEITURA RÁPIDA" "L4" "D4 não provado" "
 # critério O vence D4
 SAIDA="$(printf '%s\tO4: altera a regra de cálculo\n' "$E/RECONCILIACAO-BASE-001.md" | bash "$CLASSIFICADOR" --raiz "$R" --base main --reconciliados "$D/reconc.txt")"
 espera "$E/RECONCILIACAO-BASE-001.md" "OLHO OBRIGATÓRIO" "O4" "regra de cálculo" "O vence D4 na reconciliação"
+
+# ---------------------------------------------------------------------------
+echo
+echo "Cenário — base em subpasta (DM-288): a área listada vale como a da raiz da base"
+# ---------------------------------------------------------------------------
+# O conselhos#216 tinha `arquivo: dominio/regras.md` no índice: a SprintX aceitou da F1
+# à F5 e o E2 recusou ("enumera caminho fora da base"). A subpasta é da base; `..`,
+# caminho absoluto, `\` e link simbólico continuam fora.
+CATBASE="$REPO/.claude/skills/mergex/scripts/catalogo-de-metodo.sh"
+novo_repo; trabalho_sprintx ft-sub
+S=docs/sprintx/features/ft-sub
+fm base_indice ft-sub 'areas:' '  - arquivo: modulo.md' '  - arquivo: dominio/regras.md' | escreve "$S/base/00-INDICE.md"
+printf '# Módulo\n' | escreve "$S/base/modulo.md"
+printf '# Regras\n' | escreve "$S/base/dominio/regras.md"
+printf '# solta\n' | escreve "$S/base/dominio/solta.md"
+commit_tudo
+classifica main <<LISTA
+$S/base/00-INDICE.md
+$S/base/dominio/regras.md
+$S/base/dominio/solta.md
+LISTA
+espera "$S/base/00-INDICE.md" "DISPENSÁVEL" "D4" "as 2 área(s) listadas existem" "índice com área em subpasta"
+espera "$S/base/dominio/regras.md" "LEITURA RÁPIDA" "L4" "listada no índice" "área em subpasta listada"
+espera "$S/base/dominio/solta.md" "OLHO OBRIGATÓRIO" "padrão" "não listado no base/00-INDICE.md" "subpasta fora do índice"
+base_cat="$( (. "$CATBASE" && catalogo_base "$R" ft-sub "$S") 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && printf '%s\n' "$base_cat" | grep -qxF "$S/base/dominio/regras.md"; then
+  OK=$((OK+1)); echo "  ok    catalogo_base aceita a área em subpasta"
+else
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_base com área em subpasta (rc=$rc): $base_cat"
+fi
+for fora in '../fora.md' 'dominio/../../fora.md' '/abs/fora.md' 'dominio\regras.md'; do
+  fm base_indice ft-sub 'areas:' "  - arquivo: $fora" | escreve "$S/base/00-INDICE.md"
+  base_cat="$( (. "$CATBASE" && catalogo_base "$R" ft-sub "$S" >/dev/null; printf '%s' "$CATALOGO_ERRO") 2>&1)"
+  if printf '%s' "$base_cat" | grep -qF 'fora da base'; then
+    OK=$((OK+1)); echo "  ok    catalogo_base recusa $fora"
+  else
+    FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_base aceitou $fora: $base_cat"
+  fi
+  classifica main <<LISTA
+$S/base/00-INDICE.md
+LISTA
+  espera "$S/base/00-INDICE.md" "LEITURA RÁPIDA" "L4" "fora da base" "índice com $fora"
+done
+mkdir -p "$R/fora-da-base" && printf '# fora\n' > "$R/fora-da-base/x.md" && ln -s "$R/fora-da-base" "$R/$S/base/atalho"
+fm base_indice ft-sub 'areas:' '  - arquivo: atalho/x.md' | escreve "$S/base/00-INDICE.md"
+base_cat="$( (. "$CATBASE" && catalogo_base "$R" ft-sub "$S" >/dev/null; printf '%s' "$CATALOGO_ERRO") 2>&1)"
+if printf '%s' "$base_cat" | grep -qF 'link simbólico'; then
+  OK=$((OK+1)); echo "  ok    catalogo_base recusa área atrás de link simbólico"
+else
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_base aceitou área atrás de link simbólico: $base_cat"
+fi
+classifica main <<LISTA
+$S/base/00-INDICE.md
+LISTA
+espera "$S/base/00-INDICE.md" "LEITURA RÁPIDA" "L4" "link simbólico" "índice com área atrás de link simbólico"
 
 # ---------------------------------------------------------------------------
 echo
