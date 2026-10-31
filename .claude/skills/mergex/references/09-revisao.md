@@ -256,14 +256,15 @@ Não é impedimento: é divulgação. Quem aprova é a pessoa, e ela precisa sab
 
 ## Depois do merge — a worktree entregue
 
-Mergeado o PR, tire do disco a worktree do trabalho, a partir de fora dela (DM-290):
+Mergeado o PR final do trabalho, tire do disco a worktree dele, a partir de fora dela (DM-290). Em
+`por_sprint`, isso vale só para a última sprint: a próxima F6 retoma naquele checkout.
 
 ```bash
 bash .claude/skills/mergex/scripts/worktrees-entregues.sh --remover <caminho-da-worktree>
 ```
 
-Ela só sai com branch, sem trava, sem submódulo, com o HEAD na base remota, sem alteração e sem
-arquivo ignorado que não seja dependência. A branch fica. Se o script parar, relate o motivo e
+Ela só sai com branch, sem trava, sem submódulo, com o HEAD ancestral da base remota, sem alteração
+visível ou oculta e sem arquivo ignorado que não seja dependência. A branch fica. Se o script parar, relate o motivo e
 deixe a worktree: rastro ignorado (`docs/eventos/`) é decisão humana. Nunca force a remoção nem
 apague a pasta à mão.
 

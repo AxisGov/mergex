@@ -6,8 +6,10 @@
 # sem arquivo novo e sem arquivo ignorado que não seja dependência (`node_modules`, caches de
 # Python). O rastro ignorado (`docs/eventos/`) bloqueia e aparece aqui: o descarte é decisão
 # humana. A base vem do remoto, e comando que falha é "nao_verificado", nunca removível. A
-# remoção não força nada, e a branch fica. Squash de vários commits aparece como
-# `nao_entregue`: fica a sobra, nunca a perda.
+# remoção não força nada, e a branch fica. Entregue é o HEAD ancestral da base: squash e
+# rebase aparecem como `nao_entregue`, e fica a sobra, nunca a perda. Limite assumido: um
+# arquivo ignorado criado entre a conferência e a remoção se perde; a janela é de milissegundos
+# numa worktree sem sessão.
 #
 #   worktrees-entregues.sh --listar [--base <branch>]
 #       estado<TAB>motivo<TAB>caminho<TAB>branch, uma worktree por linha
@@ -54,15 +56,14 @@ julga() {
   [ -z "$saida" ] && [ ! -e "$c/.gitmodules" ] || { printf 'bloqueada\tsubmodulo'; return; }
   saida="$(git -C "$c" status --porcelain 2>/dev/null)" || { printf 'bloqueada\tnao_verificado'; return; }
   [ -z "$saida" ] || { printf 'bloqueada\talterada'; return; }
+  # `assume-unchanged` e `skip-worktree` escondem a alteração do status.
+  saida="$(git -C "$c" ls-files -v 2>/dev/null | awk '/^[a-zS]/')" || { printf 'bloqueada\tnao_verificado'; return; }
+  [ -z "$saida" ] || { printf 'bloqueada\toculta'; return; }
   ignorados="$(git -C "$c" status --ignored --porcelain 2>/dev/null)" || { printf 'bloqueada\tnao_verificado'; return; }
   while IFS= read -r x; do
     case "$x" in '!! '*) descartavel "${x#'!! '}" || { printf 'bloqueada\tignorado'; return; } ;; esac
   done <<<"$ignorados"
-  if ! git merge-base --is-ancestor "$h" "$BASE" 2>/dev/null; then
-    # Rebase no merge: entregue se nenhum commit tiver patch fora da base.
-    saida="$(git cherry "$BASE" "$h" 2>/dev/null)" || { printf 'bloqueada\tnao_verificado'; return; }
-    case "$saida" in *'+ '*) printf 'bloqueada\tnao_entregue'; return ;; esac
-  fi
+  git merge-base --is-ancestor "$h" "$BASE" 2>/dev/null || { printf 'bloqueada\tnao_entregue'; return; }
   printf 'removivel\t-'
 }
 

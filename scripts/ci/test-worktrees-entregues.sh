@@ -36,6 +36,11 @@ wt "com espaco"; integra "com espaco"
 wt avancou; g fetch -q origin; g update-ref refs/remotes/origin/main "$(git -C "$T/avancou" rev-parse HEAD)"
 # Por ultimo: integrado, o .gitmodules iria para todas as worktrees criadas depois.
 wt comlink; git -C "$T/comlink" update-index --add --cacheinfo "160000,$(git -C "$T/comlink" rev-parse HEAD),modulo"; git -C "$T/comlink" -c user.name=t -c user.email=t@t commit -q -m link; integra comlink; g rm -q --cached modulo; g -c user.name=t commit -q -m "tira o gitlink"; g push -q origin main
+wt oculta; integra oculta; printf 'o\n' >> "$T/oculta/a"; git -C "$T/oculta" update-index --assume-unchanged a
+wt pulada; integra pulada; printf 'p\n' >> "$T/pulada/a"; git -C "$T/pulada" update-index --skip-worktree a
+# Merge com resolucao que nao esta na base: nenhum commit proprio, e o `git cherry` nao o veria.
+wt mesclada; integra mesclada; g worktree add -q -b b-mergeada "$T/mergeada" main~1
+git -C "$T/mergeada" -c user.name=t -c user.email=t@t merge -q --no-ff --no-edit b-mesclada
 wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/comsub" add .; git -C "$T/comsub" -c user.name=t -c user.email=t@t commit -q -m sub; integra comsub
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida" 2>&1; rc=$?
 
@@ -52,6 +57,9 @@ wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/coms
 [ "$(linha r)" = ausente ];                                                     afirma "o checkout principal nao entra" $?
 [ "$(estado comsub)" = bloqueada ] && [ "$(motivo comsub)" = submodulo ];       afirma "submodulo bloqueia" $?
 [ "$(estado comlink)" = bloqueada ] && [ "$(motivo comlink)" = submodulo ];     afirma "gitlink sem .gitmodules bloqueia" $?
+[ "$(estado oculta)" = bloqueada ] && [ "$(motivo oculta)" = oculta ];         afirma "assume-unchanged bloqueia" $?
+[ "$(estado pulada)" = bloqueada ] && [ "$(motivo pulada)" = oculta ];          afirma "skip-worktree bloqueia" $?
+[ "$(estado mergeada)" = bloqueada ] && [ "$(motivo mergeada)" = nao_entregue ]; afirma "commit de merge fora da base bloqueia" $?
 [ "$(estado "com espaco")" = removivel ];                                       afirma "caminho com espaco" $?
 [ "$(estado avancou)" = bloqueada ] && [ "$(motivo avancou)" = nao_entregue ];  afirma "a base vem do remoto, nao da ref local" $?
 
