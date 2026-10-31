@@ -2092,7 +2092,7 @@ caso "integração válida via heredoc com linha em maiúsculas" mergex/commit-p
 MSG_HEREDOC_MINUSCULO="git commit -m \"\$(cat <<fim
 merge(mergex): integra a base
 
- fim 
+ fim
 
 Trabalho: ft-02
 Integra-base: $SHA_MH
