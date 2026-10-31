@@ -26,5 +26,10 @@ caso "awk NR no lugar de head"       0 "git status | awk 'NR <= 20'"
 caso "texto entre aspas simples"     0 "echo 'use x | grep -q y'"
 caso "ou logico nao e pipe"          0 'a || grep -q b "$f"'
 
+rm -rf "$T/c"; mkdir -p "$T/c/hooks"
+bash "$LINT" "$T/c" >/dev/null 2>&1; rc=$?
+if [ "$rc" = 2 ]; then ok=$((ok+1)); printf '  ok    raiz sem skills/ nao passa em silencio\n'
+else falhou=$((falhou+1)); printf '  FALHA raiz sem skills/ (rc %s)\n' "$rc"; fi
+
 printf '\n  %s ok, %s falhas\n' "$ok" "$falhou"
 [ "$falhou" -eq 0 ]

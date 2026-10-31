@@ -124,6 +124,8 @@ varre() {
   ' "$1"
 }
 
+[ -d "$RAIZ/hooks" ] && [ -d "$RAIZ/skills" ] || { echo "lint: $RAIZ sem hooks/ ou skills/" >&2; exit 2; }
+
 achados=0
 while IFS= read -r -d '' f; do
   case "$f" in */hooks/testes/*|*/hooks/teste.sh) continue ;; esac

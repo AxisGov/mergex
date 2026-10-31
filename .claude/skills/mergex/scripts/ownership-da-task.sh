@@ -228,7 +228,7 @@ EOF
   # B — declarado na atual e que não mudou.
   while IFS= read -r arquivo; do
     [ -n "$arquivo" ] || continue
-    grep -Fxq "$arquivo" <<<"$mudados" && continue
+    grep -Fxq -- "$arquivo" <<<"$mudados" && continue
     saida="${saida}2${TAB}${S_INTACTO}${TAB}${arquivo}${TAB}$(tasks_de "$arquivo")"$'\n'
   done <<EOF
 $(arquivos_de "$atual")

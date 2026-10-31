@@ -72,7 +72,7 @@ integracao_da_mensagem() {
   INT_CLASSE=nenhuma; INT_SAIDA=""
   local txt tr integra trab tmp mh rc
   # Invólucro do heredoc `-m "$(cat <<'EOF' ... EOF)"`.
-  txt="$(awk 'NR==1 && /^\$\(cat[[:space:]]*<</ { h=1; next } h && /^[A-Z_]+[[:space:]]*$/ { exit } { print }' <<<"$1")"
+  txt="$(awk 'NR==1 && /^\$\(cat[[:space:]]*<</ { h=$0; tab=(h ~ /<<-/); sub(/^\$\(cat[[:space:]]*<<-?[[:space:]]*/, "", h); gsub(/[\047"\\[:space:]]/, "", h); next } h != "" { t=$0; if (tab) sub(/^\t+/, "", t); if (t == h) exit } { print }' <<<"$1")"
   tr="$(printf '%s\n' "$txt" | git interpret-trailers --parse 2>/dev/null)"
   # Sem `-q` (sob `pipefail`, um grep que sai cedo dá SIGPIPE ao printf e o
   # pipeline devolve 141 — rodada extra da revisão): o grep lê até o fim.

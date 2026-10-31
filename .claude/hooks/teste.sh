@@ -2078,6 +2078,27 @@ Integra-base: $SHA_MH
 EOF
 )\""
 caso "integração válida via heredoc" mergex/commit-por-task.sh "$(bash_json "$MSG_HEREDOC")" 0
+# Só o delimitador fecha o heredoc: linha em maiúsculas no corpo não corta os trailers.
+MSG_HEREDOC_TITULO="git commit -m \"\$(cat <<'EOF'
+merge(mergex): integra a base
+
+API
+
+Trabalho: ft-02
+Integra-base: $SHA_MH
+EOF
+)\""
+caso "integração válida via heredoc com linha em maiúsculas" mergex/commit-por-task.sh "$(bash_json "$MSG_HEREDOC_TITULO")" 0
+MSG_HEREDOC_MINUSCULO="git commit -m \"\$(cat <<fim
+merge(mergex): integra a base
+
+ fim 
+
+Trabalho: ft-02
+Integra-base: $SHA_MH
+fim
+)\""
+caso "heredoc com delimitador minúsculo: linha com espaços não o fecha" mergex/commit-por-task.sh "$(bash_json "$MSG_HEREDOC_MINUSCULO")" 0
 MSG_DOIS_M="git commit -m \"merge(mergex): integra a base\" -m \"Trabalho: ft-02
 Integra-base: $SHA_MH\""
 caso "integração válida via -m a -m b" mergex/commit-por-task.sh "$(bash_json "$MSG_DOIS_M")" 0
