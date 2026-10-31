@@ -216,6 +216,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-dispensa-custo.sh
 
+      - name: Test varredura de worktrees entregues (DM-290)
+        shell: bash
+        run: bash scripts/ci/test-worktrees-entregues.sh
+
       - name: Lint consumidor precoce sob pipefail
         shell: bash
         run: bash scripts/ci/lint-consumidor-precoce.sh
