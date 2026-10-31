@@ -184,7 +184,7 @@ segredo_da_ref() {
         corpo_tag="$(git cat-file tag "$obj" 2>/dev/null)" || { SEG_RES=erro; SEG_DIAG="a tag $obj não se lê"; return 0; }
         texto_tag="$texto_tag
 $corpo_tag"
-        obj="$(printf '%s\n' "$corpo_tag" | sed -n 's/^object //p' | head -1)"
+        obj="$(printf '%s\n' "$corpo_tag" | sed -n 's/^object //p' | awk 'NR == 1')"
         [ -n "$obj" ] || { SEG_RES=erro; SEG_DIAG="a tag $sl tem um elo sem objeto"; return 0; }
       done
       alvo_commit="$(git rev-parse --verify --quiet "$sl^{commit}")" \
@@ -259,7 +259,7 @@ BARRA=0
 while IFS=' ' read -r ref_local sha_local ref_remota sha_remoto resto <&3; do
   [ -n "$ref_local$sha_local$ref_remota$sha_remoto$resto" ] || continue
   if [ -n "$resto" ] || [ -z "$sha_remoto" ] \
-    || printf '%s\n%s\n' "$sha_local" "$sha_remoto" | grep -Evqx '[0-9a-f]{40}|[0-9a-f]{64}'; then
+    || printf '%s\n%s\n' "$sha_local" "$sha_remoto" | grep -Evx '[0-9a-f]{40}|[0-9a-f]{64}' >/dev/null; then
     diag "linha fora do protocolo pre-push para $REMOTO: '$ref_local $sha_local $ref_remota $sha_remoto${resto:+ $resto}'; push barrado"
     BARRA=1; continue
   fi

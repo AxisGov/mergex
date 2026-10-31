@@ -191,3 +191,11 @@ jobs:
       - name: Test distribuicao sem segredo (DM-282)
         shell: bash
         run: bash scripts/ci/test-distribuicao-sem-segredo.sh
+
+      - name: Lint consumidor precoce sob pipefail
+        shell: bash
+        run: bash scripts/ci/lint-consumidor-precoce.sh
+
+      - name: Test the pipefail lint
+        shell: bash
+        run: bash scripts/ci/test-lint-consumidor-precoce.sh
