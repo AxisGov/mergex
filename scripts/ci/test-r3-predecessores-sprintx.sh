@@ -69,15 +69,18 @@ grava_manifesto() { # usa a fixture corrente e cria um commit simples do manifes
 }
 
 v9_com_produtor() { # <produtor substituto>; usa a fixture corrente
-  local produtor="$1" copia scripts
+  # Chamada em `$(...)`: o TMPS anotado aqui se perderia, então a cópia sai antes de voltar (DM-292).
+  local produtor="$1" copia scripts rc
   copia="$(mktemp -d)" || return 1
-  TMPS+=("$copia")
-  cp -R "$REPO/.claude" "$copia/" || return 1
   scripts="$copia/.claude/skills/mergex/scripts"
-  cp "$produtor" "$scripts/predecessores-sprintx.sh" || return 1
-  chmod +x "$scripts/predecessores-sprintx.sh" || return 1
-  bash "$scripts/portao-v9.sh" --verificar --entrega "$FX_PRE_ENTREGA" \
-    --origem sprintx --trabalho ft-pre
+  cp -R "$REPO/.claude" "$copia/" \
+    && cp "$produtor" "$scripts/predecessores-sprintx.sh" \
+    && chmod +x "$scripts/predecessores-sprintx.sh" \
+    && bash "$scripts/portao-v9.sh" --verificar --entrega "$FX_PRE_ENTREGA" \
+      --origem sprintx --trabalho ft-pre
+  rc=$?
+  rm -rf "$copia"
+  return "$rc"
 }
 
 grupo_verificador() {
