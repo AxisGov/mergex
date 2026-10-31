@@ -23,12 +23,14 @@ FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 COMMITS='.claude/skills/mergex/references/01-commits.md'
 SCHEMA='.claude/skills/mergex/references/00-schema.md'
 
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) | ( cd "$d" && tar -xf - )
   # O validador do contrato varre os arquivos versionados com `git ls-files`
   # (DM-184): a cópia ganha um Git próprio com a árvore inteira no índice.
@@ -198,6 +200,9 @@ M21|vigia sem timeout nunca mata o node|teste_ev|'
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
 PIDS=""; IDS=""
+# Cada mutante copia o repositório e roda uma bancada: sem teto, todos de uma vez travam
+# a máquina (DM-292). O teto é o das outras bancadas de mutação.
+PARALELO=4; ativos=0
 
 # Controle sem mutação: numa cópia intocada, as verificações TÊM que passar.
 controle() {
@@ -214,7 +219,7 @@ controle() {
 }
 [ "$#" -eq 0 ] && controle
 
-REPO_TMP="$(mktemp -d)"; TMPS="$TMPS $REPO_TMP"
+REPO_TMP="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || exit 1
 
 roda() { # id desc verificacao grupo
   local id="$1" verif="$3" grupo="$4" d
@@ -226,6 +231,8 @@ roda() { # id desc verificacao grupo
   ) > "$d/mutacao.log" 2>&1
   printf '%s\n' "$?" > "$d/rc"
   printf '%s\n' "$d" > "$REPO_TMP/$id.dir"
+  # Para o relatório bastam os registros: a cópia inteira, multiplicada por mutante, pesa.
+  find "$d" -mindepth 1 -maxdepth 1 ! -name mutacao.log ! -name saida.log ! -name rc -exec rm -rf {} +
 }
 
 while IFS='|' read -r id desc verif grupo; do
@@ -233,6 +240,8 @@ while IFS='|' read -r id desc verif grupo; do
   [ "$#" -eq 0 ] || case "$SELECAO" in *" $id "*) ;; *) continue ;; esac
   roda "$id" "$desc" "$verif" "$grupo" &
   PIDS="$PIDS $!"; IDS="$IDS $id"
+  ativos=$((ativos + 1))
+  if [ "$ativos" -ge "$PARALELO" ]; then wait; ativos=0; fi
 done <<EOF
 $LISTA
 EOF

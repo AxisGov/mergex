@@ -11,13 +11,15 @@ FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 # Desde o M4 o catálogo de método mora no helper compartilhado (DM-172).
 CATALOGO='.claude/skills/mergex/scripts/catalogo-de-metodo.sh'
 CMD='.claude/commands/mergex.md'
-TMPS=""
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
 FALHAS="$REPO/.mutacao-m2-falhas-$$"
-trap 'for d in $TMPS; do rm -rf "$d"; done; rm -f "$FALHAS"' EXIT
+trap 'rm -rf "$TMP_RAIZ"; rm -f "$FALHAS"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
   printf '%s\n' "$d"

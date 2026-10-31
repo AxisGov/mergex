@@ -20,12 +20,14 @@ BASE_SH='.claude/hooks/comum/base.sh'
 BANCADA='scripts/ci/test-d07-contrato-de-evento.sh'
 CONTRATO='scripts/ci/validate-mergex-contract.sh'
 MUTACAO='scripts/ci/mutacao-d07-contrato-de-evento.sh'
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d obrigatorio
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   # `pipefail` torna o status do pipeline o da primeira etapa que falhou, mas
   # quem o lê tem que ser o `if`: um `printf` depois do pipeline devolveria
   # sucesso e a cópia parcial seguiria para a medição do mutante.
@@ -161,8 +163,7 @@ verifica() { # <dir> — 0 só se a bancada D-07 e o contrato passam
 }
 
 FILTRAR=" $* "
-FALHAS="$(mktemp)"
-TMPS="$TMPS $FALHAS"
+FALHAS="$(mktemp "$TMP_RAIZ/XXXXXX")"
 TOTAL=0
 
 printf 'Controle — cópia SEM mutação: a bancada D-07 e o contrato têm que passar\n'

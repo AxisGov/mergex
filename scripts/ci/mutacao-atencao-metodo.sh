@@ -31,12 +31,14 @@ OWN_SH='.claude/skills/mergex/scripts/ownership-da-task.sh'
 HOOK_TASK='.claude/hooks/mergex/commit-por-task.sh'
 FECHAMENTO_SH='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   # Rastreados e novos ainda não commitados; nada ignorado. O .git do
   # repositório não vem: a cópia ganha um Git próprio com a árvore inteira no
   # índice, porque o validador do contrato varre os arquivos versionados com
@@ -421,6 +423,9 @@ M55b|nome da evidencia muda so no E3|validador'
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
 PIDS=""; IDS=""
+# Cada mutante copia o repositório e roda uma bancada: sem teto, todos de uma vez travam
+# a máquina (DM-292). O teto é o das outras bancadas de mutação.
+PARALELO=4; ativos=0
 
 # Controle sem mutação: numa cópia intocada, as verificações TÊM que passar.
 # Sem ele, uma bancada quebrada mataria toda mutação por motivo errado e a
@@ -449,15 +454,19 @@ roda() { # id desc verificacao
   ) > "$d/mutacao.log" 2>&1
   printf '%s\n' "$?" > "$d/rc"
   printf '%s\n' "$d" > "$REPO_TMP/$id.dir"
+  # Para o relatório bastam os registros: a cópia inteira, multiplicada por mutante, pesa.
+  find "$d" -mindepth 1 -maxdepth 1 ! -name mutacao.log ! -name saida.log ! -name rc -exec rm -rf {} +
 }
 
-REPO_TMP="$(mktemp -d)"; TMPS="$TMPS $REPO_TMP"
+REPO_TMP="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || exit 1
 
 while IFS='|' read -r id desc verif; do
   [ -n "$id" ] || continue
   [ "$#" -eq 0 ] || case "$SELECAO" in *" $id "*) ;; *) continue ;; esac
   roda "$id" "$desc" "$verif" &
   PIDS="$PIDS $!"; IDS="$IDS $id"
+  ativos=$((ativos + 1))
+  if [ "$ativos" -ge "$PARALELO" ]; then wait; ativos=0; fi
 done <<EOF
 $LISTA
 EOF

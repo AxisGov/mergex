@@ -13,12 +13,14 @@ PERSISTE='.claude/skills/mergex/scripts/persistir-metodo.sh'
 DECISOES='.claude/skills/mergex/DECISOES-DA-SKILL.md'
 BANCADA='scripts/ci/test-d04-historico-yaml-escalar.sh'
 CONTRATO='scripts/ci/validate-mergex-contract.sh'
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
   # O validador do contrato varre os arquivos versionados com `git ls-files`
@@ -160,8 +162,7 @@ verifica() { # <dir> — 0 só se a bancada D-04 e o contrato passam
 }
 
 FILTRAR=" $* "
-FALHAS="$(mktemp)"
-TMPS="$TMPS $FALHAS"
+FALHAS="$(mktemp "$TMP_RAIZ/XXXXXX")"
 TOTAL=0
 
 printf 'Controle — cópia SEM mutação: a bancada D-04 e o contrato têm que passar\n'

@@ -11,12 +11,14 @@ FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 OWN='.claude/skills/mergex/scripts/ownership-da-task.sh'
 V9='.claude/hooks/mergex/arquivo-fora-do-plano.sh'
 BANCADA='scripts/ci/test-m4b-arvore-inteira.sh'
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
   printf '%s\n' "$d"
