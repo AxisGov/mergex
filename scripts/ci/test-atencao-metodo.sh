@@ -708,6 +708,68 @@ espera "$S/base/00-INDICE.md" "LEITURA RÁPIDA" "L4" "link simbólico" "índice 
 
 # ---------------------------------------------------------------------------
 echo
+echo "Cenário — link em qualquer ponto do caminho nunca é método (DM-294, regressões da DM-288)"
+# ---------------------------------------------------------------------------
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+FORA="$(mktemp -d)"; TMPS="$TMPS $FORA"
+printf '# fora\n' > "$FORA/fora.md"
+fm base_indice ft-lnk 'areas:' '  - arquivo: atalho/fora.md' | escreve "$S/base/00-INDICE.md"
+ln -s "$FORA" "$R/$S/base/atalho"
+commit_tudo
+classifica main <<LISTA
+$S/base/atalho/fora.md
+LISTA
+espera "$S/base/atalho/fora.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "área listada atrás de pasta que é link"
+
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+FORA="$(mktemp -d)"; TMPS="$TMPS $FORA"
+mkdir -p "$FORA/sub" "$R/$S"
+printf '# a\n' > "$FORA/sub/a.md"
+fm base_indice ft-lnk 'areas:' '  - arquivo: sub/a.md' > "$FORA/00-INDICE.md"
+ln -s "$FORA" "$R/$S/base"
+commit_tudo
+base_cat="$( (. "$CATBASE" && catalogo_base "$R" ft-lnk "$S" >/dev/null; printf '%s' "$CATALOGO_ERRO") 2>&1)"
+if printf '%s' "$base_cat" | grep -qF 'link simbólico'; then
+  OK=$((OK+1)); echo "  ok    catalogo_base recusa base/ que é link"
+else
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_base aceitou base/ que é link: $base_cat"
+fi
+classifica main <<LISTA
+$S/base/sub/a.md
+$S/base/00-INDICE.md
+LISTA
+espera "$S/base/sub/a.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "área atrás de base/ que é link"
+espera "$S/base/00-INDICE.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "índice atrás de base/ que é link"
+
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+FORA="$(mktemp -d)"; TMPS="$TMPS $FORA"
+fm base_indice ft-lnk 'areas:' '  - arquivo: outra.md' > "$FORA/indice.md"
+mkdir -p "$R/$S/base"; ln -s "$FORA/indice.md" "$R/$S/base/00-INDICE.md"
+printf '# outra\n' | escreve "$S/base/outra.md"
+commit_tudo
+classifica main <<LISTA
+$S/base/outra.md
+LISTA
+espera "$S/base/outra.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "área listada por índice que é link"
+
+# Pasta sprint-NN com quebra de linha: o catálogo é uma lista por linha, e a segunda
+# metade do nome viraria um caminho de método (DM-294).
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+mkdir -p "$R/$S/sprint-01
+injetado"
+base_cat="$( (. "$CATBASE" && catalogo_sprints "$R" "$S") 2>&1)"
+if printf '%s\n' "$base_cat" | grep -q 'injetado'; then
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_sprints aceitou pasta com quebra de linha: $base_cat"
+else
+  OK=$((OK+1)); echo "  ok    catalogo_sprints ignora pasta com quebra de linha"
+fi
+
+# ---------------------------------------------------------------------------
+echo
 echo "Consistência — tudo o que o catalogo-de-metodo.sh commita, o classificador reconhece"
 # ---------------------------------------------------------------------------
 # Os dois catálogos divergiram uma vez (login #27/#28): o checkpoint commitava artefato que o
