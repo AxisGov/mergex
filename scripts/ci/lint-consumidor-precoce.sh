@@ -3,9 +3,10 @@
 # lint-consumidor-precoce — recusa `| grep -q` e `| head` nos scripts que a mergex instala.
 #
 # Sob `pipefail`, o consumidor que decide cedo (`grep -q`, `head`) fecha o pipe enquanto o
-# produtor ainda escreve; acima de 64 KB o produtor leva SIGPIPE (141) e o pipeline sai
+# produtor ainda escreve; o produtor leva SIGPIPE (141) e o pipeline sai
 # diferente de zero, ao contrario do que o consumidor achou. Foi o "task nao esta no plano" do
-# Login na 0.12.7, na SprintX (DS-192). A forma certa: here-string (`grep -q ... <<<"$x"`),
+# Login na 0.12.7, na SprintX (DS-192). Nao ha tamanho seguro: e intermitente, mais provavel com
+# saida maior, e foi medido a partir de 2 KB no WSL2 sob carga (DM-297). A forma certa: here-string (`grep -q ... <<<"$x"`),
 # `case`, a ferramenta lendo o arquivo direto, e `awk 'NR <= n'` no lugar de `head`.
 #
 #   bash scripts/ci/lint-consumidor-precoce.sh [raiz do .claude]

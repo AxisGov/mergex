@@ -169,7 +169,7 @@ write_json() { printf '%s' "$1" | jq -cRs --arg w "$HOOK_CWD" '{tool_name:"Write
 # Comando grande: vai por stdin do jq (`--arg` nao aceita argumento acima de 128 KB).
 json_grande() { printf '%s' "$1" | jq -Rs --arg w "$HOOK_CWD" '{tool_name:"Bash",cwd:$w,tool_input:{command:.}}'; }
 # Linhas de enchimento para os casos de SIGPIPE sob pipefail (rodada extra da
-# revisao): mais que o buffer do pipe (64 KB) e bem mais.
+# revisao): com esse tamanho o SIGPIPE deixa de ser raro, embora nao haja tamanho seguro (DM-297).
 LINHAS70="$(yes 'echo xxxxxxxx' | head -n 5600)"      # ~73 KB
 LINHAS200="$(yes 'echo xxxxxxxx' | head -n 16000)"    # ~208 KB
 
