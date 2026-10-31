@@ -684,8 +684,13 @@ fi
 # 5. Limpeza destrutiva de arquivo não rastreado
 # --------------------------------------------------------------------------
 if printf '%s' "$CMD_N" | grep -E 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+clean([[:space:]]|$)' >/dev/null; then
-  if printf '%s' "$CMD_N" | grep -E '[[:space:]]-[a-zA-Z]*[fdx]' >/dev/null; then
-    ALVOS="$(git -C "$RAIZ" clean -nd 2>/dev/null | awk 'NR <= 20')"
+  if printf '%s' "$CMD_N" | grep -E '[[:space:]](-[a-zA-Z]*[fdx]|--force)' >/dev/null; then
+    # A prévia diz o que ESTE comando removeria: com -x ou -X, o ignorado entra (DM-296).
+    PREVIA_IGNORADO=""
+    if printf '%s' "$CMD_N" | grep -E '[[:space:]]-[a-zA-Z]*X' >/dev/null; then PREVIA_IGNORADO=-X
+    elif printf '%s' "$CMD_N" | grep -E '[[:space:]]-[a-zA-Z]*x' >/dev/null; then PREVIA_IGNORADO=-x
+    fi
+    ALVOS="$(git -C "$RAIZ" clean -nd $PREVIA_IGNORADO 2>/dev/null | awk 'NR <= 20')"
     barra "limpeza destrutiva" \
 "mergex/git-perigoso — limpeza destrutiva de arquivos não rastreados
 

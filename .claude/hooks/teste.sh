@@ -623,6 +623,28 @@ caso "push --force-with-lease" mergex/git-perigoso.sh "$(bash_json 'git push --f
 caso "push +refspec"          mergex/git-perigoso.sh "$(bash_json 'git push origin +feat:main')" 2
 caso "commit na principal"    mergex/git-perigoso.sh "$(bash_json "git commit -m x")" 2
 caso "clean -fd"              mergex/git-perigoso.sh "$(bash_json 'git clean -fd')" 2
+caso "clean --force"          mergex/git-perigoso.sh "$(bash_json 'git clean --force')" 2
+# A mensagem lista o que seria removido: com -x e -X, o ignorado entra na conta (DM-296).
+CLEAN_T="$(mktemp -d)"
+(
+  cd "$CLEAN_T" || exit 1
+  git init -q -b main; git config user.email t@t; git config user.name t
+  printf 'ignorado.env\n' > .gitignore; git add .gitignore; git commit -qm base
+  printf 's\n' > ignorado.env; printf 's\n' > solto.txt
+)
+previa() { (HOOK_CWD="$CLEAN_T"; printf '%s' "$(bash_json "$1")" | bash "$H/mergex/git-perigoso.sh" 2>&1 >/dev/null); }
+previa_tem() { # <desc> <comando> <deve ter> <não deve ter|->
+  local saida; saida="$(previa "$2")"
+  if printf '%s' "$saida" | grep -Fq "Would remove $3" \
+    && { [ "$4" = - ] || ! printf '%s' "$saida" | grep -Fq "Would remove $4"; }; then
+    OK=$((OK+1)); printf '  ok    %s\n' "$1"
+  else FALHOU=$((FALHOU+1)); printf '  FALHA %s: %s\n' "$1" "$saida"; fi
+}
+previa_tem "prévia de clean -fd: só o solto" 'git clean -fd' solto.txt ignorado.env
+previa_tem "prévia de clean -fdx: o ignorado também" 'git clean -fdx' ignorado.env -
+previa_tem "prévia de clean -f -x: separado" 'git clean -f -x' ignorado.env -
+previa_tem "prévia de clean -fX: só o ignorado" 'git clean -fX' ignorado.env solto.txt
+rm -rf "$CLEAN_T"
 echo "git-perigoso — tem que PASSAR (falsos positivos)"
 caso "git status"             mergex/git-perigoso.sh "$(bash_json 'git status')" 0
 caso "git log"                mergex/git-perigoso.sh "$(bash_json 'git log --oneline')" 0
@@ -2130,6 +2152,34 @@ MSG_INT_M="git commit -m \"merge(mergex): integra a base
 Trabalho: ft-02
 Integra-base: $(git rev-parse -q --verify MERGE_HEAD)\""
 caso "integração por -m válida passa" mergex/commit-por-task.sh "$(bash_json "$MSG_INT_M")" 0
+# Sem trabalho pela branch, o trailer não se autentica: só vale o id com ENTREGA.md
+# desta branch (DM-295).
+INT_E=docs/entregas/ft-02/ENTREGA.md
+INT_BAK="$(mktemp)"
+cp "$INT_E" "$INT_BAK"
+int_msg() { printf 'git commit -m "merge(mergex): integra a base\n\nTrabalho: %s\nIntegra-base: %s"' "$1" "$(git rev-parse -q --verify MERGE_HEAD)"; }
+fm_chave "$INT_E" branch outra/branch
+caso "sem trabalho na branch: trailer de trabalho que não existe barra" mergex/commit-por-task.sh "$(bash_json "$(int_msg trabalho-que-nao-existe)")" 2
+caso "sem trabalho na branch: ENTREGA de outra branch barra" mergex/commit-por-task.sh "$(bash_json "$(int_msg ft-02)")" 2
+caso "sem trabalho na branch: id com caminho barra" mergex/commit-por-task.sh "$(bash_json "$(int_msg ../entregas/ft-02)")" 2
+caso "fora-do-plano: trailer sem ENTREGA não isenta o que veio da base" mergex/arquivo-fora-do-plano.sh "$(bash_json "$(int_msg trabalho-que-nao-existe)")" 2
+cp "$INT_BAK" "$INT_E"
+# Dois ENTREGA.md da mesma branch: a branch não decide, e o trailer aponta um deles.
+mkdir -p docs/entregas/ft-gemeo
+sed 's/^trabalho_id: ft-02/trabalho_id: ft-gemeo/' "$INT_E" > docs/entregas/ft-gemeo/ENTREGA.md
+caso "branch ambígua: o trailer com ENTREGA desta branch vale" mergex/commit-por-task.sh "$(bash_json "$(int_msg ft-gemeo)")" 0
+sed 's/^kind: entrega/kind: outro/' "$INT_BAK" > docs/entregas/ft-gemeo/ENTREGA.md
+sed -i.bak 's/^trabalho_id: ft-02/trabalho_id: ft-gemeo/' docs/entregas/ft-gemeo/ENTREGA.md
+caso "branch ambígua: kind que não é entrega barra" mergex/commit-por-task.sh "$(bash_json "$(int_msg ft-gemeo)")" 2
+cp "$INT_BAK" docs/entregas/ft-gemeo/ENTREGA.md
+caso "branch ambígua: trabalho_id de outro barra" mergex/commit-por-task.sh "$(bash_json "$(int_msg ft-gemeo)")" 2
+rm -f docs/entregas/ft-gemeo/ENTREGA.md docs/entregas/ft-gemeo/ENTREGA.md.bak
+ln -s ../ft-02/ENTREGA.md docs/entregas/ft-gemeo/ENTREGA.md
+fm_chave "$INT_E" trabalho_id ft-gemeo
+caso "branch ambígua: ENTREGA que é link barra" mergex/commit-por-task.sh "$(bash_json "$(int_msg ft-gemeo)")" 2
+rm -rf docs/entregas/ft-gemeo
+cp "$INT_BAK" "$INT_E"
+rm -f "$INT_BAK"
 caso "-m sem Integra-base segue as regras de sempre (bloqueio: mistura)" mergex/commit-por-task.sh "$(bash_json 'git commit -m "integra a base"')" 2
 caso "fora-do-plano não acusa o que veio da base" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -F msg-integracao.txt')" 0
 # -F/--file com caminho entre aspas e espaco (CodeAnt 4235529198): a mensagem tem
