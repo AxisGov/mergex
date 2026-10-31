@@ -37,7 +37,7 @@ conta() {
     real="$(command -v "$b")"
     printf '#!/bin/sh\nprintf "%s\\n" >> "%s"\nexec "%s" "$@"\n' "$b" "$reg" "$real" > "$T/shim/$b"; chmod +x "$T/shim/$b"
   done
-  (cd "$r" && PATH="$T/shim:$PATH" bash -c '. "$1"; segredo_dispensaveis_indice >"$2"' _ "$RAIZ/.claude/skills/mergex/scripts/segredo-dispensa.sh" "$T/lista") 
+  (cd "$r" && PATH="$T/shim:$PATH" bash -c '. "$1"; segredo_dispensaveis_indice >"$2"' _ "$RAIZ/.claude/skills/mergex/scripts/segredo-dispensa.sh" "$T/lista")
   wc -l < "$reg" | tr -d ' '
 }
 
@@ -46,6 +46,20 @@ monta "$T/cem" 300; c300="$(conta "$T/cem")"; n300="$(wc -l < "$T/lista" | tr -d
 echo "  processos: N=1 -> $c1; N=300 -> $c300 (dispensados: $n1 e $n300)"
 [ "$n1" = 1 ] && [ "$n300" = 300 ]; afirma "dispensa os arquivos que o lock confere" $?
 [ "$c300" -le "$c1" ]; afirma "o numero de processos nao cresce com N" $?
+
+# O pre-push passa pelo commit, nao pelo indice.
+git -C "$T/cem" -c user.name=t -c user.email=t@t commit -q -m tudo
+(cd "$T/cem" && bash -c '. "$1"; segredo_dispensaveis_commit "$(git rev-parse HEAD)" "$(git rev-parse HEAD~1)" >"$2"' _ "$RAIZ/.claude/skills/mergex/scripts/segredo-dispensa.sh" "$T/lista-commit")
+[ "$(wc -l < "$T/lista-commit" | tr -d ' ')" = 300 ]; afirma "dispensa pelo commit, como no pre-push" $?
+# Prepara de novo os 300 arquivos para os casos do hook, que olham o indice.
+for i in $(seq 1 300); do printf 'mudou %s\n' "$i" > "$T/cem/.claude/skills/f$i.md"; done
+{ printf '{"lock_version":2,"cli_version":"0","harness":[],"skills":{},"instalacao":{"arquivos":{'
+  for i in $(seq 1 300); do
+    [ "$i" = 1 ] || printf ','
+    printf '".claude/skills/f%s.md":"%s"' "$i" "$(sha_de "$T/cem/.claude/skills/f$i.md")"
+  done
+  printf '}}}\n'; } > "$T/cem/.expx/expx-lock.json"
+git -C "$T/cem" add .expx .claude/skills
 
 # Caminho com TAB ou quebra de linha nao se passa por outro: o blob do decoy bate com o lock,
 # mas o arquivo real tem outro conteudo. Windows nao aceita esses nomes.
@@ -73,7 +87,7 @@ echo "  hook com dispensa: rc $rc, $d ms"
 
 ini="$(ms)"; evento "$T/cem" | SEG_DISP_TESTE_PRAZO=1 bash "$HOOK" >/dev/null 2>&1; rc=$?; fim="$(ms)"; d=$((fim - ini))
 echo "  hook com a dispensa vencida: rc $rc, $d ms"
-[ "$d" -lt 9000 ]; afirma "dispensa vencida e varredura completa fecham em menos de 9 s" $?
+[ "$rc" = 0 ] && [ "$d" -lt 9000 ]; afirma "dispensa vencida e varredura completa fecham em menos de 9 s" $?
 
 printf '\n  %s ok, %s falhas\n' "$ok" "$falhou"
 [ "$falhou" -eq 0 ]

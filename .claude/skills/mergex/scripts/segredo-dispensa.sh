@@ -105,6 +105,7 @@ _disp_hashes() {
       read(STDIN, my $fim, 1) == 1 or exit 1;
       print "$o\t", sha256_hex($b), "\n";
     }
+    exit 1 unless time() < $prazo;
     print "#soma\t$soma\n";'
 }
 
@@ -128,7 +129,7 @@ _disp_lock() {
     then .instalacao.arquivos | to_entries[]
       | select(.key | test("^(\\.claude/(hooks|skills|commands|agents)|\\.expx/marketplace)/."))
       | "\(.key)\t\(.value)"
-    else error("fora do contrato") end' 2>/dev/null
+    else error("fora do contrato") end' 2>/dev/null | tr -d '\r'
 }
 
 # _disp_filtra <lock "caminho\thash"> <commit, ou vazio para o índice> < alterados (NUL)
@@ -179,6 +180,7 @@ segredo_dispensaveis_indice() {
 
 segredo_dispensaveis_commit() {
   local c="$1" pai="${2:-}" lock
+  _disp_prazo_ok || return 0
   _disp_tem_perl || return 0
   lock="$(_disp_lock "$c:.expx/expx-lock.json")" || return 0
   [ -n "$lock" ] || return 0
