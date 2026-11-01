@@ -723,7 +723,7 @@ CLEAN_APAGA=0; PREVIA_IGNORADO=""; CLEAN_TRECHOS=""
 CLEAN_RE='git([[:space:]]+(-C|-c|--git-dir|--work-tree|--namespace|--config-env)[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*[[:space:]]+clean'
 case "$CMD_N" in
   *clean*)
-    CLEAN_TRECHOS="$(printf '%s\n' "$CMD_N" | awk '{ gsub(/&&|\|\||;|\|/, "\n"); print }' \
+    CLEAN_TRECHOS="$(printf '%s\n' "$CMD_N" | awk '{ gsub(/[;&|(){}`]/, "\n"); print }' \
       | grep -E "$CLEAN_RE"'([[:space:]]|$)')" ;;
 esac
 if [ -n "$CLEAN_TRECHOS" ]; then

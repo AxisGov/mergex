@@ -669,6 +669,10 @@ caso "clean -fd com -c e --git-dir" mergex/git-perigoso.sh "$(bash_json 'git -c 
 caso "clean -n com -C"        mergex/git-perigoso.sh "$(bash_json 'git -C /tmp/x clean -n')" 0
 caso "clean -i"               mergex/git-perigoso.sh "$(bash_json 'git clean -i')" 2
 caso "clean --interactive"    mergex/git-perigoso.sh "$(bash_json 'git clean --interactive')" 2
+caso "clean -n em segundo plano e -f" mergex/git-perigoso.sh "$(bash_json 'git clean -n & git clean -f')" 2
+caso "clean -f em subshell"   mergex/git-perigoso.sh "$(bash_json '(git clean -n) & (git clean -f)')" 2
+caso "clean -f em substituição" mergex/git-perigoso.sh "$(bash_json 'echo $(git clean -f)')" 2
+caso "clean -n com 2>&1"      mergex/git-perigoso.sh "$(bash_json 'git clean -n 2>&1')" 0
 caso "clean -f depois de -n"  mergex/git-perigoso.sh "$(bash_json 'git clean -n && git clean -fd')" 2
 caso "clean -n depois de -f"  mergex/git-perigoso.sh "$(bash_json 'git clean -fd && git clean -n')" 2
 caso "clean com -f entre aspas" mergex/git-perigoso.sh "$(bash_json "git clean '-f'")" 2
