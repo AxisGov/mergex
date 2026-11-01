@@ -644,6 +644,10 @@ previa_tem "prévia de clean -fd: só o solto" 'git clean -fd' solto.txt ignorad
 previa_tem "prévia de clean -fdx: o ignorado também" 'git clean -fdx' ignorado.env -
 previa_tem "prévia de clean -f -x: separado" 'git clean -f -x' ignorado.env -
 previa_tem "prévia de clean -fX: só o ignorado" 'git clean -fX' ignorado.env solto.txt
+case "$(previa 'git clean -fd -- ignorado.env')" in
+  *"não aplica -e nem caminho"*) OK=$((OK+1)); printf '  ok    a prévia avisa que não aplica caminho\n' ;;
+  *) FALHOU=$((FALHOU+1)); printf '  FALHA a prévia promete mais do que sabe\n' ;;
+esac
 rm -rf "$CLEAN_T"
 echo "git-perigoso — tem que PASSAR (falsos positivos)"
 caso "git status"             mergex/git-perigoso.sh "$(bash_json 'git status')" 0

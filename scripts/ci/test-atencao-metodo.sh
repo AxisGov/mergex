@@ -20,14 +20,16 @@ FIXTURES="$REPO/scripts/ci/fixtures/e2e-p0-2"
 T="$(printf '\t')"
 
 OK=0; FALHOU=0
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Array: em string, um TMPDIR com espaço partia o caminho, a sobra ficava e o `rm -rf` podia
+# acertar um diretório irmão (CodeAnt no mergex#65).
+TMPS=()
+trap 'rm -rf ${TMPS[@]+"${TMPS[@]}"}' EXIT
 
 # ---------------------------------------------------------------------------
 # Utilitários
 # ---------------------------------------------------------------------------
 novo_repo() {
-  R="$(mktemp -d)"; TMPS="$TMPS $R"
+  R="$(mktemp -d)"; TMPS+=("$R")
   git -C "$R" init -q -b main . 2>/dev/null || { git -C "$R" init -q . && git -C "$R" checkout -q -b main; }
   git -C "$R" config user.email teste@expx.local
   git -C "$R" config user.name Teste
@@ -472,7 +474,7 @@ echo
 echo "O10 — arquivo reconciliado da base (--reconciliados)"
 # ---------------------------------------------------------------------------
 O10TXT='O10: arquivo reconciliado da base'
-D="$(mktemp -d)"; TMPS="$TMPS $D"
+D="$(mktemp -d)"; TMPS+=("$D")
 ESPECIAL="docs/Relatório d'água final.md"
 
 roda_o10() { # <lista> — entrada padrão passa para o classificador
@@ -617,7 +619,7 @@ fm reconciliacao_base ft-r | escreve "$E/RECONCILIACAO-BASE-002.md"
 fm reconciliacao_base ft-r | escreve "$E/RECONCILIACAO-BASE-1.md"
 fm entrega ft-r "branch: feature/ft-r" | escreve "$E/RECONCILIACAO-BASE-003.md"
 commit_tudo
-D="$(mktemp -d)"; TMPS="$TMPS $D"
+D="$(mktemp -d)"; TMPS+=("$D")
 printf 'src/reconciliado.ts\t001\n' > "$D/reconc.txt"
 SAIDA="$(bash "$CLASSIFICADOR" --raiz "$R" --base main --reconciliados "$D/reconc.txt" <<EOF
 $S/00-PLANEJAMENTO.md
@@ -712,7 +714,7 @@ echo "Cenário — link em qualquer ponto do caminho nunca é método (DM-294, r
 # ---------------------------------------------------------------------------
 novo_repo; trabalho_sprintx ft-lnk
 S=docs/sprintx/features/ft-lnk
-FORA="$(mktemp -d)"; TMPS="$TMPS $FORA"
+FORA="$(mktemp -d)"; TMPS+=("$FORA")
 printf '# fora\n' > "$FORA/fora.md"
 fm base_indice ft-lnk 'areas:' '  - arquivo: atalho/fora.md' | escreve "$S/base/00-INDICE.md"
 ln -s "$FORA" "$R/$S/base/atalho"
@@ -724,7 +726,7 @@ espera "$S/base/atalho/fora.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" 
 
 novo_repo; trabalho_sprintx ft-lnk
 S=docs/sprintx/features/ft-lnk
-FORA="$(mktemp -d)"; TMPS="$TMPS $FORA"
+FORA="$(mktemp -d)"; TMPS+=("$FORA")
 mkdir -p "$FORA/sub" "$R/$S"
 printf '# a\n' > "$FORA/sub/a.md"
 fm base_indice ft-lnk 'areas:' '  - arquivo: sub/a.md' > "$FORA/00-INDICE.md"
@@ -745,7 +747,7 @@ espera "$S/base/00-INDICE.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "�
 
 novo_repo; trabalho_sprintx ft-lnk
 S=docs/sprintx/features/ft-lnk
-FORA="$(mktemp -d)"; TMPS="$TMPS $FORA"
+FORA="$(mktemp -d)"; TMPS+=("$FORA")
 fm base_indice ft-lnk 'areas:' '  - arquivo: outra.md' > "$FORA/indice.md"
 mkdir -p "$R/$S/base"; ln -s "$FORA/indice.md" "$R/$S/base/00-INDICE.md"
 printf '# outra\n' | escreve "$S/base/outra.md"

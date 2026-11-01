@@ -90,8 +90,9 @@ Consequências deliberadas:
 
 Arquivo reconciliado só com as quatro provas e o inventário completo do merge; sem registro
 parcial e sem bypass (DM-179). A evidência de revisão de uma task deste trabalho,
-`docs/entregas/<trabalho>/revisao/<T-NN.MM>.json` em arquivo comum, não é produto e passa pelo
-inventário sem ser listada; qualquer outro nome sob `revisao/`, link ou remoção reprova (DM-291).
+`docs/entregas/<trabalho>/revisao/<T-NN.MM>.json` (ou o legado `<T-N>.json`) em arquivo comum, não
+é produto e passa pelo inventário sem ser listada; qualquer outro nome sob `revisao/`, link ou
+remoção reprova (DM-291).
 
 ## O artefato `RECONCILIACAO-BASE-NNN.md`
 

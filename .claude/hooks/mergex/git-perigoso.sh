@@ -700,7 +700,7 @@ git clean apaga arquivo que o versionador nunca viu. Não há histórico, não h
 stash, não há recuperação. Arquivo de ambiente, dado local e trabalho ainda
 não commitado de outra pessoa somem juntos.
 
-Seria removido:
+Pode ser removido (a prévia não aplica -e nem caminho do comando):
 ${ALVOS:-  (não foi possível pré-visualizar)}
 
 O que fazer:
