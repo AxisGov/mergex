@@ -644,6 +644,9 @@ previa_tem "prévia de clean -fd: só o solto" 'git clean -fd' solto.txt ignorad
 previa_tem "prévia de clean -fdx: o ignorado também" 'git clean -fdx' ignorado.env -
 previa_tem "prévia de clean -f -x: separado" 'git clean -f -x' ignorado.env -
 previa_tem "prévia de clean -fX: só o ignorado" 'git clean -fX' ignorado.env solto.txt
+previa_tem "prévia com -x entre aspas" "git clean -f '-x'" ignorado.env -
+previa_tem "prévia: X é o valor de -e, não a opção" 'git clean -fdx -eX' solto.txt -
+previa_tem "prévia: -x é o valor de -e, não a opção" 'git clean -fd -e -x' solto.txt ignorado.env
 case "$(previa 'git clean -fd -- ignorado.env')" in
   *"não aplica -e nem caminho"*) OK=$((OK+1)); printf '  ok    a prévia avisa que não aplica caminho\n' ;;
   *) FALHOU=$((FALHOU+1)); printf '  FALHA a prévia promete mais do que sabe\n' ;;
@@ -656,6 +659,19 @@ caso "npm run push-notifications" mergex/git-perigoso.sh "$(bash_json 'npm run p
 caso "echo sobre push --force"    mergex/git-perigoso.sh "$(bash_json "echo 'nao faca push --force'")" 0
 caso "grep por push"          mergex/git-perigoso.sh "$(bash_json 'grep -r push src/')" 0
 caso "git clean -n (seco)"    mergex/git-perigoso.sh "$(bash_json 'git clean -n')" 0
+# Cada `git clean` por si: opção de outro comando não barra, e a simulação não apaga (CodeRabbit no mergex#65).
+caso "clean -n e fetch --force" mergex/git-perigoso.sh "$(bash_json 'git clean -n && git fetch --force')" 0
+caso "clean -n e rm -f"       mergex/git-perigoso.sh "$(bash_json 'git clean -n; rm -f x')" 0
+caso "clean --dry-run --force" mergex/git-perigoso.sh "$(bash_json 'git clean --dry-run --force')" 0
+caso "clean -nf"              mergex/git-perigoso.sh "$(bash_json 'git clean -nf')" 0
+caso "clean -fd com -C"       mergex/git-perigoso.sh "$(bash_json 'git -C /tmp/x clean -fd')" 2
+caso "clean -fd com -c e --git-dir" mergex/git-perigoso.sh "$(bash_json 'git -c a=b --git-dir=.git clean -fd')" 2
+caso "clean -n com -C"        mergex/git-perigoso.sh "$(bash_json 'git -C /tmp/x clean -n')" 0
+caso "clean -i"               mergex/git-perigoso.sh "$(bash_json 'git clean -i')" 2
+caso "clean --interactive"    mergex/git-perigoso.sh "$(bash_json 'git clean --interactive')" 2
+caso "clean -f depois de -n"  mergex/git-perigoso.sh "$(bash_json 'git clean -n && git clean -fd')" 2
+caso "clean -n depois de -f"  mergex/git-perigoso.sh "$(bash_json 'git clean -fd && git clean -n')" 2
+caso "clean com -f entre aspas" mergex/git-perigoso.sh "$(bash_json "git clean '-f'")" 2
 caso "git fetch"              mergex/git-perigoso.sh "$(bash_json 'git fetch origin')" 0
 # O valor de -o (e de aglomerado terminado em o) nao e o remoto.
 caso "push -o main origin feature"  mergex/git-perigoso.sh "$(bash_json 'git push -o main origin feature')" 0

@@ -770,6 +770,18 @@ else
   OK=$((OK+1)); echo "  ok    catalogo_sprints ignora pasta com quebra de linha"
 fi
 
+# A quebra de linha no fim do nome: `$(basename ...)` a tiraria antes do teste (CodeRabbit no mergex#65).
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+mkdir -p "$R/$S/sprint-02
+"
+base_cat="$( (. "$CATBASE" && catalogo_sprints "$R" "$S") 2>&1)"
+if printf '%s\n' "$base_cat" | grep -q 'sprint-02'; then
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_sprints aceitou quebra de linha no fim do nome: $base_cat"
+else
+  OK=$((OK+1)); echo "  ok    catalogo_sprints ignora quebra de linha no fim do nome"
+fi
+
 # ---------------------------------------------------------------------------
 echo
 echo "Consistência — tudo o que o catalogo-de-metodo.sh commita, o classificador reconhece"

@@ -109,6 +109,10 @@ done
 printf -- '---\nkind: entrega\nversionado: true\ncommits: [] # vazia\n---\n' > "$E"
 bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 >/dev/null 2>&1
 [ "$(bash "$SEQ" --ler "$E" 2>/dev/null | cut -f3)" = T-01.01 ] && ok "commits: [] # vazia recebe o item novo" || falha "o item novo não entrou: $(cat "$E")"
+printf -- '---\nkind: entrega\nversionado: true\ncommits: [a]\n---\n' > "$E"
+saida="$(bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 2>&1)"; rc=$?
+case "$rc:$saida" in 1:*"não é lista de itens"*) ok "--acrescentar diz o motivo da recusa" ;; *) falha "--acrescentar: rc=$rc: $saida" ;; esac
+grep -q 'T-01.01' "$E" && falha "--acrescentar gravou numa lista inválida" || ok "--acrescentar não grava numa lista inválida"
 printf 'sem frontmatter\n' > "$E"
 saida="$(bash "$SEQ" --validar "$E" 2>&1)"
 case "$saida" in *"não começa com frontmatter"*) ok "a recusa diz o motivo" ;; *) falha "recusa sem motivo: $saida" ;; esac

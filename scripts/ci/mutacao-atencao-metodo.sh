@@ -219,7 +219,7 @@ M34() { # o item novo é inserido no COMEÇO da lista, e não no fim
     '        novo(cr); feito = 1'
 }
 M35() { # lista inválida deixa de parar a gravação: o escritor grava assim mesmo
-  troca "$SEQ_SH" '  seq="$(proximo "$arq")" || return 1' \
+  troca "$SEQ_SH" '  seq="$(proximo "$arq")" || { validar "$arq" >/dev/null; return 1; }' \
     '  seq="$(proximo "$arq" 2>/dev/null)"; [ -n "$seq" ] || seq=1'
 }
 M36() { # a V11 passa a rejeitar item legado válido

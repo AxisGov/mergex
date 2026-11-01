@@ -341,7 +341,8 @@ acrescentar() {
   [ -n "$task" ] || { ERRO="item novo sem task: não há o que registrar"; return 1; }
   sha_valido "$commit" \
     || { ERRO="item novo com commit que não é prova: ${commit:-<vazio>}"; return 1; }
-  seq="$(proximo "$arq")" || return 1
+  # O ERRO de proximo se perde no `$(...)`: no caminho de erro, a validação roda aqui.
+  seq="$(proximo "$arq")" || { validar "$arq" >/dev/null; return 1; }
 
   tmp="$arq.seq.$$"
   awk -v seq="$seq" -v task="$task" -v commit="$commit" -v revisao="$revisao" '

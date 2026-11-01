@@ -141,8 +141,9 @@ catalogo_sprints() { # <raiz> <pasta>
   local raiz="$1" pasta="$2" dir nome arquivo
   for dir in "$raiz/$pasta"/sprint-*; do
     [ -d "$dir" ] || continue
-    nome="$(basename "$dir")"
-    # O grep julga linha a linha, e o catálogo é uma lista por linha (DM-294).
+    # Sem `$(basename ...)`, que tira a quebra de linha do fim do nome. O grep julga linha a
+    # linha, e o catálogo é uma lista por linha (DM-294).
+    nome="${dir##*/}"
     case "$nome" in *$'\n'*) continue ;; esac
     grep -Eq '^sprint-[0-9]{2,}$' <<<"$nome" || continue
     for arquivo in tasks.md sprint.md fases.md; do
