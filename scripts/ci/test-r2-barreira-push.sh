@@ -1932,6 +1932,15 @@ for g in $SEL; do
   cd "$REPO" || exit 1
 done
 
+# O comentário de YAML depois de `branch:` não tira a entrega do portão (DM-304).
+for valor in 'feature/x # nota' '"feature/x" # nota' "'feature/x' # nota" feature/x; do
+  conteudo="$(printf -- '---\nkind: entrega\nbranch: %s\n---\n' "$valor")"$'\n'
+  saida="$( . "$REGRAS" >/dev/null 2>&1; printf 'abc blob %s\n%s\n' "${#conteudo}" "$conteudo" | LC_ALL=C awk -v b=feature/x "$_PR_AWK_BRANCH" )"
+  [ "$saida" = 1 ] && ok "branch: $valor seleciona a entrega" || falha "branch: $valor: saiu '$saida'"
+done
+saida="$( . "$REGRAS" >/dev/null 2>&1; conteudo="$(printf -- '---\nbranch: "feature/x # nota"\n---\n')"$'\n'; printf 'abc blob %s\n%s\n' "${#conteudo}" "$conteudo" | LC_ALL=C awk -v b=feature/x "$_PR_AWK_BRANCH" )"
+[ -z "$saida" ] && ok "# entre aspas é valor de branch:" || falha "# entre aspas virou comentário: '$saida'"
+
 echo
 echo "$OK ok, $FALHOU falha(s)"
 # NAO_EXECUTADO nunca conta como ok: fica listado à parte

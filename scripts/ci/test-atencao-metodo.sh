@@ -431,6 +431,29 @@ espera "$W/base/cep.md" "LEITURA RÁPIDA" "L4" "listada no índice" "área de í
 espera "$W/QA.md" "OLHO OBRIGATÓRIO" "padrão" "trabalho_id do arquivo" "id curto de outra ocorrência"
 espera "$W/BLOQUEIOS.md" "OLHO OBRIGATÓRIO" "padrão" "trabalho_id do arquivo" "prefixo que não é um OC-ID inteiro"
 
+# Comentário de YAML depois do id não muda o id (CodeAnt no conselhos#229, DM-304).
+novo_repo
+trabalho_runx OC-2026-0008-rua
+W=docs/manutencao/OC-2026-0008-rua
+TOOL=runx
+fm orquestrador 'OC-2026-0008 # nota' | escreve "$W/ORQUESTRADOR.md"
+fm base_indice 'OC-2026-0008-rua # nota' 'areas:' '  - arquivo: rua.md' | escreve "$W/base/00-INDICE.md"
+printf '# Rua\n' | escreve "$W/base/rua.md"
+fm ocorrencia '"OC-2026-0008 # nota"' | escreve "$W/00-OCORRENCIA.md"
+fm causa_raiz '"OC-2026-0008" # nota' | escreve "$W/01-CAUSA-RAIZ.md"
+TOOL=sprintx
+commit_tudo
+classifica main <<EOF
+$W/ORQUESTRADOR.md
+$W/base/00-INDICE.md
+$W/00-OCORRENCIA.md
+$W/01-CAUSA-RAIZ.md
+EOF
+espera "$W/01-CAUSA-RAIZ.md" "LEITURA RÁPIDA" "L4" "causa raiz, hipóteses e decisões" "id entre aspas com comentário"
+espera "$W/ORQUESTRADOR.md" "LEITURA RÁPIDA" "L4" "rota da ocorrência" "id curto com comentário"
+espera "$W/base/00-INDICE.md" "DISPENSÁVEL" "D4" "origem runx" "id completo com comentário"
+espera "$W/00-OCORRENCIA.md" "OLHO OBRIGATÓRIO" "padrão" "trabalho_id do arquivo" "# entre aspas é valor, não comentário"
+
 # A entrega é da mergex, e só o id completo vale nela.
 novo_repo
 trabalho_runx OC-2026-0004-uf

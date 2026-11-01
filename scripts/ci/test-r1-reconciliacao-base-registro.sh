@@ -864,6 +864,25 @@ grupo_evidencia_revisao() {
   reprova "evidência que é link" 4 "inventário: $e/T-03.01.json" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
 
+  # O registro da reconciliação segue a mesma regra: o que o merge removeu não é artefato (DM-303).
+  x=docs/entregas/ft-rec/RECONCILIACAO-BASE-009.md
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$x" FX_VARIANTE=evidencia_removida fx_cenario "$d" || { falha "cenário do registro removido não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  git cat-file -e "$FX_B1:$x" && ok "controle: o registro está em B1" || falha "controle: o registro fora de B1"
+  git cat-file -e "$FX_M:$x" 2>/dev/null && falha "controle: o registro segue em M" || ok "controle: o merge removeu o registro"
+  reprova "RECONCILIACAO-BASE removido pelo merge" 4 "inventário: $x" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # Como link, a cadeia já recusa antes do inventário.
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$x" FX_EVIDENCIA_LINK=1 FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário do registro por link não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  reprova "RECONCILIACAO-BASE que é link" 5 "não é arquivo regular" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
   d="$(mktemp -d)"; TMPS+=("$d")
   FX_EVIDENCIA="$e/T-03.01.json" FX_VARIANTE=evidencia_removida fx_cenario "$d" || { falha "cenário remoção não montou"; return; }
   cd "$d" || return

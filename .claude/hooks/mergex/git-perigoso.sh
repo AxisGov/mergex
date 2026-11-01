@@ -229,6 +229,14 @@ normaliza_git() {
   [ "$k" -gt 0 ] || return 0
   printf -v CMD_N '%s' "${P[@]}"
 }
+# `\` no fim da linha some para o shell: `git \<quebra> clean -fd` é `git clean -fd`, em
+# qualquer regra abaixo (DM-302). Só paga quem tem, e em LC_ALL=C a troca é linear.
+junta_continuacoes() {
+  local LC_ALL=C
+  CMD="${CMD//$'\\\r\n'/}"
+  CMD="${CMD//$'\\\n'/}"
+}
+case "$CMD" in *$'\\\n'*|*$'\\\r\n'*) junta_continuacoes ;; esac
 normaliza_git "$CMD"
 
 # Saída antecipada: se não invoca git, este hook não tem assunto.
@@ -687,13 +695,16 @@ fi
 # CL_IGNORADO (-x ou -X). Aspas não escondem a opção, e o valor de -e não é opção.
 clean_opcoes() {
   local t i c pula=0 W=()
-  CL_APAGA=0; CL_SECO=0; CL_IGNORADO=""
+  CL_APAGA=0; CL_SECO=0; CL_AJUDA=0; CL_IGNORADO=""
   read -r -a W <<<"$1"
   for t in ${W[@]+"${W[@]}"}; do
     t="${t//\'/}"; t="${t//\"/}"
     if [ "$pula" = 1 ]; then pula=0; continue; fi
+    # O valor da expansão só existe na execução: conta como o pior caso (DM-302).
+    case "$t" in *\$*) CL_APAGA=1; continue ;; esac
     case "$t" in
       --) break ;;
+      --help) CL_AJUDA=1 ;;
       --force|--interactive) CL_APAGA=1 ;;
       --dry-run) CL_SECO=1 ;;
       --exclude) pula=1 ;;
@@ -707,6 +718,7 @@ clean_opcoes() {
             x) CL_APAGA=1; CL_IGNORADO=-x ;;
             X) CL_APAGA=1; CL_IGNORADO=-X ;;
             n) CL_SECO=1 ;;
+            h) CL_AJUDA=1 ;;
             e) [ $((i + 1)) -lt "${#t}" ] || pula=1; break ;;
             [!a-zA-Z]) break ;;
           esac
@@ -716,11 +728,48 @@ clean_opcoes() {
   done
 }
 
+# clean_prefixo <trecho> — as opções entre `git` e `clean`: CL_ALVO, os `-C` literais, e
+# CL_SEM_PREVIA quando o alvo não se conhece daqui, com expansão, --git-dir ou --work-tree.
+clean_prefixo() {
+  local w W pula=0 achou=0
+  CL_ALVO=""; CL_SEM_PREVIA=0
+  read -r -a W <<<"$1"
+  for w in ${W[@]+"${W[@]}"}; do
+    if [ "$pula" = C ]; then
+      # Valor com espaço, aspa solta, expansão ou glob não cabe em palavra: sem prévia.
+      case "$w" in \"*\"|\'*\') w="${w:1:${#w}-2}" ;; esac
+      case "$w" in *[\"\'\$\*\?\[]*) CL_SEM_PREVIA=1 ;; esac
+      CL_ALVO="$CL_ALVO -C $w"; pula=0; continue
+    fi
+    w="${w//\'/}"; w="${w//\"/}"
+    if [ "$achou" = 0 ]; then [ "$w" = git ] && achou=1; continue; fi
+    [ "$w" != clean ] || return 0
+    if [ "$pula" = 1 ]; then pula=0; continue; fi
+    case "$w" in
+      -C) pula=C ;;
+      --git-dir|--work-tree) CL_SEM_PREVIA=1; pula=1 ;;
+      --git-dir=*|--work-tree=*) CL_SEM_PREVIA=1 ;;
+      -c|--namespace|--config-env) pula=1 ;;
+    esac
+  done
+}
+
+# clean_sem_exigir_forca <trecho> — clean.requireForce falso no próprio comando ou no repositório.
+clean_sem_exigir_forca() {
+  [[ "$1" =~ [cC][lL][eE][aA][nN]\.[rR][eE][qQ][uU][iI][rR][eE][fF][oO][rR][cC][eE]=([^[:space:]]*) ]] && {
+    case "${BASH_REMATCH[1]//[\"\']/}" in [fF][aA][lL][sS][eE]|[nN][oO]|[oO][fF][fF]|0) return 0 ;; *) return 1 ;; esac
+  }
+  # O alvo não se conhece daqui: o Git decide, e o pior caso é a limpeza.
+  [ "$CL_SEM_PREVIA" = 0 ] || return 0
+  # shellcheck disable=SC2086 # -C <dir> sem espaço, como clean_prefixo o guardou
+  [ "$(git -C "${CWD:-$RAIZ}" $CL_ALVO config --type=bool --get clean.requireForce 2>/dev/null)" = false ]
+}
+
 # Cada `git clean` do comando é julgado por si: opção de outro comando não conta, e a
 # simulação não apaga, mesmo com -f (git clean: -n prevalece).
 # O valor de `-C` e de `-c` é uma palavra separada entre `git` e `clean` (CodeAnt no mergex#65).
-CLEAN_APAGA=0; PREVIA_IGNORADO=""; CLEAN_TRECHOS=""
-CLEAN_RE='git([[:space:]]+(-C|-c|--git-dir|--work-tree|--namespace|--config-env)[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*[[:space:]]+clean'
+CLEAN_APAGA=0; PREVIA_IGNORADO=""; CLEAN_TRECHOS=""; PREVIA_ALVO=""; PREVIA_SEM=0; CLEAN_VISTO=0
+CLEAN_RE='git([[:space:]]+(-C|-c|--git-dir|--work-tree|--namespace|--config-env)[[:space:]]+("[^"]*"|'\''[^'\'']*'\''|[^[:space:]]+)|[[:space:]]+-[^[:space:]]+)*[[:space:]]+(clean|'\''clean'\''|"clean")'
 case "$CMD_N" in
   *clean*)
     CLEAN_TRECHOS="$(printf '%s\n' "$CMD_N" | awk '{ gsub(/[;&|(){}`]/, "\n"); print }' \
@@ -730,16 +779,30 @@ if [ -n "$CLEAN_TRECHOS" ]; then
   while IFS= read -r CLEAN_T; do
     # Sem processo: o que vier depois de `clean` é o último grupo da expressão.
     CLEAN_ARGS=""
-    if [[ "$CLEAN_T" =~ $CLEAN_RE(.*)$ ]]; then CLEAN_ARGS="${BASH_REMATCH[3]}"; fi
+    if [[ "$CLEAN_T" =~ $CLEAN_RE(.*)$ ]]; then CLEAN_ARGS="${BASH_REMATCH[5]}"; fi
     clean_opcoes "$CLEAN_ARGS"
-    if [ "$CL_APAGA" = 1 ] && [ "$CL_SECO" = 0 ]; then
+    clean_prefixo "$CLEAN_T"
+    # `git clean` puro: o Git recusa, salvo com clean.requireForce falso. Só aqui há processo.
+    if [ "$CL_APAGA" = 0 ] && [ "$CL_SECO" = 0 ] && [ "$CL_AJUDA" = 0 ] && clean_sem_exigir_forca "$CLEAN_T"; then CL_APAGA=1; fi
+    if [ "$CL_APAGA" = 1 ] && [ "$CL_SECO" = 0 ] && [ "$CL_AJUDA" = 0 ]; then
       CLEAN_APAGA=1
       [ -z "$CL_IGNORADO" ] || PREVIA_IGNORADO="$CL_IGNORADO"
+      # Dois alvos diferentes não cabem numa prévia só.
+      if [ "$CLEAN_VISTO" = 1 ] && [ "$PREVIA_ALVO" != "$CL_ALVO" ]; then CL_SEM_PREVIA=1; fi
+      [ "$CL_SEM_PREVIA" = 0 ] || PREVIA_SEM=1
+      PREVIA_ALVO="$CL_ALVO"; CLEAN_VISTO=1
     fi
   done <<<"$CLEAN_TRECHOS"
   if [ "$CLEAN_APAGA" = 1 ]; then
     # A prévia diz o que ESTE comando removeria: com -x ou -X, o ignorado entra (DM-296).
-    ALVOS="$(git -C "$RAIZ" clean -nd $PREVIA_IGNORADO 2>/dev/null | awk 'NR <= 20')"
+    # O comando pode limpar outro lugar: a prévia é a dele, ou não há prévia (DM-302).
+    if [[ "$CMD_N" =~ (^|[[:space:]\;\&\|\(\{])(cd|pushd)[[:space:]] ]]; then PREVIA_SEM=1; fi
+    if [ "$PREVIA_SEM" = 1 ]; then
+      ALVOS="  (sem prévia: o comando muda de diretório ou aponta para outro repositório)"
+    else
+      # shellcheck disable=SC2086 # -C <dir> sem espaço no valor: palavra a palavra, como foi lido
+      ALVOS="$(git -C "${CWD:-$RAIZ}" $PREVIA_ALVO clean -nd $PREVIA_IGNORADO 2>/dev/null | awk 'NR <= 20')"
+    fi
     barra "limpeza destrutiva" \
 "mergex/git-perigoso — limpeza destrutiva de arquivos não rastreados
 
