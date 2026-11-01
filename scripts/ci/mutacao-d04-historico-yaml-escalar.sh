@@ -16,6 +16,8 @@ CONTRATO='scripts/ci/validate-mergex-contract.sh'
 # Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
 # com o subshell, deixando a cópia para trás (DM-292).
 TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
 trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {

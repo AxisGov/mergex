@@ -11,6 +11,8 @@ RUNBOOK='.claude/skills/mergex/references/01-commits.md'
 TESTE='scripts/ci/test-m3-fixture-lock-lf.sh'
 TMP_RAIZ="$(mktemp -d)"
 RESULTADOS="$TMP_RAIZ/resultados"
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
 trap 'rm -rf "$TMP_RAIZ"' EXIT
 mkdir -p "$RESULTADOS"
 

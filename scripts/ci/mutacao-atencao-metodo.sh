@@ -34,6 +34,8 @@ FECHAMENTO_SH='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 # Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
 # com o subshell, deixando a cópia para trás (DM-292).
 TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
 trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
@@ -150,7 +152,7 @@ M19() { # a V11 nunca falha
     '  if true; then printf '"'"'V11=OK\n'"'"'; return 0; fi'
 }
 M20() { # basta existir qualquer commit: o id da task deixa de ser cruzado
-  troca "$PROVA_SH" '    printf '"'"'%s\n'"'"' "$provadas" | cut -f1 | grep -Fxq -- "$id" && continue' \
+  troca "$PROVA_SH" '    printf '"'"'%s\n'"'"' "$provadas" | cut -f1 | grep -Fx -- "$id" >/dev/null && continue' \
     '    [ -n "$provadas" ] && continue'
 }
 M21() { # task não concluída também passa a ser cobrada
@@ -213,7 +215,7 @@ M33() { # a escrita nova volta a poder nascer sem seq
     '      printf "  - task: %s%s\n    commit: %s%s\n    revisao: %s%s\n", task, cr, commit, cr, revisao, cr; if (0) printf "%s%s%s%s%s%s%s%s", \'
 }
 M34() { # o item novo é inserido no COMEÇO da lista, e não no fim
-  troca "$SEQ_SH" '        if (inline == "[]") { novo(cr); feito = 1 } else { dentro = 1 }' \
+  troca "$SEQ_SH" '        if (vazia) { novo(cr); feito = 1 } else { dentro = 1 }' \
     '        novo(cr); feito = 1'
 }
 M35() { # lista inválida deixa de parar a gravação: o escritor grava assim mesmo
@@ -248,9 +250,9 @@ M39() { troca "$OWN_SH" '  else printf '"'"'4\t%s\n'"'"' "$S_IRMA"' \
                         '  else printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
 M40() { troca "$OWN_SH" '  elif declara "$1" "$2"; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"' \
                         '  elif [ -n "$(tasks_de "$2")" ]; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
-M41() { troca "$OWN_SH" '  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '"'"'$atual'"'"' nao declara arquivos no plano corrente de '"'"'$trabalho'"'"'"; return 1; }' \
+M41() { troca "$OWN_SH" '  arquivos_de "$atual" | grep . >/dev/null || { ERRO="a task atual '"'"'$atual'"'"' nao declara arquivos no plano corrente de '"'"'$trabalho'"'"'"; return 1; }' \
                         '  atual="$(printf '"'"'%s\n'"'"' "$PLANO" | head -1 | cut -f1)"'; }
-M42() { troca "$OWN_SH" '  printf '"'"'%s'"'"' "$saida" | grep -q "^4${TAB}" && return 2' '  :'; }
+M42() { troca "$OWN_SH" '  grep -q "^4${TAB}" <<<"$saida" && return 2' '  :'; }
 M43() { troca "$HOOK_TASK" '    exit 2' \
                            '    expx_barra "$MODO" "$RAIZ" "$HOOK" "arquivo de task irma" "$IRMA"'; }
 

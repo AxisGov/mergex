@@ -14,6 +14,8 @@ CMD='.claude/commands/mergex.md'
 # Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
 # com o subshell, deixando a cópia para trás (DM-292).
 TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
 FALHAS="$REPO/.mutacao-m2-falhas-$$"
 trap 'rm -rf "$TMP_RAIZ"; rm -f "$FALHAS"' EXIT
 

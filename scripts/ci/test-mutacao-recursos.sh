@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # As bancadas de mutação têm de caber na máquina de quem as roda: cada mutante copia
-# o repositório e roda uma bancada, e 85 de uma vez, sem teto, travavam o WSL (DM-292).
+# o repositório e roda uma bancada, e 60 de uma vez, sem teto, pesam demais (DM-292).
 #
 #   - nenhuma cópia fica no diretório temporário: `copia` roda em `$(...)`, e a variável
 #     que ela anotasse se perdia com o subshell, então o trap não limpava nada;
@@ -54,6 +54,7 @@ confere mutacao-trava-e1.sh M13 M14 M15 M16 M17
 echo "Todas as bancadas: a cópia não é anotada em variável, e o que roda em paralelo tem teto"
 for f in "$REPO"/scripts/ci/mutacao-*.sh; do
   n="$(basename "$f")"
+  if grep -q '^export TMPDIR=' "$f"; then ok "$n guarda o temporário dos testes aninhados"; else falha "$n sem export TMPDIR"; fi
   if grep -q 'TMPS="\$TMPS' "$f"; then falha "$n anota a cópia em variável"; else ok "$n não anota a cópia em variável"; fi
   if grep -Eq '^[[:space:]]*(roda |\().*&[[:space:]]*$' "$f" && ! grep -Eq 'ativos' "$f"; then
     falha "$n dispara em paralelo sem teto"
