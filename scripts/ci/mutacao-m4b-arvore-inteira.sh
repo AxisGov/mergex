@@ -84,7 +84,7 @@ M12() { # V9 vira unitária
 M13() { # produto da task atual omitido é absorvido (inclusão automática)
   troca "$FECHA" '  [ -z "$omitidos" ] || para 11 '\''PARADO — produto da task atual alterado e não listado no E1'\'' \' \
     '  omitidos=""; [ -z "$omitidos" ] || para 11 '\''mutante'\'' \' &&
-  troca "$FECHA" '        printf '\''%s\n'\'' "$@" | grep -Fxq -- "$caminho" && printf '\''%s\n'\'' "$caminho"' \
+  troca "$FECHA" '        printf '\''%s\n'\'' "$@" | grep -Fx -- "$caminho" >/dev/null && printf '\''%s\n'\'' "$caminho"' \
     '        printf '\''%s\n'\'' "$caminho"'
 }
 

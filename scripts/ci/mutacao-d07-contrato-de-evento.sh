@@ -165,7 +165,7 @@ verifica() { # <dir> — 0 só se a bancada D-07 e o contrato passam
 }
 
 FILTRAR=" $* "
-FALHAS="$(mktemp "$TMP_RAIZ/XXXXXX")"
+FALHAS="$(mktemp "$TMP_RAIZ/XXXXXX")" || exit 1
 TOTAL=0
 
 printf 'Controle — cópia SEM mutação: a bancada D-07 e o contrato têm que passar\n'

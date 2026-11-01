@@ -214,7 +214,7 @@ M34|literal {{...}} em prosa volta a barrar
 M35|calibração final inválida passa'
 
 FILTRAR=" $* "
-FALHAS="$(mktemp "$TMP_RAIZ/XXXXXX")"
+FALHAS="$(mktemp "$TMP_RAIZ/XXXXXX")" || exit 1
 TOTAL=0
 
 printf 'Controle — cópia SEM mutação: a bancada D-02 tem que passar\n'
