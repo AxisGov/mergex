@@ -11,13 +11,17 @@ FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 # Desde o M4 o catálogo de método mora no helper compartilhado (DM-172).
 CATALOGO='.claude/skills/mergex/scripts/catalogo-de-metodo.sh'
 CMD='.claude/commands/mergex.md'
-TMPS=""
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
 FALHAS="$REPO/.mutacao-m2-falhas-$$"
-trap 'for d in $TMPS; do rm -rf "$d"; done; rm -f "$FALHAS"' EXIT
+trap 'rm -rf "$TMP_RAIZ"; rm -f "$FALHAS"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
   printf '%s\n' "$d"
@@ -53,7 +57,7 @@ M7()  { remove_contendo "$CMD" '--checkpoint pre-e6'; }
 M8()  { troca "$CATALOGO" '  printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md"' '  [ "$checkpoint" = e8 ] || printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md" # mutante: E8 deixa terminal dirty'; }
 M9()  { troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$(revisao_da_task "$task" "$sha")" 2>&1)" \' '  git commit --allow-empty -qm '\''mutante: segundo E1'\'' # mutante: recovery cria commit
   saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$(revisao_da_task "$task" "$sha")" 2>&1)" \'; }
-M10() { troca "$FECHA" "  printf '%s\\n' \"\$sha\" | grep -Eq '^[0-9A-Fa-f]{40}\$' \\" "  printf '%s\\n' \"\$sha\" | grep -Eq '^[0-9A-Fa-f]{7,40}\$' \\"; }
+M10() { troca "$FECHA" "  grep -Eq '^[0-9A-Fa-f]{40}\$' <<<\"\$sha\" \\" "  grep -Eq '^[0-9A-Fa-f]{7,40}\$' <<<\"\$sha\" \\"; }
 M11() { troca "$FECHA" '  git merge-base --is-ancestor "$sha" HEAD >/dev/null 2>&1 \' '  true # mutante: ignora alcançabilidade
   true \'; }
 M12() { troca "$FECHA" '  [ "$rc" = 0 ] || para 4 '\''PARADO — trailers do commit existente não provam este E1'\'' "$saida"' '  : # mutante: ignora trailers divergentes'; }

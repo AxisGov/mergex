@@ -8,12 +8,16 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OWN='.claude/skills/mergex/scripts/ownership-da-task.sh'
 FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 CONTRATO='.claude/skills/mergex/scripts/contrato-de-commit.sh'
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
   printf '%s\n' "$d"

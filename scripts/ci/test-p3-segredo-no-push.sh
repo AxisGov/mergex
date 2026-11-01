@@ -133,6 +133,43 @@ printf 'refs/heads/mergex-prova-livre-1 %s refs/heads/mergex-prova-livre-1 %s\n'
   | (cd "$R" && bash "$PUSH" --pre-push prova-mergex file:///dev/null) > "$aux/out" 2> "$aux/err"; rc=$?
 [ "$rc" = 0 ] && passa 'prova do E0 (file:///dev/null) sobre 306 commits: passa' || quebra "prova E0: $(mostra)"
 
+echo '== entrega por sprint: o merge da main que ja esta no servidor (C1, DM-293) =='
+# por_sprint <nome>: feature publicada com segredo em P1, merge M na main publicado,
+# --ff-only na feature e um commit novo P2. O push P2 sobre P1 nao publica M de novo.
+por_sprint() {
+  repo "$1"; g checkout -q -b feature/s; printf 'K=%s\n' "$SK" > "$R/s.txt"; commita p1
+  g push -q origin feature/s 2>/dev/null
+  g checkout -q main; g merge -q --no-ff -m M feature/s; g push -q origin main 2>/dev/null
+  g checkout -q feature/s; g merge -q --ff-only main
+}
+por_sprint c1; printf 'ok\n' > "$R/p2.txt"; commita p2
+empurra refs/heads/feature/s refs/heads/feature/s
+[ "$rc" = 0 ] && passa 'P2 limpo sobre P1, com M da main no meio: passa' || quebra "C1: $(mostra)"
+URL_PUSH="$aux/nao-existe.git" empurra refs/heads/feature/s refs/heads/feature/s
+[ "$rc" = 1 ] && diz 'chave de API' && passa 'C1 com a consulta que falha: o achado fica (falha fechada)' || quebra "C1 sem consulta: $(mostra)"
+
+por_sprint c1-novo; printf 'Z=%s0\n' "$SK" > "$R/p2.txt"; commita p2
+empurra refs/heads/feature/s refs/heads/feature/s
+p2="$(g rev-parse --short=12 HEAD)"; m="$(g rev-parse --short=12 main)"
+[ "$rc" = 1 ] && diz "no commit $p2" && ! diz "no commit $m" \
+  && passa 'segredo novo em P2: barra e acusa so o P2' || quebra "C1 com segredo novo: $(mostra)"
+
+# Sem achado, o SHA remoto basta: nenhuma consulta nova ao servidor.
+repo c1-sem-rede; g checkout -q -b feature/s; printf 'ok\n' > "$R/s.txt"; commita p1
+g push -q origin feature/s 2>/dev/null; printf 'ok\n' > "$R/p2.txt"; commita p2
+URL_PUSH="$aux/nao-existe.git" empurra refs/heads/feature/s refs/heads/feature/s
+[ "$rc" = 0 ] && passa 'caminho limpo com o SHA remoto: nao consulta o servidor' || quebra "C1 sem rede: $(mostra)"
+
+# O limite conta o que de fato se publica: a main ja publicada nao entra nele.
+repo c1-grande; g checkout -q -b feature/s; printf 'ok\n' > "$R/s.txt"; commita p1
+g push -q origin feature/s 2>/dev/null; g checkout -q main
+for i in $(seq 1 301); do g commit -q --allow-empty -m "m$i"; done; g push -q origin main 2>/dev/null
+g checkout -q feature/s; g merge -q --no-ff -m integra main; printf 'ok\n' > "$R/p2.txt"; commita p2
+empurra refs/heads/feature/s refs/heads/feature/s
+[ "$rc" = 0 ] && passa '301 commits ja publicados na main, integrados na feature: passa' || quebra "C1 grande: $(mostra)"
+URL_PUSH="$aux/nao-existe.git" empurra refs/heads/feature/s refs/heads/feature/s
+[ "$rc" = 1 ] && diz 'grande demais' && passa 'acima do limite com a consulta que falha: barra (falha fechada)' || quebra "C1 grande sem consulta: $(mostra)"
+
 echo '== modo, limite e sinal =='
 repo aviso; modo aviso; printf 'K=%s\n' "$SK" > "$R/a.txt"; commita
 : > "$aux/sinal"; empurra refs/heads/main refs/heads/main MERGEX_PRE_PUSH_SINAL="$aux/sinal"

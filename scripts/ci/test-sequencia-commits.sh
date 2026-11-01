@@ -92,6 +92,31 @@ proximo 2 "caso 2 — com seq 1 existente" 1:T-01.01:a3f19c2
 valido   "caso 2 — seq 1 sozinho" 1:T-01.01:a3f19c2
 proximo 4 "três itens modernos em sequência" 1:T-01.01:a3f19c2 2:T-01.02:7b2e401 3:T-01.03:5be75d3
 
+# `commits: []` com comentário é a mesma lista vazia em YAML; outro sufixo não é lista (DM-296).
+for sufixo in '[] # vazia' '[]   # vazia' '[] #'; do
+  printf -- '---\nkind: entrega\ncommits: %s\n---\n' "$sufixo" > "$E"
+  if [ -z "$(bash "$SEQ" --ler "$E" 2>&1)" ] && bash "$SEQ" --validar "$E" >/dev/null 2>&1; then ok "commits: $sufixo é lista vazia"
+  else falha "commits: $sufixo recusada: $(bash "$SEQ" --ler "$E" 2>&1)"; fi
+done
+for sufixo in '[]x' '[]#x' '[] x' '[a]'; do
+  printf -- '---\nkind: entrega\ncommits: %s\n---\n' "$sufixo" > "$E"
+  saida="$(bash "$SEQ" --ler "$E" 2>&1)"; rc=$?
+  case "$rc:$saida" in
+    1:*"não é lista de itens"*) ok "commits: $sufixo recusada, com motivo" ;;
+    *) falha "commits: $sufixo — rc=$rc: $saida" ;;
+  esac
+done
+printf -- '---\nkind: entrega\nversionado: true\ncommits: [] # vazia\n---\n' > "$E"
+bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 >/dev/null 2>&1
+[ "$(bash "$SEQ" --ler "$E" 2>/dev/null | cut -f3)" = T-01.01 ] && ok "commits: [] # vazia recebe o item novo" || falha "o item novo não entrou: $(cat "$E")"
+printf -- '---\nkind: entrega\nversionado: true\ncommits: [a]\n---\n' > "$E"
+saida="$(bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 2>&1)"; rc=$?
+case "$rc:$saida" in 1:*"não é lista de itens"*) ok "--acrescentar diz o motivo da recusa" ;; *) falha "--acrescentar: rc=$rc: $saida" ;; esac
+grep -q 'T-01.01' "$E" && falha "--acrescentar gravou numa lista inválida" || ok "--acrescentar não grava numa lista inválida"
+printf 'sem frontmatter\n' > "$E"
+saida="$(bash "$SEQ" --validar "$E" 2>&1)"
+case "$saida" in *"não começa com frontmatter"*) ok "a recusa diz o motivo" ;; *) falha "recusa sem motivo: $saida" ;; esac
+
 # ---------------------------------------------------------------------------
 echo
 echo "3-4, 9. Prefixo legado: ordem efetiva pela posição, sem migrar nada"

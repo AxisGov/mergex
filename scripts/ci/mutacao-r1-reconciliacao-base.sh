@@ -137,6 +137,8 @@ if [ -z "${MUTACAO_R1_SETSID:-}" ] && [ "$(ps -o pgid= -p $$ 2>/dev/null | tr -d
 fi
 
 RAIZ_TMP="$(mktemp -d "${TMPDIR:-/tmp}/mutacao-r1.XXXXXX")" || { echo 'sem diretório temporário' >&2; exit 1; }
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$RAIZ_TMP"
 limpa() { rm -rf "$RAIZ_TMP"; }
 interrompe() {
   trap '' INT TERM

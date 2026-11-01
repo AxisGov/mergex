@@ -3,7 +3,7 @@
 #
 # Parte da bancada R1: scripts/ci/test-r1-reconciliacao-base.sh a carrega com
 # `.`, na ordem de definição, e roda os grupos. Esta parte só define funções e
-# variáveis, e não roda sozinha. Grupos: reproducao, contrato, artefato, provas e entrega.
+# variáveis, e não roda sozinha. Grupos: reproducao, contrato, artefato, provas, evidencia_revisao e entrega.
 
 [ "${BASH_SOURCE[0]}" != "$0" ] || { echo "${0##*/}: parte da bancada R1; rode scripts/ci/test-r1-reconciliacao-base.sh" >&2; exit 64; }
 
@@ -819,6 +819,61 @@ EOF
 
 # Frontmatter do ENTREGA.md, uma linha por chave de topo: `chave<TAB>bloco`,
 # com as linhas de continuação (aninhadas) coladas por \001. Linhas em ordem.
+# A evidência de revisão por task (DM-240) nasce na feature e é alterada por B1..M:
+# o inventário a aceita na forma do E1 e recusa tudo o mais sob `revisao/` (DM-291).
+grupo_evidencia_revisao() {
+  local d r v e=docs/entregas/ft-rec/revisao x
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+
+  for x in T-03.01.json T-7.json; do
+    d="$(mktemp -d)"; TMPS+=("$d")
+    FX_EVIDENCIA="$e/$x" FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário $x não montou"; return; }
+    cd "$d" || return
+    r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+    v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+    git cat-file -e "$FX_P1:$e/$x" && ok "controle: $x está em P1" || falha "controle: $x fora de P1"
+    git cat-file -e "$FX_B1:$e/$x" 2>/dev/null && falha "controle: $x está em B1" || ok "controle: $x fora de B1"
+    registra_ok "evidência $x não é produto" "$FX_NOVO1" "$FX_NOVO2"
+    rc_igual "evidência $x: --verificar confirma" 0 "${v[@]}"
+    cd "$REPO" || return
+  done
+
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$e/T-03.01.json" FX_EVIDENCIA_EXEC=1 FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário executável não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  registra_ok "evidência com modo 100755, como no E1" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  # T-100.01 fica fora porque o E1 também não o grava: a forma é uma só.
+  for x in "$e/T-100.01.json" "$e/T-03.01.json.tmp" "$e/.T-03.01.json" "$e/T-03.01.txt" "$e/T-A.json" "$e/T-.json" "$e/x/T-03.01.json" \
+    docs/entregas/ft-rec/revisao.json docs/entregas/outro/revisao/T-03.01.json; do
+    d="$(mktemp -d)"; TMPS+=("$d")
+    FX_EVIDENCIA="$x" FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário $x não montou"; return; }
+    cd "$d" || return
+    r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+    reprova "fora da forma: $x" 4 "inventário: $x" "$FX_NOVO1" "$FX_NOVO2"
+    cd "$REPO" || return
+  done
+
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$e/T-03.01.json" FX_EVIDENCIA_LINK=1 FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário link não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  [ "$(git ls-tree "$FX_M" -- "$e/T-03.01.json" | cut -c1-6)" = 120000 ] && ok "controle: a evidência é link em M" || falha "controle: não é link em M"
+  reprova "evidência que é link" 4 "inventário: $e/T-03.01.json" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$e/T-03.01.json" FX_VARIANTE=evidencia_removida fx_cenario "$d" || { falha "cenário remoção não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  git cat-file -e "$FX_B1:$e/T-03.01.json" && ok "controle: a evidência está em B1" || falha "controle: fora de B1"
+  git cat-file -e "$FX_M:$e/T-03.01.json" 2>/dev/null && falha "controle: a evidência está em M" || ok "controle: fora de M"
+  reprova "evidência da base removida pelo merge" 4 "inventário: $e/T-03.01.json" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+}
+
 _blocos() { # <arquivo>
   awk '
     NR == 1 { next }

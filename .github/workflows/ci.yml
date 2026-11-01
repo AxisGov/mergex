@@ -134,6 +134,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-proveniencia-contrato.sh
 
+      - name: Test mutation bench resources
+        shell: bash
+        run: bash scripts/ci/test-mutacao-recursos.sh
+
       - name: Validate Mergex contract
         shell: bash
         run: bash scripts/ci/validate-mergex-contract.sh

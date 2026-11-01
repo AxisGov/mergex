@@ -10,12 +10,16 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PERSISTE='.claude/skills/mergex/scripts/persistir-metodo.sh'
 FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 BANCADA='scripts/ci/test-d02-historico-inicial.sh'
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
   printf '%s\n' "$d"
@@ -210,8 +214,7 @@ M34|literal {{...}} em prosa volta a barrar
 M35|calibração final inválida passa'
 
 FILTRAR=" $* "
-FALHAS="$(mktemp)"
-TMPS="$TMPS $FALHAS"
+FALHAS="$(mktemp "$TMP_RAIZ/XXXXXX")" || exit 1
 TOTAL=0
 
 printf 'Controle — cópia SEM mutação: a bancada D-02 tem que passar\n'

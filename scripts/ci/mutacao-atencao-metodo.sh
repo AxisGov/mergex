@@ -31,12 +31,16 @@ OWN_SH='.claude/skills/mergex/scripts/ownership-da-task.sh'
 HOOK_TASK='.claude/hooks/mergex/commit-por-task.sh'
 FECHAMENTO_SH='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   # Rastreados e novos ainda não commitados; nada ignorado. O .git do
   # repositório não vem: a cópia ganha um Git próprio com a árvore inteira no
   # índice, porque o validador do contrato varre os arquivos versionados com
@@ -148,7 +152,7 @@ M19() { # a V11 nunca falha
     '  if true; then printf '"'"'V11=OK\n'"'"'; return 0; fi'
 }
 M20() { # basta existir qualquer commit: o id da task deixa de ser cruzado
-  troca "$PROVA_SH" '    printf '"'"'%s\n'"'"' "$provadas" | cut -f1 | grep -Fxq -- "$id" && continue' \
+  troca "$PROVA_SH" '    printf '"'"'%s\n'"'"' "$provadas" | cut -f1 | grep -Fx -- "$id" >/dev/null && continue' \
     '    [ -n "$provadas" ] && continue'
 }
 M21() { # task não concluída também passa a ser cobrada
@@ -211,11 +215,11 @@ M33() { # a escrita nova volta a poder nascer sem seq
     '      printf "  - task: %s%s\n    commit: %s%s\n    revisao: %s%s\n", task, cr, commit, cr, revisao, cr; if (0) printf "%s%s%s%s%s%s%s%s", \'
 }
 M34() { # o item novo é inserido no COMEÇO da lista, e não no fim
-  troca "$SEQ_SH" '        if (inline == "[]") { novo(cr); feito = 1 } else { dentro = 1 }' \
+  troca "$SEQ_SH" '        if (vazia) { novo(cr); feito = 1 } else { dentro = 1 }' \
     '        novo(cr); feito = 1'
 }
 M35() { # lista inválida deixa de parar a gravação: o escritor grava assim mesmo
-  troca "$SEQ_SH" '  seq="$(proximo "$arq")" || return 1' \
+  troca "$SEQ_SH" '  seq="$(proximo "$arq")" || { validar "$arq" >/dev/null; return 1; }' \
     '  seq="$(proximo "$arq" 2>/dev/null)"; [ -n "$seq" ] || seq=1'
 }
 M36() { # a V11 passa a rejeitar item legado válido
@@ -246,9 +250,9 @@ M39() { troca "$OWN_SH" '  else printf '"'"'4\t%s\n'"'"' "$S_IRMA"' \
                         '  else printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
 M40() { troca "$OWN_SH" '  elif declara "$1" "$2"; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"' \
                         '  elif [ -n "$(tasks_de "$2")" ]; then printf '"'"'1\t%s\n'"'"' "$S_ATUAL"'; }
-M41() { troca "$OWN_SH" '  arquivos_de "$atual" | grep -q . || { ERRO="a task atual '"'"'$atual'"'"' nao declara arquivos no plano corrente de '"'"'$trabalho'"'"'"; return 1; }' \
+M41() { troca "$OWN_SH" '  arquivos_de "$atual" | grep . >/dev/null || { ERRO="a task atual '"'"'$atual'"'"' nao declara arquivos no plano corrente de '"'"'$trabalho'"'"'"; return 1; }' \
                         '  atual="$(printf '"'"'%s\n'"'"' "$PLANO" | head -1 | cut -f1)"'; }
-M42() { troca "$OWN_SH" '  printf '"'"'%s'"'"' "$saida" | grep -q "^4${TAB}" && return 2' '  :'; }
+M42() { troca "$OWN_SH" '  grep -q "^4${TAB}" <<<"$saida" && return 2' '  :'; }
 M43() { troca "$HOOK_TASK" '    exit 2' \
                            '    expx_barra "$MODO" "$RAIZ" "$HOOK" "arquivo de task irma" "$IRMA"'; }
 
@@ -421,6 +425,9 @@ M55b|nome da evidencia muda so no E3|validador'
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
 PIDS=""; IDS=""
+# Cada mutante copia o repositório e roda uma bancada: sem teto, todos de uma vez travam
+# a máquina (DM-292). O teto é o das outras bancadas de mutação.
+PARALELO=4; ativos=0
 
 # Controle sem mutação: numa cópia intocada, as verificações TÊM que passar.
 # Sem ele, uma bancada quebrada mataria toda mutação por motivo errado e a
@@ -449,15 +456,19 @@ roda() { # id desc verificacao
   ) > "$d/mutacao.log" 2>&1
   printf '%s\n' "$?" > "$d/rc"
   printf '%s\n' "$d" > "$REPO_TMP/$id.dir"
+  # Para o relatório bastam os registros: a cópia inteira, multiplicada por mutante, pesa.
+  find "$d" -mindepth 1 -maxdepth 1 ! -name mutacao.log ! -name saida.log ! -name rc -exec rm -rf {} +
 }
 
-REPO_TMP="$(mktemp -d)"; TMPS="$TMPS $REPO_TMP"
+REPO_TMP="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || exit 1
 
 while IFS='|' read -r id desc verif; do
   [ -n "$id" ] || continue
   [ "$#" -eq 0 ] || case "$SELECAO" in *" $id "*) ;; *) continue ;; esac
   roda "$id" "$desc" "$verif" &
   PIDS="$PIDS $!"; IDS="$IDS $id"
+  ativos=$((ativos + 1))
+  if [ "$ativos" -ge "$PARALELO" ]; then wait; ativos=0; fi
 done <<EOF
 $LISTA
 EOF

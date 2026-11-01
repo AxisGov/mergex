@@ -8,6 +8,8 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/mutacao-r3.XXXXXX")" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP"
 if [ "${MUTACAO_KEEP:-0}" = 1 ]; then
   trap 'printf "temporario=%s\n" "$TMP"' EXIT
 else

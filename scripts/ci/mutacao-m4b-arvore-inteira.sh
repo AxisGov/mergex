@@ -11,12 +11,16 @@ FECHA='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
 OWN='.claude/skills/mergex/scripts/ownership-da-task.sh'
 V9='.claude/hooks/mergex/arquivo-fora-do-plano.sh'
 BANCADA='scripts/ci/test-m4b-arvore-inteira.sh'
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
+# com o subshell, deixando a cópia para trás (DM-292).
+TMP_RAIZ="$(mktemp -d)" || exit 1
+# O que os testes aninhados criam também fica sob a raiz: mutante que os derruba não deixa rastro.
+export TMPDIR="$TMP_RAIZ"
+trap 'rm -rf "$TMP_RAIZ"' EXIT
 
 copia() {
   local d
-  d="$(mktemp -d)"; TMPS="$TMPS $d"
+  d="$(mktemp -d "$TMP_RAIZ/XXXXXX")" || return 1
   ( cd "$REPO" && git ls-files -z -co --exclude-standard | xargs -0 tar -cf - ) \
     | ( cd "$d" && tar -xf - )
   printf '%s\n' "$d"
@@ -80,7 +84,7 @@ M12() { # V9 vira unitária
 M13() { # produto da task atual omitido é absorvido (inclusão automática)
   troca "$FECHA" '  [ -z "$omitidos" ] || para 11 '\''PARADO — produto da task atual alterado e não listado no E1'\'' \' \
     '  omitidos=""; [ -z "$omitidos" ] || para 11 '\''mutante'\'' \' &&
-  troca "$FECHA" '        printf '\''%s\n'\'' "$@" | grep -Fxq -- "$caminho" && printf '\''%s\n'\'' "$caminho"' \
+  troca "$FECHA" '        printf '\''%s\n'\'' "$@" | grep -Fx -- "$caminho" >/dev/null && printf '\''%s\n'\'' "$caminho"' \
     '        printf '\''%s\n'\'' "$caminho"'
 }
 

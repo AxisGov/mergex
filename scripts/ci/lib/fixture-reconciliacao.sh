@@ -238,7 +238,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas preflight_metodo preflight_e_arbitrario "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -417,6 +417,10 @@ _fx_corpo() {
     case "$var" in
       base_removeu) git rm -q README.md ;;
       renomeado) git mv README.md LEIAME.md ;;
+      evidencia_removida)
+        mkdir -p "$(dirname "$FX_EVIDENCIA")"
+        printf '{"task":"T-03.01"}\n' > "$FX_EVIDENCIA"
+        git add -- "$FX_EVIDENCIA" ;;
       caminho_especial)
         printf 'export const casoEspecial = "base";\n' > "$FX_ESPECIAL"
         git add -- "$FX_ESPECIAL" ;;
@@ -458,6 +462,13 @@ _fx_corpo() {
     # ENTREGA.md (guarda estrutura[entrega]); M herda o ENTREGA.md de P1
     case "$var" in
       b0_fora_b1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $(git rev-parse "$FX_P1~4")/" ;;
+      # a evidência de revisão da task já está na feature quando a base entra
+      evidencia_feature)
+        mkdir -p "$(dirname "$FX_EVIDENCIA")"
+        if [ "${FX_EVIDENCIA_LINK:-0}" = 1 ]; then ln -s ../ENTREGA.md "$FX_EVIDENCIA"
+        else printf '{"task":"T-03.01"}\n' > "$FX_EVIDENCIA"; fi
+        [ "${FX_EVIDENCIA_EXEC:-0}" = 0 ] || chmod +x "$FX_EVIDENCIA"
+        git add -- "$FX_EVIDENCIA" ;;
       b0_fora_p1) _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $FX_B1/" ;;
       b0_ref) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha: main/' ;;
       entrega_kind) _fx_entrega_sed 's/^kind: entrega$/kind: outro/' ;;
@@ -508,6 +519,7 @@ _fx_corpo() {
         git show "$FX_B0:README.md" > README.md
         git add README.md ;;
       integracao_removeu) git rm -q -f tests/ui/attendance-ksmv-primitives.test.tsx ;;
+      evidencia_removida) git rm -q -f -- "$FX_EVIDENCIA" ;;
       resolucao_igual_base)
         git show "$FX_B1:tests/ui/attendance-ksmv-primitives.test.tsx" > tests/ui/attendance-ksmv-primitives.test.tsx
         git add tests/ui/attendance-ksmv-primitives.test.tsx ;;

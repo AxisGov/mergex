@@ -20,14 +20,16 @@ FIXTURES="$REPO/scripts/ci/fixtures/e2e-p0-2"
 T="$(printf '\t')"
 
 OK=0; FALHOU=0
-TMPS=""
-trap 'for d in $TMPS; do rm -rf "$d"; done' EXIT
+# Array: em string, um TMPDIR com espaço partia o caminho, a sobra ficava e o `rm -rf` podia
+# acertar um diretório irmão (CodeAnt no mergex#65).
+TMPS=()
+trap 'rm -rf ${TMPS[@]+"${TMPS[@]}"}' EXIT
 
 # ---------------------------------------------------------------------------
 # Utilitários
 # ---------------------------------------------------------------------------
 novo_repo() {
-  R="$(mktemp -d)"; TMPS="$TMPS $R"
+  R="$(mktemp -d)"; TMPS+=("$R")
   git -C "$R" init -q -b main . 2>/dev/null || { git -C "$R" init -q . && git -C "$R" checkout -q -b main; }
   git -C "$R" config user.email teste@expx.local
   git -C "$R" config user.name Teste
@@ -472,7 +474,7 @@ echo
 echo "O10 — arquivo reconciliado da base (--reconciliados)"
 # ---------------------------------------------------------------------------
 O10TXT='O10: arquivo reconciliado da base'
-D="$(mktemp -d)"; TMPS="$TMPS $D"
+D="$(mktemp -d)"; TMPS+=("$D")
 ESPECIAL="docs/Relatório d'água final.md"
 
 roda_o10() { # <lista> — entrada padrão passa para o classificador
@@ -617,7 +619,7 @@ fm reconciliacao_base ft-r | escreve "$E/RECONCILIACAO-BASE-002.md"
 fm reconciliacao_base ft-r | escreve "$E/RECONCILIACAO-BASE-1.md"
 fm entrega ft-r "branch: feature/ft-r" | escreve "$E/RECONCILIACAO-BASE-003.md"
 commit_tudo
-D="$(mktemp -d)"; TMPS="$TMPS $D"
+D="$(mktemp -d)"; TMPS+=("$D")
 printf 'src/reconciliado.ts\t001\n' > "$D/reconc.txt"
 SAIDA="$(bash "$CLASSIFICADOR" --raiz "$R" --base main --reconciliados "$D/reconc.txt" <<EOF
 $S/00-PLANEJAMENTO.md
@@ -705,6 +707,80 @@ classifica main <<LISTA
 $S/base/00-INDICE.md
 LISTA
 espera "$S/base/00-INDICE.md" "LEITURA RÁPIDA" "L4" "link simbólico" "índice com área atrás de link simbólico"
+
+# ---------------------------------------------------------------------------
+echo
+echo "Cenário — link em qualquer ponto do caminho nunca é método (DM-294, regressões da DM-288)"
+# ---------------------------------------------------------------------------
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+FORA="$(mktemp -d)"; TMPS+=("$FORA")
+printf '# fora\n' > "$FORA/fora.md"
+fm base_indice ft-lnk 'areas:' '  - arquivo: atalho/fora.md' | escreve "$S/base/00-INDICE.md"
+ln -s "$FORA" "$R/$S/base/atalho"
+commit_tudo
+classifica main <<LISTA
+$S/base/atalho/fora.md
+LISTA
+espera "$S/base/atalho/fora.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "área listada atrás de pasta que é link"
+
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+FORA="$(mktemp -d)"; TMPS+=("$FORA")
+mkdir -p "$FORA/sub" "$R/$S"
+printf '# a\n' > "$FORA/sub/a.md"
+fm base_indice ft-lnk 'areas:' '  - arquivo: sub/a.md' > "$FORA/00-INDICE.md"
+ln -s "$FORA" "$R/$S/base"
+commit_tudo
+base_cat="$( (. "$CATBASE" && catalogo_base "$R" ft-lnk "$S" >/dev/null; printf '%s' "$CATALOGO_ERRO") 2>&1)"
+if printf '%s' "$base_cat" | grep -qF 'link simbólico'; then
+  OK=$((OK+1)); echo "  ok    catalogo_base recusa base/ que é link"
+else
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_base aceitou base/ que é link: $base_cat"
+fi
+classifica main <<LISTA
+$S/base/sub/a.md
+$S/base/00-INDICE.md
+LISTA
+espera "$S/base/sub/a.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "área atrás de base/ que é link"
+espera "$S/base/00-INDICE.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "índice atrás de base/ que é link"
+
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+FORA="$(mktemp -d)"; TMPS+=("$FORA")
+fm base_indice ft-lnk 'areas:' '  - arquivo: outra.md' > "$FORA/indice.md"
+mkdir -p "$R/$S/base"; ln -s "$FORA/indice.md" "$R/$S/base/00-INDICE.md"
+printf '# outra\n' | escreve "$S/base/outra.md"
+commit_tudo
+classifica main <<LISTA
+$S/base/outra.md
+LISTA
+espera "$S/base/outra.md" "OLHO OBRIGATÓRIO" "padrão" "link simbólico" "área listada por índice que é link"
+
+# Pasta sprint-NN com quebra de linha: o catálogo é uma lista por linha, e a segunda
+# metade do nome viraria um caminho de método (DM-294).
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+mkdir -p "$R/$S/sprint-01
+injetado"
+base_cat="$( (. "$CATBASE" && catalogo_sprints "$R" "$S") 2>&1)"
+if printf '%s\n' "$base_cat" | grep -q 'injetado'; then
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_sprints aceitou pasta com quebra de linha: $base_cat"
+else
+  OK=$((OK+1)); echo "  ok    catalogo_sprints ignora pasta com quebra de linha"
+fi
+
+# A quebra de linha no fim do nome: `$(basename ...)` a tiraria antes do teste (CodeRabbit no mergex#65).
+novo_repo; trabalho_sprintx ft-lnk
+S=docs/sprintx/features/ft-lnk
+mkdir -p "$R/$S/sprint-02
+"
+base_cat="$( (. "$CATBASE" && catalogo_sprints "$R" "$S") 2>&1)"
+if printf '%s\n' "$base_cat" | grep -q 'sprint-02'; then
+  FALHOU=$((FALHOU+1)); echo "  FALHA catalogo_sprints aceitou quebra de linha no fim do nome: $base_cat"
+else
+  OK=$((OK+1)); echo "  ok    catalogo_sprints ignora quebra de linha no fim do nome"
+fi
 
 # ---------------------------------------------------------------------------
 echo
