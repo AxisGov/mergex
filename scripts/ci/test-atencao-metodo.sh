@@ -396,6 +396,65 @@ espera docs/entregas/OC-2026-0001-frete/ENTREGA.md "DISPENSÁVEL" "D4" "gravado 
 
 # ---------------------------------------------------------------------------
 echo
+echo "Cenário G2 — os artefatos da runx declaram o <OC-ID> curto (DM-299)"
+# ---------------------------------------------------------------------------
+novo_repo
+trabalho_runx OC-2026-0002-cep
+W=docs/manutencao/OC-2026-0002-cep
+TOOL=runx
+fm orquestrador OC-2026-0002 | escreve "$W/ORQUESTRADOR.md"
+fm ocorrencia OC-2026-0002 | escreve "$W/00-OCORRENCIA.md"
+fm causa_raiz OC-2026-0002 | escreve "$W/01-CAUSA-RAIZ.md"
+fm plano OC-2026-0002 | escreve "$W/sprint-01/tasks.md"
+fm base_indice OC-2026-0002 'areas:' '  - arquivo: cep.md' | escreve "$W/base/00-INDICE.md"
+printf '# CEP\n' | escreve "$W/base/cep.md"
+fm qa OC-2026-0003 | escreve "$W/QA.md"
+fm bloqueios OC-2026 'bloqueios: []' | escreve "$W/BLOQUEIOS.md"
+TOOL=sprintx
+commit_tudo
+classifica main <<EOF
+$W/ORQUESTRADOR.md
+$W/00-OCORRENCIA.md
+$W/01-CAUSA-RAIZ.md
+$W/sprint-01/tasks.md
+$W/base/00-INDICE.md
+$W/base/cep.md
+$W/QA.md
+$W/BLOQUEIOS.md
+EOF
+espera "$W/ORQUESTRADOR.md" "LEITURA RÁPIDA" "L4" "rota da ocorrência" "ORQUESTRADOR com o id curto"
+espera "$W/00-OCORRENCIA.md" "LEITURA RÁPIDA" "L4" "relato e tipo da ocorrência" "00-OCORRENCIA com o id curto"
+espera "$W/01-CAUSA-RAIZ.md" "LEITURA RÁPIDA" "L4" "causa raiz, hipóteses e decisões" "01-CAUSA-RAIZ com o id curto"
+espera "$W/sprint-01/tasks.md" "LEITURA RÁPIDA" "L4" "origem runx" "tasks.md com o id curto"
+espera "$W/base/00-INDICE.md" "DISPENSÁVEL" "D4" "origem runx" "índice com o id curto"
+espera "$W/base/cep.md" "LEITURA RÁPIDA" "L4" "listada no índice" "área de índice com o id curto"
+espera "$W/QA.md" "OLHO OBRIGATÓRIO" "padrão" "trabalho_id do arquivo" "id curto de outra ocorrência"
+espera "$W/BLOQUEIOS.md" "OLHO OBRIGATÓRIO" "padrão" "trabalho_id do arquivo" "prefixo que não é um OC-ID inteiro"
+
+# A entrega é da mergex, e só o id completo vale nela.
+novo_repo
+trabalho_runx OC-2026-0004-uf
+TOOL=runx
+fm entrega OC-2026-0004 "branch: fix/OC-2026-0004-uf" "entregue_por: mergex" | escreve docs/entregas/OC-2026-0004-uf/ENTREGA.md
+TOOL=sprintx
+commit_tudo
+classifica main <<EOF
+docs/entregas/OC-2026-0004-uf/ENTREGA.md
+EOF
+espera docs/entregas/OC-2026-0004-uf/ENTREGA.md "OLHO OBRIGATÓRIO" "padrão" "trabalho_id do arquivo" "ENTREGA com o id curto"
+
+# Na SprintX não há id curto, mesmo com um slug que pareça ocorrência.
+novo_repo; trabalho_sprintx OC-2026-0007-x
+S=docs/sprintx/features/OC-2026-0007-x
+fm bloqueios OC-2026-0007 'bloqueios: []' | escreve "$S/00-BLOQUEIOS.md"
+commit_tudo
+classifica main <<EOF
+$S/00-BLOQUEIOS.md
+EOF
+espera "$S/00-BLOQUEIOS.md" "OLHO OBRIGATÓRIO" "padrão" "trabalho_id do arquivo" "id curto em trabalho da SprintX"
+
+# ---------------------------------------------------------------------------
+echo
 echo "Cenário H — sem legadox e sem memox, artefato de método segue a regra nova"
 # ---------------------------------------------------------------------------
 novo_repo; trabalho_sprintx ft-h

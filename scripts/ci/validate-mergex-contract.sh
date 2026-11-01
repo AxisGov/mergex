@@ -1743,4 +1743,7 @@ awk '/^commits:$/ { c = 1; next } c && /^  - seq:/ { i++ } c && /^    revisao:/ 
   c && /^[a-z_]+:/ { exit } END { exit !(i > 0 && i == r) }' "$schema_ref" \
   || fail '00-schema.md: o exemplo de commits da entrega omite a chave revisao do item'
 
+grep -Fq 'git switch -c <nome-da-branch> --no-track <branch-base>' .claude/skills/mergex/references/00-abertura.md \
+  || fail '00-abertura.md: a branch precisa nascer sem rastrear a base (DM-300)'
+
 printf 'contract checks passed\n'

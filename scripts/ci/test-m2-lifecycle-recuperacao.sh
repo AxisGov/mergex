@@ -488,6 +488,54 @@ grupo_catalog() {
   obtido="$(lista_catalogo "$repo" runx pre-e2 2>/dev/null)"
   igual 'ENTREGA de outro trabalho na mesma branch nao seleciona contexto' "$obtido" "$esperado"
 
+  # Os artefatos da runx declaram o <OC-ID> curto, e o trabalho é <OC-ID>-<slug> (DM-299).
+  oc_lista() { # <repo>
+    (cd "$1" && bash "$PERSISTE" --listar --entrega docs/entregas/OC-2026-0005-x/ENTREGA.md \
+      --origem runx --trabalho OC-2026-0005-x --checkpoint pre-e2)
+  }
+  repo="$D/catalogo-id-curto"
+  pasta=docs/manutencao/OC-2026-0005-x
+  git init -q -b fix/OC-2026-0005-x "$repo"
+  (
+    cd "$repo" || exit 1
+    git config user.email teste@expx.local; git config user.name Teste; git config commit.gpgsign false
+    mkdir -p "$pasta/base"
+    artefato "$pasta/ORQUESTRADOR.md" orquestrador OC-2026-0005
+    artefato "$pasta/00-OCORRENCIA.md" ocorrencia OC-2026-0005
+    artefato "$pasta/base/causa.md" base_area OC-2026-0005
+    printf -- '---\nexpx_schema: 1\nexpx_tool: runx\nkind: base_indice\ntrabalho_id: OC-2026-0005\nareas:\n  - arquivo: causa.md\n---\n' > "$pasta/base/00-INDICE.md"
+    entrega docs/entregas/OC-2026-0005-x/ENTREGA.md OC-2026-0005-x fix/OC-2026-0005-x runx
+    git add -A; git commit -qm base
+    printf '\nmudanca\n' >> "$pasta/base/causa.md"
+  )
+  obtido="$(oc_lista "$repo" 2>/dev/null)"
+  igual 'RunX com o id curto no ORQUESTRADOR e no indice lista a area' "$obtido" "$pasta/base/causa.md"
+  sed -i 's/trabalho_id: OC-2026-0005/trabalho_id: OC-2026-0006/' "$repo/$pasta/base/00-INDICE.md"
+  oc_lista "$repo" >/dev/null 2>&1; rc=$?
+  [ "$rc" != 0 ] && ok 'indice com o id curto de outra ocorrencia para' \
+    || falha 'indice de outra ocorrencia foi aceito'
+  sed -i 's/trabalho_id: OC-2026-0006/trabalho_id: OC-2026-0005/' "$repo/$pasta/base/00-INDICE.md"
+  sed -i 's/trabalho_id: OC-2026-0005/trabalho_id: OC-2026/' "$repo/$pasta/ORQUESTRADOR.md"
+  oc_lista "$repo" >/dev/null 2>&1; rc=$?
+  [ "$rc" != 0 ] && ok 'ORQUESTRADOR com prefixo que nao e OC-ID inteiro para' \
+    || falha 'prefixo solto no ORQUESTRADOR foi aceito'
+
+  repo="$D/catalogo-id-curto-sprintx"
+  pasta=docs/sprintx/features/OC-2026-0007-x
+  git init -q -b feature/OC-2026-0007-x "$repo"
+  (
+    cd "$repo" || exit 1
+    git config user.email teste@expx.local; git config user.name Teste; git config commit.gpgsign false
+    mkdir -p "$pasta"
+    artefato "$pasta/ORQUESTRADOR.md" orquestrador OC-2026-0007
+    entrega docs/entregas/OC-2026-0007-x/ENTREGA.md OC-2026-0007-x feature/OC-2026-0007-x sprintx
+    git add -A; git commit -qm base
+  )
+  (cd "$repo" && bash "$PERSISTE" --listar --entrega docs/entregas/OC-2026-0007-x/ENTREGA.md \
+    --origem sprintx --trabalho OC-2026-0007-x --checkpoint pre-e2) >/dev/null 2>&1; rc=$?
+  [ "$rc" != 0 ] && ok 'SprintX com slug de ocorrencia nao aceita o id curto' \
+    || falha 'id curto aceito em trabalho da SprintX'
+
   repo="$D/catalogo-historico-alheio"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
   acrescenta_historico "$repo/docs/sprintx/estimativas/HISTORICO.md" outro
