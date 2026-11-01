@@ -628,11 +628,18 @@ caso "clean --force"          mergex/git-perigoso.sh "$(bash_json 'git clean --f
 caso "clean com expansão"     mergex/git-perigoso.sh "$(bash_json 'flags=-fd; git clean $flags')" 2
 caso "clean com expansão entre aspas" mergex/git-perigoso.sh "$(bash_json 'git clean "$flags"')" 2
 caso "clean com substituição" mergex/git-perigoso.sh "$(bash_json 'git clean $(echo -fd)')" 2
+caso "barra escapada e quebra: o push é outro comando" mergex/git-perigoso.sh "$(bash_json $'echo a\\\\\ngit push --force')" 2
+caso "duas barras escapadas e quebra" mergex/git-perigoso.sh "$(bash_json $'echo a\\\\\\\\\ngit push --force')" 2
 caso "git, continuação, clean" mergex/git-perigoso.sh "$(bash_json $'git \\\n clean -fd')" 2
 caso "clean, continuação, -fd" mergex/git-perigoso.sh "$(bash_json $'git clean \\\n -fd')" 2
 caso "clean, continuação com CRLF, -fd" mergex/git-perigoso.sh "$(bash_json $'git clean \\\r\n -fd')" 2
 caso "clean.requireForce=false" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=false clean')" 2
 caso "clean.requireforce=0, em minúsculas" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireforce=0 clean')" 2
+caso "o último -c vale: false" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=true -c clean.requireForce=false clean')" 2
+caso "o caminho depois de clean não muda o -c" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=false clean clean.requireForce=true')" 2
+caso "requireForce por --config-env" mergex/git-perigoso.sh "$(bash_json 'git --config-env clean.requireForce=F clean')" 2
+caso "requireForce por expansão" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=$f clean')" 2
+caso "clean puro depois de cd" mergex/git-perigoso.sh "$(bash_json 'cd /tmp/outro && git clean')" 2
 caso "-C com espaço entre aspas" mergex/git-perigoso.sh "$(bash_json 'git -C "/dir com espaco" clean -fd')" 2
 caso "-C com espaço, clean puro" mergex/git-perigoso.sh "$(bash_json "git -C '/dir com espaco' clean")" 2
 caso "'clean' entre aspas"    mergex/git-perigoso.sh "$(bash_json "git 'clean' -fd")" 2
@@ -706,6 +713,9 @@ caso "clean --help"           mergex/git-perigoso.sh "$(bash_json 'git clean --h
 caso "help clean"             mergex/git-perigoso.sh "$(bash_json 'git help clean')" 0
 caso "config de clean"        mergex/git-perigoso.sh "$(bash_json 'git config clean.requireForce')" 0
 caso "requireForce=true"      mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=true clean')" 0
+caso "caminho com o nome da chave, sem -c" mergex/git-perigoso.sh "$(bash_json 'git clean clean.requireForce=false')" 0
+caso "o último -c vale: true" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=false -c clean.requireForce=true clean')" 0
+caso "barra escapada e outro comando inofensivo" mergex/git-perigoso.sh "$(bash_json $'echo a\\\\\ngit status')" 0
 caso "clean -n com expansão"  mergex/git-perigoso.sh "$(bash_json 'git clean -n $flags')" 0
 caso "aspas em volta do subcomando inteiro" mergex/git-perigoso.sh "$(bash_json "git 'clean -fd'")" 0
 caso "continuação sem git destrutivo" mergex/git-perigoso.sh "$(bash_json $'git \\\n status')" 0

@@ -231,10 +231,14 @@ normaliza_git() {
 }
 # `\` no fim da linha some para o shell: `git \<quebra> clean -fd` é `git clean -fd`, em
 # qualquer regra abaixo (DM-302). Só paga quem tem, e em LC_ALL=C a troca é linear.
+# `\\` antes da quebra é uma barra escapada, e a quebra separa comandos: os pares saem da
+# frente antes da troca e voltam depois.
 junta_continuacoes() {
   local LC_ALL=C
+  CMD="${CMD//\\\\/$'\001\001'}"
   CMD="${CMD//$'\\\r\n'/}"
   CMD="${CMD//$'\\\n'/}"
+  CMD="${CMD//$'\001\001'/\\\\}"
 }
 case "$CMD" in *$'\\\n'*|*$'\\\r\n'*) junta_continuacoes ;; esac
 normaliza_git "$CMD"
@@ -732,7 +736,7 @@ clean_opcoes() {
 # CL_SEM_PREVIA quando o alvo não se conhece daqui, com expansão, --git-dir ou --work-tree.
 clean_prefixo() {
   local w W pula=0 achou=0
-  CL_ALVO=""; CL_SEM_PREVIA=0
+  CL_ALVO=""; CL_SEM_PREVIA=0; CL_FORCA_VISTA=0; CL_FORCA=""
   read -r -a W <<<"$1"
   for w in ${W[@]+"${W[@]}"}; do
     if [ "$pula" = C ]; then
@@ -744,23 +748,34 @@ clean_prefixo() {
     w="${w//\'/}"; w="${w//\"/}"
     if [ "$achou" = 0 ]; then [ "$w" = git ] && achou=1; continue; fi
     [ "$w" != clean ] || return 0
+    if [ "$pula" = c ] || [ "$pula" = e ]; then
+      if [[ "$w" =~ ^[cC][lL][eE][aA][nN]\.[rR][eE][qQ][uU][iI][rR][eE][fF][oO][rR][cC][eE](=(.*))?$ ]]; then
+        CL_FORCA_VISTA=1; CL_FORCA="${BASH_REMATCH[2]}"
+        [ -n "${BASH_REMATCH[1]}" ] || CL_FORCA=true
+        [ "$pula" = c ] || CL_FORCA='$'
+      fi
+      pula=0; continue
+    fi
     if [ "$pula" = 1 ]; then pula=0; continue; fi
     case "$w" in
       -C) pula=C ;;
+      -c) pula=c ;;
+      --config-env) pula=e ;;
       --git-dir|--work-tree) CL_SEM_PREVIA=1; pula=1 ;;
       --git-dir=*|--work-tree=*) CL_SEM_PREVIA=1 ;;
-      -c|--namespace|--config-env) pula=1 ;;
+      --namespace) pula=1 ;;
     esac
   done
 }
 
-# clean_sem_exigir_forca <trecho> — clean.requireForce falso no próprio comando ou no repositório.
+# clean_sem_exigir_forca — clean.requireForce falso no próprio comando ou no repositório.
 clean_sem_exigir_forca() {
-  [[ "$1" =~ [cC][lL][eE][aA][nN]\.[rR][eE][qQ][uU][iI][rR][eE][fF][oO][rR][cC][eE]=([^[:space:]]*) ]] && {
-    case "${BASH_REMATCH[1]//[\"\']/}" in [fF][aA][lL][sS][eE]|[nN][oO]|[oO][fF][fF]|0) return 0 ;; *) return 1 ;; esac
-  }
+  # O último `-c` antes de `clean` vale, como no Git. O valor de uma expansão só existe na execução.
+  if [ "$CL_FORCA_VISTA" = 1 ]; then
+    case "$CL_FORCA" in ''|*\$*|[fF][aA][lL][sS][eE]|[nN][oO]|[oO][fF][fF]|0) return 0 ;; *) return 1 ;; esac
+  fi
   # O alvo não se conhece daqui: o Git decide, e o pior caso é a limpeza.
-  [ "$CL_SEM_PREVIA" = 0 ] || return 0
+  [ "$CL_SEM_PREVIA" = 0 ] && [ "$CLEAN_MUDA_DIR" = 0 ] || return 0
   # shellcheck disable=SC2086 # -C <dir> sem espaço, como clean_prefixo o guardou
   [ "$(git -C "${CWD:-$RAIZ}" $CL_ALVO config --type=bool --get clean.requireForce 2>/dev/null)" = false ]
 }
@@ -776,6 +791,8 @@ case "$CMD_N" in
       | grep -E "$CLEAN_RE"'([[:space:]]|$)')" ;;
 esac
 if [ -n "$CLEAN_TRECHOS" ]; then
+  CLEAN_MUDA_DIR=0
+  if [[ "$CMD_N" =~ (^|[[:space:]\;\&\|\(\{])(cd|pushd)[[:space:]] ]]; then CLEAN_MUDA_DIR=1; fi
   while IFS= read -r CLEAN_T; do
     # Sem processo: o que vier depois de `clean` é o último grupo da expressão.
     CLEAN_ARGS=""
@@ -783,7 +800,7 @@ if [ -n "$CLEAN_TRECHOS" ]; then
     clean_opcoes "$CLEAN_ARGS"
     clean_prefixo "$CLEAN_T"
     # `git clean` puro: o Git recusa, salvo com clean.requireForce falso. Só aqui há processo.
-    if [ "$CL_APAGA" = 0 ] && [ "$CL_SECO" = 0 ] && [ "$CL_AJUDA" = 0 ] && clean_sem_exigir_forca "$CLEAN_T"; then CL_APAGA=1; fi
+    if [ "$CL_APAGA" = 0 ] && [ "$CL_SECO" = 0 ] && [ "$CL_AJUDA" = 0 ] && clean_sem_exigir_forca; then CL_APAGA=1; fi
     if [ "$CL_APAGA" = 1 ] && [ "$CL_SECO" = 0 ] && [ "$CL_AJUDA" = 0 ]; then
       CLEAN_APAGA=1
       [ -z "$CL_IGNORADO" ] || PREVIA_IGNORADO="$CL_IGNORADO"
@@ -796,7 +813,7 @@ if [ -n "$CLEAN_TRECHOS" ]; then
   if [ "$CLEAN_APAGA" = 1 ]; then
     # A prévia diz o que ESTE comando removeria: com -x ou -X, o ignorado entra (DM-296).
     # O comando pode limpar outro lugar: a prévia é a dele, ou não há prévia (DM-302).
-    if [[ "$CMD_N" =~ (^|[[:space:]\;\&\|\(\{])(cd|pushd)[[:space:]] ]]; then PREVIA_SEM=1; fi
+    if [ "$CLEAN_MUDA_DIR" = 1 ]; then PREVIA_SEM=1; fi
     if [ "$PREVIA_SEM" = 1 ]; then
       ALVOS="  (sem prévia: o comando muda de diretório ou aponta para outro repositório)"
     else
