@@ -22,15 +22,17 @@ trap 'rm -rf "$RAIZ"' EXIT
 # mede <bancada> <id>... — roda os mutantes num temporário próprio, contando os que
 # estão em voo: a cópia com mutacao.log e ainda sem o rc.
 mede() {
-  local bancada="$1" t pid maximo=0 n d; shift
+  local bancada="$1" t pid maximo=0 n d lista; shift
   t="$RAIZ/${bancada%.sh}"; mkdir -p "$t"
   ( cd "$REPO" && TMPDIR="$t" bash "scripts/ci/$bancada" "$@" ) > "$t.saida" 2>&1 &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    n=0
+    # A lista vem inteira antes de olhar o rc. Olhando durante o `find`, a passada pegava dois
+    # lotes: o que estava em voo no começo dela e o que entrou no fim, e contava sete (CI do #65).
+    n=0; lista="$(find "$t" -mindepth 3 -maxdepth 3 -name mutacao.log 2>/dev/null)"
     while IFS= read -r d; do
-      [ -e "${d%/mutacao.log}/rc" ] || n=$((n+1))
-    done < <(find "$t" -name mutacao.log 2>/dev/null)
+      [ -z "$d" ] || [ -e "${d%/mutacao.log}/rc" ] || n=$((n+1))
+    done <<<"$lista"
     [ "$n" -le "$maximo" ] || maximo="$n"
     sleep 0.1
   done
