@@ -510,6 +510,10 @@ grupo_catalog() {
   )
   obtido="$(oc_lista "$repo" 2>/dev/null)"
   igual 'RunX com o id curto no ORQUESTRADOR e no indice lista a area' "$obtido" "$pasta/base/causa.md"
+  sed -i 's/trabalho_id: OC-2026-0005/trabalho_id: OC-2026-0005 # nota/' "$repo/$pasta/base/00-INDICE.md"
+  obtido="$(oc_lista "$repo" 2>/dev/null)"
+  igual 'indice com comentario depois do id curto lista a area' "$obtido" "$(printf '%s\n' "$pasta/base/00-INDICE.md" "$pasta/base/causa.md" | LC_ALL=C sort)"
+  sed -i 's/trabalho_id: OC-2026-0005 # nota/trabalho_id: OC-2026-0005/' "$repo/$pasta/base/00-INDICE.md"
   sed -i 's/trabalho_id: OC-2026-0005/trabalho_id: OC-2026-0006/' "$repo/$pasta/base/00-INDICE.md"
   oc_lista "$repo" >/dev/null 2>&1; rc=$?
   [ "$rc" != 0 ] && ok 'indice com o id curto de outra ocorrencia para' \

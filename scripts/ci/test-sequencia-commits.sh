@@ -109,6 +109,26 @@ done
 printf -- '---\nkind: entrega\nversionado: true\ncommits: [] # vazia\n---\n' > "$E"
 bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 >/dev/null 2>&1
 [ "$(bash "$SEQ" --ler "$E" 2>/dev/null | cut -f3)" = T-01.01 ] && ok "commits: [] # vazia recebe o item novo" || falha "o item novo não entrou: $(cat "$E")"
+# Espaço no fim da lista vazia: --acrescentar dizia seq=1 e não gravava nada (Conselhos, DM-301).
+for sufixo in '[] ' '[]\t' '[] # vazia ' '# lista' '#'; do
+  printf -- "---\nkind: entrega\nversionado: true\ncommits: $sufixo\n---\n" > "$E"
+  bash "$SEQ" --validar "$E" >/dev/null 2>&1 && ok "commits: '$sufixo' vale como lista vazia" || falha "commits: '$sufixo' recusada: $(bash "$SEQ" --validar "$E" 2>&1)"
+  saida="$(bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 2>&1)"; rc=$?
+  [ "$rc:$saida:$(bash "$SEQ" --ler "$E" 2>/dev/null | cut -f3)" = "0:seq=1:T-01.01" ] \
+    && ok "commits: '$sufixo' recebe o item que anuncia" || falha "commits: '$sufixo': rc=$rc $saida; $(cat "$E")"
+done
+printf -- '---\nkind: entrega\nversionado: true\ncommits: # lista\n  - seq: 1\n    task: T-01.01\n    commit: abc1234\n---\n' > "$E"
+[ "$(bash "$SEQ" --ler "$E" 2>/dev/null | cut -f3)" = T-01.01 ] && ok "commits: # lista com itens em bloco é lida" || falha "commits: # lista: $(bash "$SEQ" --ler "$E" 2>&1)"
+saida="$(bash "$SEQ" --acrescentar "$E" T-01.02 def5678 2>&1)"
+[ "$saida" = seq=2 ] && [ "$(bash "$SEQ" --ler "$E" 2>/dev/null | wc -l | tr -d ' ')" = 2 ] && ok "commits: # lista recebe o segundo item" || falha "commits: # lista: $saida; $(cat "$E")"
+grep -q '^commits: # lista' "$E" && ok "o comentário de commits: fica" || falha "o comentário sumiu: $(cat "$E")"
+# A pós-condição: forma que a leitura aceita e o escritor não sabe gravar para, sem mexer no arquivo.
+printf -- '---\nkind: entrega\nversionado: true\n"commits": []\ncommits: []\ncommits: []\n---\n' > "$E"; cp "$E" "$E.antes"
+saida="$(bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 2>&1)"; rc=$?
+if [ "$rc" = 0 ]; then
+  [ "$(bash "$SEQ" --ler "$E" 2>/dev/null | cut -f3)" = T-01.01 ] && ok "rc 0 só com o item gravado" || falha "rc 0 sem o item: $(cat "$E")"
+else cmp -s "$E" "$E.antes" && ok "recusa deixa o arquivo intacto" || falha "recusa mexeu no arquivo"; fi
+rm -f "$E.antes"
 printf -- '---\nkind: entrega\nversionado: true\ncommits: [a]\n---\n' > "$E"
 saida="$(bash "$SEQ" --acrescentar "$E" T-01.01 abc1234 2>&1)"; rc=$?
 case "$rc:$saida" in 1:*"não é lista de itens"*) ok "--acrescentar diz o motivo da recusa" ;; *) falha "--acrescentar: rc=$rc: $saida" ;; esac
