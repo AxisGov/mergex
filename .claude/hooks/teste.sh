@@ -639,7 +639,7 @@ caso "o último -c vale: false" mergex/git-perigoso.sh "$(bash_json 'git -c clea
 caso "o caminho depois de clean não muda o -c" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=false clean clean.requireForce=true')" 2
 caso "requireForce por --config-env" mergex/git-perigoso.sh "$(bash_json 'git --config-env clean.requireForce=F clean')" 2
 caso "requireForce por --config-env grudado" mergex/git-perigoso.sh "$(bash_json 'git --config-env=clean.requireForce=F clean')" 2
-caso "--config-env grudado de outra chave não barra" mergex/git-perigoso.sh "$(bash_json 'git --config-env=core.pager=F clean -n')" 0
+caso "--config-env grudado de outra chave não barra" mergex/git-perigoso.sh "$(bash_json 'git --config-env=core.pager=F clean')" 0
 caso "requireForce por expansão" mergex/git-perigoso.sh "$(bash_json 'git -c clean.requireForce=$f clean')" 2
 caso "clean puro depois de cd" mergex/git-perigoso.sh "$(bash_json 'cd /tmp/outro && git clean')" 2
 caso "-C com espaço entre aspas" mergex/git-perigoso.sh "$(bash_json 'git -C "/dir com espaco" clean -fd')" 2
