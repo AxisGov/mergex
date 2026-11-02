@@ -1941,6 +1941,16 @@ done
 saida="$( . "$REGRAS" >/dev/null 2>&1; conteudo="$(printf -- '---\nbranch: "feature/x # nota"\n---\n')"$'\n'; printf 'abc blob %s\n%s\n' "${#conteudo}" "$conteudo" | LC_ALL=C awk -v b=feature/x "$_PR_AWK_BRANCH" )"
 [ -z "$saida" ] && ok "# entre aspas é valor de branch:" || falha "# entre aspas virou comentário: '$saida'"
 
+# A aspa escapada é parte do valor, nas três leituras do frontmatter (DM-305).
+AE_D="$(mktemp -d)"; TMPS="$TMPS $AE_D"; AE_F="$AE_D/frontmatter.md"
+printf -- '---\nbranch: "a\\"b" # nota\num: '"'"'it'"''"'s'"'"' # nota\ndois: "a\\" # b" # nota\n---\n' > "$AE_F"
+saida="$( . "$REGRAS" >/dev/null 2>&1; conteudo="$(cat "$AE_F")"$'\n'; printf 'abc blob %s\n%s\n' "${#conteudo}" "$conteudo" | LC_ALL=C awk -v b='a"b' "$_PR_AWK_BRANCH" )"
+[ "$saida" = 1 ] && ok 'branch: "a\"b" # nota seleciona a entrega de a"b' || falha "aspa escapada no portão: saiu '$saida'"
+for leitor in "$REPO/.claude/hooks/comum/base.sh:expx_frontmatter_valor" "$REPO/.claude/skills/mergex/scripts/catalogo-de-metodo.sh:catalogo_fm"; do
+  saida="$( . "${leitor%%:*}" >/dev/null 2>&1; for c in branch um dois; do "${leitor##*:}" "$AE_F" "$c"; done | paste -sd'|' - )"
+  [ "$saida" = "a\"b|it's|a\" # b" ] && ok "${leitor##*:} lê a aspa escapada" || falha "${leitor##*:}: saiu '$saida'"
+done
+
 echo
 echo "$OK ok, $FALHOU falha(s)"
 # NAO_EXECUTADO nunca conta como ok: fica listado à parte
