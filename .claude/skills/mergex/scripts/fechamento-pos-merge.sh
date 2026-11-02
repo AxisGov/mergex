@@ -135,8 +135,7 @@ else
   g config --local "branch.$BRANCH.expxFechamento" "$MERGE" \
     || para 8 "a marca de $BRANCH não foi gravada"
   if ! g worktree add -q -b "$BRANCH" --no-track "$DESTINO" "$REF_BASE" 2>/dev/null; then
-    # A branch surgiu nesse intervalo: outro E5 venceu, e a marca é dele.
-    g show-ref --verify -q "refs/heads/$BRANCH" || g config --local --unset "branch.$BRANCH.expxFechamento"
+    # A marca fica: se outro E5 venceu nesse intervalo, ela é dele; sem branch, não isenta nada.
     para 8 "o worktree $DESTINO não foi criado"
   fi
   g config --local "branch.$BRANCH.expxFechamento" "$MERGE" \
