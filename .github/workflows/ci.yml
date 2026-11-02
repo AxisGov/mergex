@@ -134,6 +134,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-proveniencia-contrato.sh
 
+      - name: Every Claude agent declares its class
+        shell: bash
+        run: bash scripts/ci/test-classe-dos-agentes.sh
+
       - name: Test mutation bench resources
         shell: bash
         run: bash scripts/ci/test-mutacao-recursos.sh
