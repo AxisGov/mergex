@@ -224,6 +224,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-worktrees-entregues.sh
 
+      - name: Fechamento depois do merge
+        shell: bash
+        run: bash scripts/ci/test-fechamento-pos-merge.sh
+
       - name: Lint consumidor precoce sob pipefail
         shell: bash
         run: bash scripts/ci/lint-consumidor-precoce.sh
