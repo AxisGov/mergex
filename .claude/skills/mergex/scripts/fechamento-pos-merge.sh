@@ -87,6 +87,8 @@ MERGE="$(campo .mergeCommit.oid)"
 REF_BASE="refs/remotes/$REMOTO/$BASE"
 # A refspec explícita: em clone de uma branch só, o fetch atualizaria só o FETCH_HEAD.
 g fetch -q --no-tags "$REMOTO" "+refs/heads/$BASE:$REF_BASE" 2>/dev/null || para 5 "git fetch $REMOTO $BASE falhou"
+[ "$(g rev-parse --is-shallow-repository 2>/dev/null)" != true ] \
+  || para 5 "clone raso: o merge não se confere aqui (git fetch --unshallow $REMOTO)"
 g merge-base --is-ancestor "$MERGE" "$REF_BASE" 2>/dev/null \
   || para 7 "o merge $MERGE não está em $REMOTO/$BASE"
 
@@ -97,6 +99,8 @@ DESTINO="$PRINCIPAL/../${PRINCIPAL##*/}--$OC-fechamento"
 if g show-ref --verify -q "refs/heads/$BRANCH"; then
   [ "$(g config --get "branch.$BRANCH.expxFechamento")" = "$MERGE" ] \
     || para 8 "a branch $BRANCH já existe sem a marca deste merge: confira antes de seguir"
+  g merge-base --is-ancestor "$MERGE" "refs/heads/$BRANCH" 2>/dev/null \
+    || para 8 "a branch $BRANCH não contém o merge $MERGE: confira antes de seguir"
   LOCAL="$(g worktree list --porcelain | awk -v b="branch refs/heads/$BRANCH" 'BEGIN { RS = ""; FS = "\n" }
     { w = ""; casa = 0; morto = 0
       for (i = 1; i <= NF; i++) {

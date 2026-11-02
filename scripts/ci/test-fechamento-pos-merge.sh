@@ -97,6 +97,15 @@ g config "branch.$FEC.expxFechamento" 0000000000000000000000000000000000000000
 afirma "marca de outro merge não retoma: rc 8" 8 "$(roda X=1)"
 g config "branch.$FEC.expxFechamento" "$MERGE"
 
+SOLTA="$(git -C "$W" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit-tree -m solta "$(git -C "$W" rev-parse HEAD^{tree})")"
+git -C "$W" update-ref "refs/heads/$FEC" "$SOLTA"
+afirma "branch que perdeu o merge não retoma: rc 8" 8 "$(roda X=1)"
+git -C "$W" update-ref "refs/heads/$FEC" "$MERGE"; git -C "$W" reset -q --hard "$MERGE"
+git clone -q --depth 1 "file://$T/origem.git" "$T/raso" 2>/dev/null
+git -C "$T/raso" remote set-url origin https://github.com/o/r.git; git -C "$T/raso" config "url.$T/origem.git.insteadOf" https://github.com/o/r.git
+rc=0; ( cd "$T/raso" && env PATH="$T/bin:$PATH" GH_HEAD="$BR" GH_MERGE="{\"oid\":\"$MERGE\"}" bash "$SCRIPT" --trabalho "$TRAB" >/dev/null 2>"$T/erro" ) || rc=$?
+afirma "clone raso: rc 5, com o motivo" "5 1" "$rc $(grep -c 'clone raso' "$T/erro")"
+
 echo "hook: os quatro documentos só com a marca e os trailers"
 w() { git -C "$W" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
 limpa() { w reset -q --hard "$MERGE"; w clean -fdq; }
