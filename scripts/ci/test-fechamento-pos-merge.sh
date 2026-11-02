@@ -72,6 +72,40 @@ g remote set-url origin git@github.com:o/r.git
 afirma "remoto scp é o mesmo repositório" 4 "$(roda GH_ESTADO=OPEN)"
 g remote set-url origin https://github.com/o/r.git
 
+troca_base() { sed -i.tmp "s#^branch_base: .*#branch_base: $1#" "$T/r/docs/entregas/$TRAB/ENTREGA.md"; rm -f "$T/r/docs/entregas/$TRAB/ENTREGA.md.tmp"; }
+limpa_fechamento() { g worktree remove "$T/r--$OC-fechamento" 2>/dev/null; g branch -q -D "$FEC" 2>/dev/null; g config --unset "branch.$FEC.expxFechamento" 2>/dev/null; true; }
+echo "script: a base da entrega nas formas que existem"
+for forma in origin/main refs/heads/main refs/remotes/origin/main "$MERGE"; do
+  troca_base "$forma"
+  afirma "branch_base: $forma, PR para main: rc 0" 0 "$(roda X=1)"
+  afirma "branch_base: $forma: a branch nasce da base" "$MERGE" "$(g rev-parse "refs/heads/$FEC" 2>/dev/null)"
+  limpa_fechamento
+done
+troca_base refs/heads/origin/main
+afirma "branch_base: refs/heads/origin/main é a branch literal, PR para main: rc 6" 6 "$(roda X=1)"; sem_efeito "branch literal"
+troca_base origin/develop
+afirma "branch_base: origin/develop, PR para main: rc 6" 6 "$(roda X=1)"; sem_efeito "base de outro nome"
+troca_base "$FORA_BASE"
+afirma "branch_base: SHA fora da base do PR: rc 6" 6 "$(roda X=1)"; sem_efeito "SHA fora da base"
+troca_base main
+
+echo "script: a corrida de dois E5"
+# O perdedor passa pela conferência e perde no worktree add: a branch surge nesse intervalo.
+mkdir "$T/bincorrida"
+cat > "$T/bincorrida/git" <<GIT
+#!/usr/bin/env bash
+case " \$* " in
+  *" worktree add "*) "$(command -v git)" -C "$T/r" branch -q "$FEC" "$MERGE"
+    "$(command -v git)" -C "$T/r" config "branch.$FEC.expxFechamento" "$MERGE" ;;
+esac
+exec "$(command -v git)" "\$@"
+GIT
+chmod +x "$T/bincorrida/git"
+rc=0; ( cd "$T/r" && env PATH="$T/bincorrida:$T/bin:$PATH" GH_HEAD="$BR" GH_MERGE="{\"oid\":\"$MERGE\"}" bash "$SCRIPT" --trabalho "$TRAB" >/dev/null 2>&1 ) || rc=$?
+afirma "o perdedor da corrida dá rc 8" 8 "$rc"
+afirma "o perdedor não apaga a marca do vencedor" "$MERGE" "$(g config --get "branch.$FEC.expxFechamento")"
+limpa_fechamento
+
 echo "script: com o merge provado"
 g worktree add -q -b tomada "$T/r--$OC-fechamento" HEAD
 afirma "pasta de destino já existe: rc 8" 8 "$(roda X=1)"
