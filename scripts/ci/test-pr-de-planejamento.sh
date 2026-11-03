@@ -360,6 +360,53 @@ v9 "$aux/s1b"
 confere 'V9 da primeira sprint depois do planejamento mergeado por squash: passa' $?
 [ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
 
+# repo_atualizado <dir> [maligno] — antes da retomada, a main recebe um PR lateral
+# que nasceu antes do planejamento e foi atualizado pelo "Update branch": o merge
+# da main, que já tinha o planejamento, na branch lateral (conselhos #241, 71358c1).
+# Esse merge difere do 1º pai na pasta do trabalho, e o --full-history o vê;
+# a pasta e a entrega dele são as do merge do planejamento. `maligno`: a resolução
+# do merge muda a pasta do trabalho
+repo_atualizado() {
+  local d="$1" m
+  repo_planejamento "$d"
+  g -C "$d" switch -q main
+  g -C "$d" switch -q -c lateral
+  printf 'q\n' > "$d/src/q.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'lateral, antes do planejamento'
+  g -C "$d" switch -q main
+  g -C "$d" merge -q --no-ff --no-edit feature/plan
+  m="$(git -C "$d" rev-parse HEAD)"
+  g -C "$d" switch -q lateral
+  g -C "$d" merge -q --no-edit main
+  if [ "${2:-}" = maligno ]; then
+    printf 'x\n' > "$d/docs/sprintx/features/plan/nota.md"
+    g -C "$d" add -A; g -C "$d" commit -q --amend --no-edit
+  fi
+  g -C "$d" switch -q main
+  g -C "$d" merge -q --no-ff --no-edit lateral
+  g -C "$d" switch -q feature/plan
+  g -C "$d" merge -q --no-edit main
+  (cd "$d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m" --base-sha "$(git -C "$d" rev-parse "$m^1")") >/dev/null 2>&1
+  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): merge do planejamento registrado' -m 'Trabalho: plan'
+}
+
+repo_atualizado "$aux/s1w"
+up="$(git -C "$aux/s1w" rev-parse lateral)"
+[ -n "$(git -C "$aux/s1w" rev-list -n1 --full-history main "^$(git -C "$aux/s1w" rev-parse "$up^2")" -- docs/sprintx/features/plan docs/entregas/plan)" ] \
+  && [ -z "$(git -C "$aux/s1w" diff "$up^2" "$up" -- docs/sprintx/features/plan docs/entregas/plan)" ]
+confere 'controle: o merge do Update branch entra no --full-history, sem mudar a pasta em relacao ao planejamento' $?
+e0r "$aux/s1w"; reancora "$aux/s1w"; sprint1 "$aux/s1w"
+v9 "$aux/s1w"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out" && grep -qx 'origem_base=registrada_sprint' "$aux/v9.out"
+confere 'V9 com o merge do Update branch de um PR lateral na base: passa (DM-309)' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
+repo_atualizado "$aux/s1x" maligno
+e0r "$aux/s1x"; reancora "$aux/s1x"; sprint1 "$aux/s1x"
+v9 "$aux/s1x"
+[ "$rc" = 3 ] && grep -qx 'resultado=v9_sem_prova' "$aux/v9.out" && grep -q 'toca a pasta do trabalho' "$aux/v9.out"
+confere 'V9 com o merge do Update branch que muda a pasta do trabalho: v9_sem_prova' $?
+[ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
 # sem o merge registrado (o E9 não rodou): o E0 recusa e manda rodar o E9
 repo_planejamento "$aux/s1c"
 g -C "$aux/s1c" switch -q main; g -C "$aux/s1c" merge -q --no-ff --no-edit feature/plan
