@@ -582,6 +582,55 @@ grupo_prepush() {
   dec5="$( PATH="$t4/rc185-gitstub:$PATH"; . "$REGRAS" || exit 9; arvore_ambiente_git 2>/dev/null; pr_decide_ref "$d4" refs/heads/feature/ft-rec "$vr" refs/heads/feature/ft-rec "$ZERO" origin; printf 'rc=%s\n' "$?" )"
   case "$dec5" in *decisao=barra*motivo=erro_ambiente*rc=1) ok "seleção da parcela (a) falha com <remoto>: pr_decide_ref imprime barra/erro_ambiente e devolve rc 1" ;; *) falha "seleção da parcela (a) falha: decisão: $(printf '%s' "$dec5" | tr '\n' '|')" ;; esac
   cd "$REPO" || return
+
+  # ---- DM-310: branch empilhada sobre outra branch de trabalho (katosmv/login#53) -----------
+  # feature/ft-rec declara branch_base: feature/ft-y e base_validada_sha = a ponta de ft-y, que
+  # ainda não entrou na main. Contra refs/remotes/origin/HEAD, a parcela (a) trazia a entrega
+  # ft-y, cujo portão vale para outro SHA, e barrava o push de um SHA válido. A base declarada
+  # na entrega da própria branch, por SHA, tira só o que veio da predecessora.
+  local t6 d6 n0 yb sb v dec6 bb
+  t6="$(mktemp -d)"; TMPS="$TMPS $t6"; d6="$t6/repo"
+  fx_cenario "$d6" || { falha "cenário DM-310 (branch empilhada) não montou"; return; }
+  fx_remoto_bare "$d6" || { falha "remoto bare (branch empilhada)"; return; }
+  modo "$d6" aviso
+  cd "$d6" || return
+  n0="$(git rev-parse main)"
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1 && git remote set-head origin main >/dev/null 2>&1 \
+    || falha "controle: branch empilhada: origin/HEAD não montou"
+  git switch -q -c feature/ft-y "$n0" && entrega_em "$d6" ft-y feature/ft-y 's/^trabalho_id: .*/&/' feature/ft-rec \
+    && git commit -q -m "docs: entrega ft-y" && produto "$d6" ft-y-1; yb="$(git rev-parse HEAD)"
+  git switch -q feature/ft-rec && git merge -q --no-ff --no-edit "$yb" >/dev/null 2>&1
+  entrega_commit "$d6" "s#^branch_base: .*#branch_base: feature/ft-y#; s/^base_validada_sha: .*/base_validada_sha: $yb/"
+  produto "$d6" ft-rec-empilhada; fx_portao_em "$d6" HEAD; sb="$(git rev-parse HEAD)"
+  [ "$(val_motivo "$sb")" = ok ] && git cat-file -e "$sb:docs/entregas/ft-y/ENTREGA.md" 2>/dev/null \
+    && ! git merge-base --is-ancestor "$yb" "$n0" \
+    && ok "controle: branch empilhada: sb é válido, a árvore tem a entrega ft-y, e ft-y não está na main" \
+    || falha "controle: branch empilhada: sb/ft-y"
+  push_espera "branch empilhada: a base declarada (base_validada_sha) tira a entrega da predecessora, e o push passa" 0 "$sb" "$d6" origin "$sb:refs/heads/feature/ft-rec"
+  err_sem "branch empilhada: nenhum diagnóstico da barreira" "mergex pre-push"
+  # a base padrão com outro nome (main, origin/main, refs/...) não estreita a seleção
+  for bb in main origin/main refs/remotes/origin/main refs/heads/main; do
+    git checkout -q --detach "$sb" && entrega_commit "$d6" "s#^branch_base: .*#branch_base: $bb#" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+    dec6="$( . "$REGRAS" || exit 9; arvore_ambiente_git; pr_decide_ref "$d6" refs/heads/feature/ft-rec "$v" refs/heads/feature/ft-rec "$ZERO" origin; printf 'rc=%s\n' "$?" )"
+    case "$dec6" in *ft-y/ENTREGA.md*decisao=barra*rc=1) ok "branch empilhada: branch_base $bb é a base padrão; a entrega ft-y continua selecionada e barra" ;; *) falha "branch empilhada: branch_base $bb: $(printf '%s' "$dec6" | tr '\n' '|')" ;; esac
+  done
+  # base_validada_sha que não serve: mal formada, ancestral da main, ou fora da história enviada
+  for bb in "s/^base_validada_sha: .*/base_validada_sha: ${yb%????????????????????????????????}/" \
+            "s/^base_validada_sha: .*/base_validada_sha: $n0/" \
+            "s/^base_validada_sha: .*/base_validada_sha: $(git commit-tree "$(git rev-parse "$n0^{tree}")" -p "$n0" -m solto)/"; do
+    git checkout -q --detach "$sb" && entrega_commit "$d6" "$bb" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+    dec6="$( . "$REGRAS" || exit 9; arvore_ambiente_git; pr_decide_ref "$d6" refs/heads/feature/ft-rec "$v" refs/heads/feature/ft-rec "$ZERO" origin; printf 'rc=%s\n' "$?" )"
+    case "$dec6" in *ft-y/ENTREGA.md*decisao=barra*rc=1) ok "branch empilhada: base_validada_sha que não serve ($bb) volta ao origin/HEAD e barra" ;; *) falha "branch empilhada: $bb: $(printf '%s' "$dec6" | tr '\n' '|')" ;; esac
+  done
+  # a branch empilhada que mexe na entrega da predecessora: ela continua selecionada
+  git checkout -q --detach "$sb" && printf '\nNota da revisao.\n' >> docs/entregas/ft-y/ENTREGA.md && git add docs/entregas/ft-y/ENTREGA.md \
+    && git commit -q -m "docs: mexe na entrega ft-y" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+  push_espera "branch empilhada: commit da branch na entrega da predecessora continua selecionado e barra" 1 "$sb" "$d6" origin "$v:refs/heads/feature/ft-rec"
+  err_tem "branch empilhada: o diagnóstico cita a entrega da predecessora" "docs/entregas/ft-y/ENTREGA.md"
+  err_tem "branch empilhada: o diagnóstico cita a base declarada" "base_validada_sha"
+  err_tem "branch empilhada: o diagnóstico cita o SHA da base declarada" "$yb"
+  git switch -q feature/ft-rec
+  cd "$REPO" || return
 }
 
 # ---------------------------------------------------------------------------
