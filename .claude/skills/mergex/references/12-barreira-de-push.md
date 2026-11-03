@@ -248,7 +248,8 @@ informada), o `ENTREGA.md` que declara `branch: <b>` na árvore enviada tem `bra
 `refs/remotes/<remoto>/HEAD`, quando tudo vale: um só `ENTREGA.md` declara a branch; o SHA tem
 40 hex, existe, é ancestral do SHA enviado e não é ancestral de `refs/remotes/<remoto>/HEAD` (a
 predecessora já integrada volta à regra de sempre); e `branch_base` não é a branch padrão do remoto
-com outro nome (`main`, `<remoto>/main`, `refs/heads/main`, `refs/remotes/<remoto>/main`). Isso só
+com outro nome (`main`, `<remoto>/main`, `refs/heads/main`, `refs/remotes/<remoto>/main`) nem tem
+byte de controle, que chegaria ao terminal no diagnóstico. Isso só
 estreita a seleção: sai a entrega trazida pela predecessora, cujo portão vale para outro SHA, e
 continuam a entrega da branch (pelo nome e pelo trailer) e toda `ENTREGA.md` que os commits da
 branch tocam depois da base. O diagnóstico cita a base declarada e o `ENTREGA.md` que a declara.

@@ -619,7 +619,8 @@ _pr_nota_base() {
 # commit presente, ancestral do SHA enviado e NÃO ancestral da base padrão (a
 # predecessora já integrada volta à regra de sempre); `branch_base` que não é a
 # branch padrão do remoto com outro nome (main, <remoto>/main, refs/heads/main,
-# refs/remotes/<remoto>/main). Fora disso, PR_BASE_DECL fica vazio e nada muda.
+# refs/remotes/<remoto>/main), sem byte de controle. Fora disso, PR_BASE_DECL fica
+# vazio e nada muda.
 _pr_base_declarada() {
   local raiz="$1" b="$2" sl="$3" remoto="$4" padrao="$5" tmp e bb bv nome
   PR_BASE_DECL=""; PR_BASE_DECL_DE=""; PR_BASE_DECL_NOME=""
@@ -631,6 +632,8 @@ _pr_base_declarada() {
   bb="$(catalogo_fm "$tmp/e" branch_base)"; bv="$(catalogo_fm "$tmp/e" base_validada_sha)"
   rm -rf "$tmp"
   [[ "$bv" =~ ^[0-9a-f]{40}$ ]] || return 0
+  # byte de controle no nome não estreita nada, nem chega ao diagnóstico (ESC no terminal)
+  case "$bb" in *[[:cntrl:]]*) return 0 ;; esac
   bb="${bb#refs/heads/}"; bb="${bb#refs/remotes/}"; bb="${bb#"$remoto"/}"
   nome="$(_pr_g -C "$raiz" symbolic-ref -q "refs/remotes/$remoto/HEAD" 2>/dev/null)" || nome=""
   nome="${nome#refs/remotes/"$remoto"/}"

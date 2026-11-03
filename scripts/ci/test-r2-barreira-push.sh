@@ -622,6 +622,11 @@ grupo_prepush() {
     dec6="$( . "$REGRAS" || exit 9; arvore_ambiente_git; pr_decide_ref "$d6" refs/heads/feature/ft-rec "$v" refs/heads/feature/ft-rec "$ZERO" origin; printf 'rc=%s\n' "$?" )"
     case "$dec6" in *ft-y/ENTREGA.md*decisao=barra*rc=1) ok "branch empilhada: base_validada_sha que não serve ($bb) volta ao origin/HEAD e barra" ;; *) falha "branch empilhada: $bb: $(printf '%s' "$dec6" | tr '\n' '|')" ;; esac
   done
+  # branch_base com byte de controle (ESC): não estreita e não chega ao terminal (CodeAnt no mergex#73)
+  git checkout -q --detach "$sb" && entrega_commit "$d6" "s#^branch_base: .*#branch_base: feature/ft-y$(printf '\033')[31m#" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+  push_espera "branch empilhada: branch_base com byte de controle volta ao origin/HEAD e barra" 1 "$sb" "$d6" origin "$v:refs/heads/feature/ft-rec"
+  if ! grep -q "$(printf '\033')" "$PUSH_ERR" 2>/dev/null; then ok "branch empilhada: o byte de controle do branch_base não chega ao stderr"
+  else falha "branch empilhada: ESC do branch_base no stderr"; fi
   # a branch empilhada que mexe na entrega da predecessora: ela continua selecionada
   git checkout -q --detach "$sb" && printf '\nNota da revisao.\n' >> docs/entregas/ft-y/ENTREGA.md && git add docs/entregas/ft-y/ENTREGA.md \
     && git commit -q -m "docs: mexe na entrega ft-y" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
