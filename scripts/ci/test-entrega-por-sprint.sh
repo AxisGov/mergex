@@ -513,6 +513,13 @@ pm "$d" e8
 [ "$rc" = 1 ] && grep -q 'push_feito: ausente' "$aux/pm.err"
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
 confere 'e8 com estado: entregue sem push_feito recusa' "$r"
+# entregue com falha registrada: causa: null só vale com falhas_portao vazia
+printf '%s\n' 'push_feito: true' 'entregue_em: 2026-11-03' > "$aux/pf"; sed -i -e '/^estado: entregue$/r '"$aux/pf" -e 's/^falhas_portao: .*/falhas_portao: [v1]/' "$d/$e9e"
+grep -q '^falhas_portao:' "$d/$e9e" || sed -i 's/^estado: entregue$/estado: entregue\nfalhas_portao: [v1]/' "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 1 ] && grep -q 'falhas_portao que não bate com causa: null' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 com estado: entregue e falhas_portao não vazia recusa' "$r"
 # o bloqueado: a causa é a que falhas_portao deriva
 awk '/^estado:/ && !x { print "estado: bloqueado"; print "portao: bloqueado"; print "falhas_portao: [v1]"; print "causa: suite_reprovada"; print "entregue_em: null"; print "push_feito: false"; x = 1; next }
   /^(portao|falhas_portao|causa|entregue_em|push_feito):/ { next } { print }' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e"
