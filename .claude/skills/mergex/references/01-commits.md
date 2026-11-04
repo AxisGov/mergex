@@ -533,7 +533,7 @@ Testes: <o que os dois testes cobrem, resumido>
 |---|---|---|
 | **E1** | exatamente um `Task:` e um `Trabalho:`; nenhum `Metodo:` | o E1, uma task por commit |
 | **método** | exatamente um `Trabalho:` e um `Metodo:` (`pre-e2`, `reconciliacao-base`, `predecessores`, `retomar-v9-predecessores`, `e9-merge`, `pre-e6` ou `e8`); nenhum `Task:` | `persistir-metodo.sh` |
-| **integração de base** | exatamente um `Trabalho:` e um `Integra-base:` com o SHA completo (40 hex) da base integrada; nenhum `Task:`, nenhum `Metodo:` | a pessoa (ou o agente, sob autorização) que concluiu o merge da base |
+| **integração de base** | exatamente um `Trabalho:` e um `Integra-base:` com o SHA completo da base integrada (40 hex no SHA-1, 64 no SHA-256, o formato do repositório); nenhum `Task:`, nenhum `Metodo:` | a pessoa (ou o agente, sob autorização) que concluiu o merge da base |
 
 O commit de integração da base é o merge `M` da reconciliação (`references/11-reconciliacao-base.md`): tem **exatamente dois pais**, e o segundo é o `Integra-base:`. Não é E1, não entra em `ENTREGA.commits`, não consome `seq` e não satisfaz V11. A MergeX não o cria — valida e registra.
 
@@ -541,7 +541,7 @@ O commit de integração da base é o merge `M` da reconciliação (`references/
 <título do merge>
 
 Trabalho: <trabalho_id>
-Integra-base: <sha de 40 hex do segundo pai>
+Integra-base: <sha completo do segundo pai>
 ```
 
 Os hooks de commit reconhecem a classe pela mensagem (`.claude/hooks/README.md`): o `commit-por-task` não a trata como mistura de tasks, e o `arquivo-fora-do-plano` avalia só os caminhos que diferem do segundo pai — o que a integração mudou, não tudo o que veio da base. Arquivo nascido na base e ajustado pela integração, que nenhuma task declara, nunca é acrescentado a uma task: o único caminho para ele passar na V9 é a reconciliação (`reconciliacao-base.sh --registrar`, com as quatro provas). Sem ela, continua fora do plano.
