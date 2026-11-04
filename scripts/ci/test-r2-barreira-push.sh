@@ -588,7 +588,7 @@ grupo_prepush() {
   # ainda não entrou na main. Contra refs/remotes/origin/HEAD, a parcela (a) trazia a entrega
   # ft-y, cujo portão vale para outro SHA, e barrava o push de um SHA válido. A base declarada
   # na entrega da própria branch, por SHA, tira só o que veio da predecessora.
-  local t6 d6 n0 yb sb v dec6 bb
+  local t6 d6 n0 yb sb v dec6 bb e6
   t6="$(mktemp -d)"; TMPS="$TMPS $t6"; d6="$t6/repo"
   fx_cenario "$d6" || { falha "cenário DM-310 (branch empilhada) não montou"; return; }
   fx_remoto_bare "$d6" || { falha "remoto bare (branch empilhada)"; return; }
@@ -627,6 +627,23 @@ grupo_prepush() {
   push_espera "branch empilhada: branch_base com byte de controle volta ao origin/HEAD e barra" 1 "$sb" "$d6" origin "$v:refs/heads/feature/ft-rec"
   if ! grep -q "$(printf '\033')" "$PUSH_ERR" 2>/dev/null; then ok "branch empilhada: o byte de controle do branch_base não chega ao stderr"
   else falha "branch empilhada: ESC do branch_base no stderr"; fi
+  # DM-313: o NUL o Bash descartava antes da checagem (feature/ft-y\0x virava feature/ft-yx e
+  # estreitava); ENTREGA.md com NUL não estreita nada (revisão do Codex no expxdev#139)
+  # o NUL sai do printf do Bash: o `\x00` do sed só vale no GNU (CodeAnt no mergex#76)
+  git checkout -q --detach "$sb" && {
+    e6=docs/entregas/ft-rec/ENTREGA.md
+    { sed '/^branch_base:/,$d' "$e6"; printf 'branch_base: feature/ft-y\000x\n'; sed '1,/^branch_base:/d' "$e6"; } > "$e6.tmp" \
+      && cat "$e6.tmp" > "$e6" && rm -f "$e6.tmp" && git add -- "$e6" && git commit -q -m "docs: entrega"
+  } && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+  if git cat-file blob "$v:docs/entregas/ft-rec/ENTREGA.md" | LC_ALL=C tr -d '\000' | cmp -s - <(git cat-file blob "$v:docs/entregas/ft-rec/ENTREGA.md"); then
+    falha "controle: branch empilhada: o NUL não entrou no ENTREGA.md"
+  else ok "controle: branch empilhada: o ENTREGA.md enviado tem o NUL na branch_base"; fi
+  push_espera "branch empilhada: branch_base com NUL volta ao origin/HEAD e barra" 1 "$sb" "$d6" origin "$v:refs/heads/feature/ft-rec"
+  # refs/remotes/<outro remoto>/X fica inteiro no nome da base declarada
+  git checkout -q --detach "$sb" && entrega_commit "$d6" "s#^branch_base: .*#branch_base: refs/remotes/upstream/feature/x#" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+  dec6="$( . "$REGRAS" || exit 9; arvore_ambiente_git; _pr_base_declarada "$d6" feature/ft-rec "$v" origin "$n0"; printf '%s|%s\n' "$PR_BASE_DECL" "$PR_BASE_DECL_NOME" )"
+  [ "$dec6" = "$yb|refs/remotes/upstream/feature/x" ] && ok "branch empilhada: refs/remotes/upstream/feature/x fica inteiro no nome da base declarada" \
+    || falha "branch empilhada: refs/remotes/upstream/feature/x: [$dec6]"
   # a branch empilhada que mexe na entrega da predecessora: ela continua selecionada
   git checkout -q --detach "$sb" && printf '\nNota da revisao.\n' >> docs/entregas/ft-y/ENTREGA.md && git add docs/entregas/ft-y/ENTREGA.md \
     && git commit -q -m "docs: mexe na entrega ft-y" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
@@ -634,8 +651,36 @@ grupo_prepush() {
   err_tem "branch empilhada: o diagnóstico cita a entrega da predecessora" "docs/entregas/ft-y/ENTREGA.md"
   err_tem "branch empilhada: o diagnóstico cita a base declarada" "base_validada_sha"
   err_tem "branch empilhada: o diagnóstico cita o SHA da base declarada" "$yb"
+  # DM-313: refs/heads/origin/main é a branch local de nome literal origin/main, não a base
+  # padrão: estreita (por último: o push que passa
+  # move o feature/ft-rec remoto). Os prefixos saíam em sequência e ele virava main (CodeAnt no conselhos#253)
+  git checkout -q --detach "$sb" && entrega_commit "$d6" "s#^branch_base: .*#branch_base: refs/heads/origin/main#" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+  push_espera "branch empilhada: branch_base refs/heads/origin/main não é a base padrão; estreita e o push passa" 0 "$v" "$d6" origin "$v:refs/heads/feature/ft-rec"
+  # DM-313: o mesmo valor de 64 hex não serve num repositório SHA-1
+  git checkout -q --detach "$sb" && entrega_commit "$d6" "s/^base_validada_sha: .*/base_validada_sha: ${yb}000000000000000000000000/" && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+  dec6="$( . "$REGRAS" || exit 9; arvore_ambiente_git; _pr_base_declarada "$d6" feature/ft-rec "$v" origin "$n0"; printf '[%s]\n' "$PR_BASE_DECL" )"
+  [ "$dec6" = "[]" ] && ok "branch empilhada: base_validada_sha de 64 hex num repositório SHA-1 não estreita" || falha "branch empilhada: 64 hex no SHA-1: $dec6"
   git switch -q feature/ft-rec
   cd "$REPO" || return
+
+  # DM-313: num repositório SHA-256 o OID tem 64 hex, e a regex de 40 nunca estreitava
+  # (CodeAnt no conselhos#253). Teste da função: o pre-push inteiro num SHA-256 custaria
+  # uma fixture nova, e a seleção depois da base é a mesma do SHA-1.
+  local t7 d7 c0 c1 c2
+  t7="$(mktemp -d)"; TMPS="$TMPS $t7"; d7="$t7/repo"
+  g7() { git -C "$d7" -c user.name=e -c user.email=e@e.invalid -c commit.gpgsign=false "$@"; }
+  if git init -q --object-format=sha256 -b main "$d7" 2>/dev/null; then
+    mkdir -p "$d7/src" && printf 'a\n' > "$d7/src/a.txt" && g7 add -A && g7 commit -q -m base; c0="$(g7 rev-parse HEAD)"
+    g7 switch -q -c feature/y && printf 'y\n' > "$d7/src/y.txt" && g7 add -A && g7 commit -q -m y; c1="$(g7 rev-parse HEAD)"
+    g7 switch -q -c feature/rec && mkdir -p "$d7/docs/entregas/rec" \
+      && printf -- '---\nkind: entrega\ntrabalho_id: rec\nbranch: feature/rec\nbranch_base: feature/y\nbase_validada_sha: %s\n---\n\n# Entrega\n' "$c1" > "$d7/docs/entregas/rec/ENTREGA.md" \
+      && g7 add -A && g7 commit -q -m rec; c2="$(g7 rev-parse HEAD)"
+    dec6="$( . "$REGRAS" || exit 9; arvore_ambiente_git; _pr_base_declarada "$d7" feature/rec "$c2" origin "$c0"; printf '%s|%s\n' "$PR_BASE_DECL" "$PR_BASE_DECL_NOME" )"
+    [ "${#c1}" = 64 ] && [ "$dec6" = "$c1|feature/y" ] && ok "repositório SHA-256: base_validada_sha de 64 hex estreita a seleção" \
+      || falha "repositório SHA-256: [${#c1}] [$dec6]"
+  else
+    falha "o git daqui não cria repositório SHA-256 (--object-format=sha256)"
+  fi
 }
 
 # ---------------------------------------------------------------------------
