@@ -1221,6 +1221,16 @@ _fx_e7() {
     >> docs/entregas/ft-rec/PR.md
 }
 
+# _fx_e8_terminal — os campos terminais que o E8 grava à mão antes do checkpoint
+# (08-registro.md, passo 2): o --registrar reabriu a entrega, e o e8 exige o
+# terminal de volta (DM-311)
+_fx_e8_terminal() {
+  local e=docs/entregas/ft-rec/ENTREGA.md
+  sed -e 's/^estado: .*/estado: entregue/' -e 's/^push_feito: .*/push_feito: true/' \
+    -e 's/^entregue_em: .*/entregue_em: 2026-10-03/' -e 's/^causa: .*/causa: null/' "$e" > "$e.fx" \
+    && cat "$e.fx" > "$e" && rm -f "$e.fx"
+}
+
 # fx_fluxo_completo <dir> — o fluxo da spec, seção 16, sobre o cenário em
 # <dir> (o checkout principal ou uma worktree vinculada em feature/ft-rec),
 # só pelos executáveis da skill, nesta ordem:
@@ -1232,10 +1242,10 @@ _fx_e7() {
 #   06-registrar-portao    registrar-portao.sh --resultado pronto (portao e portao_sha)
 #   07-e3, 07-pre-e6       ATENCAO.md pelo classificador (O10); checkpoint pre-e6
 #   08-validade            validade-do-portao.sh --verificar
-#   09-e7, 09-e8           PR.md retomado; checkpoint e8
+#   09-e7, 09-e8           PR.md retomado; o terminal do E8; checkpoint e8
 #   10-validade            validade-do-portao.sh --verificar
-# Nunca edita o ENTREGA.md: o registro, o registrar-portao e os checkpoints são
-# os únicos escritores. Para na primeira etapa com código diferente de 0, com
+# Só edita o ENTREGA.md onde o E8 o faz à mão (o terminal, _fx_e8_terminal); fora
+# disso, o registro, o registrar-portao e os checkpoints são os únicos escritores. Para na primeira etapa com código diferente de 0, com
 # FX_ERRO = a etapa e a saída. Cada etapa deixa <rótulo>.out/.err/.rc em
 # FX_FLUXO_DIR (<diretório Git comum>/fx-fluxo, no temporário do teste).
 # Exporta FX_FLUXO_DIR, FX_FLUXO_RECONC (o commit reconciliacao-base),
@@ -1264,6 +1274,7 @@ fx_fluxo_completo() {
   FX_FLUXO_PRE_E6="$(git -C "$dir" rev-parse HEAD)"
   _fx_etapa 08-validade "$dir" bash "$_FXR_SKILL/validade-do-portao.sh" --verificar --entrega "$e" || return 1
   _fx_etapa 09-e7 "$dir" _fx_e7 || return 1
+  _fx_etapa 09-terminal "$dir" _fx_e8_terminal || return 1
   _fx_etapa 09-e8 "$dir" bash "$_FXR_SKILL/persistir-metodo.sh" --persistir "$@" --checkpoint e8 || return 1
   FX_FLUXO_E8="$(git -C "$dir" rev-parse HEAD)"
   _fx_etapa 10-validade "$dir" bash "$_FXR_SKILL/validade-do-portao.sh" --verificar --entrega "$e" || return 1

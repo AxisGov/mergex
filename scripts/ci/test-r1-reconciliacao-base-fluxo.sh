@@ -115,7 +115,9 @@ fl_passos() {
   # 9. checkpoint e8
   fl_rc "$r 9: E7 (retomada do PR existente) sai 0" 09-e7
   fl_rc "$r 9: persistir-metodo --checkpoint e8 sai 0" 09-e8
-  fl_metodo "$r 9: o commit e8 toca só o PR.md" "$FX_FLUXO_E8" "$FX_FLUXO_PRE_E6" e8 docs/entregas/ft-rec/PR.md
+  fl_metodo "$r 9: o commit e8 toca o PR.md e o ENTREGA.md com o terminal" "$FX_FLUXO_E8" "$FX_FLUXO_PRE_E6" e8 docs/entregas/ft-rec/PR.md docs/entregas/ft-rec/ENTREGA.md
+  [ "$(git show "$FX_FLUXO_E8:docs/entregas/ft-rec/ENTREGA.md" | sed -n 's/^estado: //p')" = entregue ] \
+    && ok "$r 9: o e8 persiste estado: entregue" || falha "$r 9: o e8 sem estado: entregue"
 
   # 10. validade
   fl_rc "$r 10: validade-do-portao depois do e8 sai 0" 10-validade
