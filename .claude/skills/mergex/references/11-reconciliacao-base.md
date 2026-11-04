@@ -62,7 +62,8 @@ Condições estruturais, todas obrigatórias:
   em nome simples (`main`), a ref remota `refs/remotes/<remoto>/<branch_base>` é exigida quando
   existe (o `<remoto>` da branch atual, ou `origin`), porque a branch local da base pode estar atrás
   numa worktree, e a local em dia sozinha não prova que `B1` foi publicado. Sem a ref remota, vale a
-  local; `branch_base` que já é ref remota (`origin/main`) vale como está (DM-312). Antes do
+  local; `refs/heads/main` segue a mesma regra do nome simples, e `branch_base` que já é ref remota
+  (`origin/main`) vale como está (DM-312). Antes do
   `--registrar`, rode `git fetch <remoto>`.
 - A mensagem de `M` tem exatamente um `Trabalho: <trabalho_id>` igual ao da `ENTREGA.md`, um
   `Integra-base:` seguido do SHA completo de `B1`, e nenhum `Task:` nem `Metodo:` (a classe

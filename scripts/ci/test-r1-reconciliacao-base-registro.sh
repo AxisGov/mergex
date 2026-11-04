@@ -1217,7 +1217,7 @@ EOF
 # sprint 02). Quando refs/remotes/<remoto>/<branch_base> existe, ela é exigida;
 # a main local em dia sozinha não prova que B1 foi publicado.
 grupo_ponta_base() {
-  local d r topo
+  local d r topo out rcx
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   # o remoto bare nasce ao lado do repositório: o cenário fica num subdiretório próprio
   d="$(mktemp -d)"; TMPS+=("$d"); d="$d/repo"; fx_cenario "$d" || { falha "cenário não montou"; return; }
@@ -1236,6 +1236,29 @@ grupo_ponta_base() {
   reprova "origin/main atrás de B1, mesmo com a main local em dia: B1 não foi publicado" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
   git update-ref -d refs/remotes/origin/main
   registra_ok "sem a ref remota, a ponta é a local, como antes" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  cd "$REPO" || return
+
+  # `branch_base: refs/heads/main` é a mesma main: a ref remota também é exigida.
+  # O caso `refs/*` pulava a busca, e a main local em dia aceitava um B1 não
+  # publicado (CodeAnt no mergex#76)
+  d="$(mktemp -d)"; TMPS+=("$d"); d="$d/repo"
+  FX_VARIANTE=entrega_base_refs_heads fx_cenario "$d" || { falha "cenário refs/heads/main não montou"; return; }
+  fx_remoto_bare "$d" || { falha "remoto bare (refs/heads/main)"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  topo="$(git rev-parse main)"
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1 \
+    && [ "$(git cat-file -p "$(git rev-parse HEAD):$FX_ENTREGA" | sed -n 's/^branch_base: //p')" = refs/heads/main ] \
+    || { falha "controle: refs/heads/main: remoto ou entrega não montou"; cd "$REPO" || return; return; }
+  git update-ref refs/remotes/origin/main "$FX_B0"
+  reprova "branch_base refs/heads/main e origin/main atrás de B1, com a main local em dia: B1 não foi publicado" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
+  git update-ref refs/remotes/origin/main "$topo"; git update-ref refs/heads/main "$FX_B0"
+  # o registra_ok confere o artefato com `branch_base: main` fixo: aqui basta o registro
+  out="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; rcx=$?
+  [ "$rcx" = 0 ] && grep -qx 'registrado=RECONCILIACAO-BASE-001.md' <<<"$out" \
+    && ok "branch_base refs/heads/main, main local atrás e origin/main com B1: a ponta é a remota" \
+    || falha "branch_base refs/heads/main com B1 na origin/main: rc=$rcx: $out"
   desfaz
   cd "$REPO" || return
 }

@@ -630,6 +630,23 @@ grupo_lifecycle() {
   terminal entregue bloqueado null 2026-09-22 true
   metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
   [ "$rc" = 1 ] && ok 'E8 entregue com portao bloqueado nao fecha' || falha "E8 entregue incoerente persistiu (rc=$rc)"
+  # a data do entregue_em é do calendário, não só do formato (CodeAnt no mergex#76)
+  for dia in 2026-99-99 2026-02-30 2027-02-29; do
+    terminal entregue pronto null "$dia" true
+    saida="$(metodo "$repo" --verificar sprintx e8 2>&1)"; rc=$?
+    [ "$rc" = 1 ] && case "$saida" in *"não é uma data do calendário"*) true ;; *) false ;; esac \
+      && ok "E8 entregue com entregue_em $dia nao fecha" || falha "E8 entregue_em $dia passou (rc=$rc; $saida)"
+  done
+  terminal entregue pronto null 2028-02-29 true
+  saida="$(metodo "$repo" --verificar sprintx e8 2>&1)"
+  case "$saida" in *"não é uma data do calendário"*) falha "29 de fevereiro de ano bissexto recusado: $saida" ;; *) ok 'E8 aceita 29 de fevereiro de ano bissexto como data' ;; esac
+  # chave terminal repetida: o catalogo_fm lê a primeira, um leitor YAML a última
+  terminal bloqueado bloqueado tarefa_nao_concluida null false
+  awk '/^estado:/ && !x { print; print "estado: entregue"; x = 1; next } { print }' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/e.tmp" \
+    && mv "$repo/e.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
+  saida="$(metodo "$repo" --persistir sprintx e8 2>&1)"; rc=$?
+  [ "$rc" = 1 ] && case "$saida" in *"chave terminal repetida"*estado*) true ;; *) false ;; esac \
+    && ok 'E8 com estado repetido no frontmatter nao fecha' || falha "E8 com chave repetida passou (rc=$rc; $saida)"
 
   repo="$D/lifecycle-stage"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
