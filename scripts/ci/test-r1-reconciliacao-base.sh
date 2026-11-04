@@ -63,6 +63,7 @@ R1_PARTES=(
   "$REPO/scripts/ci/test-r1-reconciliacao-base-verificacao.sh"
   "$REPO/scripts/ci/test-r1-reconciliacao-base-portao.sh"
   "$REPO/scripts/ci/test-r1-reconciliacao-base-fluxo.sh"
+  "$REPO/scripts/ci/test-r1-reconciliacao-base-sha256.sh"
 )
 for _r1_parte in "${R1_PARTES[@]}"; do
   # shellcheck source=/dev/null
