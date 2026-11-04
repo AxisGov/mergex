@@ -631,7 +631,7 @@ grupo_lifecycle() {
   metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
   [ "$rc" = 1 ] && ok 'E8 entregue com portao bloqueado nao fecha' || falha "E8 entregue incoerente persistiu (rc=$rc)"
   # a data do entregue_em é do calendário, não só do formato (CodeAnt no mergex#76)
-  for dia in 2026-99-99 2026-02-30 2027-02-29; do
+  for dia in 2026-99-99 2026-02-30 2027-02-29 0000-02-29 2026-00-10 2026-01-00; do
     terminal entregue pronto null "$dia" true
     saida="$(metodo "$repo" --verificar sprintx e8 2>&1)"; rc=$?
     [ "$rc" = 1 ] && case "$saida" in *"não é uma data do calendário"*) true ;; *) false ;; esac \
@@ -641,12 +641,17 @@ grupo_lifecycle() {
   saida="$(metodo "$repo" --verificar sprintx e8 2>&1)"
   case "$saida" in *"não é uma data do calendário"*) falha "29 de fevereiro de ano bissexto recusado: $saida" ;; *) ok 'E8 aceita 29 de fevereiro de ano bissexto como data' ;; esac
   # chave terminal repetida: o catalogo_fm lê a primeira, um leitor YAML a última
-  terminal bloqueado bloqueado tarefa_nao_concluida null false
-  awk '/^estado:/ && !x { print; print "estado: entregue"; x = 1; next } { print }' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/e.tmp" \
-    && mv "$repo/e.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
-  saida="$(metodo "$repo" --persistir sprintx e8 2>&1)"; rc=$?
-  [ "$rc" = 1 ] && case "$saida" in *"chave terminal repetida"*estado*) true ;; *) false ;; esac \
-    && ok 'E8 com estado repetido no frontmatter nao fecha' || falha "E8 com chave repetida passou (rc=$rc; $saida)"
+  # a mesma chave em grafia YAML equivalente (aspas, espaço antes do `:`, CRLF) também conta (Codex)
+  for repetida in 'estado: entregue' '"estado": entregue' "'estado': entregue" 'estado : entregue' $'estado: entregue\r'; do
+    terminal bloqueado bloqueado tarefa_nao_concluida null false
+    # a repetida da volta anterior sai: cada volta prova só a sua grafia
+    awk -v r="$repetida" '/^estado:/ && !x { print; print r; x = 1; next } x && /^["'"'"']?estado["'"'"']?[[:space:]]*:/ { next } { print }' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/e.tmp" \
+      && mv "$repo/e.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
+    saida="$(metodo "$repo" --persistir sprintx e8 2>&1)"; rc=$?
+    [ "$rc" = 1 ] && case "$saida" in *"chave terminal repetida"*estado*) true ;; *) false ;; esac \
+      && ok "E8 com estado repetido no frontmatter nao fecha ($(printf '%q' "$repetida"))" \
+      || falha "E8 com chave repetida passou ($(printf '%q' "$repetida"); rc=$rc; $saida)"
+  done
 
   repo="$D/lifecycle-stage"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
