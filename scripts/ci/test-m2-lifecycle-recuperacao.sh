@@ -617,13 +617,13 @@ grupo_lifecycle() {
   # ia para o corpo e o ENTREGA.md seguia `estado: aberto`
   terminal() { # <estado> <portao> <causa> <entregue_em> <push_feito>
     awk -v e="$1" -v p="$2" -v c="$3" -v d="$4" -v f="$5" '
-      /^estado:/ && !x { print "estado: " e; print "portao: " p; print "causa: " c; print "entregue_em: " d; print "push_feito: " f; x = 1; next }
-      /^(portao|causa|entregue_em|push_feito):/ { next }
+      /^estado:/ && !x { print "estado: " e; print "portao: " p; print "falhas_portao: " (c == "null" ? "[]" : "[v1]"); print "causa: " c; print "entregue_em: " d; print "push_feito: " f; x = 1; next }
+      /^(portao|falhas_portao|causa|entregue_em|push_feito):/ { next }
       { print }' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/e.tmp" && mv "$repo/e.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
   }
   metodo "$repo" --verificar sprintx e8 >/dev/null 2>&1; rc=$?
   [ "$rc" = 1 ] && ok 'E8 com estado: aberto nao fecha (DM-311)' || falha "E8 aberto passou no verificar (rc=$rc)"
-  terminal bloqueado bloqueado indeterminada null false
+  terminal bloqueado bloqueado tarefa_nao_concluida null false
   metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
   [ "$rc" = 0 ] && git -C "$repo" show HEAD:docs/entregas/ft-m2/ENTREGA.md | grep -q '^estado: bloqueado$' \
     && ok 'E8 bloqueado persiste o terminal' || falha 'E8 bloqueado nao ficou duravel'

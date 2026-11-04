@@ -369,7 +369,7 @@ Três limites valem para os artefatos de método, e nenhum é flexível:
 
 ### Lifecycle dos artefatos de método
 
-O lifecycle tem três checkpoints executáveis e cumulativos: `pre-e2`, `pre-e6` e `e8`. Três checkpoints estreitos ficam fora da cadeia cumulativa: `reconciliacao-base`, depois de um merge de base integrado após o E8 (`references/11-reconciliacao-base.md`); `predecessores`, que persiste somente o manifesto SprintX; e `retomar-v9-predecessores`, que persiste somente a reabertura da entrega. O enum fechado, na ordem do fluxo, é `pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8`.
+O lifecycle tem três checkpoints executáveis e cumulativos: `pre-e2`, `pre-e6` e `e8`. Quatro checkpoints estreitos ficam fora da cadeia cumulativa: `reconciliacao-base`, depois de um merge de base integrado após o E8 (`references/11-reconciliacao-base.md`); `predecessores`, que persiste somente o manifesto SprintX; `retomar-v9-predecessores`, que persiste somente a reabertura da entrega; e `e9-merge`, que persiste somente o registro do merge pelo E9, antes do merge de integração da sprint seguinte. O enum fechado (um conjunto, não a ordem em que rodam) é `pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8`.
 
 **O `HISTORICO.md` não entra no commit de uma task.** Se estiver dirty, o catálogo `pre-e2` o seleciona pelo caminho global exato e prova, contra HEAD, que a mudança pertence ao trabalho explícito.
 

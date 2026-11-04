@@ -340,7 +340,7 @@ repo "$aux/r2" por_sprint
 abre "$aux/r2" 01; task "$aux/r2" src/b.ts T-01.01
 e8 "$aux/r2" https://github.com/dono/repo/pull/2 aberto
 g -C "$aux/r2" add -A; g -C "$aux/r2" commit -q -m 'docs(mergex): E8' -m 'Trabalho: plan'
-cp -R "$aux/r2" "$aux/r9"
+cp -R "$aux/r2" "$aux/r9"; cp -R "$aux/r2" "$aux/r9c"
 fecha01 "$aux/r2" merge
 g -C "$aux/r2" merge -q --no-edit main
 
@@ -507,14 +507,39 @@ pm "$d" e8
 [ "$rc" = 1 ] && grep -q 'e8 com estado: entregue exige' "$aux/pm.err"
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
 confere 'e8 com estado: entregue sem entregue_em recusa' "$r"
-sed -e 's/^estado: .*/estado: bloqueado/' -e 's/^portao: .*/portao: bloqueado/' -e 's/^causa: .*/causa: indeterminada/' -e 's/^push_feito: .*/push_feito: false/' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e"
-grep -q '^entregue_em:' "$d/$e9e" || sed -i 's/^estado: bloqueado$/estado: bloqueado\nentregue_em: null/' "$d/$e9e"
-grep -q '^push_feito:' "$d/$e9e" || sed -i 's/^estado: bloqueado$/estado: bloqueado\npush_feito: false/' "$d/$e9e"
-grep -q '^causa:' "$d/$e9e" || sed -i 's/^estado: bloqueado$/estado: bloqueado\ncausa: indeterminada/' "$d/$e9e"
+# entregue sem push_feito: o campo é true ou false, mas tem de existir
+sed -i -e 's/^entregue_em: .*/entregue_em: 2026-11-03/' -e '/^push_feito:/d' "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 1 ] && grep -q 'push_feito: ausente' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 com estado: entregue sem push_feito recusa' "$r"
+# o bloqueado: a causa é a que falhas_portao deriva
+awk '/^estado:/ && !x { print "estado: bloqueado"; print "portao: bloqueado"; print "falhas_portao: [v1]"; print "causa: suite_reprovada"; print "entregue_em: null"; print "push_feito: false"; x = 1; next }
+  /^(portao|falhas_portao|causa|entregue_em|push_feito):/ { next } { print }' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 1 ] && grep -q 'não deriva de falhas_portao' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 bloqueado com causa que não deriva de falhas_portao recusa' "$r"
+sed -i 's/^causa: suite_reprovada$/causa: tarefa_nao_concluida/' "$d/$e9e"
 pm "$d" e8
 [ "$rc" = 0 ]
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
-confere 'e8 com o fechamento bloqueado completo persiste' "$r"
+confere 'e8 com o fechamento bloqueado completo, causa derivada de falhas_portao, persiste' "$r"
+# o E9 de ontem: o replay de hoje difere só na data de atualizado_em, também em CRLF
+d="$aux/r9-ontem"; cp -R "$aux/r9" "$d"
+sed -i 's/^atualizado_em: .*/atualizado_em: 2026-01-01/' "$d/$e9e"
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e9-merge aceita o registro do E9 feito noutro dia (só atualizado_em difere)' "$r"
+d="$aux/r9c"
+sed -i 's/$/\r/' "$d/$e9e"; g -C "$d" add -A; g -C "$d" commit -q -m 'docs: ENTREGA.md em CRLF' -m 'Trabalho: plan'
+fecha01 "$d" merge sem-e9
+sed -i 's/^atualizado_em: [0-9-]*\r$/atualizado_em: 2026-01-01\r/' "$d/$e9e"
+grep -q $'^atualizado_em: 2026-01-01\r$' "$d/$e9e" && pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e9-merge em ENTREGA.md CRLF com o registro de outro dia' "$r"
 
 grep -q -- '--checkpoint e9-merge' "$ref/09-revisao.md" && grep -q 'checkpoint `e9-merge`' "$ref/00-abertura.md" \
   && grep -q 'estado terminal' "$ref/08-registro.md"
