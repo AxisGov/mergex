@@ -768,7 +768,7 @@ grupo_contrato() {
   for f in .claude/skills/mergex/SKILL.md .claude/skills/mergex/references/01-commits.md \
            .claude/skills/mergex/references/08-registro.md .claude/skills/mergex/references/11-reconciliacao-base.md \
            .claude/hooks/README.md; do
-    grep -Fq "$enum" "$REPO/$f" && ok "$f publica o enum de seis checkpoints" \
+    grep -Fq "$enum" "$REPO/$f" && ok "$f publica o enum de sete checkpoints" \
       || falha "$f diverge do enum de checkpoints"
   done
   for dm in DM-187 DM-188 DM-189 DM-190; do

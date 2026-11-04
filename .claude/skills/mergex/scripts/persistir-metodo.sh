@@ -803,7 +803,8 @@ prova_e9_merge() {
   IFS="$(printf '\t')" read -r s est sha base < "$t/mudou"
   s="${s#pr=}"
   [ "$est" = merged ] || { rm -rf "$t"; para "e9-merge: o item $s de prs não está merged ($est)"; }
-  sed -E 's/^atualizado_em: [0-9]{4}-[0-9]{2}-[0-9]{2}$/atualizado_em: -/' "$RAIZ/$ENTREGA" > "$t/disco"
+  # a data com ou sem CR no fim: num ENTREGA.md CRLF, o E9 de ontem e o replay de hoje diferem só nela
+  sed -E 's/^atualizado_em: [0-9]{4}-[0-9]{2}-[0-9]{2}(\r?)$/atualizado_em: -\1/' "$RAIZ/$ENTREGA" > "$t/disco"
   for acao in registrar-merge completar-base; do
     cp "$t/ENTREGA.md" "$t/refeito.md"
     if [ "$acao" = registrar-merge ]; then
@@ -811,7 +812,7 @@ prova_e9_merge() {
     else
       bash "$PLANEJAMENTO_SH" --completar-base "$s" --merge-sha "$sha" --base-sha "$base" --entrega "$t/refeito.md" >/dev/null 2>&1 || continue
     fi
-    sed -E 's/^atualizado_em: [0-9]{4}-[0-9]{2}-[0-9]{2}$/atualizado_em: -/' "$t/refeito.md" > "$t/refeito"
+    sed -E 's/^atualizado_em: [0-9]{4}-[0-9]{2}-[0-9]{2}(\r?)$/atualizado_em: -\1/' "$t/refeito.md" > "$t/refeito"
     if cmp -s "$t/refeito" "$t/disco"; then rm -rf "$t"; return 0; fi
   done
   rm -rf "$t"
@@ -832,11 +833,16 @@ confere_e8_terminal() {
   push="$(catalogo_fm "$RAIZ/$ENTREGA" push_feito)"
   case "$est" in
     entregue)
+      # push_feito é true ou false: false é legítimo sem remoto (08-registro), mas tem de existir
       [ "$por" = pronto ] && [[ "$ent" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && [ "$cau" = null ] \
-        || para "e8 com estado: entregue exige portao: pronto, entregue_em AAAA-MM-DD e causa: null (está portao: ${por:-ausente}, entregue_em: ${ent:-ausente}, causa: ${cau:-ausente})" ;; # guarda:E8TERM
+        && { [ "$push" = true ] || [ "$push" = false ]; } \
+        || para "e8 com estado: entregue exige portao: pronto, entregue_em AAAA-MM-DD, causa: null e push_feito true ou false (está portao: ${por:-ausente}, entregue_em: ${ent:-ausente}, causa: ${cau:-ausente}, push_feito: ${push:-ausente})" ;; # guarda:E8TERM
     bloqueado)
       [ "$por" = bloqueado ] && [ -n "$cau" ] && [ "$cau" != null ] && [ "$ent" = null ] && [ "$push" = false ] \
-        || para "e8 com estado: bloqueado exige portao: bloqueado, causa preenchida, entregue_em: null e push_feito: false (está portao: ${por:-ausente}, causa: ${cau:-ausente}, entregue_em: ${ent:-ausente}, push_feito: ${push:-ausente})" ;; # guarda:E8TERM
+        || para "e8 com estado: bloqueado exige portao: bloqueado, causa preenchida, entregue_em: null e push_feito: false (está portao: ${por:-ausente}, causa: ${cau:-ausente}, entregue_em: ${ent:-ausente}, push_feito: ${push:-ausente})" # guarda:E8TERM
+      # a causa é a que falhas_portao deriva (00-schema, "A causa do bloqueio")
+      bash "$AQUI/causa-do-portao.sh" --validar "$RAIZ/$ENTREGA" >/dev/null 2>&1 \
+        || para "e8 com estado: bloqueado e causa ($cau) que não deriva de falhas_portao: rode causa-do-portao.sh --validar" ;; # guarda:E8TERM
     *) para "e8 sem estado terminal (estado: ${est:-ausente}): o E8 grava estado entregue ou bloqueado, com os campos terminais, antes do checkpoint (08-registro.md, passo 2)" ;; # guarda:E8TERM
   esac
 }
