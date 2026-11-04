@@ -588,7 +588,7 @@ grupo_prepush() {
   # ainda não entrou na main. Contra refs/remotes/origin/HEAD, a parcela (a) trazia a entrega
   # ft-y, cujo portão vale para outro SHA, e barrava o push de um SHA válido. A base declarada
   # na entrega da própria branch, por SHA, tira só o que veio da predecessora.
-  local t6 d6 n0 yb sb v dec6 bb
+  local t6 d6 n0 yb sb v dec6 bb e6
   t6="$(mktemp -d)"; TMPS="$TMPS $t6"; d6="$t6/repo"
   fx_cenario "$d6" || { falha "cenário DM-310 (branch empilhada) não montou"; return; }
   fx_remoto_bare "$d6" || { falha "remoto bare (branch empilhada)"; return; }
@@ -629,7 +629,12 @@ grupo_prepush() {
   else falha "branch empilhada: ESC do branch_base no stderr"; fi
   # DM-313: o NUL o Bash descartava antes da checagem (feature/ft-y\0x virava feature/ft-yx e
   # estreitava); ENTREGA.md com NUL não estreita nada (revisão do Codex no expxdev#139)
-  git checkout -q --detach "$sb" && entrega_commit "$d6" 's#^branch_base: .*#branch_base: feature/ft-y\x00x#' && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
+  # o NUL sai do printf do Bash: o `\x00` do sed só vale no GNU (CodeAnt no mergex#76)
+  git checkout -q --detach "$sb" && {
+    e6=docs/entregas/ft-rec/ENTREGA.md
+    { sed '/^branch_base:/,$d' "$e6"; printf 'branch_base: feature/ft-y\000x\n'; sed '1,/^branch_base:/d' "$e6"; } > "$e6.tmp" \
+      && cat "$e6.tmp" > "$e6" && rm -f "$e6.tmp" && git add -- "$e6" && git commit -q -m "docs: entrega"
+  } && fx_portao_em "$d6" HEAD; v="$(git rev-parse HEAD)"
   if git cat-file blob "$v:docs/entregas/ft-rec/ENTREGA.md" | LC_ALL=C tr -d '\000' | cmp -s - <(git cat-file blob "$v:docs/entregas/ft-rec/ENTREGA.md"); then
     falha "controle: branch empilhada: o NUL não entrou no ENTREGA.md"
   else ok "controle: branch empilhada: o ENTREGA.md enviado tem o NUL na branch_base"; fi
