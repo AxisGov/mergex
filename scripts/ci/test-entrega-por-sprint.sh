@@ -565,12 +565,20 @@ confere 'e9-merge em ENTREGA.md CRLF com o registro de outro dia' "$r"
 grep -q -- '--checkpoint e9-merge' "$ref/09-revisao.md" && grep -q 'checkpoint `e9-merge`' "$ref/00-abertura.md" \
   && grep -q 'estado terminal' "$ref/08-registro.md"
 confere '09-revisao manda persistir o registro pelo e9-merge, 00-abertura dá a ordem, 08-registro exige o terminal no e8' $?
-# o passo 7 do E9 chama os dois scripts pelo caminho, como o bloco do passo 2: o
-# nome solto dá "command not found" fora do PATH (CodeAnt no conselhos#256)
-grep -Fq '`bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega' "$ref/09-revisao.md" \
+# o nome solto dá "command not found" fora do PATH (CodeAnt no conselhos#256,
+# DM-314): o SKILL.md diz como rodar; o comando que abre a linha de um passo e
+# todo bloco cercado levam o caminho completo
+nomes="$(cd "$scripts" && ls ./*.sh | sed 's|^\./||; s|\.sh$||' | paste -sd'|' -)"
+soltos="$(awk -v re="(^|[ \t(\"/])(bash )?(\\.\\.\\./)?($nomes)\\.sh( |$)" '
+  FNR == 1 { dentro = 0 }
+  /^ *```/ { dentro = !dentro; next }
+  (dentro || /^ +`[a-z-]+\.sh /) && $0 ~ re && index($0, ".claude/skills/mergex/scripts/") == 0 { print FILENAME ":" FNR }
+' "$ref"/*.md "$raiz/.claude/skills/mergex/SKILL.md")"
+grep -Fq 'Os scripts não estão no PATH.' "$raiz/.claude/skills/mergex/SKILL.md" \
   && grep -Fq '`bash .claude/skills/mergex/scripts/persistir-metodo.sh --persistir --entrega' "$ref/09-revisao.md" \
-  && ! grep -Eq '^ +`(entrega-de-planejamento|persistir-metodo)\.sh ' "$ref/09-revisao.md" "$ref/00-abertura.md"
-confere '09-revisao passo 7 e 00-abertura: entrega-de-planejamento e persistir-metodo pelo caminho, nunca pelo nome solto' $?
+  && [ -z "$soltos" ]
+r=$?; [ "$r" = 0 ] || printf '        nome solto em: %s\n' $soltos
+confere 'scripts pelo caminho: a regra no SKILL.md, o passo 7 do E9 e nenhum bloco ou passo com o nome solto' "$r"
 
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

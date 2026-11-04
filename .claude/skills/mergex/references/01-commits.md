@@ -162,11 +162,11 @@ Ele recusa `.`, `-A` e `-u`: o staging continua sendo por caminho explícito.
 **A varredura de segredo (passo 2) é julgamento, e roda DENTRO da seção** — ela lê `git diff --cached`, que só existe depois do staging. Para isso a seção abre em dois tempos, com a mesma trava atravessando os dois:
 
 ```
-bash .../fechamento-do-e1.sh --preparar --entrega <ENTREGA.md> \
+bash .claude/skills/mergex/scripts/fechamento-do-e1.sh --preparar --entrega <ENTREGA.md> \
   --task <id> --mensagem <arquivo> -- <caminho-1> ...
 # imprime token=<...>; a trava CONTINUA adquirida
 # → varredura de segredo sobre `git diff --cached`
-bash .../fechamento-do-e1.sh --concluir --entrega <ENTREGA.md> \
+bash .claude/skills/mergex/scripts/fechamento-do-e1.sh --concluir --entrega <ENTREGA.md> \
   --task <id> --mensagem <arquivo> --token <token>
 ```
 
