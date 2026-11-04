@@ -1470,7 +1470,7 @@ if ! g rev-parse --verify -q "refs/remotes/$BRANCH_BASE^{commit}" >/dev/null 2>&
 fi
 PONTA_BASE="$(g rev-parse --verify -q "$PONTA_REF^{commit}")" || estrutura base "ref de base $PONTA_REF ilegível"
 g merge-base --is-ancestor "$B1" "$PONTA_BASE" 2>/dev/null \
-  || estrutura base "B1 $B1 não é ancestral da ponta de $PONTA_REF ($PONTA_BASE)$( [ "$PONTA_REF" = "$BRANCH_BASE" ] || printf '; a base publicada é a ref remota: rode git fetch e confira que o merge da base foi enviado' )" # guarda:EST
+  || estrutura base "B1 $B1 não é ancestral da ponta de $PONTA_REF ($PONTA_BASE)$(case "$(g rev-parse --symbolic-full-name "$PONTA_REF" 2>/dev/null)" in refs/remotes/*) printf '; a ponta é a ref remota, que pode estar desatualizada: rode git fetch e confira que o merge da base foi enviado' ;; esac)" # guarda:EST
 
 # União das tasks e catálogo de método, as quatro provas e o inventário.
 uniao_e_catalogo "$RAIZ_M" "$PASTA" || exit 1
