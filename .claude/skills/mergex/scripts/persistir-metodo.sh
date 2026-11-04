@@ -801,6 +801,9 @@ prova_e9_merge() {
     || ! bash "$PLANEJAMENTO_SH" --entrega "$t/provado.md" > "$t/depois" 2>/dev/null; then
     rm -rf "$t"; para "$ENTREGA não se lê como entrega de planejamento ou de sprint: e9-merge recusado"
   fi
+  if grep -qx 'sprint_atual=null' "$t/depois"; then
+    rm -rf "$t"; para "e9-merge: $ENTREGA é entrega por trabalho, e nela o E9 não grava pr_estado depois do merge (DM-317): o estado final é o do serviço, e a branch já integrada não recebe commit"
+  fi
   grep '^pr=' "$t/antes" | LC_ALL=C sort > "$t/antes.pr"
   grep '^pr=' "$t/depois" | LC_ALL=C sort > "$t/depois.pr"
   LC_ALL=C comm -13 "$t/antes.pr" "$t/depois.pr" > "$t/mudou"

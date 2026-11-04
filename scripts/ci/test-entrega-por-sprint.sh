@@ -583,6 +583,33 @@ grep -Fq 'Os scripts não estão no PATH.' "$raiz/.claude/skills/mergex/SKILL.md
   && [ -z "$soltos" ]
 r=$?; [ "$r" = 0 ] || printf '        nome solto em: %s\n' $soltos
 confere 'scripts pelo caminho: a regra no SKILL.md, o passo 7 do E9 e nenhum bloco ou passo com o nome solto' "$r"
+# A entrega por trabalho não grava `pr_estado` depois do merge (DM-317): o
+# serviço é a fonte do estado final, e a branch já integrada não recebe commit.
+# O registro em `prs` segue só na entrega de planejamento e na de sprint.
+pt='Na entrega por trabalho, o E9 não grava `pr_estado` no `ENTREGA.md`'
+grep -Fq "$pt" "$ref/09-revisao.md" \
+  && ! grep -Fq 'Atualize `pr_estado: merged` no `ENTREGA.md` correspondente' "$ref/09-revisao.md" \
+  && grep -Fq 'na entrega por trabalho, fica com o retrato do E7' "$ref/00-schema.md" \
+  && grep -Fq 'na entrega por trabalho, fica com o retrato do E7' "$ref/08-registro.md" \
+  && grep -Fq 'O E9 também não o grava' "$ref/integracao/runx.md"
+confere 'entrega por trabalho: o E9 não grava pr_estado depois do merge (09-revisao, schema, 08-registro, runx)' $?
+# e quem tentar o e9-merge nela recebe a regra, nas duas origens
+d="$aux/por-trabalho"; mkdir -p "$d/docs/entregas/plan" "$d/docs/sprintx/features/plan" "$d/docs/manutencao/plan"
+g -C "$d" init -q -b fix/plan
+for o in sprintx runx; do
+  printf -- '---\nexpx_schema: 1\nexpx_tool: %s\nkind: entrega\ntrabalho_id: plan\nestado: entregue\nbranch: fix/plan\nbranch_base: main\npr_url: https://github.com/o/r/pull/9\npr_estado: aberto\nprs: []\natualizado_em: 2026-11-01\n---\n' "$o" > "$d/docs/entregas/plan/ENTREGA.md"
+  printf -- '---\nkind: orquestrador\ntrabalho_id: plan\n---\n' | tee "$d/docs/sprintx/features/plan/ORQUESTRADOR.md" > "$d/docs/manutencao/plan/ORQUESTRADOR.md"
+  g -C "$d" add -A; g -C "$d" commit -q -m "entrega por trabalho ($o)"
+  sed -i 's/^pr_estado: aberto$/pr_estado: merged/' "$d/docs/entregas/plan/ENTREGA.md"
+  h="$(git -C "$d" rev-parse HEAD)"
+  (cd "$d" && bash "$scripts/persistir-metodo.sh" --persistir --entrega docs/entregas/plan/ENTREGA.md \
+    --origem "$o" --trabalho plan --checkpoint e9-merge) >"$aux/pm.out" 2>"$aux/pm.err"; rc=$?
+  [ "$rc" = 1 ] && grep -q 'entrega por trabalho' "$aux/pm.err" && grep -q 'DM-317' "$aux/pm.err" \
+    && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
+  r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+  confere "e9-merge na entrega por trabalho ($o) recusa com a regra da DM-317, sem commitar" "$r"
+  git -C "$d" checkout -q -- docs/entregas/plan/ENTREGA.md
+done
 
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
