@@ -569,11 +569,11 @@ confere '09-revisao manda persistir o registro pelo e9-merge, 00-abertura dá a 
 # DM-314): o SKILL.md diz como rodar; o comando que abre a linha de um passo e
 # todo bloco cercado levam o caminho completo
 nomes="$(cd "$scripts" && ls ./*.sh | sed 's|^\./||; s|\.sh$||' | paste -sd'|' -)"
-soltos="$(awk -v re="(^|[ \t(\"/])(bash )?(\\.\\.\\./)?($nomes)\\.sh( |$)" '
+soltos="$(awk -v re="(^|[ \t(\"/])(bash )?([.][.][.]/)?($nomes)[.]sh( |$)" '
   FNR == 1 { dentro = 0 }
   /^ *```/ { dentro = !dentro; next }
-  (dentro || /^ +`[a-z-]+\.sh /) && $0 ~ re && index($0, ".claude/skills/mergex/scripts/") == 0 { print FILENAME ":" FNR }
-' "$ref"/*.md "$raiz/.claude/skills/mergex/SKILL.md")"
+  (dentro || /^ +`[a-z-]+[.]sh /) && $0 ~ re && index($0, ".claude/skills/mergex/scripts/") == 0 { print FILENAME ":" FNR }
+' "$ref"/*.md "$ref"/integracao/*.md "$raiz/.claude/skills/mergex/SKILL.md" "$raiz"/.claude/commands/*.md)"
 grep -Fq 'Os scripts não estão no PATH.' "$raiz/.claude/skills/mergex/SKILL.md" \
   && grep -Fq '`bash .claude/skills/mergex/scripts/persistir-metodo.sh --persistir --entrega' "$ref/09-revisao.md" \
   && [ -z "$soltos" ]
