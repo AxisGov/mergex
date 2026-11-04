@@ -398,6 +398,17 @@ insere_depois() { # <arquivo> <linha alvo> <texto>
   A="$2" B="$3" awk '{ print } $0 == ENVIRON["A"] && !feito { print ENVIRON["B"]; feito = 1 }' \
     "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
+# O E8 do fechamento bloqueado, como o 08-registro manda: o terminal no
+# frontmatter, com os campos que o e8 exige (DM-311). Acrescentar `estado:` depois
+# do `---` deixava o frontmatter em `aberto`, e o e8 recusa.
+entrega_bloqueada() { # <ENTREGA.md>
+  troca_linha "$1" 'estado: aberto' 'estado: bloqueado
+portao: bloqueado
+falhas_portao: [v1]
+causa: tarefa_nao_concluida
+entregue_em: null
+push_feito: false'
+}
 
 LINHA_T0101='| issue-123-rotulo-parecer | T-01.01 | teste | accountability | — | — | — | 0,12 h | — |'
 LINHA_T0201='| issue-123-rotulo-parecer | T-02.01 | ui | accountability | — | — | — | 0,13 h | — |'
@@ -474,7 +485,7 @@ grupo_checkpoints() {
     || falha "pre-e6 nao persistiu a primeira criacao (rc=$rc)"
 
   repo="$D/e8-valido"; repo_c7c "$repo"; fim_da_f6 "$repo"
-  printf 'estado: bloqueado\n' >> "$repo/$ENT"
+  entrega_bloqueada "$repo/$ENT"
   metodo "$repo" --persistir e8 >/dev/null 2>&1; rc=$?
   [ "$rc" = 0 ] && nomes_head "$repo" | grep -Fxq "$HIST" \
     && git -C "$repo" show "HEAD:$ENT" | grep -Fq 'estado: bloqueado' \
@@ -484,15 +495,17 @@ grupo_checkpoints() {
   igual 'e8 deixa o metodo limpo' "$?" 0
 
   repo="$D/e8-invalido"; repo_c7c "$repo"; fim_da_f6 "$repo"
-  printf 'estado: bloqueado\n' >> "$repo/$ENT"
+  entrega_bloqueada "$repo/$ENT"
   troca_linha "$repo/$HIST" "  - trabalho_id: $TRAB" '  - trabalho_id: outro-trabalho' 2
   cp "$repo/$HIST" "$D/e8-invalido.md"
   antes="$(commits "$repo")"
-  metodo "$repo" --persistir e8 >/dev/null 2>&1; rc=$?
-  [ "$rc" != 0 ] && [ "$(commits "$repo")" = "$antes" ] && [ -z "$(staged "$repo")" ] \
+  metodo "$repo" --persistir e8 >/dev/null 2>"$D/e8-invalido.err"; rc=$?
+  # o motivo é o do HISTORICO: com o terminal fora do frontmatter, a recusa era a do e8
+  [ "$rc" != 0 ] && grep -Fq 'entrada de outro trabalho' "$D/e8-invalido.err" \
+    && [ "$(commits "$repo")" = "$antes" ] && [ -z "$(staged "$repo")" ] \
     && trava_livre "$repo" && cmp -s "$repo/$HIST" "$D/e8-invalido.md" \
     && ok 'e8 com primeira criacao invalida falha fechado, sem add, commit ou trava' \
-    || falha "e8 aceitou primeira criacao invalida (rc=$rc)"
+    || falha "e8 aceitou primeira criacao invalida (rc=$rc; $(cat "$D/e8-invalido.err"))"
 }
 
 # Cada negativo roda numa cópia nova do C7-C. Nada pode virar commit, o stage
@@ -1126,7 +1139,7 @@ grupo_tracked() {
     && ok 'tracked: pre-e6 persiste a recalibracao depois do pre-e2' \
     || falha "tracked: pre-e6 recusou recalibracao (rc=$rc)"
   troca_linha "$repo/$HIST" '    real: 2.1' '    real: 2.4'
-  printf 'estado: bloqueado\n' >> "$repo/$ENT"
+  entrega_bloqueada "$repo/$ENT"
   metodo "$repo" --persistir e8 >/dev/null 2>"$D/tracked.err"; rc=$?
   [ "$rc" != 0 ] && grep -Fq 'remove ou reescreve' "$D/tracked.err" && [ -z "$(staged "$repo")" ] \
     && ok 'tracked: e8 barra reescrita de entrada ja versionada pelo pre-e2' \
