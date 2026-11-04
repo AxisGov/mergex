@@ -726,7 +726,7 @@ grupo_retomada() {
 }
 grupo_contrato() {
   local f enum
-  enum='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8'
+  enum='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8'
   for f in .claude/commands/mergex.md .claude/commands/mergex-check.md \
            .opencode/commands/mergex.md .opencode/commands/mergex-check.md; do
     grep -Fq 'predecessores-sprintx.sh' "$REPO/$f" \

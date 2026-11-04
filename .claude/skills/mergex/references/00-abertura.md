@@ -163,6 +163,9 @@ retomada de um arquivo sem a chave), com o modo que o mesmo `--modo-efetivo` dis
 4. com `reconciliacoes` não vazio, a atualização da branch a partir da main nova já foi
    registrada como a reconciliação seguinte e a cadeia passa em `reconciliacao-base.sh
    --verificar`; a `base_validada_sha` da cadeia é a base buscada (DM-266). Sem cadeia, nada muda.
+   A ordem é: o E9 registra o merge da sprint anterior e o persiste pelo checkpoint `e9-merge`;
+   depois vêm o merge de integração da main nova, o `--registrar`, o checkpoint
+   `reconciliacao-base` e, por fim, o E0 (DM-311).
 
 Então grava `entrega: por_sprint`, `sprint_atual: <NN>`, o item novo `{sprint: <NN>, url: null,
 estado: null, merge_sha: null, merge: null, base_sha: null}` no fim de `prs`, volta `pr_url` e

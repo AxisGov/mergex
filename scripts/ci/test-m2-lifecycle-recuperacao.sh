@@ -613,14 +613,23 @@ grupo_lifecycle() {
     && ok 'metodo de outro trabalho permanece fora do checkpoint' \
     || falha 'checkpoint absorveu metodo de outro trabalho'
 
-  printf '\nestado: entregue\n' >> "$repo/docs/entregas/ft-m2/ENTREGA.md"
+  # o terminal no frontmatter, com os campos que o e8 exige (DM-311); antes, a linha
+  # ia para o corpo e o ENTREGA.md seguia `estado: aberto`
+  terminal() { # <estado> <portao> <causa> <entregue_em> <push_feito>
+    awk -v e="$1" -v p="$2" -v c="$3" -v d="$4" -v f="$5" '
+      /^estado:/ && !x { print "estado: " e; print "portao: " p; print "causa: " c; print "entregue_em: " d; print "push_feito: " f; x = 1; next }
+      /^(portao|causa|entregue_em|push_feito):/ { next }
+      { print }' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/e.tmp" && mv "$repo/e.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
+  }
+  metodo "$repo" --verificar sprintx e8 >/dev/null 2>&1; rc=$?
+  [ "$rc" = 1 ] && ok 'E8 com estado: aberto nao fecha (DM-311)' || falha "E8 aberto passou no verificar (rc=$rc)"
+  terminal bloqueado bloqueado indeterminada null false
   metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
-  [ "$rc" = 0 ] && git -C "$repo" show HEAD:docs/entregas/ft-m2/ENTREGA.md | grep -q 'estado: entregue' \
-    && ok 'E8 entregue persiste o terminal' || falha 'E8 entregue nao ficou duravel'
-  printf '\nestado: bloqueado\n' >> "$repo/docs/entregas/ft-m2/ENTREGA.md"
-  metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
-  [ "$rc" = 0 ] && git -C "$repo" show HEAD:docs/entregas/ft-m2/ENTREGA.md | grep -q 'estado: bloqueado' \
+  [ "$rc" = 0 ] && git -C "$repo" show HEAD:docs/entregas/ft-m2/ENTREGA.md | grep -q '^estado: bloqueado$' \
     && ok 'E8 bloqueado persiste o terminal' || falha 'E8 bloqueado nao ficou duravel'
+  terminal entregue bloqueado null 2026-09-22 true
+  metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
+  [ "$rc" = 1 ] && ok 'E8 entregue com portao bloqueado nao fecha' || falha "E8 entregue incoerente persistiu (rc=$rc)"
 
   repo="$D/lifecycle-stage"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
@@ -997,7 +1006,7 @@ grupo_integration() {
 
   grep -Fq 'persistir-metodo.sh' "$skill" \
     && ok 'SKILL torna o lifecycle executavel' || falha 'SKILL nao aponta ao executor de metodo'
-  grep -Fq 'Metodo: pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8' "$commits" \
+  grep -Fq 'Metodo: pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8' "$commits" \
     && ok 'E1 documenta commit de metodo como classe propria' || falha 'E1 ainda nao define a classe metodo'
   ! grep -Fq 'Isto **não é uma etapa nova**: é o E1' "$commits" \
     && ok 'commit de metodo nao e descrito como E1 tardio' || falha 'reference ainda mistura metodo com E1'
