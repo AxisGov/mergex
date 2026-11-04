@@ -238,7 +238,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas entrega_base_refs_heads preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -495,6 +495,8 @@ _fx_corpo() {
       entrega_base_vazia) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha:/' ;;
       entrega_base_null) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha: null/' ;;
       entrega_base_aspas) _fx_entrega_sed 's/^base_validada_sha:/"base_validada_sha":/' ;;
+      # a base pela ref completa da branch local (DM-312, CodeAnt no mergex#76)
+      entrega_base_refs_heads) _fx_entrega_sed 's#^branch_base: main$#branch_base: refs/heads/main#' ;;
       entrega_symlink)
         git mv docs/entregas/ft-rec/ENTREGA.md docs/entregas/ft-rec/ENTREGA-real.md
         ln -s ENTREGA-real.md docs/entregas/ft-rec/ENTREGA.md

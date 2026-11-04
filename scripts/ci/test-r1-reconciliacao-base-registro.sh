@@ -1210,3 +1210,55 @@ EOF
   bash "$TRAVA" --status >/dev/null 2>&1 && ok "interrupção: trava livre" || falha "interrupção: trava presa"
   cd "$REPO" || return
 }
+
+# DM-312: a ponta da base é a publicada. Com `branch_base: main`, o --registrar
+# lia a ponta pela ref LOCAL; numa worktree, a main local atrás do merge
+# registrado recusava um B1 que está na origin/main (Conselhos, onda-0c,
+# sprint 02). Quando refs/remotes/<remoto>/<branch_base> existe, ela é exigida;
+# a main local em dia sozinha não prova que B1 foi publicado.
+grupo_ponta_base() {
+  local d r topo out rcx
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  # o remoto bare nasce ao lado do repositório: o cenário fica num subdiretório próprio
+  d="$(mktemp -d)"; TMPS+=("$d"); d="$d/repo"; fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_remoto_bare "$d" || { falha "remoto bare"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  topo="$(git rev-parse main)"
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1 \
+    && [ "$(git rev-parse refs/remotes/origin/main)" = "$topo" ] && git merge-base --is-ancestor "$FX_B1" "$topo" \
+    || { falha "controle: origin/main com B1 não montou"; cd "$REPO" || return; return; }
+  git update-ref refs/heads/main "$FX_B0"
+  ! git merge-base --is-ancestor "$FX_B1" main && ok "controle: a main local ficou atrás de B1" || falha "controle: a main local contém B1"
+  registra_ok "main local atrás e origin/main com B1: a ponta da base é a remota" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git update-ref refs/heads/main "$topo"; git update-ref refs/remotes/origin/main "$FX_B0"
+  reprova "origin/main atrás de B1, mesmo com a main local em dia: B1 não foi publicado" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
+  git update-ref -d refs/remotes/origin/main
+  registra_ok "sem a ref remota, a ponta é a local, como antes" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  cd "$REPO" || return
+
+  # `branch_base: refs/heads/main` é a mesma main: a ref remota também é exigida.
+  # O caso `refs/*` pulava a busca, e a main local em dia aceitava um B1 não
+  # publicado (CodeAnt no mergex#76)
+  d="$(mktemp -d)"; TMPS+=("$d"); d="$d/repo"
+  FX_VARIANTE=entrega_base_refs_heads fx_cenario "$d" || { falha "cenário refs/heads/main não montou"; return; }
+  fx_remoto_bare "$d" || { falha "remoto bare (refs/heads/main)"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  topo="$(git rev-parse main)"
+  git push -q origin main >/dev/null 2>&1 && git fetch -q origin >/dev/null 2>&1 \
+    && [ "$(git cat-file -p "$(git rev-parse HEAD):$FX_ENTREGA" | sed -n 's/^branch_base: //p')" = refs/heads/main ] \
+    || { falha "controle: refs/heads/main: remoto ou entrega não montou"; cd "$REPO" || return; return; }
+  git update-ref refs/remotes/origin/main "$FX_B0"
+  reprova "branch_base refs/heads/main e origin/main atrás de B1, com a main local em dia: B1 não foi publicado" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
+  git update-ref refs/remotes/origin/main "$topo"; git update-ref refs/heads/main "$FX_B0"
+  # o registra_ok confere o artefato com `branch_base: main` fixo: aqui basta o registro
+  out="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; rcx=$?
+  [ "$rcx" = 0 ] && grep -qx 'registrado=RECONCILIACAO-BASE-001.md' <<<"$out" \
+    && ok "branch_base refs/heads/main, main local atrás e origin/main com B1: a ponta é a remota" \
+    || falha "branch_base refs/heads/main com B1 na origin/main: rc=$rcx: $out"
+  desfaz
+  cd "$REPO" || return
+}
