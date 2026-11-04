@@ -664,7 +664,7 @@ Isto não muda o schema e não cria campo: `references/00-schema.md` descreve `c
 bash .claude/skills/mergex/scripts/fechamento-do-e1.sh --registrar-existente \
   --entrega docs/entregas/<trabalho_id>/ENTREGA.md \
   --origem <sprintx|runx> --trabalho <trabalho_id> \
-  --task <T-NN.MM> --sha <40-hex>
+  --task <T-NN.MM> --sha <sha completo: 40 hex no SHA-1, 64 no SHA-256>
 ```
 
 Sob a mesma trava C5, ela exige stage vazio, contexto explícito coerente com `ENTREGA.md`, branch consistente, SHA completo existente e alcançável de `HEAD`, commit não-merge, exatamente um `Task:` e um `Trabalho:` correspondentes e nenhum `Metodo:`. O ownership é reexecutado sobre os paths do commit — em rename, origem e destino. Ela não cria, amenda, reseta, rebasa nem aplica commit algum.

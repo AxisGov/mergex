@@ -51,7 +51,7 @@
 #   fechamento-do-e1.sh --status      # diagnóstico da trava desta worktree
 #
 #   fechamento-do-e1.sh --registrar-existente --entrega <ENTREGA.md> \
-#       --origem <sprintx|runx> --trabalho <id> --task <id> --sha <40-hex>
+#       --origem <sprintx|runx> --trabalho <id> --task <id> --sha <sha completo: 40 hex no SHA-1, 64 no SHA-256>
 #       recupera somente o registro de um commit E1 já existente e alcançável.
 #
 # Ordem normativa combinada (P0.2-C7-B — compõe contexto, C1 e C5):
