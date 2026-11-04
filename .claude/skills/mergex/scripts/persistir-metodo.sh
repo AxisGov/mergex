@@ -825,11 +825,13 @@ prova_e9_merge
 # ENTREGA.md ficou `estado: aberto` com o PR publicado e mesclado). Vale nos
 # modos persistir e verificar, antes do noop (08-registro.md, campos terminais).
 
-# data_do_calendario <AAAA-MM-DD> — a data existe (mês 01-12, dia do mês, 29 de
-# fevereiro só em ano bissexto). Só aritmética: `date -d` não é o mesmo no BSD.
+# data_do_calendario <AAAA-MM-DD> — a data existe (ano a partir de 0001, mês 01-12,
+# dia do mês, 29 de fevereiro só em ano bissexto). Só aritmética: `date -d` não é o
+# mesmo no BSD.
 data_do_calendario() {
   [[ "$1" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]] || return 1
   local a=$((10#${BASH_REMATCH[1]})) m=$((10#${BASH_REMATCH[2]})) d=$((10#${BASH_REMATCH[3]})) dm
+  [ "$a" -ge 1 ] || return 1
   case "$m" in
     1|3|5|7|8|10|12) dm=31 ;;
     4|6|9|11) dm=30 ;;
@@ -841,13 +843,17 @@ data_do_calendario() {
 
 # chaves_repetidas <arquivo> <chave...> — as chaves que aparecem mais de uma vez
 # no frontmatter. O catalogo_fm lê a primeira, e um leitor YAML comum, a última.
+# A grafia YAML equivalente conta como a mesma chave: entre aspas, com espaço
+# antes do `:`, com CRLF (revisão do Codex).
 chaves_repetidas() {
   local f="$1"; shift
   awk -v chaves="$*" '
     BEGIN { n = split(chaves, k, " "); for (i = 1; i <= n; i++) q[k[i]] = 1 }
     NR == 1 { if ($0 !~ /^---[[:space:]]*\r?$/) exit; next }
     /^---[[:space:]]*\r?$/ { exit }
-    { c = $0; sub(/:.*/, "", c); if ((c in q) && ++v[c] == 2) print c }' "$f"
+    /^["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?[[:space:]]*:/ {
+      c = $0; sub(/[[:space:]]*:.*/, "", c); gsub(/["\047]/, "", c)
+      if ((c in q) && ++v[c] == 2) print c }' "$f"
 }
 
 confere_e8_terminal() {
