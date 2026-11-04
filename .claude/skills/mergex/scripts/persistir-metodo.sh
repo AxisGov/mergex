@@ -824,15 +824,46 @@ prova_e9_merge
 # passava por fechamento (no Conselhos, depois de uma reconciliação pós-E8 o
 # ENTREGA.md ficou `estado: aberto` com o PR publicado e mesclado). Vale nos
 # modos persistir e verificar, antes do noop (08-registro.md, campos terminais).
+
+# data_do_calendario <AAAA-MM-DD> — a data existe (mês 01-12, dia do mês, 29 de
+# fevereiro só em ano bissexto). Só aritmética: `date -d` não é o mesmo no BSD.
+data_do_calendario() {
+  [[ "$1" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]] || return 1
+  local a=$((10#${BASH_REMATCH[1]})) m=$((10#${BASH_REMATCH[2]})) d=$((10#${BASH_REMATCH[3]})) dm
+  case "$m" in
+    1|3|5|7|8|10|12) dm=31 ;;
+    4|6|9|11) dm=30 ;;
+    2) dm=28; { [ $((a % 4)) = 0 ] && [ $((a % 100)) != 0 ]; } || [ $((a % 400)) = 0 ] && dm=29 ;;
+    *) return 1 ;;
+  esac
+  [ "$d" -ge 1 ] && [ "$d" -le "$dm" ]
+}
+
+# chaves_repetidas <arquivo> <chave...> — as chaves que aparecem mais de uma vez
+# no frontmatter. O catalogo_fm lê a primeira, e um leitor YAML comum, a última.
+chaves_repetidas() {
+  local f="$1"; shift
+  awk -v chaves="$*" '
+    BEGIN { n = split(chaves, k, " "); for (i = 1; i <= n; i++) q[k[i]] = 1 }
+    NR == 1 { if ($0 !~ /^---[[:space:]]*\r?$/) exit; next }
+    /^---[[:space:]]*\r?$/ { exit }
+    { c = $0; sub(/:.*/, "", c); if ((c in q) && ++v[c] == 2) print c }' "$f"
+}
+
 confere_e8_terminal() {
   [ "$CHECKPOINT" = e8 ] || return 0
   [ "$MODO" = listar ] && return 0
-  local est por ent cau push
+  local est por ent cau push rep
+  rep="$(chaves_repetidas "$RAIZ/$ENTREGA" estado portao falhas_portao causa entregue_em push_feito | tr '\n' ' ')"
+  [ -z "$rep" ] || para "e8 com chave terminal repetida no frontmatter de $ENTREGA (${rep% }): cada campo terminal aparece uma vez (CodeAnt no mergex#76)" # guarda:E8TERM
   est="$(catalogo_fm "$RAIZ/$ENTREGA" estado)"; por="$(catalogo_fm "$RAIZ/$ENTREGA" portao)"
   ent="$(catalogo_fm "$RAIZ/$ENTREGA" entregue_em)"; cau="$(catalogo_fm "$RAIZ/$ENTREGA" causa)"
   push="$(catalogo_fm "$RAIZ/$ENTREGA" push_feito)"
   case "$est" in
     entregue)
+      if [[ "$ent" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && ! data_do_calendario "$ent"; then
+        para "e8 com estado: entregue e entregue_em $ent, que não é uma data do calendário" # guarda:E8TERM
+      fi
       # push_feito é true ou false: false é legítimo sem remoto (08-registro), mas tem de existir
       [ "$por" = pronto ] && [[ "$ent" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && [ "$cau" = null ] \
         && { [ "$push" = true ] || [ "$push" = false ]; } \
