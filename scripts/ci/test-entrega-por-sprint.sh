@@ -484,6 +484,20 @@ pm "$d" e9-merge
   && [ "$(git -C "$d" diff --name-only HEAD~1 HEAD)" = "$e9e" ]
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
 confere 'e9-merge persiste o registro do merge da sprint 01, só o ENTREGA.md, com Metodo: e9-merge' "$r"
+# o conteúdo provado é o que entra: um escritor entre a prova e o `git add`
+# (aqui, um git falso que escreve no ENTREGA.md logo antes do add) não commita
+mkdir -p "$aux/shim-add"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'if [ "${1:-}" = add ] && [ "${2:-}" = -- ] && [ "${3:-}" = %s ]; then printf '"'"'\\nNota escrita depois da prova.\\n'"'"' >> "$3"; fi\n' "$e9e"
+  printf 'exec %q "$@"\n' "$(command -v git)"; } > "$aux/shim-add/git"
+chmod +x "$aux/shim-add/git"
+d="$aux/r9-corrida"; cp -R "$aux/r9" "$d"
+h="$(git -C "$d" rev-parse HEAD)"
+PATH="$aux/shim-add:$PATH" pm "$d" e9-merge
+[ "$rc" = 1 ] && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ] && grep -q 'mudou entre a prova' "$aux/pm.err" \
+  && grep -q 'Nota escrita depois da prova' "$d/$e9e"
+r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
+confere 'e9-merge recusa o ENTREGA.md que mudou entre a prova e o git add, sem commitar e sem desfazer a escrita' "$r"
 # a base histórica que o --completar-base preenche também
 d="$aux/r9-base"; cp -R "$aux/r9-ok" "$d"
 le_repo "$d"; pl="$(grep '^pr=planejamento' "$aux/out")"
@@ -551,6 +565,12 @@ confere 'e9-merge em ENTREGA.md CRLF com o registro de outro dia' "$r"
 grep -q -- '--checkpoint e9-merge' "$ref/09-revisao.md" && grep -q 'checkpoint `e9-merge`' "$ref/00-abertura.md" \
   && grep -q 'estado terminal' "$ref/08-registro.md"
 confere '09-revisao manda persistir o registro pelo e9-merge, 00-abertura dá a ordem, 08-registro exige o terminal no e8' $?
+# o passo 7 do E9 chama os dois scripts pelo caminho, como o bloco do passo 2: o
+# nome solto dá "command not found" fora do PATH (CodeAnt no conselhos#256)
+grep -Fq '`bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --registrar-merge --entrega' "$ref/09-revisao.md" \
+  && grep -Fq '`bash .claude/skills/mergex/scripts/persistir-metodo.sh --persistir --entrega' "$ref/09-revisao.md" \
+  && ! grep -Eq '^ +`(entrega-de-planejamento|persistir-metodo)\.sh ' "$ref/09-revisao.md" "$ref/00-abertura.md"
+confere '09-revisao passo 7 e 00-abertura: entrega-de-planejamento e persistir-metodo pelo caminho, nunca pelo nome solto' $?
 
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
