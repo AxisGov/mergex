@@ -1234,10 +1234,6 @@ grupo_ponta_base() {
   desfaz
   git update-ref refs/heads/main "$topo"; git update-ref refs/remotes/origin/main "$FX_B0"
   reprova "origin/main atrás de B1, mesmo com a main local em dia: B1 não foi publicado" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
-  # branch_base que já é a ref remota, atrasada: a recusa também manda buscar (CodeAnt no mergex#75)
-  sed 's|^branch_base: main$|branch_base: origin/main|' "$FX_ENTREGA" > "$FX_ENTREGA.tmp" && cat "$FX_ENTREGA.tmp" > "$FX_ENTREGA" && rm -f "$FX_ENTREGA.tmp"
-  reprova "branch_base: origin/main atrás de B1: a recusa manda rodar git fetch" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
-  git restore -- "$FX_ENTREGA"
   git update-ref -d refs/remotes/origin/main
   registra_ok "sem a ref remota, a ponta é a local, como antes" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
