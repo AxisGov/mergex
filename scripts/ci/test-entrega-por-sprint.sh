@@ -498,6 +498,16 @@ PATH="$aux/shim-add:$PATH" pm "$d" e9-merge
   && grep -q 'Nota escrita depois da prova' "$d/$e9e"
 r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
 confere 'e9-merge recusa o ENTREGA.md que mudou entre a prova e o git add, sem commitar e sem desfazer a escrita' "$r"
+# core.autocrlf=true: o blob é LF e o disco é CRLF; o replay parte do ENTREGA.md
+# de HEAD como o checkout o escreve, e o commit leva o blob LF de sempre
+d="$aux/r9-autocrlf"; cp -R "$aux/r9" "$d"
+g -C "$d" config core.autocrlf true
+sed 's/$/\r/' "$d/$e9e" > "$aux/e.tmp" && cat "$aux/e.tmp" > "$d/$e9e"
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge' \
+  && ! git -C "$d" show "HEAD:$e9e" | grep -q $'\r' && [ -z "$(git -C "$d" status --porcelain)" ]
+r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
+confere 'e9-merge com core.autocrlf=true: disco CRLF, blob LF, commit do registro' "$r"
 # a base histórica que o --completar-base preenche também
 d="$aux/r9-base"; cp -R "$aux/r9-ok" "$d"
 le_repo "$d"; pl="$(grep '^pr=planejamento' "$aux/out")"
