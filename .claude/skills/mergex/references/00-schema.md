@@ -356,11 +356,11 @@ grava `seq: 1`.
 Uma interpretação mecânica só, num script só — `scripts/sequencia-de-commits.sh`:
 
 ```
-sequencia-de-commits.sh --ler <ENTREGA.md>     # ordem_efetiva, seq, task, commit por item
-sequencia-de-commits.sh --validar <ENTREGA.md> # a invariante acima; PARA quando quebra
-sequencia-de-commits.sh --proximo <ENTREGA.md> # o maior seq efetivo + 1
-sequencia-de-commits.sh --acrescentar <ENTREGA.md> <task> <commit> [<revisao>]
-sequencia-de-commits.sh --revisao <valor>      # o valor de revisao como seria gravado
+bash .claude/skills/mergex/scripts/sequencia-de-commits.sh --ler <ENTREGA.md>     # ordem_efetiva, seq, task, commit por item
+bash .claude/skills/mergex/scripts/sequencia-de-commits.sh --validar <ENTREGA.md> # a invariante acima; PARA quando quebra
+bash .claude/skills/mergex/scripts/sequencia-de-commits.sh --proximo <ENTREGA.md> # o maior seq efetivo + 1
+bash .claude/skills/mergex/scripts/sequencia-de-commits.sh --acrescentar <ENTREGA.md> <task> <commit> [<revisao>]
+bash .claude/skills/mergex/scripts/sequencia-de-commits.sh --revisao <valor>      # o valor de revisao como seria gravado
 ```
 
 - **`--acrescentar` é o escritor do E1** (e do E1 tardio). Ele acrescenta no **fim**, com `seq`,

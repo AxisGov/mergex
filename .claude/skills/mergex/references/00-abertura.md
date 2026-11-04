@@ -437,7 +437,7 @@ replanejamento (portão bloqueado → replaneja → F3/F4/F5 → F6 de novo → 
   `sprint: planejamento`, `url: null`, `estado: null`, `merge_sha: null`, `merge: null`,
   `base_sha: null`
   (`00-schema.md`, "A entrega de planejamento"). Confira a gravação com
-  `entrega-de-planejamento.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md`: tem de dizer
+  `bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md`: tem de dizer
   `planejamento=sim`
 
 Repositório sem versionador (passo 1): `base_validada_sha` e `origem_base` ficam `null`, como `branch` e `branch_base`.

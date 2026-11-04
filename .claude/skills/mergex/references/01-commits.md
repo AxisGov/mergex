@@ -162,11 +162,11 @@ Ele recusa `.`, `-A` e `-u`: o staging continua sendo por caminho explícito.
 **A varredura de segredo (passo 2) é julgamento, e roda DENTRO da seção** — ela lê `git diff --cached`, que só existe depois do staging. Para isso a seção abre em dois tempos, com a mesma trava atravessando os dois:
 
 ```
-bash .../fechamento-do-e1.sh --preparar --entrega <ENTREGA.md> \
+bash .claude/skills/mergex/scripts/fechamento-do-e1.sh --preparar --entrega <ENTREGA.md> \
   --task <id> --mensagem <arquivo> -- <caminho-1> ...
 # imprime token=<...>; a trava CONTINUA adquirida
 # → varredura de segredo sobre `git diff --cached`
-bash .../fechamento-do-e1.sh --concluir --entrega <ENTREGA.md> \
+bash .claude/skills/mergex/scripts/fechamento-do-e1.sh --concluir --entrega <ENTREGA.md> \
   --task <id> --mensagem <arquivo> --token <token>
 ```
 
@@ -429,7 +429,7 @@ Trabalho: <trabalho_id>
 Metodo: retomar-v9-predecessores
 ```
 
-**7. `e9-merge`, logo depois de o E9 registrar o merge de um PR de planejamento ou de sprint.** Persiste somente `docs/entregas/<trabalho_id>/ENTREGA.md`, e só a transição que `entrega-de-planejamento.sh --registrar-merge` (ou `--completar-base`) grava (DM-311):
+**7. `e9-merge`, logo depois de o E9 registrar o merge de um PR de planejamento ou de sprint.** Persiste somente `docs/entregas/<trabalho_id>/ENTREGA.md`, e só a transição que `entrega-de-planejamento.sh --registrar-merge` (ou `--completar-base`) grava (DM-311). O commit leva o conteúdo que a prova leu: se o `ENTREGA.md` mudar entre a prova e o `git add`, o executor para sem commitar e preserva o stage (DM-314):
 
 ```
 chore(mergex): persiste metodo e9-merge
