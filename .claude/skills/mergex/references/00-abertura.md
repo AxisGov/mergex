@@ -99,7 +99,8 @@ e em `por_trabalho`. Entrega com `reconciliacoes` não vazio (a main entrou na b
 planejamento por reconciliação) não é reancorada: a base dela vem da cadeia, e o E0 recusa.
 
 As três pré-condições e a base nova, em toda retomada sem `--planejamento` (`<base>` é a base
-buscada, por exemplo `origin/main`). Saída 0 com as duas linhas: grave-as. Saída 0 sem nada: não
+buscada: a ref remota depois do `git fetch`, por exemplo `origin/main`, e não a branch local, que
+numa worktree pode estar atrás — DM-312). Saída 0 com as duas linhas: grave-as. Saída 0 sem nada: não
 é a primeira sprint depois do planejamento, e a base fica como está. Saída 1: recusa, sem escrever
 nada. Saída 2: entrega ilegível ou base inexistente; relate o motivo.
 
