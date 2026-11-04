@@ -296,7 +296,7 @@ valida `Trabalho:` + `Metodo: e8`, sem `Task:`. Sem mudanças elegíveis devolve
 cria commit vazio. **Antes, inclusive no `noop` e no `--verificar`, ele exige o estado terminal
 (DM-311):** `estado: entregue` com `portao: pronto`, `entregue_em` AAAA-MM-DD, `causa: null` e `push_feito`
 `true` ou `false`, ou `estado: bloqueado` com `portao: bloqueado`, a `causa` que `falhas_portao`
-deriva (`causa-do-portao.sh --validar`), `entregue_em: null` e `push_feito: false`. Um `ENTREGA.md` que voltou a `aberto` (uma reconciliação pós-E8, por exemplo)
+deriva (`causa-do-portao.sh --validar`), `entregue_em: null` e `push_feito: false`. A `entregue_em` é uma data do calendário, e cada campo terminal aparece uma vez no frontmatter. Um `ENTREGA.md` que voltou a `aberto` (uma reconciliação pós-E8, por exemplo)
 não fecha: grave de novo os campos terminais. O commit não entra em `ENTREGA.commits`, não consome `seq` e não inclui produto.
 
 ### Passo 3 — Publicar o commit final
