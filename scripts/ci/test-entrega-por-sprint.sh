@@ -610,6 +610,22 @@ for o in sprintx runx; do
   confere "e9-merge na entrega por trabalho ($o) recusa com a regra da DM-317, sem commitar" "$r"
   git -C "$d" checkout -q -- docs/entregas/plan/ENTREGA.md
 done
+# A entrega por sprint entre o planejamento e a sprint 01 também tem sprint_atual:
+# null, e o reparo --completar-base dela segue pelo e9-merge (Codex).
+d="$aux/entre-sprints"; repo "$d" por_sprint
+le_repo "$d"; pl="$(grep '^pr=planejamento' "$aux/out")"
+psha="$(printf '%s' "$pl" | cut -f3)"; pbase="$(printf '%s' "$pl" | cut -f4)"
+awk -v b="$pbase" '/^sprint_atual: / { print "entrega: por_sprint"; print "sprint_atual: null"; next }
+  { sub("^    base_sha: " b "$", "    base_sha: null"); print }' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e"
+g -C "$d" add -A; g -C "$d" commit -q -m 'docs: entre o planejamento e a sprint 01, item legado sem base' -m 'Trabalho: plan'
+le_repo "$d"
+grep -qx 'sprint_atual=null' "$aux/out" && grep -qx 'entrega=por_sprint' "$aux/out"
+confere 'controle: entrega por sprint com sprint_atual null antes da sprint 01' $?
+(cd "$d" && bash "$leitor" --completar-base planejamento --merge-sha "$psha" --base-sha "$pbase" --entrega "$e9e") >/dev/null 2>&1
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e9-merge persiste o --completar-base da entrega por sprint entre o planejamento e a sprint 01' "$r"
 
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

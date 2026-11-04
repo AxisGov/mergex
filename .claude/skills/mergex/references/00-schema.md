@@ -633,7 +633,7 @@ Um `ENTREGA.md` gravado antes de `causa` e `falhas_portao` existirem, **sem as d
   duas chaves;
 - **não há migração em massa**: vale a regra de migração abaixo. A mergex acrescenta as chaves na
   próxima vez que gravar aquele arquivo — e só grava onde o valor é `null`/`[]` por definição (E0
-  na retomada, E9 atualizando `pr_estado` de uma entrega `entregue`). **Um bloqueio legado nunca
+  na retomada, E9 atualizando `pr_estado` de uma entrega `entregue` de planejamento ou de sprint). **Um bloqueio legado nunca
   ganha causa retroativa**: a causa só existe quando o portão roda de novo.
 
 Um arquivo com **uma** das duas chaves e sem a outra não é legado: é gravação incompleta, e
