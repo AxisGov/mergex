@@ -1456,17 +1456,21 @@ estrutura_resto "$M" "$B0" || exit 1
 # (`main`), a ref remota refs/remotes/<remoto>/<branch_base> é exigida quando
 # existe: numa worktree, a branch local da base fica atrás sem ninguém notar, e a
 # local em dia sozinha não prova que B1 foi publicado. O <remoto> é o da branch
-# atual, ou `origin`. `branch_base` que já é ref remota (`origin/main`) ou não tem
-# ref remota correspondente vale como está.
+# atual, ou `origin`. `refs/heads/main` é a mesma main local e segue a mesma regra
+# (CodeAnt no mergex#76). `branch_base` que já é ref remota (`origin/main`), outra
+# ref completa, ou que não tem ref remota correspondente vale como está.
 PONTA_REF="$BRANCH_BASE"
 if ! g rev-parse --verify -q "refs/remotes/$BRANCH_BASE^{commit}" >/dev/null 2>&1; then
   REMOTO_BASE="$(g config "branch.$(g branch --show-current 2>/dev/null).remote" 2>/dev/null)" || REMOTO_BASE=""
   [ -n "$REMOTO_BASE" ] && [ "$REMOTO_BASE" != . ] || REMOTO_BASE=origin
   case "$BRANCH_BASE" in
-    refs/*) ;;
-    *) ! g rev-parse --verify -q "refs/remotes/$REMOTO_BASE/$BRANCH_BASE^{commit}" >/dev/null 2>&1 \
-         || PONTA_REF="refs/remotes/$REMOTO_BASE/$BRANCH_BASE" ;;
+    refs/heads/?*) NOME_BASE="${BRANCH_BASE#refs/heads/}" ;;
+    refs/*) NOME_BASE="" ;;
+    *) NOME_BASE="$BRANCH_BASE" ;;
   esac
+  if [ -n "$NOME_BASE" ] && g rev-parse --verify -q "refs/remotes/$REMOTO_BASE/$NOME_BASE^{commit}" >/dev/null 2>&1; then
+    PONTA_REF="refs/remotes/$REMOTO_BASE/$NOME_BASE"
+  fi
 fi
 PONTA_BASE="$(g rev-parse --verify -q "$PONTA_REF^{commit}")" || estrutura base "ref de base $PONTA_REF ilegível"
 g merge-base --is-ancestor "$B1" "$PONTA_BASE" 2>/dev/null \
