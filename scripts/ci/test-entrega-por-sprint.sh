@@ -572,7 +572,11 @@ nomes="$(cd "$scripts" && ls ./*.sh | sed 's|^\./||; s|\.sh$||' | paste -sd'|' -
 soltos="$(awk -v re="(^|[ \t(\"/])(bash )?([.][.][.]/)?($nomes)[.]sh( |$)" '
   FNR == 1 { dentro = 0 }
   /^ *```/ { dentro = !dentro; next }
-  (dentro || /^ +`[a-z-]+[.]sh /) && $0 ~ re && index($0, ".claude/skills/mergex/scripts/") == 0 { print FILENAME ":" FNR }
+  (dentro || /^ +`[a-z-]+[.]sh /) {
+    # cada chamada pelo caminho sai antes da busca: a linha que tem uma não isenta a outra
+    l = $0; gsub(/[.]claude\/skills\/mergex\/scripts\/[a-z0-9-]+[.]sh/, "<caminho>", l)
+    if (l ~ re) print FILENAME ":" FNR
+  }
 ' "$ref"/*.md "$ref"/integracao/*.md "$raiz/.claude/skills/mergex/SKILL.md" "$raiz"/.claude/commands/*.md)"
 grep -Fq 'Os scripts não estão no PATH.' "$raiz/.claude/skills/mergex/SKILL.md" \
   && grep -Fq '`bash .claude/skills/mergex/scripts/persistir-metodo.sh --persistir --entrega' "$ref/09-revisao.md" \
