@@ -613,14 +613,45 @@ grupo_lifecycle() {
     && ok 'metodo de outro trabalho permanece fora do checkpoint' \
     || falha 'checkpoint absorveu metodo de outro trabalho'
 
-  printf '\nestado: entregue\n' >> "$repo/docs/entregas/ft-m2/ENTREGA.md"
+  # o terminal no frontmatter, com os campos que o e8 exige (DM-311); antes, a linha
+  # ia para o corpo e o ENTREGA.md seguia `estado: aberto`
+  terminal() { # <estado> <portao> <causa> <entregue_em> <push_feito>
+    awk -v e="$1" -v p="$2" -v c="$3" -v d="$4" -v f="$5" '
+      /^estado:/ && !x { print "estado: " e; print "portao: " p; print "falhas_portao: " (c == "null" ? "[]" : "[v1]"); print "causa: " c; print "entregue_em: " d; print "push_feito: " f; x = 1; next }
+      /^(portao|falhas_portao|causa|entregue_em|push_feito):/ { next }
+      { print }' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/e.tmp" && mv "$repo/e.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
+  }
+  metodo "$repo" --verificar sprintx e8 >/dev/null 2>&1; rc=$?
+  [ "$rc" = 1 ] && ok 'E8 com estado: aberto nao fecha (DM-311)' || falha "E8 aberto passou no verificar (rc=$rc)"
+  terminal bloqueado bloqueado tarefa_nao_concluida null false
   metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
-  [ "$rc" = 0 ] && git -C "$repo" show HEAD:docs/entregas/ft-m2/ENTREGA.md | grep -q 'estado: entregue' \
-    && ok 'E8 entregue persiste o terminal' || falha 'E8 entregue nao ficou duravel'
-  printf '\nestado: bloqueado\n' >> "$repo/docs/entregas/ft-m2/ENTREGA.md"
-  metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
-  [ "$rc" = 0 ] && git -C "$repo" show HEAD:docs/entregas/ft-m2/ENTREGA.md | grep -q 'estado: bloqueado' \
+  [ "$rc" = 0 ] && git -C "$repo" show HEAD:docs/entregas/ft-m2/ENTREGA.md | grep -q '^estado: bloqueado$' \
     && ok 'E8 bloqueado persiste o terminal' || falha 'E8 bloqueado nao ficou duravel'
+  terminal entregue bloqueado null 2026-09-22 true
+  metodo "$repo" --persistir sprintx e8 >/dev/null 2>&1; rc=$?
+  [ "$rc" = 1 ] && ok 'E8 entregue com portao bloqueado nao fecha' || falha "E8 entregue incoerente persistiu (rc=$rc)"
+  # a data do entregue_em é do calendário, não só do formato (CodeAnt no mergex#76)
+  for dia in 2026-99-99 2026-02-30 2027-02-29 0000-02-29 2026-00-10 2026-01-00; do
+    terminal entregue pronto null "$dia" true
+    saida="$(metodo "$repo" --verificar sprintx e8 2>&1)"; rc=$?
+    [ "$rc" = 1 ] && case "$saida" in *"não é uma data do calendário"*) true ;; *) false ;; esac \
+      && ok "E8 entregue com entregue_em $dia nao fecha" || falha "E8 entregue_em $dia passou (rc=$rc; $saida)"
+  done
+  terminal entregue pronto null 2028-02-29 true
+  saida="$(metodo "$repo" --verificar sprintx e8 2>&1)"
+  case "$saida" in *"não é uma data do calendário"*) falha "29 de fevereiro de ano bissexto recusado: $saida" ;; *) ok 'E8 aceita 29 de fevereiro de ano bissexto como data' ;; esac
+  # chave terminal repetida: o catalogo_fm lê a primeira, um leitor YAML a última
+  # a mesma chave em grafia YAML equivalente (aspas, espaço antes do `:`, CRLF) também conta (Codex)
+  for repetida in 'estado: entregue' '"estado": entregue' "'estado': entregue" 'estado : entregue' $'estado: entregue\r'; do
+    terminal bloqueado bloqueado tarefa_nao_concluida null false
+    # a repetida da volta anterior sai: cada volta prova só a sua grafia
+    awk -v r="$repetida" '/^estado:/ && !x { print; print r; x = 1; next } x && /^["'"'"']?estado["'"'"']?[[:space:]]*:/ { next } { print }' "$repo/docs/entregas/ft-m2/ENTREGA.md" > "$repo/e.tmp" \
+      && mv "$repo/e.tmp" "$repo/docs/entregas/ft-m2/ENTREGA.md"
+    saida="$(metodo "$repo" --persistir sprintx e8 2>&1)"; rc=$?
+    [ "$rc" = 1 ] && case "$saida" in *"chave terminal repetida"*estado*) true ;; *) false ;; esac \
+      && ok "E8 com estado repetido no frontmatter nao fecha ($(printf '%q' "$repetida"))" \
+      || falha "E8 com chave repetida passou ($(printf '%q' "$repetida"); rc=$rc; $saida)"
+  done
 
   repo="$D/lifecycle-stage"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
@@ -997,7 +1028,7 @@ grupo_integration() {
 
   grep -Fq 'persistir-metodo.sh' "$skill" \
     && ok 'SKILL torna o lifecycle executavel' || falha 'SKILL nao aponta ao executor de metodo'
-  grep -Fq 'Metodo: pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8' "$commits" \
+  grep -Fq 'Metodo: pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8' "$commits" \
     && ok 'E1 documenta commit de metodo como classe propria' || falha 'E1 ainda nao define a classe metodo'
   ! grep -Fq 'Isto **não é uma etapa nova**: é o E1' "$commits" \
     && ok 'commit de metodo nao e descrito como E1 tardio' || falha 'reference ainda mistura metodo com E1'

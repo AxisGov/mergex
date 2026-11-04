@@ -21,6 +21,15 @@ mostra() { sed 's/^/        /' "$@"; }
 
 aux="$(mktemp -d)"; trap 'rm -rf "$aux"' EXIT
 g() { git -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"; }
+# e9 <dir> — o registro do E9 persistido pelo checkpoint e9-merge (DM-311), como o
+# passo 7 do 09-revisao manda; antes, o teste commitava à mão, sem Metodo:
+e9() {
+  (cd "$1" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+    bash "$scripts/persistir-metodo.sh" --persistir --entrega docs/entregas/plan/ENTREGA.md \
+      --origem sprintx --trabalho plan --checkpoint e9-merge) >"$aux/e9.out" 2>"$aux/e9.err" \
+    || { mostra "$aux/e9.err"; return 1; }
+  git -C "$1" log -1 --format=%B | grep -qx 'Metodo: e9-merge' || { echo "        (o commit do e9-merge sem Metodo: e9-merge)"; return 1; }
+}
 
 # bloco <arquivo> <marca> — o bloco cercado do reference que contém a marca
 bloco() {
@@ -162,6 +171,8 @@ repo() {
   mkdir -p "$d/docs/sprintx/features/plan/sprint-01" "$d/docs/sprintx/features/plan/sprint-02"
   printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: planejamento' 'trabalho_id: plan' \
     "entrega: $2" '---' > "$d/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
+  printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: orquestrador' 'trabalho_id: plan' '---' \
+    > "$d/docs/sprintx/features/plan/ORQUESTRADOR.md"
   printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
     'tasks:' '  - id: T-01.01' '    status: pendente' '    arquivos:' '      cria: [src/b.ts]' \
     '      altera: []' '---' > "$d/docs/sprintx/features/plan/sprint-01/tasks.md"
@@ -190,7 +201,7 @@ prs:
   g -C "$d" switch -q feature/plan
   (cd "$d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m" --base-sha "$b") >/dev/null \
     || echo "        (registro do planejamento falhou em $d)"
-  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): merge do planejamento' -m 'Trabalho: plan'
+  e9 "$d" || quebra "checkpoint e9-merge do registro do planejamento em $d"
   g -C "$d" merge -q --no-edit main
 }
 
@@ -245,7 +256,7 @@ fecha01() {
   g -C "$d" switch -q feature/plan
   (cd "$d" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md --merge-sha "$m" --base-sha "$b") >/dev/null \
     || echo "        (registro da sprint 01 falhou em $d)"
-  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): merge da sprint 01' -m 'Trabalho: plan'
+  [ "${3:-}" = sem-e9 ] || e9 "$d" || quebra "checkpoint e9-merge do registro da sprint 01 em $d"
 }
 
 # a sprint 01 só abre com o planejamento merged
@@ -329,6 +340,7 @@ repo "$aux/r2" por_sprint
 abre "$aux/r2" 01; task "$aux/r2" src/b.ts T-01.01
 e8 "$aux/r2" https://github.com/dono/repo/pull/2 aberto
 g -C "$aux/r2" add -A; g -C "$aux/r2" commit -q -m 'docs(mergex): E8' -m 'Trabalho: plan'
+cp -R "$aux/r2" "$aux/r9"; cp -R "$aux/r2" "$aux/r9c"
 fecha01 "$aux/r2" merge
 g -C "$aux/r2" merge -q --no-edit main
 
@@ -445,6 +457,100 @@ confere 'CI executa a bancada de entrega por sprint' $?
 grep -Fq 'rev-list --reverse --topo-order --parents "$HEAD_SHA"' "$scripts/portao-v9.sh" \
   && ! grep -Fq 'done 5< "$TMP_DIR/v-ordem"' "$scripts/portao-v9.sh"
 confere 'V9 verifica rebaixamento em uma travessia do grafo, sem pares quadraticos' $?
+
+# DM-311: o e9-merge persiste só a transição que o E9 grava, e o e8 exige o estado terminal
+pm() { # <dir> <checkpoint> [persistir|verificar] — o persistir-metodo; rc em $rc
+  (cd "$1" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+    bash "$scripts/persistir-metodo.sh" --"${3:-persistir}" --entrega docs/entregas/plan/ENTREGA.md \
+      --origem sprintx --trabalho plan --checkpoint "$2") >"$aux/pm.out" 2>"$aux/pm.err"; rc=$?
+}
+fecha01 "$aux/r9" merge sem-e9
+e9e="docs/entregas/plan/ENTREGA.md"
+for caso in alem outro naomerged; do
+  d="$aux/r9-$caso"; cp -R "$aux/r9" "$d"
+  case "$caso" in
+    alem) printf '\nNota fora do registro do E9.\n' >> "$d/$e9e" ;;
+    outro) printf 'x\n' > "$d/src/solto.ts" ;;
+    naomerged) awk '{ l[NR] = $0 } /^    estado: merged$/ { u = NR } END { for (i = 1; i <= NR; i++) print (i == u ? "    estado: aberto" : l[i]) }' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e" ;;
+  esac
+  h="$(git -C "$d" rev-parse HEAD)"; pm "$d" e9-merge
+  [ "$rc" = 1 ] && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
+  r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+  confere "e9-merge recusa ($caso) sem commitar nada" "$r"
+done
+d="$aux/r9-ok"; cp -R "$aux/r9" "$d"
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge' && [ -z "$(git -C "$d" status --porcelain)" ] \
+  && [ "$(git -C "$d" diff --name-only HEAD~1 HEAD)" = "$e9e" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e9-merge persiste o registro do merge da sprint 01, só o ENTREGA.md, com Metodo: e9-merge' "$r"
+# a base histórica que o --completar-base preenche também
+d="$aux/r9-base"; cp -R "$aux/r9-ok" "$d"
+le_repo "$d"; pl="$(grep '^pr=planejamento' "$aux/out")"
+psha="$(printf '%s' "$pl" | cut -f3)"; pbase="$(printf '%s' "$pl" | cut -f4)"
+awk -v b="$pbase" '{ sub("^    base_sha: " b "$", "    base_sha: null"); print }' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e"
+g -C "$d" add -A; g -C "$d" commit -q -m 'docs: item legado sem base' -m 'Trabalho: plan'
+(cd "$d" && bash "$leitor" --completar-base planejamento --merge-sha "$psha" --base-sha "$pbase" --entrega "$e9e") >/dev/null 2>&1
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e9-merge persiste a base histórica do --completar-base' "$r"
+# o e8 sem estado terminal: recusa no verificar e no persistir (o noop não passa mais)
+d="$aux/r9-ok"
+pm "$d" e8 verificar; a="$rc"; pm "$d" e8; b="$rc"
+[ "$a" = 1 ] && [ "$b" = 1 ] && grep -q 'e8 sem estado terminal' "$aux/pm.err" && ! grep -qx 'noop=true' "$aux/pm.out"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 com estado: aberto recusa no verificar e no persistir, sem noop' "$r"
+d="$aux/r9-e8"; cp -R "$aux/r9-ok" "$d"
+sed -e 's/^estado: .*/estado: entregue/' -e 's/^portao: .*/portao: pronto/' -e 's/^entregue_em: .*/entregue_em: null/' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 1 ] && grep -q 'e8 com estado: entregue exige' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 com estado: entregue sem entregue_em recusa' "$r"
+# entregue sem push_feito: o campo é true ou false, mas tem de existir
+sed -i -e 's/^entregue_em: .*/entregue_em: 2026-11-03/' -e '/^push_feito:/d' "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 1 ] && grep -q 'push_feito: ausente' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 com estado: entregue sem push_feito recusa' "$r"
+# entregue com falha registrada: causa: null só vale com falhas_portao vazia
+printf '%s\n' 'push_feito: true' 'entregue_em: 2026-11-03' > "$aux/pf"; sed -i -e '/^estado: entregue$/r '"$aux/pf" -e 's/^falhas_portao: .*/falhas_portao: [v1]/' "$d/$e9e"
+grep -q '^falhas_portao:' "$d/$e9e" || sed -i 's/^estado: entregue$/estado: entregue\nfalhas_portao: [v1]/' "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 1 ] && grep -q 'falhas_portao que não bate com causa: null' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 com estado: entregue e falhas_portao não vazia recusa' "$r"
+# o bloqueado: a causa é a que falhas_portao deriva
+awk '/^estado:/ && !x { print "estado: bloqueado"; print "portao: bloqueado"; print "falhas_portao: [v1]"; print "causa: suite_reprovada"; print "entregue_em: null"; print "push_feito: false"; x = 1; next }
+  /^(portao|falhas_portao|causa|entregue_em|push_feito):/ { next } { print }' "$d/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 1 ] && grep -q 'não deriva de falhas_portao' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 bloqueado com causa que não deriva de falhas_portao recusa' "$r"
+sed -i 's/^causa: suite_reprovada$/causa: tarefa_nao_concluida/' "$d/$e9e"
+pm "$d" e8
+[ "$rc" = 0 ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e8 com o fechamento bloqueado completo, causa derivada de falhas_portao, persiste' "$r"
+# o E9 de ontem: o replay de hoje difere só na data de atualizado_em, também em CRLF
+d="$aux/r9-ontem"; cp -R "$aux/r9" "$d"
+sed -i 's/^atualizado_em: .*/atualizado_em: 2026-01-01/' "$d/$e9e"
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e9-merge aceita o registro do E9 feito noutro dia (só atualizado_em difere)' "$r"
+d="$aux/r9c"
+sed -i 's/$/\r/' "$d/$e9e"; g -C "$d" add -A; g -C "$d" commit -q -m 'docs: ENTREGA.md em CRLF' -m 'Trabalho: plan'
+fecha01 "$d" merge sem-e9
+sed -i 's/^atualizado_em: [0-9-]*\r$/atualizado_em: 2026-01-01\r/' "$d/$e9e"
+grep -q $'^atualizado_em: 2026-01-01\r$' "$d/$e9e" && pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e9-merge em ENTREGA.md CRLF com o registro de outro dia' "$r"
+
+grep -q -- '--checkpoint e9-merge' "$ref/09-revisao.md" && grep -q 'checkpoint `e9-merge`' "$ref/00-abertura.md" \
+  && grep -q 'estado terminal' "$ref/08-registro.md"
+confere '09-revisao manda persistir o registro pelo e9-merge, 00-abertura dá a ordem, 08-registro exige o terminal no e8' $?
 
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

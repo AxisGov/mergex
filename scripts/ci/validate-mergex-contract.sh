@@ -1476,16 +1476,16 @@ reconc_ref="$REF/11-reconciliacao-base.md"
 abertura_pr="$REF/07-abertura-pr.md"
 
 # O enum fechado de checkpoints é o mesmo na prosa e nos três executáveis.
-enum_cp='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8'
+enum_cp='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8'
 for f in "$skill" "$commits" "$registro"; do
   grep -Fq "$enum_cp" "$f" || fail "$f sem o enum de checkpoints novo"
 done
 [ -f "$reconc_ref" ] || fail "missing required file: $reconc_ref"
 for f in persistir-metodo.sh contrato-de-commit.sh catalogo-de-metodo.sh; do
-  grep -Fq 'pre-e2|reconciliacao-base|predecessores|retomar-v9-predecessores|pre-e6|e8' "$SKILL_DIR/scripts/$f" \
+  grep -Fq 'pre-e2|reconciliacao-base|predecessores|retomar-v9-predecessores|e9-merge|pre-e6|e8' "$SKILL_DIR/scripts/$f" \
     || fail "$SKILL_DIR/scripts/$f sem o enum de checkpoints novo"
 done
-for checkpoint in pre-e2 reconciliacao-base predecessores retomar-v9-predecessores pre-e6 e8; do
+for checkpoint in pre-e2 reconciliacao-base predecessores retomar-v9-predecessores e9-merge pre-e6 e8; do
   sed -n '1,35p' "$SKILL_DIR/scripts/catalogo-de-metodo.sh" | grep -Fq "$checkpoint" \
     || fail "catalogo-de-metodo.sh: o enum documentado não cita $checkpoint"
 done

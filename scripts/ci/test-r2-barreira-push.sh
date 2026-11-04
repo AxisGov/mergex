@@ -1248,6 +1248,8 @@ EOF
   edita_e "s/^portao_sha: .*/portao_sha: $(git rev-parse HEAD)/; s/^atualizado_em: .*/atualizado_em: 2026-10-09/"
   cp "$e" "$t/antes"; c0="$(git rev-parse HEAD)"
   for x in pre-e6 e8; do
+    # o e8 exige o terminal (DM-311): com ele gravado, a recusa que sobra é a do pre-push
+    [ "$x" = e8 ] && { edita_e 's/^estado: .*/estado: entregue/; s/^entregue_em: .*/entregue_em: 2026-10-09/'; cp "$e" "$t/antes"; }
     persiste --persistir "$x"; rc=$?
     [ "$rc" != 0 ] && [ "$(git rev-parse HEAD)" = "$c0" ] && [ -z "$(git diff --cached --name-only)" ] \
       && cmp -s "$e" "$t/antes" && printf '%s\n' "$PER_OUT" | grep -Fq 'pre-push sem prova funcional' \
@@ -1266,7 +1268,7 @@ EOF
   persiste --persistir pre-e6; rc=$?
   [ "$rc" = 0 ] && [ "$(git rev-parse HEAD)" != "$c0" ] && [ -z "$(git status --porcelain)" ] \
     && ok "pre-e6 persiste pronto com pre-push funcional (externo composto)" || falha "pre-e6 composto: rc=$rc $PER_OUT"
-  edita_e 's/^estado: .*/estado: entregue/; s/^push_feito: .*/push_feito: true/'
+  edita_e 's/^estado: .*/estado: entregue/; s/^push_feito: .*/push_feito: true/; s/^entregue_em: .*/entregue_em: 2026-10-09/'
   c0="$(git rev-parse HEAD)"
   persiste --persistir e8; rc=$?
   [ "$rc" = 0 ] && [ "$(git rev-parse HEAD)" != "$c0" ] && git log -1 --format=%B | grep -Fxq 'Metodo: e8' \

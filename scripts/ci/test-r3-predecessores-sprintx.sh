@@ -726,7 +726,7 @@ grupo_retomada() {
 }
 grupo_contrato() {
   local f enum
-  enum='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | pre-e6 | e8'
+  enum='pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8'
   for f in .claude/commands/mergex.md .claude/commands/mergex-check.md \
            .opencode/commands/mergex.md .opencode/commands/mergex-check.md; do
     grep -Fq 'predecessores-sprintx.sh' "$REPO/$f" \
@@ -768,7 +768,7 @@ grupo_contrato() {
   for f in .claude/skills/mergex/SKILL.md .claude/skills/mergex/references/01-commits.md \
            .claude/skills/mergex/references/08-registro.md .claude/skills/mergex/references/11-reconciliacao-base.md \
            .claude/hooks/README.md; do
-    grep -Fq "$enum" "$REPO/$f" && ok "$f publica o enum de seis checkpoints" \
+    grep -Fq "$enum" "$REPO/$f" && ok "$f publica o enum de sete checkpoints" \
       || falha "$f diverge do enum de checkpoints"
   done
   for dm in DM-187 DM-188 DM-189 DM-190; do
