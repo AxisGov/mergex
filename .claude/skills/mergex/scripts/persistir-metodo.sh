@@ -836,7 +836,10 @@ confere_e8_terminal() {
       # push_feito é true ou false: false é legítimo sem remoto (08-registro), mas tem de existir
       [ "$por" = pronto ] && [[ "$ent" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && [ "$cau" = null ] \
         && { [ "$push" = true ] || [ "$push" = false ]; } \
-        || para "e8 com estado: entregue exige portao: pronto, entregue_em AAAA-MM-DD, causa: null e push_feito true ou false (está portao: ${por:-ausente}, entregue_em: ${ent:-ausente}, causa: ${cau:-ausente}, push_feito: ${push:-ausente})" ;; # guarda:E8TERM
+        || para "e8 com estado: entregue exige portao: pronto, entregue_em AAAA-MM-DD, causa: null e push_feito true ou false (está portao: ${por:-ausente}, entregue_em: ${ent:-ausente}, causa: ${cau:-ausente}, push_feito: ${push:-ausente})" # guarda:E8TERM
+      # causa: null só com falhas_portao vazia: o portão pronto não tem falha
+      bash "$AQUI/causa-do-portao.sh" --validar "$RAIZ/$ENTREGA" >/dev/null 2>&1 \
+        || para "e8 com estado: entregue e falhas_portao que não bate com causa: null: rode causa-do-portao.sh --validar" ;; # guarda:E8TERM
     bloqueado)
       [ "$por" = bloqueado ] && [ -n "$cau" ] && [ "$cau" != null ] && [ "$ent" = null ] && [ "$push" = false ] \
         || para "e8 com estado: bloqueado exige portao: bloqueado, causa preenchida, entregue_em: null e push_feito: false (está portao: ${por:-ausente}, causa: ${cau:-ausente}, entregue_em: ${ent:-ausente}, push_feito: ${push:-ausente})" # guarda:E8TERM
