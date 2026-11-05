@@ -4,8 +4,9 @@
 #
 # O E5 da runx só roda depois da entrega aceita, e a essa altura a branch já foi
 # integrada. O fechamento vai numa branch própria, docs/<OC-ID>-fechamento, a
-# partir da base. ENTREGA.md não é tocado: `pr_estado` continua com o E9 ou com
-# uma pessoa, e o portão não seleciona o PR de fechamento.
+# partir da base. ENTREGA.md não é tocado: `pr_estado` fica com o retrato do E7
+# (a entrega da runx é por trabalho, DM-317), e o portão não seleciona o PR de
+# fechamento.
 #
 #   fechamento-pos-merge.sh --trabalho <pasta em docs/entregas> [--raiz <dir>]
 #

@@ -806,6 +806,12 @@ prova_e9_merge() {
   grep '^pr=' "$t/antes" | LC_ALL=C sort > "$t/antes.pr"
   grep '^pr=' "$t/depois" | LC_ALL=C sort > "$t/depois.pr"
   LC_ALL=C comm -13 "$t/antes.pr" "$t/depois.pr" > "$t/mudou"
+  # Nenhum item de `prs` mudou, fora de planejamento e de sprint: é o merge da entrega
+  # por trabalho, que o E9 não grava (DM-317). Entre o planejamento e a sprint 01 a
+  # entrega por sprint também tem sprint_atual=null, mas o --completar-base muda um item.
+  if [ ! -s "$t/mudou" ] && grep -qx 'sprint_atual=null' "$t/depois"; then
+    rm -rf "$t"; para "e9-merge: $ENTREGA é entrega por trabalho, e nela o E9 não grava pr_estado depois do merge (DM-317): o estado final é o do serviço, e a branch já integrada não recebe commit"
+  fi
   if [ "$(wc -l < "$t/mudou" | tr -d ' ')" != 1 ]; then
     rm -rf "$t"; para "e9-merge: o registro do E9 muda exatamente um item de prs; aqui mudaram $(LC_ALL=C comm -3 "$t/antes.pr" "$t/depois.pr" 2>/dev/null | wc -l | tr -d ' ') linha(s)"
   fi
