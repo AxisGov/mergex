@@ -155,6 +155,18 @@ printf '%s\n' '---' 'kind: planejamento' 'entrega: por_trabalho' '---' > "$aux/m
 bash "$leitor" --modo-efetivo --entrega "$aux/s01.md" --plano "$aux/m/trab.md" --projeto por_trabalho >"$aux/out" 2>"$aux/err"; rc=$?
 [ "$rc" = 0 ] && [ "$(linha entrega)" = por_sprint ] && [ "$(linha origem)" = registrada ]
 confere 'modo registrado uma vez: o 00-PLANEJAMENTO alterado depois nao muda o modo' $?
+# a base validada do --abrir-sprint é SHA local: o tamanho do formato do repositório (DM-315)
+for formato in sha1 sha256; do
+  git init -q --object-format="$formato" "$aux/oid-$formato"
+  h="$(printf 'x' | git -C "$aux/oid-$formato" hash-object --stdin)"
+  case "$formato" in sha1) outro="${h}000000000000000000000000" ;; sha256) outro="${h:0:40}" ;; esac
+  (cd "$aux/oid-$formato" && bash "$leitor" --abrir-sprint 02 --base-validada-sha "$outro" --entrega "$aux/s01.md") >"$aux/out" 2>"$aux/err"; rc=$?
+  [ "$rc" = 64 ] && grep -q 'base_validada_sha inválido' "$aux/err"
+  confere "$formato: --abrir-sprint recusa base_validada_sha no tamanho do outro formato" $?
+  (cd "$aux/oid-$formato" && bash "$leitor" --abrir-sprint 02 --base-validada-sha "$h" --entrega "$aux/s01.md") >"$aux/out" 2>"$aux/err"; rc=$?
+  [ "$rc" != 64 ] && ! grep -q 'base_validada_sha inválido' "$aux/err"
+  confere "$formato: --abrir-sprint aceita base_validada_sha de ${#h} hex como forma" $?
+done
 
 echo '== E0 --sprint, E8 e E9 num repositorio =='
 
