@@ -1251,6 +1251,37 @@ fi
 # ---------------------------------------------------------------------------
 # história cortada não prova nada: o raso para antes da trava e de qualquer prova
 arvore_recusa_raso || para 4 "estrutura[raso]: $ARVORE_ERRO" # guarda:EST
+
+# base_remota <branch_base> — NOME_BASE (o nome da branch, vazio para outra ref
+# completa) e REMOTO_BASE (o da branch atual, ou origin) da base em nome simples
+base_remota() {
+  REMOTO_BASE="$(g config "branch.$(g branch --show-current 2>/dev/null).remote" 2>/dev/null)" || REMOTO_BASE=""
+  [ -n "$REMOTO_BASE" ] && [ "$REMOTO_BASE" != . ] || REMOTO_BASE=origin
+  case "$1" in
+    refs/heads/?*) NOME_BASE="${1#refs/heads/}" ;;
+    refs/*) NOME_BASE="" ;;
+    *) NOME_BASE="$1" ;;
+  esac
+}
+# DM-321: a consulta ao servidor pela base sem ref remota roda ANTES da trava C5,
+# com a branch_base do ENTREGA.md de HEAD: a rede lenta ou um ssh que espera não
+# prendem o índice. Nunca interativa (GIT_TERMINAL_PROMPT=0); o ssh e as
+# credenciais do usuário ficam como estão. Sob a trava, o resultado só vale para a
+# mesma base e o mesmo remoto (DM-312, ponta da base, abaixo).
+CONSULTA_NOME=""; CONSULTA_REMOTO=""; CONSULTA_RC=""
+if bb_head="$(g cat-file blob "HEAD:$ENTREGA" 2>/dev/null)" && [ -n "$bb_head" ]; then
+  printf '%s\n' "$bb_head" > "$TMP_DIR/entrega-head"
+  bb_head="$(catalogo_fm "$TMP_DIR/entrega-head" branch_base)"
+  if [ -n "$bb_head" ] && ! g rev-parse --verify -q "refs/remotes/$bb_head^{commit}" >/dev/null 2>&1; then
+    base_remota "$bb_head"
+    if [ -n "$NOME_BASE" ] && ! g rev-parse --verify -q "refs/remotes/$REMOTO_BASE/$NOME_BASE^{commit}" >/dev/null 2>&1 \
+       && g remote get-url "$REMOTO_BASE" >/dev/null 2>&1; then
+      GIT_TERMINAL_PROMPT=0 g ls-remote --exit-code --heads "$REMOTO_BASE" "refs/heads/$NOME_BASE" >/dev/null 2>&1; CONSULTA_RC=$?
+      CONSULTA_NOME="$NOME_BASE"; CONSULTA_REMOTO="$REMOTO_BASE"
+    fi
+  fi
+fi
+
 SAIDA_TRAVA="$(adquirir reconciliacao-base)"; RC_TRAVA=$?
 [ "$RC_TRAVA" != 2 ] || para 2 'índice ocupado pela trava C5'
 [ "$RC_TRAVA" = 0 ] || para 1 'não foi possível adquirir a trava C5 do índice'
@@ -1475,28 +1506,21 @@ estrutura_resto "$M" "$B0" || exit 1
 # (DM-320).
 PONTA_REF="$BRANCH_BASE"
 if ! g rev-parse --verify -q "refs/remotes/$BRANCH_BASE^{commit}" >/dev/null 2>&1; then
-  REMOTO_BASE="$(g config "branch.$(g branch --show-current 2>/dev/null).remote" 2>/dev/null)" || REMOTO_BASE=""
-  [ -n "$REMOTO_BASE" ] && [ "$REMOTO_BASE" != . ] || REMOTO_BASE=origin
-  case "$BRANCH_BASE" in
-    refs/heads/?*) NOME_BASE="${BRANCH_BASE#refs/heads/}" ;;
-    refs/*) NOME_BASE="" ;;
-    *) NOME_BASE="$BRANCH_BASE" ;;
-  esac
+  base_remota "$BRANCH_BASE"
   if [ -n "$NOME_BASE" ] && g rev-parse --verify -q "refs/remotes/$REMOTO_BASE/$NOME_BASE^{commit}" >/dev/null 2>&1; then
     PONTA_REF="refs/remotes/$REMOTO_BASE/$NOME_BASE"
   elif [ -n "$NOME_BASE" ] && g remote get-url "$REMOTO_BASE" >/dev/null 2>&1; then
-    # roda sob a trava C5: nunca interativa (credencial que pediria senha falha na
-    # hora) e com prazo; falha e prazo vencido recusam, e `git fetch` antes evita a
-    # consulta. O ssh do usuário é mantido, com BatchMode e ConnectTimeout
-    SSH_BASE="${GIT_SSH_COMMAND:-$(g config core.sshCommand 2>/dev/null || printf ssh)}"
-    PRAZO=(); command -v timeout >/dev/null 2>&1 && PRAZO=(timeout 60)
-    GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_SSH_COMMAND="$SSH_BASE -o BatchMode=yes -o ConnectTimeout=20" \
-      ${PRAZO[@]+"${PRAZO[@]}"} git -c core.quotepath=false -c http.lowSpeedLimit=1 -c http.lowSpeedTime=20 \
-      ls-remote --exit-code --heads "$REMOTO_BASE" "refs/heads/$NOME_BASE" >/dev/null 2>&1; RC_LS=$?
+    # a consulta feita antes da trava, para esta mesma base e este mesmo remoto
+    if [ -n "$CONSULTA_RC" ] && [ "$CONSULTA_NOME" = "$NOME_BASE" ] && [ "$CONSULTA_REMOTO" = "$REMOTO_BASE" ]; then
+      RC_LS="$CONSULTA_RC"
+    else
+      RC_LS=sem
+    fi
     case "$RC_LS" in
       2) ;;
+      sem) estrutura base "a base $NOME_BASE de M não é a que o ENTREGA.md de HEAD declara, e o servidor não foi consultado por ela antes da trava: rode git fetch $REMOTO_BASE e registre de novo" ;; # guarda:EST
       0) estrutura base "a base $NOME_BASE existe em $REMOTO_BASE, mas refs/remotes/$REMOTO_BASE/$NOME_BASE não foi buscada: a branch local não prova que B1 foi publicado; rode git fetch $REMOTO_BASE e registre de novo" ;; # guarda:EST
-      *) estrutura base "a consulta a $REMOTO_BASE pela base $NOME_BASE falhou (ls-remote saiu $RC_LS; 124 é o prazo de 60 s): sem ela, não há prova de que a base não foi publicada; rode git fetch $REMOTO_BASE, ou repita com o remoto acessível" ;; # guarda:EST
+      *) estrutura base "a consulta a $REMOTO_BASE pela base $NOME_BASE falhou (ls-remote saiu $RC_LS): sem ela, não há prova de que a base não foi publicada; rode git fetch $REMOTO_BASE, ou repita com o remoto acessível" ;; # guarda:EST
     esac
   fi
 fi
