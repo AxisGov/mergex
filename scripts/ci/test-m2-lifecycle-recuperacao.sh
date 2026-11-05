@@ -553,6 +553,27 @@ grupo_lifecycle() {
   local repo pasta antes depois saida rc nomes corpo token trava staged segredo
   printf '\nLIFECYCLE — checkpoints idempotentes e fail-closed\n'
 
+  # área da base com nome que o Git cita (acento, TAB, aspas): o catálogo
+  # continua batendo com o que entrou no stage (DM-319)
+  local n area
+  n=0
+  for area in 'área.md' "$(printf 'com\ttab.md')" 'aspa"dupla.md'; do
+    n=$((n + 1)); repo="$D/lifecycle-citado-$n"
+    pasta="$(repo_catalogo "$repo" sprintx canonico)"
+    (
+      cd "$repo" || exit 1
+      A="$area" awk '{ sub(/arquivo: area com espaco\.md/, "arquivo: " ENVIRON["A"]); print }' \
+        "$pasta/base/00-INDICE.md" > indice.tmp && mv indice.tmp "$pasta/base/00-INDICE.md"
+      artefato "$pasta/base/$area" base_area ft-m2
+      git add -A && git commit -qm 'chore: área citada'
+    )
+    printf '\nmudanca\n' >> "$repo/$pasta/base/$area"
+    saida="$(metodo "$repo" --persistir sprintx pre-e2 2>&1)"; rc=$?
+    [ "$rc" = 0 ] && [ "$(git -C "$repo" show --format= --name-only -z HEAD | tr '\0' '\n' | sed '/^$/d')" = "$pasta/base/$area" ] \
+      && ok "pre-e2 persiste a area da base que o Git cita ($(printf '%s' "$area" | od -An -c | tr -s ' ' | cut -c1-40))" \
+      || falha "area citada $n (rc=$rc): $saida"
+  done
+
   repo="$D/lifecycle-principal"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"
   printf '\nappend da ultima task\n' >> "$repo/docs/entregas/ft-m2/ENTREGA.md"
