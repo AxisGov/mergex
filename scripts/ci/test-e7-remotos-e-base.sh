@@ -127,7 +127,14 @@ mkdir -p "$aux/bin"
 cat > "$aux/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 # GH_JA_EXISTE=1: o `pr create` falha como "PR já existe" e o `pr view` devolve a URL dele
-if [ "$1 $2" = "pr view" ]; then printf '%s\n' "$*" >> "$ARGS_GH.view"; echo https://github.com/acme/login/pull/7; exit 0; fi
+if [ "$1 $2" = "pr view" ]; then
+  printf '%s\n' "$*" >> "$ARGS_GH.view"
+  case "$*" in
+    *baseRefOid*) printf '%s %s\n' "${GH_BASE_NOME:-main}" "${GH_BASE_OID:-$(git rev-parse main)}" ;;
+    *) echo https://github.com/acme/login/pull/7 ;;
+  esac
+  exit 0
+fi
 printf '%s\n' "$@" > "$ARGS_GH"
 if [ "${GH_JA_EXISTE:-}" = 1 ]; then echo 'a pull request for branch "feature/x" into branch "main" already exists' >&2; exit 1; fi
 if [ "${GH_OUTRA_FALHA:-}" = 1 ]; then echo 'HTTP 403: Resource not accessible by integration' >&2; exit 1; fi
@@ -151,6 +158,8 @@ cat > "$aux/bin/git" <<GIT
 if [ "\${1:-}" = ls-remote ]; then
   printf '%s\t%s\n' "\${PONTA_REMOTA:-\$("$git_real" rev-parse HEAD)}" "\${3:-}"; exit 0
 fi
+# o fetch da base do PR existente: sem rede, os commits do teste já estão aqui
+if [ "\${1:-}" = fetch ]; then exit 0; fi
 exec "$git_real" "\$@"
 GIT
 chmod +x "$aux/bin/git"
@@ -300,6 +309,26 @@ GH_OUTRA_FALHA=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
 rm -f "$aux/args-gh.view"
 passo2 "$aux/existe" 'gh pr create'; rc=$?
 [ "$rc" = 0 ] && [ ! -e "$aux/args-gh.view" ] && passa 'PR criado: nao consulta o existente' || quebra "PR criado consultou o existente (rc $rc)"
+
+echo '== E7: o PR existente so e retomado se a base dele contem a base validada (DM-320) =='
+# a entrega empilhada: base validada num commit fora da main (a predecessora)
+d="$aux/existe"
+g "$d" switch -q -c feature/predecessora main && printf 'p\n' > "$d/p" && g "$d" add -A && g "$d" commit -q -m p
+pred="$(git -C "$d" rev-parse HEAD)"; g "$d" switch -q feature/x
+mkdir -p "$d/docs/entregas/x"; printf 'corpo\n' > "$d/docs/entregas/x/PR.md"
+printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$pred" > "$d/docs/entregas/x/ENTREGA.md"
+rm -f "$aux/args-gh.view"
+GH_JA_EXISTE=1 GH_BASE_NOME=main GH_BASE_OID="$(git -C "$d" rev-parse main)" passo2 "$d" 'gh pr create'; rc=$?
+[ "$rc" = 1 ] && grep -q 'DM-320' "$aux/p2.out" && ! grep -q 'PR existente retomado' "$aux/p2.out" \
+  && passa 'PR existente contra a main, sem a predecessora: nao retoma' \
+  || quebra "PR existente contra outra base retomado: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+GH_JA_EXISTE=1 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred" passo2 "$d" 'gh pr create'; rc=$?
+[ "$rc" = 0 ] && grep -q 'PR existente retomado' "$aux/p2.out" \
+  && passa 'PR existente contra a predecessora: retoma' || quebra "PR existente contra a predecessora: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$(git -C "$d" rev-parse main)" > "$d/docs/entregas/x/ENTREGA.md"
+GH_JA_EXISTE=1 GH_BASE_NOME=main GH_BASE_OID="$pred" passo2 "$d" 'gh pr create'; rc=$?
+[ "$rc" = 0 ] && grep -q 'PR existente retomado' "$aux/p2.out" \
+  && passa 'base do PR que contem a base validada (redirecionado, DM-245): retoma' || quebra "redirecionado: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
 
 printf -- '---------------------------------------------\n%s ok, %s falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = 0 ]

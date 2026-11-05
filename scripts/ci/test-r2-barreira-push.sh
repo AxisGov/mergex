@@ -1696,6 +1696,27 @@ grupo_ci() {
   done
   CI_BASE="$pn" ci_rc "ci: base igual ao SHA sem ENTREGA.md declarando: não aplicável (controle da regra de aplicabilidade)" 0 "$co" "$pn" feature/ft-rec
 
+  # DM-320: a base do PR tem de conter a base validada da entrega. O PR aberto
+  # contra outra base (a frente empilhada contra a main, levando a predecessora
+  # junto) barra; a base que contém a validada (a main andou, a predecessora
+  # mergeada e o PR redirecionado, DM-245) passa
+  b0="$(sed -n 's/^base_validada_sha: //p' "$d/docs/entregas/ft-rec/ENTREGA.md" | head -1)"
+  [ -n "$b0" ] && git -C "$co" merge-base --is-ancestor "$b0" "$mainsha" \
+    && ok "controle: a base validada está na main" || falha "controle: base validada ($b0) fora da main"
+  # uma base sem a validada: um commit da main que não a contém, ou, se ela é a
+  # raiz, um commit órfão
+  antes_b0="$(git -C "$co" rev-parse -q --verify "$b0~1^{commit}" 2>/dev/null)" || antes_b0="$orf"
+  git -C "$co" merge-base --is-ancestor "$b0" "$antes_b0" && falha "controle: a base escolhida contém a validada"
+  CI_BASE="$antes_b0" ci_rc "ci: base do PR que não contém a base validada da entrega barra (DM-320)" 1 "$co" "$vv" feature/ft-rec
+  case "$CI_OUT" in *motivo=base_do_pr_divergente*) ok "ci: motivo base_do_pr_divergente" ;; *) falha "base do PR divergente: $(printf '%s' "$CI_OUT" | tr '\n' '|')" ;; esac
+  ci_err_tem "ci: base do PR divergente: o diagnóstico manda abrir contra a branch_base registrada" "branch_base registrada"
+  CI_BASE="$b0" ci_rc "ci: base do PR igual à base validada passa (DM-320)" 0 "$co" "$vv" feature/ft-rec
+  CI_BASE="$mainsha" ci_rc "ci: base do PR que contém a base validada passa (DM-320)" 0 "$co" "$vv" feature/ft-rec
+  # o pre-push não conhece a base do PR: a mesma entrada continua liberada nele
+  remoto_novo "$d" dm320 || falha "remoto novo (DM-320)"
+  out="$(FX_PORTAO_PUSH="$PP" fx_push_real "$d" origin "$vv:refs/heads/feature/ft-rec")"
+  [ "$(printf '%s\n' "$out" | sed -n 's/^rc=//p')" = 0 ] && ok "pre-push: a base do PR não entra (DM-320)" || falha "pre-push barrou: $out"
+
   # historia_incompleta: clone raso, com a mesma entrada no pre-push e no CI
   git push -q origin "$vv:refs/heads/feature/ft-rec" >/dev/null 2>&1 || falha "push do portão válido ao remoto"
   cd "$t" || return
