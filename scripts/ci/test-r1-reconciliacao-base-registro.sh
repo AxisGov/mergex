@@ -1234,8 +1234,22 @@ grupo_ponta_base() {
   desfaz
   git update-ref refs/heads/main "$topo"; git update-ref refs/remotes/origin/main "$FX_B0"
   reprova "origin/main atrás de B1, mesmo com a main local em dia: B1 não foi publicado" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
+  # DM-321: sem a ref remota, o servidor é consultado. A base que existe lá e não
+  # foi buscada recusa (a local não prova a publicação); a que não existe lá (a
+  # base empilhada nunca enviada) e o repositório sem remoto valem pela local; a
+  # consulta que falha recusa
   git update-ref -d refs/remotes/origin/main
-  registra_ok "sem a ref remota, a ponta é a local, como antes" "$FX_NOVO1" "$FX_NOVO2"
+  reprova "sem a ref remota, com a base no servidor: recusa e manda buscar" 4 "git fetch origin" "$FX_NOVO1" "$FX_NOVO2"
+  git -C "$FX_REMOTO" update-ref -d refs/heads/main
+  git ls-remote --exit-code --heads origin refs/heads/main >/dev/null 2>&1; [ "$?" = 2 ] \
+    && ok "controle: a base não existe no servidor" || falha "controle: a base continua no servidor"
+  registra_ok "sem a ref remota e sem a base no servidor (base nunca enviada): a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  url="$(git remote get-url origin)"; git remote set-url origin "$d/../nao-existe.git"
+  reprova "sem a ref remota e com a consulta ao servidor falhando: recusa" 4 "consulta" "$FX_NOVO1" "$FX_NOVO2"
+  git remote set-url origin "$url"
+  git remote remove origin
+  registra_ok "repositório sem remoto: a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
   cd "$REPO" || return
 
