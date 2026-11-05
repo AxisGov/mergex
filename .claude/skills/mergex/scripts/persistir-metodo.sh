@@ -943,12 +943,20 @@ while IFS= read -r caminho; do
   git add -- "$caminho" || para "falha ao preparar $caminho; stage preservado"
 done < "$TMP_LISTA"
 
-STAGED="$(git diff --cached --name-only 2>/dev/null | LC_ALL=C sort -u)"
+# DM-319: a árvore e o pai que o commit tem de ter, fixados logo depois do add.
+# O catálogo e o blob provado são conferidos nesta árvore, e não no índice: a
+# trava C5 não segura um `git add` de fora dela, e o gate de segredo e a
+# mensagem ainda rodam antes do commit. A conferência depois dele acusa o
+# índice que mudou no intervalo.
+ARVORE="$(git write-tree 2>/dev/null)" || para 'não foi possível ler a árvore do índice; stage preservado'
+PAI="$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)"
+ANTES="${PAI:-$(git hash-object -t tree /dev/null 2>/dev/null)}"
+STAGED="$(git diff --name-only "$ANTES" "$ARVORE" 2>/dev/null | LC_ALL=C sort -u)"
 ESPERADO="$(cat "$TMP_LISTA")"
 [ -n "$STAGED" ] || para 'nenhuma mudança elegível entrou no stage'
 [ "$STAGED" = "$ESPERADO" ] || para 'o staged diff diverge do catálogo exato; stage preservado'
 # o e9-merge commita o conteúdo que a prova leu, e nenhum outro
-[ -z "$E9_BLOB" ] || [ "$(git rev-parse -q --verify ":$ENTREGA" 2>/dev/null)" = "$E9_BLOB" ] \
+[ -z "$E9_BLOB" ] || [ "$(git rev-parse -q --verify "$ARVORE:$ENTREGA" 2>/dev/null)" = "$E9_BLOB" ] \
   || para "e9-merge: $ENTREGA mudou entre a prova e o git add; o stage tem conteúdo não provado. Nenhum commit foi criado e o stage foi preservado" # guarda:E9MERGE
 
 # Reutiliza literalmente o gate de segurança dos hooks sobre o staged diff.
@@ -973,6 +981,14 @@ bash "$CONTRATO_SH" --validar-metodo --trabalho "$TRABALHO" \
 
 git commit -F "$TMP_MSG" >/dev/null \
   || para 'git commit falhou; nenhum estado foi limpo automaticamente'
+
+# O commit tem a árvore conferida (e, nela, o blob provado do e9-merge) e o pai
+# de antes. Divergiu: outro escritor preparou ou commitou algo depois do `git
+# add`, ou um hook do projeto reescreveu o stage. O commit fica (é local), e a
+# recuperação é humana: o índice pode ter recebido trabalho alheio.
+[ "$(git rev-parse -q --verify 'HEAD^{tree}' 2>/dev/null)" = "$ARVORE" ] \
+  && [ "$(git rev-parse -q --verify 'HEAD^1' 2>/dev/null)" = "$PAI" ] \
+  || para "o índice mudou entre o git add e o git commit: o commit $(git rev-parse --short HEAD 2>/dev/null) tem conteúdo que a prova e o gate de segredo não viram (DM-319). Não envie. Confira o commit com git show; desfazê-lo é decisão humana, porque o índice pode ter recebido trabalho alheio" # guarda:ARVORE
 
 bash "$CONTRATO_SH" --validar-metodo --trabalho "$TRABALHO" \
   --checkpoint "$CHECKPOINT" --commit HEAD >/dev/null 2>&1 \

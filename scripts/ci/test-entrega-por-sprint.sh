@@ -510,6 +510,32 @@ PATH="$aux/shim-add:$PATH" pm "$d" e9-merge
   && grep -q 'Nota escrita depois da prova' "$d/$e9e"
 r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
 confere 'e9-merge recusa o ENTREGA.md que mudou entre a prova e o git add, sem commitar e sem desfazer a escrita' "$r"
+# DM-319: entre o `git add` e o `git commit` rodam o gate de segredo e a
+# validação da mensagem. Um `git add` de fora da trava nesse intervalo (aqui, um
+# git falso que prepara outra coisa logo antes do commit) entra no commit; a
+# conferência da árvore depois dele para, sem desfazer o commit local.
+for caso in entrega solto pai; do
+  mkdir -p "$aux/shim-commit-$caso"
+  { printf '#!/usr/bin/env bash\n'
+    printf 'if [ "${1:-}" = commit ]; then\n'
+    if [ "$caso" = entrega ]; then
+      printf '  printf '"'"'\\nNota preparada antes do commit.\\n'"'"' >> %q && %q add -- %q\n' "$e9e" "$(command -v git)" "$e9e"
+    elif [ "$caso" = solto ]; then
+      printf '  printf '"'"'x\\n'"'"' > src/solto.ts && %q add -- src/solto.ts\n' "$(command -v git)"
+    else
+      printf '  %q -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --only --allow-empty -m outro\n' "$(command -v git)"
+    fi
+    printf 'fi\nexec %q "$@"\n' "$(command -v git)"; } > "$aux/shim-commit-$caso/git"
+  chmod +x "$aux/shim-commit-$caso/git"
+  d="$aux/r9-commit-$caso"; cp -R "$aux/r9" "$d"
+  h="$(git -C "$d" rev-parse HEAD)"
+  PATH="$aux/shim-commit-$caso:$PATH" pm "$d" e9-merge
+  [ "$rc" = 1 ] && [ "$(git -C "$d" rev-parse "HEAD~$([ "$caso" = pai ] && echo 2 || echo 1)")" = "$h" ] \
+    && grep -q 'mudou entre o git add e o git commit' "$aux/pm.err" \
+    && grep -q 'Não envie' "$aux/pm.err" && ! grep -q '^commit=' "$aux/pm.out"
+  r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
+  confere "e9-merge para quando o índice muda entre o git add e o git commit ($caso), sem desfazer o commit local" "$r"
+done
 # core.autocrlf=true: o blob é LF e o disco é CRLF; o replay parte do ENTREGA.md
 # de HEAD como o checkout o escreve, e o commit leva o blob LF de sempre
 d="$aux/r9-autocrlf"; cp -R "$aux/r9" "$d"
