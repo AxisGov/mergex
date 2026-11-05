@@ -936,6 +936,10 @@ if [ ! -s "$TMP_LISTA" ]; then
   exit 0
 fi
 
+# DM-319: o pai é o HEAD de antes do add. Lido depois, um commit de fora no
+# intervalo viraria o pai esperado e passaria sem ser visto.
+PAI="$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)"
+
 # O stage nasce vazio sob a trava. Cada path vem do catálogo fechado acima;
 # nenhum diretório, glob ou `git add -A` participa desta operação.
 while IFS= read -r caminho; do
@@ -943,15 +947,15 @@ while IFS= read -r caminho; do
   git add -- "$caminho" || para "falha ao preparar $caminho; stage preservado"
 done < "$TMP_LISTA"
 
-# DM-319: a árvore e o pai que o commit tem de ter, fixados logo depois do add.
-# O catálogo e o blob provado são conferidos nesta árvore, e não no índice: a
+# DM-319: a árvore que o commit tem de ter, fixada logo depois do add. O
+# catálogo e o blob provado são conferidos nesta árvore, e não no índice: a
 # trava C5 não segura um `git add` de fora dela, e o gate de segredo e a
 # mensagem ainda rodam antes do commit. A conferência depois dele acusa o
-# índice que mudou no intervalo.
+# índice que mudou no intervalo. Sem quotepath, o caminho com acento sai cru,
+# como o catálogo o escreve.
 ARVORE="$(git write-tree 2>/dev/null)" || para 'não foi possível ler a árvore do índice; stage preservado'
-PAI="$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)"
 ANTES="${PAI:-$(git hash-object -t tree /dev/null 2>/dev/null)}"
-STAGED="$(git diff --name-only "$ANTES" "$ARVORE" 2>/dev/null | LC_ALL=C sort -u)"
+STAGED="$(git -c core.quotepath=false diff --name-only "$ANTES" "$ARVORE" 2>/dev/null | LC_ALL=C sort -u)"
 ESPERADO="$(cat "$TMP_LISTA")"
 [ -n "$STAGED" ] || para 'nenhuma mudança elegível entrou no stage'
 [ "$STAGED" = "$ESPERADO" ] || para 'o staged diff diverge do catálogo exato; stage preservado'

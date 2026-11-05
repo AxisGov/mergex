@@ -538,6 +538,21 @@ for caso in entrega solto pai; do
   r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
   confere "e9-merge para quando o índice ou a branch muda entre o git add e o git commit ($caso), sem desfazer o commit local" "$r"
 done
+# o pai é o de antes do add: um commit de fora logo depois do write-tree (aqui,
+# um git falso que commita ao fixar a árvore) não vira o pai esperado
+mkdir -p "$aux/shim-wt"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'if [ "${1:-}" = write-tree ]; then\n'
+  printf '  t="$(%q write-tree)" || exit 1\n' "$(command -v git)"
+  printf '  %q -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --only --allow-empty -m outro >/dev/null\n' "$(command -v git)"
+  printf '  printf '"'"'%%s\\n'"'"' "$t"; exit 0\nfi\nexec %q "$@"\n' "$(command -v git)"; } > "$aux/shim-wt/git"
+chmod +x "$aux/shim-wt/git"
+d="$aux/r9-wt"; cp -R "$aux/r9" "$d"
+h="$(git -C "$d" rev-parse HEAD)"
+PATH="$aux/shim-wt:$PATH" pm "$d" e9-merge
+[ "$rc" = 1 ] && [ "$(git -C "$d" rev-parse HEAD~2)" = "$h" ] && grep -q 'outro commit entrou na branch' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
+confere 'e9-merge para quando outro commit entra logo depois de fixada a árvore: o pai é o de antes do add' "$r"
 # core.autocrlf=true: o blob é LF e o disco é CRLF; o replay parte do ENTREGA.md
 # de HEAD como o checkout o escreve, e o commit leva o blob LF de sempre
 d="$aux/r9-autocrlf"; cp -R "$aux/r9" "$d"
