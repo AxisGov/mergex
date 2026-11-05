@@ -88,6 +88,7 @@ TMP_CATALOGO=""
 TMP_HIST=""
 TMP_STATUS=""
 TMP_INDEX=""
+TMP_STAGED=""
 
 encerrar() {
   local rc="$1"
@@ -97,6 +98,7 @@ encerrar() {
   [ -z "$TMP_HIST" ] || rm -rf "$TMP_HIST"
   [ -z "$TMP_STATUS" ] || rm -f "$TMP_STATUS"
   [ -z "$TMP_INDEX" ] || rm -f "$TMP_INDEX" "$TMP_INDEX.lock"
+  [ -z "$TMP_STAGED" ] || rm -f "$TMP_STAGED"
   [ -z "${TMP_PROVA:-}" ] || rm -f "$TMP_PROVA"
   if [ "$LIBERAR_NA_SAIDA" = 1 ] && [ -n "$TOKEN" ]; then
     liberar "$TOKEN" >/dev/null 2>&1
@@ -951,15 +953,21 @@ done < "$TMP_LISTA"
 # catálogo e o blob provado são conferidos nesta árvore, e não no índice: a
 # trava C5 não segura um `git add` de fora dela, e o gate de segredo e a
 # mensagem ainda rodam antes do commit. A conferência depois dele acusa o
-# índice que mudou no intervalo. A comparação é nome a nome, em NUL dos dois
-# lados: crua, sem as aspas que o Git põe em acento, TAB e aspas, e sem que um
-# nome com quebra de linha se passe por dois caminhos do catálogo.
+# índice que mudou no intervalo. Os nomes saem em NUL, crus: sem as aspas que o
+# Git põe em acento, TAB e aspas. Nome com quebra de linha não é do catálogo
+# (que o recusa) e diverge aqui, antes de virar lista por linha, onde se
+# passaria por dois caminhos.
 ARVORE="$(git write-tree 2>/dev/null)" || para 'não foi possível ler a árvore do índice; stage preservado'
 ANTES="${PAI:-$(git hash-object -t tree /dev/null 2>/dev/null)}"
-[ -n "$(git diff --name-only "$ANTES" "$ARVORE" 2>/dev/null)" ] || para 'nenhuma mudança elegível entrou no stage'
-cmp -s <(git diff --name-only -z "$ANTES" "$ARVORE" 2>/dev/null | LC_ALL=C sort -z -u) \
-  <(tr '\n' '\0' < "$TMP_LISTA" | LC_ALL=C sort -z -u) \
-  || para 'o staged diff diverge do catálogo exato; stage preservado'
+TMP_STAGED="$(mktemp "${TMPDIR:-/tmp}/mergex-staged.XXXXXX")" || para 'não foi possível criar a lista do stage'
+git diff --name-only -z "$ANTES" "$ARVORE" > "$TMP_STAGED" 2>/dev/null \
+  || para 'não foi possível ler o staged diff; stage preservado'
+[ -s "$TMP_STAGED" ] || para 'nenhuma mudança elegível entrou no stage'
+[ "$(tr -cd '\n' < "$TMP_STAGED" | wc -c | tr -d ' ')" = 0 ] \
+  || para 'o staged diff diverge do catálogo exato (nome com quebra de linha); stage preservado'
+STAGED="$(tr '\0' '\n' < "$TMP_STAGED" | LC_ALL=C sort -u)"
+ESPERADO="$(cat "$TMP_LISTA")"
+[ "$STAGED" = "$ESPERADO" ] || para 'o staged diff diverge do catálogo exato; stage preservado'
 # o e9-merge commita o conteúdo que a prova leu, e nenhum outro
 [ -z "$E9_BLOB" ] || [ "$(git rev-parse -q --verify "$ARVORE:$ENTREGA" 2>/dev/null)" = "$E9_BLOB" ] \
   || para "e9-merge: $ENTREGA mudou entre a prova e o git add; o stage tem conteúdo não provado. Nenhum commit foi criado e o stage foi preservado" # guarda:E9MERGE
