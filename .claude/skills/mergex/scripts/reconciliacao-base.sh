@@ -1485,11 +1485,18 @@ if ! g rev-parse --verify -q "refs/remotes/$BRANCH_BASE^{commit}" >/dev/null 2>&
   if [ -n "$NOME_BASE" ] && g rev-parse --verify -q "refs/remotes/$REMOTO_BASE/$NOME_BASE^{commit}" >/dev/null 2>&1; then
     PONTA_REF="refs/remotes/$REMOTO_BASE/$NOME_BASE"
   elif [ -n "$NOME_BASE" ] && g remote get-url "$REMOTO_BASE" >/dev/null 2>&1; then
-    g ls-remote --exit-code --heads "$REMOTO_BASE" "refs/heads/$NOME_BASE" >/dev/null 2>&1; RC_LS=$?
+    # roda sob a trava C5: nunca interativa (credencial que pediria senha falha na
+    # hora) e com prazo; falha e prazo vencido recusam, e `git fetch` antes evita a
+    # consulta. O ssh do usuário é mantido, com BatchMode e ConnectTimeout
+    SSH_BASE="${GIT_SSH_COMMAND:-$(g config core.sshCommand 2>/dev/null || printf ssh)}"
+    PRAZO=(); command -v timeout >/dev/null 2>&1 && PRAZO=(timeout 60)
+    GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_SSH_COMMAND="$SSH_BASE -o BatchMode=yes -o ConnectTimeout=20" \
+      ${PRAZO[@]+"${PRAZO[@]}"} git -c core.quotepath=false -c http.lowSpeedLimit=1 -c http.lowSpeedTime=20 \
+      ls-remote --exit-code --heads "$REMOTO_BASE" "refs/heads/$NOME_BASE" >/dev/null 2>&1; RC_LS=$?
     case "$RC_LS" in
       2) ;;
       0) estrutura base "a base $NOME_BASE existe em $REMOTO_BASE, mas refs/remotes/$REMOTO_BASE/$NOME_BASE não foi buscada: a branch local não prova que B1 foi publicado; rode git fetch $REMOTO_BASE e registre de novo" ;; # guarda:EST
-      *) estrutura base "a consulta a $REMOTO_BASE pela base $NOME_BASE falhou (ls-remote saiu $RC_LS): sem ela, não há prova de que a base não foi publicada; repita com o remoto acessível" ;; # guarda:EST
+      *) estrutura base "a consulta a $REMOTO_BASE pela base $NOME_BASE falhou (ls-remote saiu $RC_LS; 124 é o prazo de 60 s): sem ela, não há prova de que a base não foi publicada; rode git fetch $REMOTO_BASE, ou repita com o remoto acessível" ;; # guarda:EST
     esac
   fi
 fi

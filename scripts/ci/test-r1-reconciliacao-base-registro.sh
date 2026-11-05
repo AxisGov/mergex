@@ -1245,6 +1245,16 @@ grupo_ponta_base() {
     && ok "controle: a base não existe no servidor" || falha "controle: a base continua no servidor"
   registra_ok "sem a ref remota e sem a base no servidor (base nunca enviada): a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
+  # a consulta roda sob a trava C5: nunca interativa (um git que pediria senha
+  # recusa, sem esperar) e com prazo
+  sh="$(mktemp -d)"; TMPS+=("$sh")
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue; [ "${GIT_TERMINAL_PROMPT:-}" = 0 ] || : > %q; exit 128; done\n' "$sh/pediu-senha"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  git -C "$FX_REMOTO" update-ref refs/heads/main "$topo"
+  PATH="$sh:$PATH" reprova "sem a ref remota, a consulta que pediria senha não espera: recusa" 4 "consulta" "$FX_NOVO1" "$FX_NOVO2"
+  [ ! -e "$sh/pediu-senha" ] && ok "a consulta ao servidor roda com GIT_TERMINAL_PROMPT=0" || falha "a consulta ao servidor podia pedir senha"
+  git -C "$FX_REMOTO" update-ref -d refs/heads/main
   url="$(git remote get-url origin)"; git remote set-url origin "$d/../nao-existe.git"
   reprova "sem a ref remota e com a consulta ao servidor falhando: recusa" 4 "consulta" "$FX_NOVO1" "$FX_NOVO2"
   git remote set-url origin "$url"

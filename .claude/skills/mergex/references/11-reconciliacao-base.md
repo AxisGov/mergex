@@ -63,7 +63,9 @@ Condições estruturais, todas obrigatórias:
   existe (o `<remoto>` da branch atual, ou `origin`), porque a branch local da base pode estar atrás
   numa worktree, e a local em dia sozinha não prova que `B1` foi publicado. Sem a ref remota, o
   servidor é consultado (`git ls-remote`, DM-321): a base que existe lá e não foi buscada recusa e
-  manda rodar `git fetch <remoto>`; a consulta que falha recusa; a base que não existe no servidor
+  manda rodar `git fetch <remoto>`; a consulta que falha recusa (ela roda sob a trava C5, por
+  isso nunca é interativa: credencial que pediria senha falha na hora, e há prazo de 60 s onde o
+  sistema tem `timeout`; com a ref remota buscada antes, não há consulta); a base que não existe no servidor
   (a base empilhada nunca enviada) e o repositório sem esse remoto valem pela ref local, e aí `B1`
   é só local, não publicado. A frente sobre essa base fica barrada no CI até a base do PR conter
   `B1` (DM-320). `refs/heads/main` segue a mesma regra do nome simples, e `branch_base` que já é
