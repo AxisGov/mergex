@@ -567,15 +567,18 @@ _pr_vence() {
 # pull_request.base.sha do CI) tem de conter a `base_validada_sha` da entrega no
 # SHA da cabeça. Pelo SHA, não pelo nome: o CI não sabe o remoto, e a feature
 # redirecionada (DM-245) mira a base da predecessora mergeada com a branch_base
-# ainda no nome dela. rc 0: contém, ou não se aplica (ENTREGA.md ausente no SHA,
-# que a validade já barra; chave ausente ou `pendente`, entrega legada); rc 1:
-# não contém, ou o valor presente não é um commit do formato do repositório, com
-# o diagnóstico em PR_BASE_DIAG.
+# ainda no nome dela. rc 0: contém, ou não se aplica (chave ausente ou
+# `pendente`, entrega legada); rc 1: não contém, o valor presente não é um commit
+# do formato do repositório, ou o ENTREGA.md não pôde ser lido no SHA (só chega
+# aqui a entrega que a validade não barrou, e ela existe no SHA: falha de leitura
+# fecha), com o diagnóstico em PR_BASE_DIAG.
 _pr_base_do_pr() {
   local raiz="$1" sha="$2" ent="$3" base="$4" tmp bv n
   PR_BASE_DIAG=""
   tmp="$(mktemp "${TMPDIR:-/tmp}/mergex-base-pr.XXXXXX")" || { PR_BASE_DIAG="sem arquivo temporário"; return 1; }
-  if ! _pr_g -C "$raiz" cat-file blob "$sha:$ent" > "$tmp" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if ! _pr_g -C "$raiz" cat-file blob "$sha:$ent" > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"; PR_BASE_DIAG="$ent não pôde ser lido no SHA da cabeça ($sha)"; return 1
+  fi
   if ! awk 'NR == 1 { if ($0 !~ /^---[[:space:]]*\r?$/) exit 1; next } /^---[[:space:]]*\r?$/ { exit 1 } /^base_validada_sha:/ { exit 0 } END { }' "$tmp"; then
     rm -f "$tmp"; return 0
   fi

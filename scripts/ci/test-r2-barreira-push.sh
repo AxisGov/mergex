@@ -1712,6 +1712,13 @@ grupo_ci() {
   ci_err_tem "ci: base do PR divergente: o diagnóstico manda abrir contra a branch_base registrada" "branch_base registrada"
   CI_BASE="$b0" ci_rc "ci: base do PR igual à base validada passa (DM-320)" 0 "$co" "$vv" feature/ft-rec
   CI_BASE="$mainsha" ci_rc "ci: base do PR que contém a base validada passa (DM-320)" 0 "$co" "$vv" feature/ft-rec
+  # o ENTREGA.md que não pôde ser lido no SHA fecha (só chega aqui a entrega que a
+  # validade não barrou, e ela existe no SHA): nunca pula a regra
+  ( . "$REGRAS" || exit 9; arvore_ambiente_git
+    _pr_base_do_pr "$co" "$vv" docs/entregas/nao-lido/ENTREGA.md "$mainsha"; r=$?
+    [ "$r" = 1 ] && case "$PR_BASE_DIAG" in *"não pôde ser lido"*) exit 0 ;; esac; exit 1 ) \
+    && ok "ci: ENTREGA.md não lido no SHA: a regra da base do PR fecha (DM-320)" \
+    || falha "ci: ENTREGA.md não lido no SHA pulou a regra da base do PR"
   # o pre-push não conhece a base do PR: a mesma entrada continua liberada nele
   remoto_novo "$d" dm320 || falha "remoto novo (DM-320)"
   out="$(FX_PORTAO_PUSH="$PP" fx_push_real "$d" origin "$vv:refs/heads/feature/ft-rec")"
