@@ -91,6 +91,16 @@ valido   "caso 1 — commits: [] é lista válida"
 proximo 2 "caso 2 — com seq 1 existente" 1:T-01.01:a3f19c2
 valido   "caso 2 — seq 1 sozinho" 1:T-01.01:a3f19c2
 proximo 4 "três itens modernos em sequência" 1:T-01.01:a3f19c2 2:T-01.02:7b2e401 3:T-01.03:5be75d3
+# o SHA registrado vai do curto ao inteiro do SHA-256 (DM-315): 7 a 64 hex
+h64=8a64eba738221bff259100faff083e5b8aa8c4fd78f67b1d234a0385848347e2
+for v in "64:$h64" "41:${h64:0:41}" "7:${h64:0:7}" "65:${h64}0" "6:${h64:0:6}"; do
+  entrega "$E" true
+  saida="$(bash "$SEQ" --acrescentar "$E" T-01.01 "${v#*:}" 2>&1)"; rc=$?
+  case "${v%%:*}:$rc" in
+    64:0|41:0|7:0|65:1|6:1) ok "--acrescentar com SHA de ${v%%:*} hex → rc $rc" ;;
+    *) falha "--acrescentar com SHA de ${v%%:*} hex — rc=$rc: $saida" ;;
+  esac
+done
 
 # `commits: []` com comentário é a mesma lista vazia em YAML; outro sufixo não é lista (DM-296).
 for sufixo in '[] # vazia' '[]   # vazia' '[] #'; do

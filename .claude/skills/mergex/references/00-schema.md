@@ -165,10 +165,10 @@ entregue_em: 2026-08-29
 | `estado` | `aberto` no E0; `entregue` quando o fluxo completou; `bloqueado` quando o portão barrou |
 | `versionado` | `false` em repositório sem versionador |
 | `branch`, `branch_base` | `null` quando `versionado: false` |
-| `base_validada_sha` | SHA de 40 hex da base em que o trabalho foi validado; gravado no E0 (`git merge-base HEAD <branch_base>`); atualizado pelo `reconciliacao-base.sh --registrar` para o `b1_sha` registrado. Nunca nome de ref. `null` sem versionador |
+| `base_validada_sha` | SHA completo, no tamanho do formato do repositório (40 hex no SHA-1, 64 no SHA-256), da base em que o trabalho foi validado; gravado no E0 (`git merge-base HEAD <branch_base>`); atualizado pelo `reconciliacao-base.sh --registrar` para o `b1_sha` registrado. Nunca nome de ref. `null` sem versionador |
 | `origem_base` | `registrada_e0` \| `registrada_sprint` (a base reancorada pelo E0 na primeira retomada depois do PR de planejamento `merged`, sobre a main que contém o `merge_sha` — DM-261) \| `inferida_legado` (gravado uma única vez, pela primeira reconciliação de uma entrega anterior a esta chave — DM-183). Uma reconciliação aberta sobre uma base `registrada_sprint` grava no `RECONCILIACAO-BASE-001.md` `origem_base: registrada_e0`, como sobre qualquer base registrada |
 | `reconciliacoes` | Lista `{numero, arquivo, b1_sha, m_sha}`, na ordem da cadeia; `[]` sem reconciliação. Escrita só pelo `--registrar` |
-| `portao_sha` | SHA de 40 hex do `HEAD` que o E2 avaliou, gravado com `portao` só por `registrar-portao.sh`; `null` antes do E2 e depois de um `--registrar`. O `--resultado bloqueado` também grava `portao_sha` = `HEAD` avaliado, sem efeito na validade (`portao_nao_pronto` vem antes do SHA). O portão vale só para ele e para os commits de método `pre-e6`/`e8` de um pai que o seguem (DM-181) |
+| `portao_sha` | SHA completo (40 ou 64 hex, o formato do repositório) do `HEAD` que o E2 avaliou, gravado com `portao` só por `registrar-portao.sh`; `null` antes do E2 e depois de um `--registrar`. O `--resultado bloqueado` também grava `portao_sha` = `HEAD` avaliado, sem efeito na validade (`portao_nao_pronto` vem antes do SHA). O portão vale só para ele e para os commits de método `pre-e6`/`e8` de um pai que o seguem (DM-181) |
 | `commits` | Um item por task commitada, na ordem em que fecharam, cada um com a chave de ordem `seq` e, no item novo, a `revisao` da task; `[]` sem versionador. Ver "A ordem de registro" |
 | `modulo_afetado` | Os módulos que a entrega toca (ver abaixo) |
 | `arquivos_alterados` | **O diff real** — ver abaixo. É o campo mais importante deste kind |
@@ -660,16 +660,16 @@ anterior: null
 branch: "feature/ft-exemplo"
 branch_base: "main"
 origem_base: registrada_e0
-b0_sha: <sha de 40 hex>
-p1_sha: <sha de 40 hex>
-b1_sha: <sha de 40 hex>
-m_sha: <sha de 40 hex>
+b0_sha: <sha completo: 40 hex no SHA-1, 64 no SHA-256>
+p1_sha: <sha completo>
+b1_sha: <sha completo>
+m_sha: <sha completo>
 estado: ativa
 arquivos:
   - caminho: "tests/ui/exemplo.test.tsx"
     status_base: A
-    blob_b1: <sha de 40 hex>
-    blob_m: <sha de 40 hex>
+    blob_b1: <sha completo>
+    blob_m: <sha completo>
     diff_b1_m_sha256: <sha256 de 64 hex>
     motivo: "a feature dividiu o botao em duas etapas"
 registrado_em: 2026-10-07
@@ -736,5 +736,5 @@ Ao abrir um `ENTREGA.md` que já existe e não tem os campos de indexação:
       derivada de `falhas_portao` (`scripts/causa-do-portao.sh --validar` passa).
 - [ ] Todo item **novo** de `commits` tem `seq`; nenhum item legado ganhou `seq` retroativo
       (`scripts/sequencia-de-commits.sh --validar` passa).
-- [ ] `base_validada_sha` e `portao_sha` são SHA de 40 hex ou `null`, nunca nome de ref; nenhum
+- [ ] `base_validada_sha` e `portao_sha` são SHA completo no formato do repositório (40 hex no SHA-1, 64 no SHA-256) ou `null`, nunca nome de ref; nenhum
       dos dois, nem `reconciliacoes`, foi escrito à mão.
