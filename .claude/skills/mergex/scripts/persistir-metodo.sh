@@ -982,13 +982,15 @@ bash "$CONTRATO_SH" --validar-metodo --trabalho "$TRABALHO" \
 git commit -F "$TMP_MSG" >/dev/null \
   || para 'git commit falhou; nenhum estado foi limpo automaticamente'
 
-# O commit tem a árvore conferida (e, nela, o blob provado do e9-merge) e o pai
-# de antes. Divergiu: outro escritor preparou ou commitou algo depois do `git
+# O commit tem o pai de antes e a árvore conferida (e, nela, o blob provado do
+# e9-merge). Divergiu: outro escritor commitou ou preparou algo depois do `git
 # add`, ou um hook do projeto reescreveu o stage. O commit fica (é local), e a
-# recuperação é humana: o índice pode ter recebido trabalho alheio.
+# recuperação é humana: a branch ou o índice podem ter recebido trabalho alheio.
+FEITO="$(git rev-parse -q --verify HEAD 2>/dev/null)"
+[ "$(git rev-parse -q --verify 'HEAD^1' 2>/dev/null)" = "$PAI" ] \
+  || para "outro commit entrou na branch entre o git add e o git commit: o commit de método ${FEITO:-?} não tem como pai ${PAI:-<nenhum>}, o HEAD de antes (DM-319). Não envie. Confira os commits que entraram com git log ${PAI:+$PAI..}${FEITO:-HEAD}; desfazer é decisão humana, porque a branch pode ter recebido trabalho alheio" # guarda:ARVORE
 [ "$(git rev-parse -q --verify 'HEAD^{tree}' 2>/dev/null)" = "$ARVORE" ] \
-  && [ "$(git rev-parse -q --verify 'HEAD^1' 2>/dev/null)" = "$PAI" ] \
-  || para "o índice mudou entre o git add e o git commit: o commit $(git rev-parse --short HEAD 2>/dev/null) tem conteúdo que a prova e o gate de segredo não viram (DM-319). Não envie. Confira o commit com git show; desfazê-lo é decisão humana, porque o índice pode ter recebido trabalho alheio" # guarda:ARVORE
+  || para "o índice mudou entre o git add e o git commit: o commit ${FEITO:-?} tem conteúdo que a prova e o gate de segredo não viram (DM-319). Não envie. Confira o commit com git show ${FEITO:-HEAD}; desfazê-lo é decisão humana, porque o índice pode ter recebido trabalho alheio" # guarda:ARVORE
 
 bash "$CONTRATO_SH" --validar-metodo --trabalho "$TRABALHO" \
   --checkpoint "$CHECKPOINT" --commit HEAD >/dev/null 2>&1 \

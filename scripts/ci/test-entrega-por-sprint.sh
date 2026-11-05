@@ -531,10 +531,12 @@ for caso in entrega solto pai; do
   h="$(git -C "$d" rev-parse HEAD)"
   PATH="$aux/shim-commit-$caso:$PATH" pm "$d" e9-merge
   [ "$rc" = 1 ] && [ "$(git -C "$d" rev-parse "HEAD~$([ "$caso" = pai ] && echo 2 || echo 1)")" = "$h" ] \
-    && grep -q 'mudou entre o git add e o git commit' "$aux/pm.err" \
+    && if [ "$caso" = pai ]; then grep -q 'outro commit entrou na branch' "$aux/pm.err" \
+         && grep -q "git log $h\.\." "$aux/pm.err" && ! grep -q 'o índice mudou' "$aux/pm.err"
+       else grep -q 'o índice mudou entre o git add e o git commit' "$aux/pm.err"; fi \
     && grep -q 'Não envie' "$aux/pm.err" && ! grep -q '^commit=' "$aux/pm.out"
   r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
-  confere "e9-merge para quando o índice muda entre o git add e o git commit ($caso), sem desfazer o commit local" "$r"
+  confere "e9-merge para quando o índice ou a branch muda entre o git add e o git commit ($caso), sem desfazer o commit local" "$r"
 done
 # core.autocrlf=true: o blob é LF e o disco é CRLF; o replay parte do ENTREGA.md
 # de HEAD como o checkout o escreve, e o commit leva o blob LF de sempre
