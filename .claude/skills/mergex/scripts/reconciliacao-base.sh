@@ -1265,8 +1265,9 @@ base_remota() {
 }
 # DM-321: a consulta ao servidor pela base sem ref remota roda ANTES da trava C5,
 # com a branch_base do ENTREGA.md de HEAD: a rede lenta ou um ssh que espera não
-# prendem o índice. Nunca interativa (GIT_TERMINAL_PROMPT=0); o ssh e as
-# credenciais do usuário ficam como estão. Sob a trava, o resultado só vale para a
+# prendem o índice. O Git não pergunta credencial no terminal
+# (GIT_TERMINAL_PROMPT=0); o ssh e as credenciais do usuário ficam como estão, e
+# um ssh que peça senha espera com o índice livre. Sob a trava, o resultado só vale para a
 # mesma base e o mesmo remoto (DM-312, ponta da base, abaixo).
 CONSULTA_NOME=""; CONSULTA_REMOTO=""; CONSULTA_RC=""
 if bb_head="$(g cat-file blob "HEAD:$ENTREGA" 2>/dev/null)" && [ -n "$bb_head" ]; then

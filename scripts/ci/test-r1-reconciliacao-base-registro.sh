@@ -1245,9 +1245,9 @@ grupo_ponta_base() {
     && ok "controle: a base não existe no servidor" || falha "controle: a base continua no servidor"
   registra_ok "sem a ref remota e sem a base no servidor (base nunca enviada): a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
-  # a consulta roda ANTES da trava C5 (a rede lenta não prende o índice) e nunca
-  # é interativa: o git falso marca se foi chamado com a trava presa ou podendo
-  # pedir senha, e falha como a rede
+  # a consulta roda ANTES da trava C5 (a rede lenta não prende o índice) e sem
+  # pergunta de credencial do Git: o git falso marca se foi chamado com a trava
+  # presa ou sem GIT_TERMINAL_PROMPT=0, e falha como a rede
   sh="$(mktemp -d)"; TMPS+=("$sh")
   { printf '#!/usr/bin/env bash\n'
     printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
