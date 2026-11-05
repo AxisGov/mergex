@@ -155,6 +155,18 @@ printf '%s\n' '---' 'kind: planejamento' 'entrega: por_trabalho' '---' > "$aux/m
 bash "$leitor" --modo-efetivo --entrega "$aux/s01.md" --plano "$aux/m/trab.md" --projeto por_trabalho >"$aux/out" 2>"$aux/err"; rc=$?
 [ "$rc" = 0 ] && [ "$(linha entrega)" = por_sprint ] && [ "$(linha origem)" = registrada ]
 confere 'modo registrado uma vez: o 00-PLANEJAMENTO alterado depois nao muda o modo' $?
+# a base validada do --abrir-sprint é SHA local: o tamanho do formato do repositório (DM-315)
+for formato in sha1 sha256; do
+  git init -q --object-format="$formato" "$aux/oid-$formato"
+  h="$(printf 'x' | git -C "$aux/oid-$formato" hash-object --stdin)"
+  case "$formato" in sha1) outro="${h}000000000000000000000000" ;; sha256) outro="${h:0:40}" ;; esac
+  (cd "$aux/oid-$formato" && bash "$leitor" --abrir-sprint 02 --base-validada-sha "$outro" --entrega "$aux/s01.md") >"$aux/out" 2>"$aux/err"; rc=$?
+  [ "$rc" = 64 ] && grep -q 'base_validada_sha inválido' "$aux/err"
+  confere "$formato: --abrir-sprint recusa base_validada_sha no tamanho do outro formato" $?
+  (cd "$aux/oid-$formato" && bash "$leitor" --abrir-sprint 02 --base-validada-sha "$h" --entrega "$aux/s01.md") >"$aux/out" 2>"$aux/err"; rc=$?
+  [ "$rc" != 64 ] && ! grep -q 'base_validada_sha inválido' "$aux/err"
+  confere "$formato: --abrir-sprint aceita base_validada_sha de ${#h} hex como forma" $?
+done
 
 echo '== E0 --sprint, E8 e E9 num repositorio =='
 
@@ -498,6 +510,16 @@ PATH="$aux/shim-add:$PATH" pm "$d" e9-merge
   && grep -q 'Nota escrita depois da prova' "$d/$e9e"
 r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
 confere 'e9-merge recusa o ENTREGA.md que mudou entre a prova e o git add, sem commitar e sem desfazer a escrita' "$r"
+# core.autocrlf=true: o blob é LF e o disco é CRLF; o replay parte do ENTREGA.md
+# de HEAD como o checkout o escreve, e o commit leva o blob LF de sempre
+d="$aux/r9-autocrlf"; cp -R "$aux/r9" "$d"
+g -C "$d" config core.autocrlf true
+sed 's/$/\r/' "$d/$e9e" > "$aux/e.tmp" && cat "$aux/e.tmp" > "$d/$e9e"
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge' \
+  && ! git -C "$d" show "HEAD:$e9e" | grep -q $'\r' && [ -z "$(git -C "$d" status --porcelain)" ]
+r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
+confere 'e9-merge com core.autocrlf=true: disco CRLF, blob LF, commit do registro' "$r"
 # a base histórica que o --completar-base preenche também
 d="$aux/r9-base"; cp -R "$aux/r9-ok" "$d"
 le_repo "$d"; pl="$(grep '^pr=planejamento' "$aux/out")"

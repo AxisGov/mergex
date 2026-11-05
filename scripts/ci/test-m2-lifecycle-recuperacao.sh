@@ -262,9 +262,9 @@ metodo() { # <repo> <acao> <origem> <checkpoint>
   )
 }
 
-repo_recovery() { # <dir>
+repo_recovery() { # <dir> [formato de objetos: sha1|sha256]
   local dir="$1"
-  git init -q -b feature/ft-m2 "$dir" 2>/dev/null || return 1
+  git init -q --object-format="${2:-sha1}" -b feature/ft-m2 "$dir" 2>/dev/null || return 1
   (
     cd "$dir" || exit 1
     git config user.email teste@expx.local
@@ -1230,14 +1230,40 @@ grupo_v11() {
     || falha '35 pre-e2 deixou metodo pendente depois da retomada'
 }
 
+# O tamanho do SHA completo vem do formato do repositório (DM-315): 64 hex no
+# SHA-256, e o tamanho do outro formato nunca vale.
+grupo_recovery_sha256() {
+  local repo sha saida rc
+  printf '\nRECOVERY — repositório SHA-256\n'
+  repo="$D/recovery-sha256"
+  repo_recovery "$repo" sha256 || { falha 'git daqui não cria repositório SHA-256'; return; }
+  sha="$(commit_e1_teste "$repo" src/a.js T-01.01 ft-m2)"
+  [ "${#sha}" = 64 ] && ok 'controle: E1 com SHA de 64 hex' || falha "controle: SHA $sha"
+  recupera "$repo" T-01.01 "${sha:0:40}" >/dev/null 2>&1; rc=$?
+  [ "$rc" = 4 ] && ! grep -Fq "${sha:0:40}" "$repo/docs/entregas/ft-m2/ENTREGA.md" \
+    && ok 'SHA-256: 40 hex (abreviação) não é SHA completo' || falha "SHA-256: 40 hex aceito (rc=$rc)"
+  saida="$(recupera "$repo" T-01.01 "$sha" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && printf '%s\n' "$saida" | grep -Fxq 'seq=1' && grep -Fq "commit: $sha" "$repo/docs/entregas/ft-m2/ENTREGA.md" \
+    && ok 'SHA-256: o commit existente de 64 hex é registrado' || falha "SHA-256: recovery de 64 falhou (rc=$rc; $saida)"
+  saida="$(recupera "$repo" T-01.01 "$sha" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && [ "$saida" = 'noop=true' ] && [ "$(grep -Fc "commit: $sha" "$repo/docs/entregas/ft-m2/ENTREGA.md")" = 1 ] \
+    && ok 'SHA-256: o mesmo SHA de 64 registrado é no-op' || falha "SHA-256: o registro de 64 não se reconhece (rc=$rc; $saida)"
+
+  repo="$D/recovery-sha1-64"; repo_recovery "$repo"
+  sha="$(commit_e1_teste "$repo" src/a.js T-01.01 ft-m2)"
+  recupera "$repo" T-01.01 "${sha}000000000000000000000000" >/dev/null 2>&1; rc=$?
+  [ "$rc" = 4 ] && ok 'SHA-1: 64 hex não é SHA completo' || falha "SHA-1: 64 hex aceito (rc=$rc)"
+}
+
 grupo="${1:-all}"
 case "$grupo" in
-  all) grupo_grammar; grupo_catalog; grupo_lifecycle; grupo_integration; grupo_recovery; grupo_v11 ;;
+  all) grupo_grammar; grupo_catalog; grupo_lifecycle; grupo_integration; grupo_recovery; grupo_recovery_sha256; grupo_v11 ;;
   grammar) grupo_grammar ;;
   catalog) grupo_catalog ;;
   lifecycle) grupo_lifecycle ;;
   integration) grupo_integration ;;
   recovery) grupo_recovery ;;
+  recovery_sha256) grupo_recovery_sha256 ;;
   v11) grupo_v11 ;;
   *) printf 'grupo desconhecido: %s\n' "$grupo" >&2; exit 64 ;;
 esac

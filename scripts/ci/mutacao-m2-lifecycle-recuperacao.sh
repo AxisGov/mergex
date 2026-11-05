@@ -57,7 +57,7 @@ M7()  { remove_contendo "$CMD" '--checkpoint pre-e6'; }
 M8()  { troca "$CATALOGO" '  printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md"' '  [ "$checkpoint" = e8 ] || printf '\''%s\n'\'' "docs/entregas/$trabalho/ENTREGA.md" # mutante: E8 deixa terminal dirty'; }
 M9()  { troca "$FECHA" '  saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$(revisao_da_task "$task" "$sha")" 2>&1)" \' '  git commit --allow-empty -qm '\''mutante: segundo E1'\'' # mutante: recovery cria commit
   saida="$(bash "$SEQ_SH" --acrescentar "$entrega" "$task" "$sha" "$(revisao_da_task "$task" "$sha")" 2>&1)" \'; }
-M10() { troca "$FECHA" "  grep -Eq '^[0-9A-Fa-f]{40}\$' <<<\"\$sha\" \\" "  grep -Eq '^[0-9A-Fa-f]{7,40}\$' <<<\"\$sha\" \\"; }
+M10() { troca "$FECHA" '  grep -Eq "^[0-9A-Fa-f]{$n}\$" <<<"$sha" \' '  grep -Eq "^[0-9A-Fa-f]{7,$n}\$" <<<"$sha" \'; }
 M11() { troca "$FECHA" '  git merge-base --is-ancestor "$sha" HEAD >/dev/null 2>&1 \' '  true # mutante: ignora alcançabilidade
   true \'; }
 M12() { troca "$FECHA" '  [ "$rc" = 0 ] || para 4 '\''PARADO — trailers do commit existente não provam este E1'\'' "$saida"' '  : # mutante: ignora trailers divergentes'; }

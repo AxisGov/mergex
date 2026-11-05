@@ -14,21 +14,29 @@ command -v jq >/dev/null 2>&1 || { echo "sem jq: bancada NAO_EXECUTADA"; exit 1;
 
 OC=OC-2026-0007; TRAB="$OC-rua"; URL=https://github.com/o/r/pull/9; BR="fix/$TRAB"; FEC="docs/$OC-fechamento"
 g() { git -C "$T/r" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
-git init -q --bare -b main "$T/origem.git"
-git init -q -b main "$T/r"
-for u in https://github.com/o/r.git ssh://git@github.com:443/o/r.git git@github.com:o/r.git; do g config --add "url.$T/origem.git.insteadOf" "$u"; done
-g remote add origin https://github.com/o/r.git
-mkdir -p "$T/r/docs/entregas/$TRAB" "$T/r/docs/entregas/OC-2026-0008-rua" "$T/r/docs/manutencao/$TRAB" "$T/r/docs/manutencao/OC-2026-0008-rua" \
-  "$T/r/docs/relatorios" "$T/r/docs/sprintx/features/x" "$T/r/src" "$T/r/.expx"
-printf -- '---\nkind: entrega\ntrabalho_id: %s\nbranch: %s\nbranch_base: main\npr_url: %s\npr_estado: aberto\n---\n' "$OC" "$BR" "$URL" > "$T/r/docs/entregas/$TRAB/ENTREGA.md"
-printf -- '---\nkind: entrega\nbranch: fix/sem\nbranch_base: main\npr_url: null\n---\n' > "$T/r/docs/entregas/OC-2026-0008-rua/ENTREGA.md"
-printf 'orq\n' > "$T/r/docs/manutencao/$TRAB/ORQUESTRADOR.md"
-printf 'orq\n' > "$T/r/docs/manutencao/OC-2026-0008-rua/ORQUESTRADOR.md"
-printf 'idx\n' > "$T/r/docs/relatorios/INDICE.md"
-printf 'a\n' > "$T/r/src/a.js"
-printf 'arquivos:\n  cria: [src/planejado.js]\n' > "$T/r/docs/sprintx/features/x/tasks.md"
-printf '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}\n' > "$T/r/.expx/hooks.json"
-g add .; g commit -q -m base; g push -q origin main; g fetch -q origin
+# monta <repositório> <remoto bare> <formato de objetos> — a entrega, a outra
+# ocorrência, o índice e o plano, publicados na main do remoto
+monta() {
+  local r="$1" o="$2" u
+  git init -q --bare --object-format="$3" -b main "$o"
+  git init -q --object-format="$3" -b main "$r"
+  for u in https://github.com/o/r.git ssh://git@github.com:443/o/r.git git@github.com:o/r.git; do git -C "$r" config --add "url.$o.insteadOf" "$u"; done
+  git -C "$r" remote add origin https://github.com/o/r.git
+  mkdir -p "$r/docs/entregas/$TRAB" "$r/docs/entregas/OC-2026-0008-rua" "$r/docs/manutencao/$TRAB" "$r/docs/manutencao/OC-2026-0008-rua" \
+    "$r/docs/relatorios" "$r/docs/sprintx/features/x" "$r/src" "$r/.expx"
+  printf -- '---\nkind: entrega\ntrabalho_id: %s\nbranch: %s\nbranch_base: main\npr_url: %s\npr_estado: aberto\n---\n' "$OC" "$BR" "$URL" > "$r/docs/entregas/$TRAB/ENTREGA.md"
+  printf -- '---\nkind: entrega\nbranch: fix/sem\nbranch_base: main\npr_url: null\n---\n' > "$r/docs/entregas/OC-2026-0008-rua/ENTREGA.md"
+  printf 'orq\n' > "$r/docs/manutencao/$TRAB/ORQUESTRADOR.md"
+  printf 'orq\n' > "$r/docs/manutencao/OC-2026-0008-rua/ORQUESTRADOR.md"
+  printf 'idx\n' > "$r/docs/relatorios/INDICE.md"
+  printf 'a\n' > "$r/src/a.js"
+  printf 'arquivos:\n  cria: [src/planejado.js]\n' > "$r/docs/sprintx/features/x/tasks.md"
+  printf '{"expx_hooks":1,"hooks":{"arquivo-fora-do-plano":{"modo":"bloqueio"}}}\n' > "$r/.expx/hooks.json"
+  git -C "$r" add .
+  git -C "$r" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m base
+  git -C "$r" push -q origin main; git -C "$r" fetch -q origin
+}
+monta "$T/r" "$T/origem.git" sha1
 MERGE="$(g rev-parse HEAD)"
 g commit -q --allow-empty -m 'fora da base' ; FORA_BASE="$(g rev-parse HEAD)"; g reset -q --hard "$MERGE"
 
@@ -204,6 +212,28 @@ afirma "pre-push deixa passar" 0 "$?"
 ( cd "$W" && bash "$SK/portao-ci.sh" --verificar --base "$MERGE" --sha "$FECHA" --branch "$FEC" >"$T/ci" 2>&1 )
 afirma "CI deixa passar" 0 "$?"
 afirma "o CI não seleciona entrega" "motivo=ref_nao_aplicavel" "$(grep -m1 '^motivo=' "$T/ci")"
+
+echo "SHA-256: o SHA local no formato do repositório; o merge do GitHub segue SHA-1 (DM-315)"
+# no SHA-1, o merge de 64 hex que o serviço desse não é commit
+afirma "SHA-1: merge de 64 hex do serviço: rc 5" 5 "$(GH_MERGE="{\"oid\":\"${MERGE}000000000000000000000000\"}" roda X=1)"
+grep -Fq 'SHA-1' "$T/erro"; afirma "SHA-1: o motivo diz que o serviço informa SHA-1" 0 "$?"
+monta "$T/r256" "$T/origem256.git" sha256
+M256="$(git -C "$T/r256" rev-parse HEAD)"
+afirma "controle: o repositório SHA-256 tem merge de 64 hex" 64 "${#M256}"
+sed -i.tmp "s#^branch_base: .*#branch_base: $M256#" "$T/r256/docs/entregas/$TRAB/ENTREGA.md"; rm -f "$T/r256/docs/entregas/$TRAB/ENTREGA.md.tmp"
+rc=0; ( cd "$T/r256" && env PATH="$T/bin:$PATH" GH_HEAD="$BR" GH_MERGE="{\"oid\":\"$M256\"}" bash "$SCRIPT" --trabalho "$TRAB" >/dev/null 2>"$T/erro" ) || rc=$?
+afirma "SHA-256: branch_base de 64 é SHA local, e o merge que o GitHub não dá pára: rc 5" 5 "$rc"
+grep -Fq 'SHA-1' "$T/erro"; afirma "SHA-256: o motivo diz que o serviço informa SHA-1" 0 "$?"
+# o hook: a marca de 64 isenta; a de 40 (abreviação) não
+W256="$T/r256"
+git -C "$W256" switch -q -c "$FEC"
+git -C "$W256" config "branch.$FEC.expxFechamento" "$M256"
+W_ANTES="$W"; W="$W256"; MERGE_ANTES="$MERGE"; MERGE="$M256"
+msg; prepara
+afirma "SHA-256: marca e trailer de 64: os quatro passam" 0 "$(julga)"
+git -C "$W256" config "branch.$FEC.expxFechamento" "${M256:0:40}"; msg "${M256:0:40}"
+afirma "SHA-256: marca e trailer de 40 (abreviação): barra" 2 "$(julga)"
+W="$W_ANTES"; MERGE="$MERGE_ANTES"
 
 printf '\n%s ok, %s falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

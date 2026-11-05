@@ -4,6 +4,7 @@
 # Funções:
 #   fx_cenario <dir> [legado]   monta o cenário inteiro e exporta
 #                               FX_B0 FX_P1 FX_B1 FX_M FX_TRAB FX_ENTREGA FX_NOVO1 FX_NOVO2
+#                               (FX_OBJECT_FORMAT=sha256 monta o repositório em SHA-256)
 #   fx_merge_sem_commit <dir>   o mesmo cenário, parado com o merge resolvido
 #                               e no índice, sem commit (MERGE_HEAD presente)
 #   fx_segunda_base <dir> [ajusta]  segunda base B2 integrada num merge M2
@@ -138,6 +139,9 @@
 #   entrega_base_vazia    base_validada_sha presente e vazia
 #   entrega_base_null     base_validada_sha: null
 #   entrega_base_aspas    "base_validada_sha" entre aspas
+#   entrega_base_outro_formato  base_validada_sha no tamanho do outro formato:
+#                         B0 cortado em 40 hex no SHA-256, B0 com 24 zeros
+#                         a mais (64 hex) no SHA-1
 # As demais variantes de ENTREGA.md e de B0 alteram o ENTREGA.md num commit da
 # feature logo antes do merge (que passa a ser P1), porque o merge de
 # integração não pode mexer no ENTREGA.md; a árvore continua limpa.
@@ -238,7 +242,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas entrega_base_refs_heads preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas entrega_base_outro_formato entrega_base_refs_heads preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -268,7 +272,7 @@ _fx_corpo() {
   if [ "$var" = runx ]; then fx_pasta=docs/manutencao/ft-rec; fx_ferramenta=runx; fi
   {
     cd "$dir"
-    git init -q -b main
+    git init -q --object-format="${FX_OBJECT_FORMAT:-sha1}" -b main
     git config user.email teste@expx.local
     git config user.name "Teste Expx"
     git config core.autocrlf false
@@ -494,6 +498,9 @@ _fx_corpo() {
       entrega_sem_base) _fx_entrega_sed '/^base_validada_sha:/d' ;;
       entrega_base_vazia) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha:/' ;;
       entrega_base_null) _fx_entrega_sed 's/^base_validada_sha: .*/base_validada_sha: null/' ;;
+      entrega_base_outro_formato)
+        if [ "${#FX_B0}" = 64 ]; then _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: $(printf '%.40s' "$FX_B0")/"
+        else _fx_entrega_sed "s/^base_validada_sha: .*/base_validada_sha: ${FX_B0}000000000000000000000000/"; fi ;;
       entrega_base_aspas) _fx_entrega_sed 's/^base_validada_sha:/"base_validada_sha":/' ;;
       # a base pela ref completa da branch local (DM-312, CodeAnt no mergex#76)
       entrega_base_refs_heads) _fx_entrega_sed 's#^branch_base: main$#branch_base: refs/heads/main#' ;;
@@ -590,7 +597,7 @@ _fx_monta() {
   fi
   msg="$(mktemp)" || return 1
   mkdir -p "$dir" || return 1
-  FX_NL_ALVO="${FX_NL_ALVO:-}" bash -c 'set -e; . "$1"; shift; _fx_corpo "$@"' _ \
+  FX_NL_ALVO="${FX_NL_ALVO:-}" FX_OBJECT_FORMAT="${FX_OBJECT_FORMAT:-}" bash -c 'set -e; . "$1"; shift; _fx_corpo "$@"' _ \
     "$_FXR_LIB/fixture-reconciliacao.sh" "$dir" "$legado" "$com_commit" "$msg" "$msg.shas" "$var"
   rc=$?
   [ "$rc" -eq 0 ] || { rm -f "$msg" "$msg.shas"; return 1; }
@@ -765,10 +772,11 @@ fx_persiste_reconciliacao() {
 # docs/entregas/ft-rec/RECONCILIACAO-BASE-<NNN>.md com rb_emitir: coerente e
 # assinado, com P1 = M^1, B1 = M^2 e os campos de cada caminho tirados do Git.
 # NÃO prova nada (é para forjar): status fora de A|M vira M, blob ausente vira
-# 40 zeros. `anterior` e `origem_base` seguem o número (null/registrada_e0 no
-# 001; o nome anterior/reconciliacao_anterior nos demais).
-# Ambiente opcional: FX_ESTADO (ativa), FX_ORIGEM_BASE, FX_P1_SHA e FX_B1_SHA
-# (só os escalares gravados; os campos seguem M^1/M^2), FX_FORJA_AWK (programa
+# zeros no tamanho do OID do repositório. `anterior` e `origem_base` seguem o
+# número (null/registrada_e0 no 001; o nome anterior/reconciliacao_anterior nos
+# demais).
+# Ambiente opcional: FX_ESTADO (ativa), FX_ORIGEM_BASE, FX_P1_SHA, FX_B1_SHA e
+# FX_M_SHA (só os escalares gravados; os campos seguem M, M^1 e M^2), FX_FORJA_AWK (programa
 # awk, -F/OFS = TAB, aplicado ao TSV de arquivos antes da emissão: colunas
 # caminho status_base blob_b1 blob_m diff_b1_m_sha256 motivo).
 fx_emite_reconciliacao() {
@@ -778,18 +786,19 @@ fx_emite_reconciliacao() {
     . "$_FXR_ARTEFATO" || exit 1
     t="$(mktemp -d)" || exit 1
     p1="$(git rev-parse "$m^1")" && b1="$(git rev-parse "$m^2")" || { rm -rf "$t"; exit 1; }
+    zero="$(printf '%s' "$p1" | tr '0-9a-f' '0')"
     nome="$(printf 'RECONCILIACAO-BASE-%03d.md' "$num")"
     if [ "$num" = 1 ]; then ant=null; ob=registrada_e0
     else ant="$(printf 'RECONCILIACAO-BASE-%03d.md' $((num - 1)))"; ob=reconciliacao_anterior; fi
     ob="${FX_ORIGEM_BASE:-$ob}"
     printf 'expx_tool\tsprintx\ntrabalho_id\tft-rec\nnumero\t%s\nanterior\t%s\nbranch\tfeature/ft-rec\nbranch_base\tmain\norigem_base\t%s\nb0_sha\t%s\np1_sha\t%s\nb1_sha\t%s\nm_sha\t%s\nestado\t%s\nregistrado_em\t2026-10-07\n' \
-      "$num" "$ant" "$ob" "$b0" "${FX_P1_SHA:-$p1}" "${FX_B1_SHA:-$b1}" "$m" "${FX_ESTADO:-ativa}" > "$t/esc"
+      "$num" "$ant" "$ob" "$b0" "${FX_P1_SHA:-$p1}" "${FX_B1_SHA:-$b1}" "${FX_M_SHA:-$m}" "${FX_ESTADO:-ativa}" > "$t/esc"
     : > "$t/arq"
     for f in "$@"; do
       st="$(git -c core.quotepath=false diff --no-renames --name-status -z "$b0" "$b1" -- ":(literal)$f" | tr '\0' '\n' | head -n1)"
       case "$st" in A|M) ;; *) st=M ;; esac
-      bb="$(git rev-parse -q --verify "$b1:$f")" || bb=0000000000000000000000000000000000000000
-      bm="$(git rev-parse -q --verify "$m:$f")" || bm=0000000000000000000000000000000000000000
+      bb="$(git rev-parse -q --verify "$b1:$f")" || bb="$zero"
+      bm="$(git rev-parse -q --verify "$m:$f")" || bm="$zero"
       ds="$(rb_diff_sha "$b1" "$m" "$f")" || { rm -rf "$t"; exit 1; }
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$f" "$st" "$bb" "$bm" "$ds" "forjado pela fixture" >> "$t/arq"
     done
@@ -966,7 +975,7 @@ fx_remoto_bare() {
   [ -n "$dir" ] && [ -e "$dir/.git" ] || return 64
   r="$(cd "$dir/.." && pwd)/remoto.git" || return 1
   [ ! -e "$r" ] || return 1
-  git init -q --bare "$r" || return 1
+  git init -q --bare --object-format="$(git -C "$dir" rev-parse --show-object-format)" "$r" || return 1
   if git -C "$dir" remote get-url origin >/dev/null 2>&1; then
     git -C "$dir" remote set-url origin "$r" || return 1
   else

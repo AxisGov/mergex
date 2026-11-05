@@ -794,7 +794,9 @@ prova_e9_merge() {
   cp "$RAIZ/$ENTREGA" "$t/provado.md" 2>/dev/null \
     && E9_BLOB="$(git -C "$RAIZ" hash-object --path="$ENTREGA" -- "$t/provado.md" 2>/dev/null)" && [ -n "$E9_BLOB" ] \
     || { rm -rf "$t"; para "não foi possível copiar $ENTREGA para a prova do e9-merge"; }
-  if ! git -C "$RAIZ" show "HEAD:$ENTREGA" > "$t/ENTREGA.md" 2>/dev/null; then
+  # o ENTREGA.md de HEAD como o checkout o escreve (--filters: autocrlf, eol,
+  # .gitattributes), para comparar com o disco nos mesmos fins de linha
+  if ! git -C "$RAIZ" cat-file --filters "HEAD:$ENTREGA" > "$t/ENTREGA.md" 2>/dev/null; then
     rm -rf "$t"; para "$ENTREGA ausente de HEAD: o e9-merge só persiste o registro de um ENTREGA.md versionado"
   fi
   if ! bash "$PLANEJAMENTO_SH" --entrega "$t/ENTREGA.md" > "$t/antes" 2>/dev/null \

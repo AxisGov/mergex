@@ -29,7 +29,7 @@ novo_repo() { N_CASO=$((N_CASO + 1)); CASO="$D/d04-$N_CASO"; }
 extra_checkpoint() { # <repo> <checkpoint>
   case "$2" in
     pre-e6) printf 'pr\n' > "$1/docs/entregas/$TRAB/PR.md" ;;
-    e8) printf 'estado: bloqueado\n' >> "$1/$ENT" ;;
+    e8) entrega_bloqueada "$1/$ENT" ;;
   esac
 }
 
@@ -309,7 +309,7 @@ grupo_first() {
     && ok 'FIRST lido pelo valor: grafia plain equivalente passa no tracked seguinte' \
     || falha "FIRST nao foi lido pelo valor (rc=$rc; $(cat "$D/first.err"))"
   troca_linha "$repo/$HIST" '      - x y' '      - x  y'
-  printf 'estado: bloqueado\n' >> "$repo/$ENT"
+  entrega_bloqueada "$repo/$ENT"
   metodo "$repo" --persistir e8 >/dev/null 2>"$D/first.err"; rc=$?
   [ "$rc" != 0 ] && grep -Fq "$REESCRITA" "$D/first.err" && [ -z "$(staged "$repo")" ] \
     && ok 'FIRST lido pelo valor: valor diferente barra no e8 seguinte' \
@@ -342,13 +342,13 @@ grupo_checkpoints() {
   # e8 sem checkpoint anterior: a primeira criação citada passa, a com "a\n"
   # barra antes do git add.
   novo_repo; repo="$CASO"; repo_c7c "$repo"; fim_da_f6 "$repo"; f_citado "$repo"
-  printf 'estado: bloqueado\n' >> "$repo/$ENT"
+  entrega_bloqueada "$repo/$ENT"
   metodo "$repo" --persistir e8 >/dev/null 2>"$D/cp.err"; rc=$?
   [ "$rc" = 0 ] && nomes_head "$repo" | grep -Fxq "$HIST" && metodo "$repo" --verificar e8 >/dev/null 2>&1 \
     && ok 'e8 persiste a primeira criacao citada' \
     || falha "e8 recusou a primeira criacao citada (rc=$rc; $(cat "$D/cp.err"))"
   novo_repo; repo="$CASO"; repo_c7c "$repo"; fim_da_f6 "$repo"; f_barra_n "$repo"
-  printf 'estado: bloqueado\n' >> "$repo/$ENT"
+  entrega_bloqueada "$repo/$ENT"
   metodo "$repo" --persistir e8 >/dev/null 2>"$D/cp.err"; rc=$?
   [ "$rc" != 0 ] && grep -Fq "$QUEBRA" "$D/cp.err" && [ -z "$(staged "$repo")" ] \
     && [ -z "$(no_head "$repo")" ] && trava_livre "$repo" \
