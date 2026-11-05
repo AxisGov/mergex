@@ -18,6 +18,10 @@
 #      SEQ=<outro script> bash scripts/ci/test-sequencia-commits.sh
 
 set -uo pipefail
+# Dentro de um hook do Git, GIT_DIR e afins apontam o repositório de quem chamou:
+# a bancada monta os próprios repositórios e só os casos que pedem o ambiente o
+# passam, explícito (DM-271).
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SEQ="${SEQ:-$REPO/.claude/skills/mergex/scripts/sequencia-de-commits.sh}"

@@ -447,7 +447,8 @@ if git init -q --object-format=sha256 "$aux/sonda-sha256" 2>/dev/null; then
   ITENS=" T-01.01:$(g rev-parse HEAD)"; entrega; tarefas T-01.01:concluida
   (cd "$aux" && "$BASH" "$V12" --verificar --entrega sha256-64/docs/entregas/w/ENTREGA.md --trabalho w --raiz sha256-64 \
      -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
-  ! tem 'motivo=commit-invalido:T-01.01' && tem 'T-01.01 FALHA evidencia-ausente' \
+  [ "$rc" = 1 ] && [ "$(primeira)" = 'V12=FALHA' ] && ! tem 'motivo=commit-invalido:T-01.01' \
+    && tem 'T-01.01 FALHA evidencia-ausente' \
     && passa 'SHA-256 com 64 hex, de fora da raiz: o SHA vale, e a V12 confere a evidência' \
     || quebra "SHA-256 com 64 hex: $(mostra)"
 else

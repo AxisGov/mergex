@@ -246,8 +246,13 @@ M56a() { troca "$SEQ_SH" '    *) SHA_TETO=40 ;;' '    *) SHA_TETO=64 ;;'; }
 M56b() { troca "$SEQ_SH" '  case "$(unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE' '  case "$(:'; }
 M56c() { troca "$SEQ_SH" '  sha_valido "$commit" "$(dirname "$arq")" \' '  sha_valido "$commit" \'; }
 M56d() { troca "$PROVA_SH" '  [ "$arq" = - ] || dir="$(dirname "$arq")"' '  :'; }
-M56e() { troca "$V12_SH" '  sha_valido "$sha" "$RAIZ" || sem_prova "commit-invalido:$id"' \
-                         '  sha_valido "$sha" || sem_prova "commit-invalido:$id"'; }
+# Só o SHA-256 separa --raiz do diretório corrente: com SHA-1 nos dois, o teto é
+# 40 dos dois lados. Git sem SHA-256 não prova este mutante, e ele sai indisponível.
+M56e() {
+  git init -q --object-format=sha256 "$(mktemp -d)" 2>/dev/null || return 4
+  troca "$V12_SH" '  sha_valido "$sha" "$RAIZ" || sem_prova "commit-invalido:$id"' \
+    '  sha_valido "$sha" || sem_prova "commit-invalido:$id"'
+}
 
 # --- P0.2-C1: o ownership da task no fechamento (ownership-da-task.sh) ---
 # As cinco tentações que o contrato do E1 proíbe, mais o hook que pararia de
@@ -438,7 +443,7 @@ M56d|a V11 mede o SHA pelo diretorio corrente, nao pela ENTREGA|teste_v11
 M56e|a V12 mede o SHA pelo diretorio corrente, nao por --raiz|teste_v12'
 
 SELECAO=" $* "
-MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1
+MORTAS=0; VIVAS=0; ERROS=0; INDISPONIVEIS=0; CONTROLE_OK=1
 PIDS=""; IDS=""
 # Cada mutante copia o repositório e roda uma bancada: sem teto, todos de uma vez travam
 # a máquina (DM-292). O teto é o das outras bancadas de mutação.
@@ -451,7 +456,7 @@ controle() {
   local d rc
   d="$(copia)"
   echo "Controle — cópia SEM mutação: as verificações têm que passar"
-  for v in teste teste_causa teste_v11 teste_seq teste_own teste_hooks teste_integracao teste_ev validador; do
+  for v in teste teste_causa teste_v11 teste_seq teste_own teste_hooks teste_integracao teste_ev teste_v12 validador; do
     rc=0; ( cd "$d" && "$v" ) || rc=$?
     if [ "$rc" = 0 ]; then printf '  ok     %s\n' "$v"
     else CONTROLE_OK=0; printf '  FALHA  %s — verde era esperado (rc=%s)\n' "$v" "$rc"
@@ -466,7 +471,9 @@ roda() { # id desc verificacao
   d="$(copia)"
   (
     cd "$d" || exit 3
-    "$id" || exit 3
+    # 4: o ambiente não prova este mutante (ex.: Git sem SHA-256); 3: não aplicado
+    "$id"; r=$?
+    [ "$r" = 0 ] || { [ "$r" = 4 ] && exit 4; exit 3; }
     if "$verif"; then exit 1; else exit 0; fi
   ) > "$d/mutacao.log" 2>&1
   printf '%s\n' "$?" > "$d/rc"
@@ -501,6 +508,8 @@ while IFS='|' read -r id desc verif; do
        grep -E 'FALHA|contract check failed' "$d/saida.log" 2>/dev/null | head -4 \
          | sed 's/^[[:space:]]*//' | cut -c1-140 | sed 's/^/           /' ;;
     1) VIVAS=$((VIVAS+1)); printf '  VIVA   %-4s %s — %s continuou verde\n' "$id" "$desc" "$verif" ;;
+    4) INDISPONIVEIS=$((INDISPONIVEIS+1))
+       printf '  indisp %-4s %s — o ambiente não prova este mutante (Git sem SHA-256)\n' "$id" "$desc" ;;
     *) ERROS=$((ERROS+1)); printf '  ERRO   %-4s %s — mutação não aplicada\n' "$id" "$desc"; sed 's/^/         /' "$d/mutacao.log" ;;
   esac
 done <<EOF
@@ -508,6 +517,6 @@ $LISTA
 EOF
 
 echo "---------------------------------------------"
-printf '%d morta(s), %d viva(s), %d erro(s)\n' "$MORTAS" "$VIVAS" "$ERROS"
+printf '%d morta(s), %d viva(s), %d erro(s), %d indisponível(is)\n' "$MORTAS" "$VIVAS" "$ERROS" "$INDISPONIVEIS"
 [ "$CONTROLE_OK" = 1 ] || printf 'controle sem mutação REPROVOU: as mutações não provam nada\n'
 [ "$VIVAS" = 0 ] && [ "$ERROS" = 0 ] && [ "$CONTROLE_OK" = 1 ]
