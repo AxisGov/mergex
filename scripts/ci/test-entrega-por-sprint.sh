@@ -553,6 +553,21 @@ PATH="$aux/shim-wt:$PATH" pm "$d" e9-merge
 [ "$rc" = 1 ] && [ "$(git -C "$d" rev-parse HEAD~2)" = "$h" ] && grep -q 'outro commit entrou na branch' "$aux/pm.err"
 r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
 confere 'e9-merge para quando outro commit entra logo depois de fixada a árvore: o pai é o de antes do add' "$r"
+# o catálogo do stage é comparado nome a nome, em NUL: um arquivo de fora cujo
+# nome tem quebra de linha e repete o caminho do catálogo não se confunde com ele
+mkdir -p "$aux/shim-nl"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'if [ "${1:-}" = write-tree ]; then\n'
+  printf '  n="%s"$'"'"'\\n'"'"'"%s"\n' "$e9e" "$e9e"
+  printf '  mkdir -p "${n%%/*}" && printf '"'"'x\\n'"'"' > "$n" && %q add -- "$n"\nfi\n' "$(command -v git)"
+  printf 'exec %q "$@"\n' "$(command -v git)"; } > "$aux/shim-nl/git"
+chmod +x "$aux/shim-nl/git"
+d="$aux/r9-nl"; cp -R "$aux/r9" "$d"
+h="$(git -C "$d" rev-parse HEAD)"
+PATH="$aux/shim-nl:$PATH" pm "$d" e9-merge
+[ "$rc" = 1 ] && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ] && grep -q 'diverge do catálogo exato' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || { mostra "$aux/pm.err"; echo "        rc=$rc"; }
+confere 'e9-merge recusa o arquivo de fora com quebra de linha no nome que repete o caminho do catálogo' "$r"
 # core.autocrlf=true: o blob é LF e o disco é CRLF; o replay parte do ENTREGA.md
 # de HEAD como o checkout o escreve, e o commit leva o blob LF de sempre
 d="$aux/r9-autocrlf"; cp -R "$aux/r9" "$d"
