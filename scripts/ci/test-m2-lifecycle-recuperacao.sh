@@ -553,21 +553,26 @@ grupo_lifecycle() {
   local repo pasta antes depois saida rc nomes corpo token trava staged segredo
   printf '\nLIFECYCLE — checkpoints idempotentes e fail-closed\n'
 
-  # área da base com acento: com core.quotepath (o padrão do Git), o catálogo
+  # área da base com nome que o Git cita (acento, TAB, aspas): o catálogo
   # continua batendo com o que entrou no stage (DM-319)
-  repo="$D/lifecycle-acento"
-  pasta="$(repo_catalogo "$repo" sprintx canonico)"
-  (
-    cd "$repo" || exit 1
-    sed -i 's/arquivo: area com espaco.md/arquivo: área.md/' "$pasta/base/00-INDICE.md"
-    artefato "$pasta/base/área.md" base_area ft-m2
-    git add -A && git commit -qm 'chore: área com acento'
-  )
-  printf '\nmudanca\n' >> "$repo/$pasta/base/área.md"
-  saida="$(metodo "$repo" --persistir sprintx pre-e2 2>&1)"; rc=$?
-  [ "$rc" = 0 ] && [ "$(git -C "$repo" -c core.quotepath=false show --format= --name-only HEAD | sed '/^$/d')" = "$pasta/base/área.md" ] \
-    && ok 'pre-e2 persiste a area da base com acento, com core.quotepath padrao' \
-    || falha "area com acento (rc=$rc): $saida"
+  local n area
+  n=0
+  for area in 'área.md' "$(printf 'com\ttab.md')" 'aspa"dupla.md'; do
+    n=$((n + 1)); repo="$D/lifecycle-citado-$n"
+    pasta="$(repo_catalogo "$repo" sprintx canonico)"
+    (
+      cd "$repo" || exit 1
+      A="$area" awk '{ sub(/arquivo: area com espaco\.md/, "arquivo: " ENVIRON["A"]); print }' \
+        "$pasta/base/00-INDICE.md" > indice.tmp && mv indice.tmp "$pasta/base/00-INDICE.md"
+      artefato "$pasta/base/$area" base_area ft-m2
+      git add -A && git commit -qm 'chore: área citada'
+    )
+    printf '\nmudanca\n' >> "$repo/$pasta/base/$area"
+    saida="$(metodo "$repo" --persistir sprintx pre-e2 2>&1)"; rc=$?
+    [ "$rc" = 0 ] && [ "$(git -C "$repo" show --format= --name-only -z HEAD | tr '\0' '\n' | sed '/^$/d')" = "$pasta/base/$area" ] \
+      && ok "pre-e2 persiste a area da base que o Git cita ($(printf '%s' "$area" | od -An -c | tr -s ' ' | cut -c1-40))" \
+      || falha "area citada $n (rc=$rc): $saida"
+  done
 
   repo="$D/lifecycle-principal"
   pasta="$(repo_catalogo "$repo" sprintx canonico)"

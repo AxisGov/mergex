@@ -951,11 +951,12 @@ done < "$TMP_LISTA"
 # catálogo e o blob provado são conferidos nesta árvore, e não no índice: a
 # trava C5 não segura um `git add` de fora dela, e o gate de segredo e a
 # mensagem ainda rodam antes do commit. A conferência depois dele acusa o
-# índice que mudou no intervalo. Sem quotepath, o caminho com acento sai cru,
-# como o catálogo o escreve.
+# índice que mudou no intervalo. Os nomes saem em NUL: crus, como o catálogo os
+# escreve, sem as aspas que o Git põe em acento, TAB e aspas (o catálogo recusa
+# quebra de linha no nome, e a lista é uma por linha).
 ARVORE="$(git write-tree 2>/dev/null)" || para 'não foi possível ler a árvore do índice; stage preservado'
 ANTES="${PAI:-$(git hash-object -t tree /dev/null 2>/dev/null)}"
-STAGED="$(git -c core.quotepath=false diff --name-only "$ANTES" "$ARVORE" 2>/dev/null | LC_ALL=C sort -u)"
+STAGED="$(git diff --name-only -z "$ANTES" "$ARVORE" 2>/dev/null | tr '\0' '\n' | LC_ALL=C sort -u)"
 ESPERADO="$(cat "$TMP_LISTA")"
 [ -n "$STAGED" ] || para 'nenhuma mudança elegível entrou no stage'
 [ "$STAGED" = "$ESPERADO" ] || para 'o staged diff diverge do catálogo exato; stage preservado'
