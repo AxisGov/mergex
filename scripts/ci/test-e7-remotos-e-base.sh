@@ -127,7 +127,14 @@ mkdir -p "$aux/bin"
 cat > "$aux/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 # GH_JA_EXISTE=1: o `pr create` falha como "PR já existe" e o `pr view` devolve a URL dele
-if [ "$1 $2" = "pr view" ]; then printf '%s\n' "$*" >> "$ARGS_GH.view"; echo https://github.com/acme/login/pull/7; exit 0; fi
+if [ "$1 $2" = "pr view" ]; then
+  printf '%s\n' "$*" >> "$ARGS_GH.view"
+  case "$*" in
+    *baseRefOid*) printf '%s %s\n' "${GH_BASE_NOME:-main}" "${GH_BASE_OID:-$(git rev-parse main)}" ;;
+    *) echo https://github.com/acme/login/pull/7 ;;
+  esac
+  exit 0
+fi
 printf '%s\n' "$@" > "$ARGS_GH"
 if [ "${GH_JA_EXISTE:-}" = 1 ]; then echo 'a pull request for branch "feature/x" into branch "main" already exists' >&2; exit 1; fi
 if [ "${GH_OUTRA_FALHA:-}" = 1 ]; then echo 'HTTP 403: Resource not accessible by integration' >&2; exit 1; fi
@@ -151,6 +158,13 @@ cat > "$aux/bin/git" <<GIT
 if [ "\${1:-}" = ls-remote ]; then
   printf '%s\t%s\n' "\${PONTA_REMOTA:-\$("$git_real" rev-parse HEAD)}" "\${3:-}"; exit 0
 fi
+# o fetch da base do PR existente: sem rede, os commits do teste já estão aqui.
+# GIT_FETCH_FALHA=1 falha como a rede; GIT_FETCH_OID é a ponta buscada (FETCH_HEAD)
+if [ "\${1:-}" = fetch ]; then
+  [ "\${GIT_FETCH_FALHA:-}" != 1 ] || exit 1
+  [ -z "\${GIT_FETCH_OID:-}" ] || printf '%s\n' "\$GIT_FETCH_OID" > "\$("$git_real" rev-parse --git-path FETCH_HEAD)"
+  exit 0
+fi
 exec "$git_real" "\$@"
 GIT
 chmod +x "$aux/bin/git"
@@ -161,6 +175,10 @@ projeto_pr() { # <dir> <url origin> <url fork> <remoto do upstream> — branch f
   git -C "$d" update-ref "refs/remotes/$4/feature/x" HEAD
   git -C "$d" config branch.feature/x.remote "$4"; git -C "$d" config branch.feature/x.merge refs/heads/feature/x
   mkdir -p "$d/docs/entregas/x"; printf 'corpo\n' > "$d/docs/entregas/x/PR.md"
+  # o ENTREGA.md publicado, sem base_validada_sha (entrega legada); a DM-320 o lê do SHA medido
+  printf -- '---\nkind: entrega\n---\n' > "$d/docs/entregas/x/ENTREGA.md"
+  g "$d" add docs/entregas/x/ENTREGA.md && g "$d" commit -q -m entrega
+  git -C "$d" update-ref "refs/remotes/$4/feature/x" HEAD
   # o estado do passo 1.5: remoto-base, base, upstream e o SHA medido
   printf 'origin\nmain\n%s/feature/x\n%s\n' "$4" "$(git -C "$d" rev-parse HEAD)" \
     > "$(git -C "$d" rev-parse --path-format=absolute --git-path mergex-e7-base)"
@@ -300,6 +318,61 @@ GH_OUTRA_FALHA=1 passo2 "$aux/existe" 'gh pr create'; rc=$?
 rm -f "$aux/args-gh.view"
 passo2 "$aux/existe" 'gh pr create'; rc=$?
 [ "$rc" = 0 ] && [ ! -e "$aux/args-gh.view" ] && passa 'PR criado: nao consulta o existente' || quebra "PR criado consultou o existente (rc $rc)"
+
+echo '== E7: o PR existente so e retomado se a base dele contem a base validada (DM-320) =='
+d="$aux/existe"
+g "$d" switch -q -c feature/predecessora main && printf 'p\n' > "$d/p" && g "$d" add p && g "$d" commit -q -m p
+pred="$(git -C "$d" rev-parse HEAD)"; g "$d" switch -q feature/x
+mainsha="$(git -C "$d" rev-parse main)"
+publica() { # <conteudo do ENTREGA.md> — commita e passa a ser o SHA medido do passo 1.5
+  mkdir -p "$d/docs/entregas/x"; printf 'corpo\n' > "$d/docs/entregas/x/PR.md"
+  printf '%s' "$1" > "$d/docs/entregas/x/ENTREGA.md"
+  g "$d" add docs/entregas/x/ENTREGA.md && g "$d" commit -q --allow-empty -m "entrega"
+  printf 'origin\nmain\norigin/feature/x\n%s\n' "$(git -C "$d" rev-parse HEAD)" \
+    > "$(git -C "$d" rev-parse --path-format=absolute --git-path mergex-e7-base)"
+}
+retoma() { # <descricao> <rc esperado> [VAR=valor...] — o PR ja existe; retomado ou nao
+  local desc="$1" esp="$2" rc; shift 2
+  ( export GH_JA_EXISTE=1 "$@"; passo2 "$d" 'gh pr create' ); rc=$?
+  if [ "$esp" = 0 ]; then
+    [ "$rc" = 0 ] && grep -q 'PR existente retomado' "$aux/p2.out" && passa "$desc" || quebra "$desc: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+  else
+    [ "$rc" = 1 ] && ! grep -q 'PR existente retomado' "$aux/p2.out" && passa "$desc" || quebra "$desc: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+  fi
+}
+publica "$(printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$pred")"
+retoma 'PR existente contra a main, sem a predecessora: nao retoma' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+grep -q 'DM-320' "$aux/p2.out" && passa 'a recusa cita a DM-320' || quebra "a recusa nao cita a DM-320: $(tr '\n' '|' < "$aux/p2.out")"
+retoma 'PR existente contra a predecessora: retoma' 0 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred"
+retoma 'base do PR que contem a base validada (redirecionado, DM-245): retoma' 0 GH_BASE_NOME=main GH_BASE_OID="$pred"
+retoma 'base do PR nao buscada (rede): nao retoma' 1 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred" GIT_FETCH_FALHA=1
+# a base validada e a do ENTREGA.md publicado: a edicao no disco, sem commit, nao muda a decisao
+printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$mainsha" > "$d/docs/entregas/x/ENTREGA.md"
+retoma 'ENTREGA.md editado no disco sem commit: vale o publicado (nao retoma)' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+publica "$(printf -- '---\nkind: entrega\nbase_validada_sha:\n---\n')"
+retoma 'base_validada_sha presente e vazia: nao retoma' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+publica "$(printf -- '---\nkind: entrega\nbase_validada_sha: pendente\n---\n')"
+retoma 'base_validada_sha pendente (legado): retoma como antes' 0 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+
+echo '== E7: a MR existente so e retomada se o alvo contem a base validada (DM-320) =='
+d="$aux/gl"
+g "$d" switch -q -c feature/predecessora main && printf 'p\n' > "$d/p" && g "$d" add p && g "$d" commit -q -m p
+predgl="$(git -C "$d" rev-parse HEAD)"; g "$d" switch -q feature/x
+mkdir -p "$d/docs/entregas/x"; printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$predgl" > "$d/docs/entregas/x/ENTREGA.md"
+g "$d" add docs/entregas/x/ENTREGA.md && g "$d" commit -q -m entrega
+git -C "$d" update-ref refs/remotes/origin/feature/x HEAD
+estado="$(git -C "$d" rev-parse --path-format=absolute --git-path mergex-e7-base)"
+sed -i "4s/.*/$(git -C "$d" rev-parse HEAD)/" "$estado"
+printf '[%s]\n' "$(mr feature/x 42 main https://gl/mr/alvo)" > "$aux/paginas/1.json"; rm -f "$aux/paginas/2.json"
+GIT_FETCH_OID="$(git -C "$d" rev-parse main)" passo2 "$d" 'glab mr create'; rc=$?
+[ "$rc" = 1 ] && grep -q 'DM-320' "$aux/p2.out" && [ ! -e "$aux/args-glab" ] \
+  && passa 'GitLab: a ponta do alvo sem a base validada: nao retoma' || quebra "GitLab alvo sem a base validada: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+GIT_FETCH_OID="$predgl" passo2 "$d" 'glab mr create'; rc=$?
+[ "$rc" = 0 ] && [ ! -e "$aux/args-glab" ] \
+  && passa 'GitLab: a ponta do alvo contem a base validada: retoma' || quebra "GitLab alvo com a base validada: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+GIT_FETCH_FALHA=1 passo2 "$d" 'glab mr create'; rc=$?
+[ "$rc" = 1 ] && grep -q 'não buscado' "$aux/p2.out" \
+  && passa 'GitLab: alvo nao buscado (rede): nao retoma' || quebra "GitLab fetch falho: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
 
 printf -- '---------------------------------------------\n%s ok, %s falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = 0 ]

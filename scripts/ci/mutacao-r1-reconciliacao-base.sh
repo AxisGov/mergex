@@ -121,7 +121,8 @@ MATRIZ='1|P1|r1:provas|prova 1 desligada
 35|PPLEG|r2:prepush|pre-push sem a parcela legada pelo nome
 36|PPTRL|r2:prepush|pre-push sem a parcela do trailer
 37|PPCOB|r2:prepush|pre-push sem o aviso cobertura_indeterminada
-38|M3CHAM|r2:prepush|chamador gerenciado sem conferir o validador'
+38|M3CHAM|r2:prepush|chamador gerenciado sem conferir o validador
+39|CIBASEPR|r2:ci|o CI ignora a base do PR (DM-320)'
 
 # Grupo de processos próprio. interrompe() derruba a árvore inteira com
 # `kill -TERM 0`, que alcança o GRUPO: lançado de um bash não interativo (outro
