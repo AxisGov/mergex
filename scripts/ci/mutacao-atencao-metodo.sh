@@ -30,6 +30,7 @@ AGENTE_OC='.opencode/agent/revisor-diff.md'
 OWN_SH='.claude/skills/mergex/scripts/ownership-da-task.sh'
 HOOK_TASK='.claude/hooks/mergex/commit-por-task.sh'
 FECHAMENTO_SH='.claude/skills/mergex/scripts/fechamento-do-e1.sh'
+V12_SH='.claude/skills/mergex/scripts/portao-v12.sh'
 
 # Uma raiz só: `copia` roda em `$(...)`, e o que ela anotasse numa variável se perderia
 # com o subshell, deixando a cópia para trás (DM-292).
@@ -82,6 +83,7 @@ teste_own()   { bash scripts/ci/test-ownership-task.sh > saida.log 2>&1; }
 teste_hooks()      { bash .claude/hooks/teste.sh > saida.log 2>&1; }
 teste_integracao() { bash scripts/ci/test-integracao-c7a.sh > saida.log 2>&1; }
 teste_ev()   { bash scripts/ci/test-e1-evidencia-revisao.sh > saida.log 2>&1; }
+teste_v12()  { bash scripts/ci/test-portao-v12.sh > saida.log 2>&1; }
 
 # ---------------------------------------------------------------------------
 # As mutações: id | descrição | verificação que TEM que falhar | função que muta
@@ -164,7 +166,7 @@ M22() { # só o primeiro item de commits decide
     '  if ! provadas="$(commits_validos "$ent" | head -1)"; then'
 }
 M23() { # commit vazio ou malformado passa a satisfazer
-  troca "$PROVA_SH" '    sha_valido "$c" || continue' '    sha_valido "$c" || true'
+  troca "$PROVA_SH" '    sha_valido "$c" "$dir" || continue' '    sha_valido "$c" "$dir" || true'
 }
 M24a() { # o item que o E1 tardio acrescentou no fim é ignorado
   troca "$PROVA_SH" '  if ! provadas="$(commits_validos "$ent")"; then' \
@@ -238,6 +240,14 @@ M37f() { # volta a existir um segundo parser de commits fora do leitor único
     '. "$(dirname "${BASH_SOURCE[0]}")/sequencia-de-commits.sh"
 bloco_proprio() { bloco "$arq" commits; }'
 }
+
+# --- DM-318: o teto do SHA é o OID do repositório da ENTREGA ---
+M56a() { troca "$SEQ_SH" '    *) SHA_TETO=40 ;;' '    *) SHA_TETO=64 ;;'; }
+M56b() { troca "$SEQ_SH" '  case "$(unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE' '  case "$(:'; }
+M56c() { troca "$SEQ_SH" '  sha_valido "$commit" "$(dirname "$arq")" \' '  sha_valido "$commit" \'; }
+M56d() { troca "$PROVA_SH" '  [ "$arq" = - ] || dir="$(dirname "$arq")"' '  :'; }
+M56e() { troca "$V12_SH" '  sha_valido "$sha" "$RAIZ" || sem_prova "commit-invalido:$id"' \
+                         '  sha_valido "$sha" || sem_prova "commit-invalido:$id"'; }
 
 # --- P0.2-C1: o ownership da task no fechamento (ownership-da-task.sh) ---
 # As cinco tentações que o contrato do E1 proíbe, mais o hook que pararia de
@@ -420,7 +430,12 @@ M54c|reconhecimento le o frontmatter da evidencia|teste_ev
 M54d|qualquer nome sob revisao/ vira evidencia|teste_ev
 M54e|evidencia de outro trabalho e reconhecida|teste_ev
 M55a|nome da evidencia muda so no E1|validador
-M55b|nome da evidencia muda so no E3|validador'
+M55b|nome da evidencia muda so no E3|validador
+M56a|fora de repositorio o teto do SHA vira 64|teste_seq
+M56b|o formato le o repositorio do ambiente do Git|teste_seq
+M56c|o E1 mede o SHA pelo diretorio corrente, nao pela ENTREGA|teste_seq
+M56d|a V11 mede o SHA pelo diretorio corrente, nao pela ENTREGA|teste_v11
+M56e|a V12 mede o SHA pelo diretorio corrente, nao por --raiz|teste_v12'
 
 SELECAO=" $* "
 MORTAS=0; VIVAS=0; ERROS=0; CONTROLE_OK=1

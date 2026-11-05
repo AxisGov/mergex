@@ -242,6 +242,28 @@ bash "$PROVA" --verificar "$E" "$T" 2>&1 | grep -Fq 'motivo=sem-versionador' \
 
 # ---------------------------------------------------------------------------
 echo
+echo "14b. O tamanho do SHA é o do repositório da ENTREGA (DM-318)"
+# ---------------------------------------------------------------------------
+h64=8a64eba738221bff259100faff083e5b8aa8c4fd78f67b1d234a0385848347e2
+S1="$D/sha1"; git init -q "$S1"; plano "$S1/tasks.md" plano T-01.01:concluida
+entrega "$S1/ENTREGA.md" true T-01.01:"${h64:0:41}"
+verifica FALHA "SHA-1: 41 hex não prova a task" "$S1/ENTREGA.md" "$S1/tasks.md"
+entrega "$S1/ENTREGA.md" true T-01.01:"${h64:0:40}"
+verifica OK "SHA-1: 40 hex prova a task" "$S1/ENTREGA.md" "$S1/tasks.md"
+if git init -q --object-format=sha256 "$D/sha256" 2>/dev/null; then
+  S2="$D/sha256"; plano "$S2/tasks.md" plano T-01.01:concluida
+  entrega "$S2/ENTREGA.md" true T-01.01:"$h64"
+  verifica OK "SHA-256: 64 hex prova a task" "$S2/ENTREGA.md" "$S2/tasks.md"
+  entrega "$S1/ENTREGA.md" true T-01.01:"$h64"
+  obtido="$(GIT_DIR="$S2/.git" bash "$PROVA" --verificar "$S1/ENTREGA.md" "$S1/tasks.md" 2>&1 | head -1)"
+  [ "$obtido" = V11=FALHA ] && ok "SHA-1 com GIT_DIR do SHA-256: 64 hex não prova a task" \
+    || falha "SHA-1 com GIT_DIR do SHA-256 — obteve '$obtido'"
+else
+  ok "git sem --object-format=sha256: o SHA-256 fica de fora"
+fi
+
+# ---------------------------------------------------------------------------
+echo
 echo "15. Sem prova não é prova: a V11 que não pôde rodar não vira OK"
 # ---------------------------------------------------------------------------
 verifica SEM_PROVA "ENTREGA.md inexistente" "$D/nao-existe.md" "$T"
