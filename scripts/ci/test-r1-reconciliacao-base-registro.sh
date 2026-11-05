@@ -1234,8 +1234,37 @@ grupo_ponta_base() {
   desfaz
   git update-ref refs/heads/main "$topo"; git update-ref refs/remotes/origin/main "$FX_B0"
   reprova "origin/main atrás de B1, mesmo com a main local em dia: B1 não foi publicado" 4 "rode git fetch" "$FX_NOVO1" "$FX_NOVO2"
+  # DM-321: sem a ref remota, o servidor é consultado. A base que existe lá e não
+  # foi buscada recusa (a local não prova a publicação); a que não existe lá (a
+  # base empilhada nunca enviada) e o repositório sem remoto valem pela local; a
+  # consulta que falha recusa
   git update-ref -d refs/remotes/origin/main
-  registra_ok "sem a ref remota, a ponta é a local, como antes" "$FX_NOVO1" "$FX_NOVO2"
+  reprova "sem a ref remota, com a base no servidor: recusa e manda buscar" 4 "git fetch origin" "$FX_NOVO1" "$FX_NOVO2"
+  git -C "$FX_REMOTO" update-ref -d refs/heads/main
+  git ls-remote --exit-code --heads origin refs/heads/main >/dev/null 2>&1; [ "$?" = 2 ] \
+    && ok "controle: a base não existe no servidor" || falha "controle: a base continua no servidor"
+  registra_ok "sem a ref remota e sem a base no servidor (base nunca enviada): a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  # a consulta roda ANTES da trava C5 (a rede lenta não prende o índice) e sem
+  # pergunta de credencial do Git: o git falso marca se foi chamado com a trava
+  # presa ou sem GIT_TERMINAL_PROMPT=0, e falha como a rede
+  sh="$(mktemp -d)"; TMPS+=("$sh")
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  [ "${GIT_TERMINAL_PROMPT:-}" = 0 ] || : > %q\n' "$sh/pediu-senha"
+    printf '  bash %q --status >/dev/null 2>&1 || : > %q\n' "$TRAVA" "$sh/sob-trava"
+    printf '  exit 128; done\n'
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  git -C "$FX_REMOTO" update-ref refs/heads/main "$topo"
+  PATH="$sh:$PATH" reprova "sem a ref remota, a consulta que falha (rede, senha): recusa" 4 "consulta" "$FX_NOVO1" "$FX_NOVO2"
+  [ ! -e "$sh/pediu-senha" ] && ok "a consulta ao servidor roda com GIT_TERMINAL_PROMPT=0" || falha "a consulta ao servidor podia pedir senha"
+  [ ! -e "$sh/sob-trava" ] && ok "a consulta ao servidor roda antes da trava C5" || falha "a consulta ao servidor rodou com a trava C5 presa"
+  git -C "$FX_REMOTO" update-ref -d refs/heads/main
+  url="$(git remote get-url origin)"; git remote set-url origin "$d/../nao-existe.git"
+  reprova "sem a ref remota e com a consulta ao servidor falhando: recusa" 4 "consulta" "$FX_NOVO1" "$FX_NOVO2"
+  git remote set-url origin "$url"
+  git remote remove origin
+  registra_ok "repositório sem remoto: a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
   cd "$REPO" || return
 
