@@ -430,6 +430,31 @@ roda
 [ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=commit-invalido:T-01.01' \
   && passa 'ultimo item da task com commit invalido: SEM_PROVA' || quebra "ultimo item com commit invalido: $(mostra)"
 
+# o tamanho do SHA é o do repositório de --raiz, chamado de fora dela (DM-318)
+projeto sha1-41 obrigatoria; escreve src/a.ts; commita T-01.01
+ITENS=" T-01.01:$(g rev-parse HEAD)0"; entrega; tarefas T-01.01:concluida
+(cd "$aux" && "$BASH" "$V12" --verificar --entrega sha1-41/docs/entregas/w/ENTREGA.md --trabalho w --raiz sha1-41 \
+   -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 2 ] && [ "$(primeira)" = 'V12=SEM_PROVA' ] && tem 'motivo=commit-invalido:T-01.01' \
+  && passa 'SHA-1 com 41 hex, de fora da raiz: SEM_PROVA commit-invalido' || quebra "SHA-1 com 41 hex: $(mostra)"
+if git init -q --object-format=sha256 "$aux/sonda-sha256" 2>/dev/null; then
+  P="$aux/sha256-64"; ITENS=""
+  mkdir -p "$P/$nucleo_rel" && cp -R "$aux/nucleo/." "$P/$nucleo_rel/"
+  g init -q -b main --object-format=sha256 && g config core.autocrlf false
+  printf '{"expx_fatiamento": 2, "revisao_por_task": {"modo": "obrigatoria"}}\n' > "$P/.expx/fatiamento.json"
+  printf 'base\n' > "$P/base.txt"; g add -A; g commit -q -m base
+  escreve src/a.ts; commita T-01.01
+  ITENS=" T-01.01:$(g rev-parse HEAD)"; entrega; tarefas T-01.01:concluida
+  (cd "$aux" && "$BASH" "$V12" --verificar --entrega sha256-64/docs/entregas/w/ENTREGA.md --trabalho w --raiz sha256-64 \
+     -- "$aux/tasks.md" > "$aux/out" 2> "$aux/err"); rc=$?
+  [ "$rc" = 1 ] && [ "$(primeira)" = 'V12=FALHA' ] && ! tem 'motivo=commit-invalido:T-01.01' \
+    && tem 'T-01.01 FALHA evidencia-ausente' \
+    && passa 'SHA-256 com 64 hex, de fora da raiz: o SHA vale, e a V12 confere a evidência' \
+    || quebra "SHA-256 com 64 hex: $(mostra)"
+else
+  passa 'git sem --object-format=sha256: o SHA-256 fica de fora'
+fi
+
 # evidência de versão antiga (expx_revisao 1) no commit: FALHA evidencia-invalida:versao
 projeto v1 obrigatoria
 lista=""; for i in $(seq 1 41); do escreve "src/f$i.ts"; lista="$lista${lista:+,}src/f$i.ts"; done

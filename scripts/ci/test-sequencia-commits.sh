@@ -11,12 +11,17 @@
 # legado, o cálculo do próximo seq, o que PARA o contrato (duplicata, buraco,
 # regressão, mistura inválida) e o escritor que o E1 usa.
 #
-# Sem rede, sem jq, sem git. Nada fora dos diretórios temporários é tocado.
+# Sem rede e sem jq. O Git só entra no tamanho do SHA, que é o do repositório
+# da ENTREGA (DM-318). Nada fora dos diretórios temporários é tocado.
 #
 # Uso: bash scripts/ci/test-sequencia-commits.sh
 #      SEQ=<outro script> bash scripts/ci/test-sequencia-commits.sh
 
 set -uo pipefail
+# Dentro de um hook do Git, GIT_DIR e afins apontam o repositório de quem chamou:
+# a bancada monta os próprios repositórios e só os casos que pedem o ambiente o
+# passam, explícito (DM-271).
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SEQ="${SEQ:-$REPO/.claude/skills/mergex/scripts/sequencia-de-commits.sh}"
@@ -91,16 +96,52 @@ valido   "caso 1 — commits: [] é lista válida"
 proximo 2 "caso 2 — com seq 1 existente" 1:T-01.01:a3f19c2
 valido   "caso 2 — seq 1 sozinho" 1:T-01.01:a3f19c2
 proximo 4 "três itens modernos em sequência" 1:T-01.01:a3f19c2 2:T-01.02:7b2e401 3:T-01.03:5be75d3
-# o SHA registrado vai do curto ao inteiro do SHA-256 (DM-315): 7 a 64 hex
+# O SHA registrado vai do curto ao inteiro do repositório da ENTREGA (DM-318):
+# até 40 hex no SHA-1, até 64 no SHA-256. Fora de repositório, até 40: nada
+# prova que o projeto é SHA-256. O formato é lido sem o ambiente do Git (DM-271).
 h64=8a64eba738221bff259100faff083e5b8aa8c4fd78f67b1d234a0385848347e2
-for v in "64:$h64" "41:${h64:0:41}" "7:${h64:0:7}" "65:${h64}0" "6:${h64:0:6}"; do
-  entrega "$E" true
-  saida="$(bash "$SEQ" --acrescentar "$E" T-01.01 "${v#*:}" 2>&1)"; rc=$?
-  case "${v%%:*}:$rc" in
-    64:0|41:0|7:0|65:1|6:1) ok "--acrescentar com SHA de ${v%%:*} hex → rc $rc" ;;
-    *) falha "--acrescentar com SHA de ${v%%:*} hex — rc=$rc: $saida" ;;
-  esac
-done
+tamanhos() { # <rótulo> <ENTREGA> <aceitos, separados por espaço> [VAR=valor...]
+  local rot="$1" arq="$2" aceitos=" $3 " n v esperado saida rc; shift 3
+  for n in 6 7 40 41 64 65; do
+    v="$(printf '%s%s' "$h64" "$h64" | cut -c1-"$n")"
+    entrega "$arq" true
+    saida="$(env "$@" bash "$SEQ" --acrescentar "$arq" T-01.01 "$v" 2>&1)"; rc=$?
+    case "$aceitos" in *" $n "*) esperado=0 ;; *) esperado=1 ;; esac
+    if [ "$rc" = "$esperado" ]; then ok "$rot: --acrescentar com SHA de $n hex → rc $rc"
+    else falha "$rot: --acrescentar com SHA de $n hex — rc=$rc, esperava $esperado: $saida"; fi
+  done
+}
+if git -C "$D" rev-parse --git-dir >/dev/null 2>&1; then
+  falha "o temporário $D está dentro de um repositório Git: rode com TMPDIR fora dele"
+else
+  tamanhos "fora de repositório" "$E" "7 40"
+fi
+R1="$D/repo-sha1"; git init -q "$R1"
+tamanhos "repositório SHA-1" "$R1/ENTREGA.md" "7 40"
+if git init -q --object-format=sha256 "$D/repo-sha256" 2>/dev/null; then
+  R2="$D/repo-sha256"
+  tamanhos "repositório SHA-256" "$R2/ENTREGA.md" "7 40 41 64"
+  # o ambiente do Git aponta o SHA-256, e a ENTREGA é do SHA-1: vale o da ENTREGA
+  tamanhos "SHA-1 com GIT_DIR do SHA-256" "$R1/ENTREGA.md" "7 40" GIT_DIR="$R2/.git"
+  tamanhos "SHA-1 com GIT_WORK_TREE e GIT_COMMON_DIR do SHA-256" "$R1/ENTREGA.md" "7 40" \
+    GIT_WORK_TREE="$R2" GIT_COMMON_DIR="$R2/.git"
+  # --sha não tem arquivo: vale o repositório do diretório corrente
+  for par in "$R1:41:1" "$R1:40:0" "$R2:64:0" "$R2:65:1" "$D:41:1"; do
+    dir="${par%%:*}"; n="${par#*:}"; n="${n%%:*}"
+    v="$(printf '%s%s' "$h64" "$h64" | cut -c1-"$n")"
+    (cd "$dir" && bash "$PROVA" --sha "$v" >/dev/null 2>&1); rc=$?
+    [ "$rc" = "${par##*:}" ] && ok "prova-de-commit --sha com $n hex em ${dir##*/} → rc $rc" \
+      || falha "prova-de-commit --sha com $n hex em ${dir##*/} — rc=$rc"
+  done
+  # stdin não tem diretório: vale o corrente
+  entrega "$E" true 1:T-01.01:"${h64:0:41}"
+  [ "$(cd "$R2" && bash "$PROVA" --commits - < "$E" | cut -f1)" = T-01.01 ] \
+    && ok "--commits - no SHA-256: 41 hex é prova" || falha "--commits - no SHA-256 não aceitou 41 hex"
+  [ -z "$(cd "$R1" && bash "$PROVA" --commits - < "$E")" ] \
+    && ok "--commits - no SHA-1: 41 hex não é prova" || falha "--commits - no SHA-1 aceitou 41 hex"
+else
+  ok "git sem --object-format=sha256: o SHA-256 fica de fora"
+fi
 
 # `commits: []` com comentário é a mesma lista vazia em YAML; outro sufixo não é lista (DM-296).
 for sufixo in '[] # vazia' '[]   # vazia' '[] #'; do
