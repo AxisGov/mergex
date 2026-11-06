@@ -82,7 +82,9 @@ remoto e `refs/heads/<branch>` nunca nomeia; no nome curto, o primeiro segmento 
 for um remoto configurado (`git remote`) **e** o nome inteiro não for branch do remoto do
 upstream — `feature/<slug>` é uma branch válida, e um remoto chamado `feature` não a desvia. Só a
 resposta "não há essa branch" (saída `2` do `ls-remote --exit-code`) troca o remoto; uma conferência
-que falha (rede, credencial) não prova nada e para o E7. A base medida é o `FETCH_HEAD`, o que acabou de chegar, e não a ref de rastreio: um
+que falha (rede, credencial) não prova nada e para o E7. A base medida é o que acabou de chegar,
+numa ref só desta execução (`refs/mergex/e7/…`, apagada na saída), e não o `FETCH_HEAD`, que outro
+fetch na mesma worktree (o automático do editor) sobrescreve entre a busca e a leitura (DM-323), nem a ref de rastreio: um
 `origin/HEAD` buscado não atualiza a ref simbólica local, que mediria contra o alvo antigo. E
 `origin/HEAD` normaliza para `bb=HEAD`, que não é branch no serviço: o `$bb` vai para o
 `gh pr create --base` e para a instrução manual do passo 3, então o `HEAD` do remoto é resolvido
@@ -133,8 +135,11 @@ if [ "$bb" = HEAD ]; then
   bb="$(git ls-remote --symref "$rb" HEAD | awk '$1 == "ref:" && $3 == "HEAD" { sub("^refs/heads/", "", $2); print $2; exit }')"
   [ -n "$bb" ] || { echo "o HEAD de $rb não resolveu para uma branch: o E7 não mede nem abre o PR"; exit 2; }
 fi
-git fetch "$rb" "$bb" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 2; }
-base="$(git rev-parse --verify "FETCH_HEAD^{commit}")" || exit 2
+# a ponta buscada vai para uma ref só desta execução: o FETCH_HEAD é da worktree, e outro
+# fetch nela (o automático do editor) o sobrescreve entre a busca e a leitura (DM-323)
+ref_e7="refs/mergex/e7/base-$$-$RANDOM"; trap 'git update-ref -d "$ref_e7" 2>/dev/null' EXIT
+git fetch "$rb" "+refs/heads/$bb:$ref_e7" || { echo "busca de $bb em $rb falhou: o E7 não mede nem abre o PR"; exit 2; }
+base="$(git rev-parse --verify "$ref_e7^{commit}")" || exit 2
 planejamento="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "docs/entregas/<trabalho_id>/ENTREGA.md" --rev "$publicado")" || { echo "ENTREGA.md ilegível ou incoerente no SHA publicado: o E7 não mede nem abre o PR"; exit 2; }
 fatia="$(bash .claude/skills/mergex/scripts/leitor-do-projeto.sh --rev "$publicado")" || { echo "configuração do projeto (.expx/fatiamento.json) não lida: o E7 não mede nem abre o PR"; exit 2; }
 set -a; eval "$fatia"; set +a
@@ -323,8 +328,10 @@ if [ "$rc_pr" != 0 ]; then
   if [ -n "$bv" ]; then
     # a decisão é sobre a ponta buscada agora, não sobre um OID lido antes do fetch:
     # um force-push na base que tire a base validada não passa (DM-322)
-    git fetch -q "$rb" "refs/heads/$nome_base_pr" 2>/dev/null || { echo "base do PR existente ($nome_base_pr) não buscada em $rb: o E7 não retoma"; exit 1; }
-    ponta_base_pr="$(git rev-parse -q --verify 'FETCH_HEAD^{commit}')" || { echo "ponta buscada da base do PR ($nome_base_pr) ilegível: o E7 não retoma"; exit 1; }
+    # numa ref só desta execução, não no FETCH_HEAD que outro fetch sobrescreve (DM-323)
+    ref_e7="refs/mergex/e7/base-pr-$$-$RANDOM"; trap 'git update-ref -d "$ref_e7" 2>/dev/null' EXIT
+    git fetch -q "$rb" "+refs/heads/$nome_base_pr:$ref_e7" 2>/dev/null || { echo "base do PR existente ($nome_base_pr) não buscada em $rb: o E7 não retoma"; exit 1; }
+    ponta_base_pr="$(git rev-parse -q --verify "$ref_e7^{commit}")" || { echo "ponta buscada da base do PR ($nome_base_pr) ilegível: o E7 não retoma"; exit 1; }
     git merge-base --is-ancestor "$bv" "$ponta_base_pr" 2>/dev/null \
       || { echo "o PR existente ($pr_url) mira $nome_base_pr, que não contém a base validada da entrega ($bv): o E7 não o retoma (DM-320). Abra o PR contra $bb, ou entregue a base antes e reconcilie"; exit 1; }
   fi
@@ -402,8 +409,9 @@ case "$quantidade" in
      [ -z "$bv" ] || [ "${#bv}" = "$n_oid" ] \
        || { echo "base_validada_sha ($bv) não é um SHA completo do formato deste repositório: o E7 não retoma (DM-322)"; exit 1; }
      if [ -n "$bv" ]; then
-       git fetch -q "$rb" "refs/heads/$bb" 2>/dev/null || { echo "alvo da MR existente ($bb) não buscado em $rb: o E7 não retoma"; exit 1; }
-       git merge-base --is-ancestor "$bv" FETCH_HEAD 2>/dev/null \
+       ref_e7="refs/mergex/e7/alvo-mr-$$-$RANDOM"; trap 'git update-ref -d "$ref_e7" 2>/dev/null' EXIT
+       git fetch -q "$rb" "+refs/heads/$bb:$ref_e7" 2>/dev/null || { echo "alvo da MR existente ($bb) não buscado em $rb: o E7 não retoma"; exit 1; }
+       git merge-base --is-ancestor "$bv" "$ref_e7" 2>/dev/null \
          || { echo "a MR existente ($pr_url) mira $bb, que não contém a base validada da entrega ($bv): o E7 não a retoma (DM-320)"; exit 1; }
      fi ;;
   *) echo "mais de uma MR aberta para $projeto_fonte:$branch_fonte no destino"; exit 1 ;;

@@ -102,6 +102,25 @@ passo15 main; rc=$?
 [ "$rc" = 2 ] && passa 'busca do upstream que falha: sai 2 (nao medido), nunca 1 (reprovado)' \
   || quebra "busca do upstream que falha saiu $rc, esperado 2: $(tr '\n' '|' < "$aux/p15.out")"
 g "$aux/dev" remote set-url origin "$aux/remoto.git"
+# DM-323: outro fetch na mesma worktree (o automatico do editor) sobrescreve o FETCH_HEAD logo
+# depois da busca da base; a base medida e a da ref desta execucao. O git falso busca de verdade
+# e depois grava no FETCH_HEAD a ponta da feature; a medicao vira um eco da base
+mkdir -p "$aux/bin15"
+git_real15="$(command -v git)"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'if [ "${1:-}" = fetch ]; then %q "$@" || exit\n' "$git_real15"
+  printf '  printf "%%s\\n" "$(%q rev-parse feature/x)" > "$(%q rev-parse --git-path FETCH_HEAD)"; exit 0; fi\n' "$git_real15" "$git_real15"
+  printf 'exec %q "$@"\n' "$git_real15"; } > "$aux/bin15/git"; chmod +x "$aux/bin15/git"
+b15="$(bloco_do_e7 'fatiamento-da-pr.sh "$@" "$base" "$publicado"')"
+b15="${b15//'<trabalho_id>'/x}"
+b15="${b15//'bash .claude/skills/mergex/scripts/fatiamento-da-pr.sh "$@" "$base" "$publicado"'/echo \"base=\$base\"}"
+b15="${b15//'bash .claude/skills/mergex/scripts/'/bash $raiz/.claude/skills/mergex/scripts/}"
+{ canal mergex-e7-branch-base main; printf '%s\n' "$b15"; } > "$aux/passo15-base.sh"
+(cd "$aux/dev" && CANAL=main PATH="$aux/bin15:$PATH" bash "$aux/passo15-base.sh" > "$aux/p15b.out" 2>&1)
+[ "$(sed -n 's/^base=//p' "$aux/p15b.out")" = "$(git -C "$aux/remoto.git" rev-parse main)" ] \
+  && [ -z "$(git -C "$aux/dev" for-each-ref refs/mergex/)" ] \
+  && passa 'passo 1.5: FETCH_HEAD sobrescrito por outro fetch: a base medida e a ponta buscada, e a ref sai (DM-323)' \
+  || quebra "passo 1.5 com FETCH_HEAD sobrescrito: $(tr '\n' '|' < "$aux/p15b.out") refs: $(git -C "$aux/dev" for-each-ref refs/mergex/ | tr '\n' '|')"
 
 echo '== E7: branch_base e titulo chegam por arquivo, nunca pelo texto do bloco =='
 # por substituicao no bloco, uma quebra de linha seguida do delimitador do heredoc antigo fechava-o
@@ -160,10 +179,17 @@ if [ "\${1:-}" = ls-remote ]; then
   printf '%s\t%s\n' "\${PONTA_REMOTA:-\$("$git_real" rev-parse HEAD)}" "\${3:-}"; exit 0
 fi
 # o fetch da base do PR existente: sem rede, os commits do teste já estão aqui.
-# GIT_FETCH_FALHA=1 falha como a rede; GIT_FETCH_OID é a ponta buscada (FETCH_HEAD)
+# GIT_FETCH_FALHA=1 falha como a rede; GIT_FETCH_OID é a ponta buscada (no FETCH_HEAD e na
+# ref de destino do refspec <src>:<dst>, quando há); GIT_FETCH_HEAD_OUTRO é o que outro fetch
+# na mesma worktree deixa no FETCH_HEAD logo depois (o automático do editor, DM-323)
 if [ "\${1:-}" = fetch ]; then
   [ "\${GIT_FETCH_FALHA:-}" != 1 ] || exit 1
-  [ -z "\${GIT_FETCH_OID:-}" ] || printf '%s\n' "\$GIT_FETCH_OID" > "\$("$git_real" rev-parse --git-path FETCH_HEAD)"
+  if [ -n "\${GIT_FETCH_OID:-}" ]; then
+    for a in "\$@"; do
+      case "\$a" in *:refs/*) "$git_real" update-ref "\${a#*:}" "\$GIT_FETCH_OID" || exit 1 ;; esac
+    done
+    printf '%s\n' "\${GIT_FETCH_HEAD_OUTRO:-\$GIT_FETCH_OID}" > "\$("$git_real" rev-parse --git-path FETCH_HEAD)"
+  fi
   exit 0
 fi
 exec "$git_real" "\$@"
@@ -353,6 +379,11 @@ retoma 'force-push na base depois da leitura (a ponta buscada sem a base validad
 retoma 'a base so avancou depois da leitura (a ponta buscada contem a base validada): retoma' 0 GH_BASE_NOME=main GH_BASE_OID="$mainsha" GIT_FETCH_OID="$pred"
 grep -q baseRefOid "$aux/args-gh.view" && quebra "o E7 ainda pede o baseRefOid: $(tr '\n' '|' < "$aux/args-gh.view")" \
   || passa 'o E7 nao pede mais o baseRefOid: so o nome, e a ponta e a buscada'
+# DM-323: outro fetch na mesma worktree (o automatico do editor) sobrescreve o FETCH_HEAD entre a
+# busca e a leitura; a ponta lida e a da ref desta execucao, nao a do FETCH_HEAD
+retoma 'FETCH_HEAD sobrescrito por outro fetch depois da busca: vale a ponta buscada (nao retoma)' 1 GH_BASE_NOME=feature/predecessora GIT_FETCH_OID="$mainsha" GIT_FETCH_HEAD_OUTRO="$pred"
+[ -z "$(git -C "$d" for-each-ref refs/mergex/)" ] && passa 'a ref da busca do E7 e apagada na saida' \
+  || quebra "sobrou ref da busca do E7: $(git -C "$d" for-each-ref refs/mergex/ | tr '\n' '|')"
 # a base validada e a do ENTREGA.md publicado: a edicao no disco, sem commit, nao muda a decisao
 printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$mainsha" > "$d/docs/entregas/x/ENTREGA.md"
 retoma 'ENTREGA.md editado no disco sem commit: vale o publicado (nao retoma)' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha" GIT_FETCH_OID="$mainsha"
@@ -380,6 +411,10 @@ GIT_FETCH_OID="$(git -C "$d" rev-parse main)" passo2 "$d" 'glab mr create'; rc=$
 GIT_FETCH_OID="$predgl" passo2 "$d" 'glab mr create'; rc=$?
 [ "$rc" = 0 ] && [ ! -e "$aux/args-glab" ] \
   && passa 'GitLab: a ponta do alvo contem a base validada: retoma' || quebra "GitLab alvo com a base validada: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+GIT_FETCH_OID="$(git -C "$d" rev-parse main)" GIT_FETCH_HEAD_OUTRO="$predgl" passo2 "$d" 'glab mr create'; rc=$?
+[ "$rc" = 1 ] && grep -q 'DM-320' "$aux/p2.out" && [ ! -e "$aux/args-glab" ] && [ -z "$(git -C "$d" for-each-ref refs/mergex/)" ] \
+  && passa 'GitLab: FETCH_HEAD sobrescrito por outro fetch: vale a ponta buscada (nao retoma, DM-323)' \
+  || quebra "GitLab FETCH_HEAD sobrescrito: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
 GIT_FETCH_FALHA=1 passo2 "$d" 'glab mr create'; rc=$?
 [ "$rc" = 1 ] && grep -q 'não buscado' "$aux/p2.out" \
   && passa 'GitLab: alvo nao buscado (rede): nao retoma' || quebra "GitLab fetch falho: rc $rc $(tr '\n' '|' < "$aux/p2.out")"

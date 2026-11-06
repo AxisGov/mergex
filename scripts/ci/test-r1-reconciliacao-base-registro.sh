@@ -805,6 +805,39 @@ EOF
     cd "$REPO" || return
   done
 
+  # DM-323: o merge que trouxe a base ANTES do E0 já está na base validada (o
+  # ENTREGA.md nasceu depois, com B0 = essa base). Ele não trava a fila do 001, e
+  # a prova 2 não o conta como toque da feature no caminho que ele tomou da base.
+  # Era o conselhos#266: "o próximo é" o merge anterior ao E0, e --merge dele
+  # dava "ENTREGA.md ausente"
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_pre_e0 fx_cenario "$d" || { falha "merge_pre_e0 não montou"; return; }
+  cd "$d" || return
+  q="$(git rev-list --first-parent --merges "$FX_B0..$FX_P1")"
+  [ -n "$q" ] && [ "$(git rev-parse "$q^2")" = "$FX_B0" ] && git show "$q:$FX_NOVO1" >/dev/null 2>&1 \
+    && ok "controle: um merge anterior ao E0, com a base validada como segundo pai e FX_NOVO1" || falha "controle: merge_pre_e0 sem o merge anterior ao E0"
+  git diff --no-renames --name-status "$FX_B0" "$FX_B1" -- "$FX_NOVO1" | grep -q '^M' \
+    && ok "controle: FX_NOVO1 mudou nas duas janelas (status M entre B0 e B1)" || falha "controle: FX_NOVO1 sem status M"
+  registra_ok "merge da base anterior ao E0: fora da fila e fora da prova 2" "$FX_NOVO1" "$FX_NOVO2"
+  fx_persiste_reconciliacao "$d" || falha "merge_pre_e0: checkpoint"
+  out="$(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec 2>&1)"; rcx=$?
+  [ "$rcx" = 0 ] && [ "$(sed -n 1p <<<"$out")" = ok=true ] \
+    && ok "merge da base anterior ao E0: o --verificar recalcula e aprova" || falha "merge_pre_e0 --verificar: rc=$rcx: $(tr '\n\t' '|>' <<<"$out")"
+  # a cadeia segue: o 002 registra e o --verificar refaz as provas do 001, que
+  # continuam vendo o merge anterior ao E0 (Codex)
+  fx_segunda_base "$d" ajusta || { falha "merge_pre_e0: segunda base não montou"; cd "$REPO" || return; return; }
+  out="$(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec -- "$FX_NOVO3" 2>&1)"; rcx=$?
+  [ "$rcx" = 0 ] && grep -qx 'registrado=RECONCILIACAO-BASE-002.md' <<<"$out" \
+    && ok "merge da base anterior ao E0: o 002 registra" || falha "merge_pre_e0 002: rc=$rcx: $(tr '\n' '|' <<<"$out")"
+  fx_persiste_reconciliacao "$d" || falha "merge_pre_e0: checkpoint do 002"
+  out="$(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec 2>&1)"; rcx=$?
+  [ "$rcx" = 0 ] && [ "$out" = "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t001\ncoberto\t%s\t002' "$FX_NOVO2" "$FX_NOVO1" "$FX_NOVO3")" ] \
+    && ok "merge da base anterior ao E0: o --verificar da cadeia 001 -> 002 aprova" || falha "merge_pre_e0 cadeia: rc=$rcx: $(tr '\n\t' '|>' <<<"$out")"
+  cd "$REPO" || return
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_pre_e0_editado fx_cenario "$d" || { falha "merge_pre_e0_editado não montou"; return; }
+  cd "$d" || return
+  reprova "merge anterior ao E0 que editou o caminho por conta própria: a prova 2 o conta" 4 "prova 2: $FX_NOVO1" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
   d="$(mktemp -d)"; TMPS+=("$d"); fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
   cd "$d" || return
   reprova "merge em andamento" 3 "merge em andamento" "$FX_NOVO1" "$FX_NOVO2"
@@ -1252,7 +1285,7 @@ grupo_ponta_base() {
   { printf '#!/usr/bin/env bash\n'
     printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
     printf '  [ "${GIT_TERMINAL_PROMPT:-}" = 0 ] || : > %q\n' "$sh/pediu-senha"
-    printf '  bash %q --status >/dev/null 2>&1 || : > %q\n' "$TRAVA" "$sh/sob-trava"
+    printf '  (cd %q && bash %q --status >/dev/null 2>&1) || : > %q\n' "$d" "$TRAVA" "$sh/sob-trava"
     printf '  exit 128; done\n'
     printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
   git -C "$FX_REMOTO" update-ref refs/heads/main "$topo"
@@ -1271,7 +1304,7 @@ grupo_ponta_base() {
   sh="$(mktemp -d)"; TMPS+=("$sh")
   { printf '#!/usr/bin/env bash\n'
     printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
-    printf '  %q "$@"; rc=$?; %q remote set-url origin %q; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$outro/outro.git"
+    printf '  %q "$@"; rc=$?; %q -C %q remote set-url origin %q; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d" "$outro/outro.git"
     printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
   PATH="$sh:$PATH" reprova "a URL do remoto mudou entre a consulta e a trava: recusa e manda buscar" 4 "mudou de URL" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
@@ -1280,7 +1313,7 @@ grupo_ponta_base() {
   # que já não existia vale pela local (Codex)
   { printf '#!/usr/bin/env bash\n'
     printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
-    printf '  %q "$@"; rc=$?; %q remote remove origin; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)"
+    printf '  %q "$@"; rc=$?; %q -C %q remote remove origin; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d"
     printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
   PATH="$sh:$PATH" reprova "o remoto sumiu entre a consulta e a trava: recusa e manda buscar" 4 "foi removido" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
@@ -1292,8 +1325,8 @@ grupo_ponta_base() {
   vazio="$(mktemp -d)"; TMPS+=("$vazio"); git init -q --bare "$vazio/vazio.git"
   { printf '#!/usr/bin/env bash\n'
     printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
-    printf '  %q remote set-url origin %q; %q "$@"; rc=$?; %q remote set-url origin %q; exit "$rc"; done\n' \
-      "$(command -v git)" "$vazio/vazio.git" "$(command -v git)" "$(command -v git)" "$url"
+    printf '  %q -C %q remote set-url origin %q; %q "$@"; rc=$?; %q -C %q remote set-url origin %q; exit "$rc"; done\n' \
+      "$(command -v git)" "$d" "$vazio/vazio.git" "$(command -v git)" "$(command -v git)" "$d" "$url"
     printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
   PATH="$sh:$PATH" reprova "a URL trocou durante a consulta e voltou antes da trava: vale o servidor da URL gravada" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
@@ -1314,6 +1347,35 @@ grupo_ponta_base() {
   [ -e "$sh/uploadpack-usado" ] && ok "a consulta usa a configuração do remoto (uploadpack)" || falha "a consulta ignorou o uploadpack do remoto"
   desfaz
   git config --unset remote.origin.uploadpack
+  # a configuração congelada leva o valor vazio, o de várias linhas e o booleano
+  # implícito (sem `=`) sem quebrar a consulta (Codex)
+  git config remote.origin.mergexvazio ""
+  git config remote.origin.mergexlinhas "$(printf 'um\ndois')"
+  printf '[mergexteste]\n\timplicita\n' >> "$(git rev-parse --git-path config)"
+  [ "$(git config --type=bool mergexteste.implicita)" = true ] && ok "controle: booleano implícito na configuração" || falha "controle: booleano implícito não montou"
+  reprova "configuração com valor vazio, de várias linhas e implícito: a consulta acha a base" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git config --unset remote.origin.mergexvazio; git config --unset remote.origin.mergexlinhas
+  git config --remove-section mergexteste
+  # DM-323: um url.*.insteadOf que aparece DURANTE a consulta e some antes da trava
+  # (no repositório ou no global) não desvia a consulta para outro servidor: ela
+  # roda com a configuração da leitura, fora do repositório e sem o global
+  # (CodeAnt no conselhos#267). A base está no origin, e o servidor vazio não a tem
+  local glob; glob="$(mktemp)"; TMPS+=("$glob")
+  for escopo in local global; do
+    if [ "$escopo" = local ]; then cfg=(--file "$(git rev-parse --path-format=absolute --git-path config)"); else cfg=(--file "$glob"); fi
+    { printf '#!/usr/bin/env bash\n'
+      printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+      printf '  %q config' "$(command -v git)"; printf ' %q' "${cfg[@]}"; printf ' %q %q\n' "url.$vazio/vazio.git.insteadOf" "$FX_REMOTO"
+      printf '  %q "$@"; rc=$?\n' "$(command -v git)"
+      printf '  %q config' "$(command -v git)"; printf ' %q' "${cfg[@]}"; printf ' --unset %q\n' "url.$vazio/vazio.git.insteadOf"
+      printf '  exit "$rc"; done\n'
+      printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+    GIT_CONFIG_GLOBAL="$glob" PATH="$sh:$PATH" reprova "insteadOf $escopo durante a consulta, removido antes da trava: vale o servidor da leitura" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
+    desfaz
+    [ -z "$(git config --get-regexp '^url\.' 2>/dev/null; git config --file "$glob" --get-regexp '^url\.' 2>/dev/null)" ] \
+      && ok "controle: o insteadOf $escopo saiu depois da consulta" || falha "controle: o insteadOf $escopo ficou"
+  done
   git -C "$FX_REMOTO" update-ref -d refs/heads/main
   git remote remove origin
   registra_ok "repositório sem remoto: a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"

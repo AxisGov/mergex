@@ -143,6 +143,10 @@
 #                         B0 cortado em 40 hex no SHA-256, B0 com 24 zeros
 #                         a mais (64 hex) no SHA-1
 #   entrega_base_sha      branch_base: <B1>, o SHA completo
+#   merge_pre_e0          antes do E0, a main ganha FX_NOVO1 (versão antiga) e a
+#                         feature a traz num merge com Trabalho:/Integra-base:;
+#                         o ENTREGA.md nasce depois, com B0 = essa main (DM-323)
+#   merge_pre_e0_editado  o mesmo, com o merge editando FX_NOVO1 por conta própria
 # As demais variantes de ENTREGA.md e de B0 alteram o ENTREGA.md num commit da
 # feature logo antes do merge (que passa a ser P1), porque o merge de
 # integração não pode mexer no ENTREGA.md; a árvore continua limpa.
@@ -243,7 +247,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas entrega_base_outro_formato entrega_base_refs_heads entrega_base_sha preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas entrega_base_outro_formato entrega_base_refs_heads entrega_base_sha merge_pre_e0 merge_pre_e0_editado preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -320,6 +324,28 @@ _fx_corpo() {
     git add "$fx_pasta/sprint-01/tasks.md" "$fx_pasta/ORQUESTRADOR.md"
     _fx_msg "$msg" "docs: plano da feature ft-rec"
     _fx_commit "$msg"
+
+    # merge_pre_e0*: a main avança e a feature a traz ANTES do E0; o ENTREGA.md
+    # nasce depois, e a base validada (merge-base no E0) é essa main
+    case "$var" in
+      merge_pre_e0|merge_pre_e0_editado)
+        fixture_switch_exato main main
+        mkdir -p tests/ui
+        printf 'export const casoCompliance = "antigo";\n' > tests/ui/compliance-ksmv-primitives.test.tsx
+        git add tests/ui/compliance-ksmv-primitives.test.tsx
+        _fx_msg "$msg" "test: primitiva antiga"
+        _fx_commit "$msg"
+        FX_B0="$(git rev-parse HEAD)"
+        fixture_switch_exato feature/ft-rec feature/ft-rec
+        git merge -q --no-ff --no-commit main >/dev/null 2>&1 || true
+        [ -f .git/MERGE_HEAD ]
+        if [ "$var" = merge_pre_e0_editado ]; then
+          printf 'export const casoCompliance = "antigo, editado no merge";\n' > tests/ui/compliance-ksmv-primitives.test.tsx
+          git add tests/ui/compliance-ksmv-primitives.test.tsx
+        fi
+        _fx_msg "$msg" "merge: traz a main antes do E0" "Trabalho: ft-rec" "Integra-base: $FX_B0"
+        _fx_commit "$msg" ;;
+    esac
 
     # E1 da T-01.01: cria o teste e altera a linha de titulo
     mkdir -p tests/ui

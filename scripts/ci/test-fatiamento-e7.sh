@@ -81,8 +81,8 @@ grep -Fq 'Saída `2` (ou qualquer outra que não `0` nem `1`): o E7 **não abre 
   && grep -Fq '| `fatiamento-da-pr.sh` saiu `2`' "$e7" \
   && passa 'medicao impossivel (saida 2) tambem impede a abertura' \
   || quebra 'o E7 so trata as saidas 0 e 1 do fatiamento; a 2 (nao mediu) abriria sem medir'
-grep -Fxq 'rb="$remoto"' "$e7" && grep -Fq 'a="$(git rev-parse --path-format=absolute --git-path mergex-e7-branch-base)"' "$e7" && grep -Fq 'git fetch "$rb" "$bb"' "$e7" \
-  && grep -Fq 'git rev-parse --verify "FETCH_HEAD^{commit}"' "$e7" \
+grep -Fxq 'rb="$remoto"' "$e7" && grep -Fq 'a="$(git rev-parse --path-format=absolute --git-path mergex-e7-branch-base)"' "$e7" && grep -Fq 'git fetch "$rb" "+refs/heads/$bb:$ref_e7"' "$e7" \
+  && grep -Fq 'git rev-parse --verify "$ref_e7^{commit}"' "$e7" && ! grep -Fq 'FETCH_HEAD^{commit}' "$e7" \
   && passa 'a base vem do remoto do upstream, buscada agora' \
   || quebra 'a base nao e buscada no remoto do upstream (ref antiga ou fork mediria errado)'
 grep -Fq 'gh pr create --repo "$destino" --base "$bb"' "$e7" && ! grep -Fq 'gh pr create --base <branch-base>' "$e7" \
