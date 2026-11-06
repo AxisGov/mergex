@@ -1285,6 +1285,36 @@ grupo_ponta_base() {
   PATH="$sh:$PATH" reprova "o remoto sumiu entre a consulta e a trava: recusa e manda buscar" 4 "foi removido" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
   git remote get-url origin >/dev/null 2>&1 || git remote add origin "$url"
+  # a URL que troca DURANTE a consulta e volta antes da trava: a consulta é feita
+  # pela URL gravada, não pelo nome, e o "ausente" de outro servidor não vale
+  # (CodeAnt no mergex#86). Aqui a base está no origin e o outro servidor não a tem
+  git -C "$FX_REMOTO" update-ref refs/heads/main "$topo"
+  vazio="$(mktemp -d)"; TMPS+=("$vazio"); git init -q --bare "$vazio/vazio.git"
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q remote set-url origin %q; %q "$@"; rc=$?; %q remote set-url origin %q; exit "$rc"; done\n' \
+      "$(command -v git)" "$vazio/vazio.git" "$(command -v git)" "$(command -v git)" "$url"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  PATH="$sh:$PATH" reprova "a URL trocou durante a consulta e voltou antes da trava: vale o servidor da URL gravada" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git remote set-url origin "$url"
+  # o url.*.insteadOf vale uma vez, sobre a URL crua, como no `ls-remote origin`:
+  # a URL já reescrita, reescrita de novo, iria ao servidor vazio (Codex)
+  git config "url.$(dirname "$FX_REMOTO")/.insteadOf" apelido:
+  git config "url.$vazio/vazio.git.insteadOf" "$FX_REMOTO"
+  git remote set-url origin "apelido:$(basename "$FX_REMOTO")"
+  reprova "insteadOf em cadeia: a consulta reescreve a URL uma vez só e acha a base" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git config --unset "url.$(dirname "$FX_REMOTO")/.insteadOf"; git config --unset "url.$vazio/vazio.git.insteadOf"
+  git remote set-url origin "$url"
+  # a configuração do remoto vale na consulta: o uploadpack próprio é usado
+  { printf '#!/usr/bin/env bash\n: > %q\nexec git-upload-pack "$@"\n' "$sh/uploadpack-usado"; } > "$sh/meu-upload-pack"; chmod +x "$sh/meu-upload-pack"
+  git config remote.origin.uploadpack "$sh/meu-upload-pack"
+  reprova "uploadpack do remoto: a consulta o usa e acha a base" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
+  [ -e "$sh/uploadpack-usado" ] && ok "a consulta usa a configuração do remoto (uploadpack)" || falha "a consulta ignorou o uploadpack do remoto"
+  desfaz
+  git config --unset remote.origin.uploadpack
+  git -C "$FX_REMOTO" update-ref -d refs/heads/main
   git remote remove origin
   registra_ok "repositório sem remoto: a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
   desfaz

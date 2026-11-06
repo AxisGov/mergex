@@ -67,7 +67,10 @@ Condições estruturais, todas obrigatórias:
   com a `branch_base` do `ENTREGA.md` de HEAD, e sem pergunta de credencial do Git no terminal
   (`GIT_TERMINAL_PROMPT=0`): a rede lenta, ou um ssh do usuário que peça senha, não prende o índice. Sob a trava, o resultado só vale para a mesma base e o mesmo
   remoto, pelo nome e pela URL; senão (outra base, a URL trocada ou o remoto removido depois da
-  consulta), recusa e manda buscar (DM-322). Com a ref remota buscada antes, não há consulta; a base que não existe no servidor
+  consulta), recusa e manda buscar (DM-322). A consulta vai à configuração do remoto lida uma vez
+  só e copiada num remoto sintético, não ao nome: uma URL que troca durante a consulta e volta
+  antes da trava não faz valer a resposta de outro servidor, e o `url.*.insteadOf`, o proxy e o
+  `uploadpack` do remoto valem como no `git ls-remote <remoto>`. Com a ref remota buscada antes, não há consulta; a base que não existe no servidor
   (a base empilhada nunca enviada) e o repositório sem esse remoto valem pela ref local, e aí `B1`
   é só local, não publicado. A frente sobre essa base fica barrada no CI até a base do PR conter
   `B1` (DM-320). A base publicada no servidor durante a espera pela trava, sem `fetch`, é a janela
