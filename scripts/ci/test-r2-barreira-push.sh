@@ -203,6 +203,13 @@ grupo_prepush() {
 
   # ---- pronto válido, vencido e o SHA enviado ---------------------------------
   fx_portao_em "$d" HEAD; v1="$(git rev-parse HEAD)"
+  # DM-322: só o CI informa a base do PR. Um PR_BASE_DO_PR exportado no shell,
+  # aqui um commit órfão que não contém a base validada, não vale no pre-push
+  export PR_BASE_DO_PR="$(git commit-tree "$(git mktree </dev/null)" -m orfao)"
+  push_espera "pronto válido passa com PR_BASE_DO_PR exportado no shell" 0 "$v1" "$d" origin feature/ft-rec
+  err_sem "PR_BASE_DO_PR exportado: nenhum base_do_pr_divergente" "base_do_pr_divergente"
+  unset PR_BASE_DO_PR
+  git -C "$FX_REMOTO" update-ref -d refs/heads/feature/ft-rec
   push_espera "pronto válido passa" 0 "$v1" "$d" origin feature/ft-rec
   err_sem "pronto válido: nenhum diagnóstico da barreira" "mergex pre-push"
   produto "$d" vencido1; p1="$(git rev-parse HEAD)"
