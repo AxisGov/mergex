@@ -1263,6 +1263,28 @@ grupo_ponta_base() {
   url="$(git remote get-url origin)"; git remote set-url origin "$d/../nao-existe.git"
   reprova "sem a ref remota e com a consulta ao servidor falhando: recusa" 4 "consulta" "$FX_NOVO1" "$FX_NOVO2"
   git remote set-url origin "$url"
+  # DM-322: o "ausente" da consulta só vale sob a trava para o mesmo remoto, e o
+  # remoto é o nome E a URL. O git falso responde a consulta e, antes da trava,
+  # troca a URL do origin por outro servidor, que tem a base
+  outro="$(mktemp -d)"; TMPS+=("$outro"); git init -q --bare "$outro/outro.git"
+  git push -q "$outro/outro.git" "$topo:refs/heads/main" >/dev/null 2>&1 || falha "controle: o outro servidor não recebeu a base"
+  sh="$(mktemp -d)"; TMPS+=("$sh")
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q remote set-url origin %q; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$outro/outro.git"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  PATH="$sh:$PATH" reprova "a URL do remoto mudou entre a consulta e a trava: recusa e manda buscar" 4 "mudou de URL" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git remote set-url origin "$url"
+  # o remoto que existia na consulta e sumiu antes da trava também recusa: só o
+  # que já não existia vale pela local (Codex)
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q remote remove origin; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  PATH="$sh:$PATH" reprova "o remoto sumiu entre a consulta e a trava: recusa e manda buscar" 4 "foi removido" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git remote get-url origin >/dev/null 2>&1 || git remote add origin "$url"
   git remote remove origin
   registra_ok "repositório sem remoto: a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
   desfaz
@@ -1288,6 +1310,30 @@ grupo_ponta_base() {
   [ "$rcx" = 0 ] && grep -qx 'registrado=RECONCILIACAO-BASE-001.md' <<<"$out" \
     && ok "branch_base refs/heads/main, main local atrás e origin/main com B1: a ponta é a remota" \
     || falha "branch_base refs/heads/main com B1 na origin/main: rc=$rcx: $out"
+  desfaz
+  cd "$REPO" || return
+
+  # DM-322: `branch_base` em SHA completo é ref completa, como `refs/*`: vale como
+  # está, sem consulta ao servidor. A DM-321 a tomava por nome de branch e
+  # perguntava refs/heads/<sha> ao remoto; sem rede, recusava o que a 0.13.9
+  # aceitava (Conselhos, mp2-3 a mp2-6)
+  d="$(mktemp -d)"; TMPS+=("$d"); d="$d/repo"
+  FX_VARIANTE=entrega_base_sha fx_cenario "$d" || { falha "cenário branch_base em SHA não montou"; return; }
+  fx_remoto_bare "$d" || { falha "remoto bare (branch_base em SHA)"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  [ "$(git cat-file -p "$(git rev-parse HEAD):$FX_ENTREGA" | sed -n 's/^branch_base: //p')" = "$FX_B1" ] \
+    && ok "controle: branch_base é o SHA completo de B1" || { falha "controle: branch_base em SHA não montou"; cd "$REPO" || return; return; }
+  sh="$(mktemp -d)"; TMPS+=("$sh")
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] && : > %q; done\n' "$sh/consultou"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  git remote set-url origin "$d/../nao-existe.git"
+  out="$(PATH="$sh:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; rcx=$?
+  [ "$rcx" = 0 ] && grep -qx 'registrado=RECONCILIACAO-BASE-001.md' <<<"$out" \
+    && ok "branch_base em SHA com o remoto fora do ar: a ponta é o próprio SHA" \
+    || falha "branch_base em SHA com o remoto fora do ar: rc=$rcx: $out"
+  [ ! -e "$sh/consultou" ] && ok "branch_base em SHA: o servidor não é consultado" || falha "branch_base em SHA: o registro consultou o servidor"
   desfaz
   cd "$REPO" || return
 }

@@ -131,6 +131,7 @@ if [ "$1 $2" = "pr view" ]; then
   printf '%s\n' "$*" >> "$ARGS_GH.view"
   case "$*" in
     *baseRefOid*) printf '%s %s\n' "${GH_BASE_NOME:-main}" "${GH_BASE_OID:-$(git rev-parse main)}" ;;
+    *baseRefName*) printf '%s\n' "${GH_BASE_NOME:-main}" ;;
     *) echo https://github.com/acme/login/pull/7 ;;
   esac
   exit 0
@@ -341,18 +342,27 @@ retoma() { # <descricao> <rc esperado> [VAR=valor...] — o PR ja existe; retoma
   fi
 }
 publica "$(printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$pred")"
-retoma 'PR existente contra a main, sem a predecessora: nao retoma' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+retoma 'PR existente contra a main, sem a predecessora: nao retoma' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha" GIT_FETCH_OID="$mainsha"
 grep -q 'DM-320' "$aux/p2.out" && passa 'a recusa cita a DM-320' || quebra "a recusa nao cita a DM-320: $(tr '\n' '|' < "$aux/p2.out")"
-retoma 'PR existente contra a predecessora: retoma' 0 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred"
-retoma 'base do PR que contem a base validada (redirecionado, DM-245): retoma' 0 GH_BASE_NOME=main GH_BASE_OID="$pred"
+retoma 'PR existente contra a predecessora: retoma' 0 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred" GIT_FETCH_OID="$pred"
+retoma 'base do PR que contem a base validada (redirecionado, DM-245): retoma' 0 GH_BASE_NOME=main GH_BASE_OID="$pred" GIT_FETCH_OID="$pred"
 retoma 'base do PR nao buscada (rede): nao retoma' 1 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred" GIT_FETCH_FALHA=1
+# DM-322: a decisao e sobre a ponta buscada, nao sobre o baseRefOid lido antes do fetch; um
+# force-push na base que tire a base validada nao passa pelo OID antigo
+retoma 'force-push na base depois da leitura (a ponta buscada sem a base validada): nao retoma' 1 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred" GIT_FETCH_OID="$mainsha"
+retoma 'a base so avancou depois da leitura (a ponta buscada contem a base validada): retoma' 0 GH_BASE_NOME=main GH_BASE_OID="$mainsha" GIT_FETCH_OID="$pred"
+grep -q baseRefOid "$aux/args-gh.view" && quebra "o E7 ainda pede o baseRefOid: $(tr '\n' '|' < "$aux/args-gh.view")" \
+  || passa 'o E7 nao pede mais o baseRefOid: so o nome, e a ponta e a buscada'
 # a base validada e a do ENTREGA.md publicado: a edicao no disco, sem commit, nao muda a decisao
 printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "$mainsha" > "$d/docs/entregas/x/ENTREGA.md"
-retoma 'ENTREGA.md editado no disco sem commit: vale o publicado (nao retoma)' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+retoma 'ENTREGA.md editado no disco sem commit: vale o publicado (nao retoma)' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha" GIT_FETCH_OID="$mainsha"
 publica "$(printf -- '---\nkind: entrega\nbase_validada_sha:\n---\n')"
-retoma 'base_validada_sha presente e vazia: nao retoma' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+retoma 'base_validada_sha presente e vazia: nao retoma' 1 GH_BASE_NOME=main GH_BASE_OID="$mainsha" GIT_FETCH_OID="$mainsha"
+# DM-322: abreviada e unica, passaria no merge-base, mas o CI exige o tamanho do OID (DM-315)
+publica "$(printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "${pred:0:12}")"
+retoma 'base_validada_sha abreviada: nao retoma' 1 GH_BASE_NOME=feature/predecessora GH_BASE_OID="$pred" GIT_FETCH_OID="$pred"
 publica "$(printf -- '---\nkind: entrega\nbase_validada_sha: pendente\n---\n')"
-retoma 'base_validada_sha pendente (legado): retoma como antes' 0 GH_BASE_NOME=main GH_BASE_OID="$mainsha"
+retoma 'base_validada_sha pendente (legado): retoma como antes' 0 GH_BASE_NOME=main GH_BASE_OID="$mainsha" GIT_FETCH_OID="$mainsha"
 
 echo '== E7: a MR existente so e retomada se o alvo contem a base validada (DM-320) =='
 d="$aux/gl"
@@ -373,6 +383,13 @@ GIT_FETCH_OID="$predgl" passo2 "$d" 'glab mr create'; rc=$?
 GIT_FETCH_FALHA=1 passo2 "$d" 'glab mr create'; rc=$?
 [ "$rc" = 1 ] && grep -q 'não buscado' "$aux/p2.out" \
   && passa 'GitLab: alvo nao buscado (rede): nao retoma' || quebra "GitLab fetch falho: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
+printf -- '---\nkind: entrega\nbase_validada_sha: %s\n---\n' "${predgl:0:12}" > "$d/docs/entregas/x/ENTREGA.md"
+g "$d" add docs/entregas/x/ENTREGA.md && g "$d" commit -q -m 'entrega abreviada'
+git -C "$d" update-ref refs/remotes/origin/feature/x HEAD
+sed -i "4s/.*/$(git -C "$d" rev-parse HEAD)/" "$estado"
+GIT_FETCH_OID="$predgl" passo2 "$d" 'glab mr create'; rc=$?
+[ "$rc" = 1 ] && [ ! -e "$aux/args-glab" ] \
+  && passa 'GitLab: base_validada_sha abreviada: nao retoma (DM-322)' || quebra "GitLab base abreviada: rc $rc $(tr '\n' '|' < "$aux/p2.out")"
 
 printf -- '---------------------------------------------\n%s ok, %s falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = 0 ]
