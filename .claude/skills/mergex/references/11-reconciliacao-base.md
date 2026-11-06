@@ -69,7 +69,8 @@ Condições estruturais, todas obrigatórias:
   remoto, pelo nome e pela URL; senão (outra base, a URL trocada ou o remoto removido depois da
   consulta), recusa e manda buscar (DM-322). A consulta vai à configuração lida uma vez só, com o
   remoto copiado num remoto sintético, não ao nome, e roda fora do repositório, sem o arquivo de
-  configuração do sistema nem o global (DM-323): uma URL ou um `url.*.insteadOf` que troca
+  configuração do sistema nem o global, com a configuração lida num arquivo só do dono e nunca em
+  argumentos de processo (DM-323): uma URL ou um `url.*.insteadOf` que troca
   durante a consulta e volta antes da trava não faz valer a resposta de outro servidor, e o
   `url.*.insteadOf`, o proxy e o `uploadpack` do remoto valem como no `git ls-remote <remoto>`,
   aplicados uma vez. A foto que vale sob a trava inclui as chaves `remote.<remoto>.*` e `url.*`. Com a ref remota buscada antes, não há consulta; a base que não existe no servidor
@@ -100,8 +101,8 @@ Para cada caminho `f` declarado na reconciliação, com renomeação desligada (
 | 4 | Existe diferença real entre `B1` e `M` | `git diff --quiet --no-renames B1 M -- f` | sem diferença; ou `f` ausente em `M` (a integração removeu `f`) |
 
 `<início>` da prova 2 é `B0` na primeira reconciliação e o `M` da reconciliação anterior nas
-seguintes. Um merge da base que já está na base validada (o segundo pai é `B0` ou ancestral dele,
-como o feito antes do E0) e que tem `f` com o blob e o modo do segundo pai não conta como toque da
+seguintes. Um merge da base que já está na base validada (trouxe base nova à feature, e o segundo pai
+é `B0` ou ancestral dele, como o feito antes do E0) e que tem `f` com o blob e o modo do segundo pai não conta como toque da
 feature: ele tomou `f` da base. Se o merge editou `f` por conta própria, conta (DM-323).
 
 Consequências deliberadas:
@@ -346,8 +347,10 @@ preserva `commits`, `criado_em`, `pr_url`, `pr_estado`, `desvios`. `base_validad
   registrados em ordem com `--merge <sha>`, um por vez, do mais antigo para o mais novo.
 - **Base trazida antes do E0** (DM-323): o merge da base feito antes de o E0 criar o `ENTREGA.md`,
   ou antes da reancoragem da primeira sprint depois do PR de planejamento (DM-261, que exige a
-  branch atualizada a partir da main), já está na base validada: o segundo pai dele é `B0` ou
-  ancestral de `B0`. Ele não é reconciliação, não entra na fila da ordem do `001` e não se
+  branch atualizada a partir da main), já está na base validada: ele trouxe base nova à feature (o
+  segundo pai não estava no primeiro), e o segundo pai é `B0` ou ancestral de `B0`. O merge "sem
+  efeito" de um commit da base já contido na feature não traz base: o que ele muda é da feature, e
+  ele fica na fila e na prova 2. Ele não é reconciliação, não entra na fila da ordem do `001` e não se
   registra (`--merge` dele recusa: não há âncora antes dele). A ordem conta a partir
   do primeiro merge que traz base nova. O E0 não proíbe trazer a base antes dele.
 - **Entrega sem reconciliação:** comportamento idêntico ao anterior, com a base fixada por SHA.
@@ -427,12 +430,11 @@ estão documentados no cabeçalho do executável afetado:
 8. **Escala resolvida pela DM-184.** A primeira implementação da barreira de push varria todas as
    branches entregues do repositório a cada comando, e com dezenas delas estourava o prazo. O
    `pre-push` avalia só as refs do push: o custo deixou de depender das branches existentes.
-9. **Consulta congelada no Git anterior ao 2.32.** O `GIT_CONFIG_GLOBAL` só existe a partir do
-   Git 2.32. Antes disso, a consulta da base ainda lê o arquivo global na hora: uma regra
-   `url.*.insteadOf` global que mude durante o `ls-remote` e volte antes da trava não é vista. A
-   do repositório e a do sistema ficam de fora em qualquer versão. Um `credential.helper` com
-   caminho relativo (`!./script`) roda num diretório vazio e pode falhar: a consulta que falha
-   recusa e manda buscar, nunca aprova (DM-323).
+9. **Consulta congelada no Git anterior ao 2.32.** A configuração congelada é lida de um arquivo
+   só do dono, pelo `GIT_CONFIG_GLOBAL`, que só existe a partir do Git 2.32. Antes disso, o remoto
+   sintético não existe, a consulta falha, e o registro recusa e manda rodar `git fetch`, que é
+   sempre o caminho que resolve: falso bloqueio, nunca aprovação. Um `credential.helper` com
+   caminho relativo (`!./script`) roda num diretório vazio e pode falhar do mesmo jeito (DM-323).
 
 Os riscos residuais da própria barreira de push — o autor do PR que controla o modo e os scripts do
 CI, o PR sem `ENTREGA.md`, várias entregas no mesmo PR, a base do evento defasada e o hook

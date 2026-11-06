@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Controle e 41 mutantes da reconciliação de base pós-E8 (R1), da barreira de
+# Controle e 42 mutantes da reconciliação de base pós-E8 (R1), da barreira de
 # push da DM-184 (R2) e da seleção da entrega pelo conteúdo (DM-185). Os 17
 # primeiros são a lista da spec (seção 21); os 8 seguintes completam a barreira
 # de push; os 13 seguintes (26-38) são os da seleção pelo conteúdo; o 39 é a
-# base do PR no CI (DM-320), e o 40 e o 41, o merge já na base validada (DM-323).
+# base do PR no CI (DM-320), e do 40 ao 42, o merge já na base validada (DM-323).
 #
 # Cada mutante altera só uma CÓPIA temporária do repositório (git ls-files ->
 # tar -> git init + commit), nunca o repositório real. A regra geral é a do
@@ -75,7 +75,7 @@
 # na matriz).
 #
 # Uso: bash scripts/ci/mutacao-r1-reconciliacao-base.sh [controle | <ID>]
-#   sem argumento: controle + os 41 mutantes; `controle`: só o controle;
+#   sem argumento: controle + os 42 mutantes; `controle`: só o controle;
 #   <ID>: controle das suítes daquele ID + o mutante.
 # rc 0 só com controle verde e todos os mutantes executados mortos.
 
@@ -125,7 +125,8 @@ MATRIZ='1|P1|r1:provas|prova 1 desligada
 38|M3CHAM|r2:prepush|chamador gerenciado sem conferir o validador
 39|CIBASEPR|r2:ci|o CI ignora a base do PR (DM-320)
 40|P2BASE|r1:provas|prova 2 conta o merge já na base validada que tomou o caminho da base (DM-323)
-41|FILABASE|r1:provas|a fila do 001 não pula o merge já na base validada (DM-323)'
+41|FILABASE|r1:provas|a fila do 001 não pula o merge já na base validada (DM-323)
+42|NOVABASE|r1:provas|o merge sem efeito de um commit já contido conta como base validada (DM-323)'
 
 # Grupo de processos próprio. interrompe() derruba a árvore inteira com
 # `kill -TERM 0`, que alcança o GRUPO: lançado de um bash não interativo (outro

@@ -837,6 +837,17 @@ EOF
   cd "$d" || return
   reprova "merge anterior ao E0 que editou o caminho por conta própria: a prova 2 o conta" 4 "prova 2: $FX_NOVO1" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
+  # o merge "sem efeito" de um commit antigo da base, já contido na feature, não
+  # trouxe base nenhuma: a reversão que ele faz é da feature, e ele não sai da
+  # fila nem da prova 2 (CodeAnt no mergex#87)
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=antigo_reverte fx_cenario "$d" || { falha "antigo_reverte não montou"; return; }
+  cd "$d" || return
+  q="$(git rev-parse "$FX_P1")"
+  git merge-base --is-ancestor "$q^2" "$q^1" && git merge-base --is-ancestor "$q^2" "$FX_B0" \
+    && [ "$(git rev-parse "$q:README.md")" = "$(git rev-parse "$q^2:README.md")" ] \
+    && ok "controle: P1 é merge de um commit já contido, ancestral de B0, que desfaz o README.md" || falha "controle: antigo_reverte"
+  reprova "merge sem efeito de um commit antigo da base que desfaz o README.md: fica na fila" 5 "ordem:" "$FX_NOVO1" "$FX_NOVO2" README.md
+  cd "$REPO" || return
 
   d="$(mktemp -d)"; TMPS+=("$d"); fx_merge_sem_commit "$d" || { falha "merge sem commit não montou"; return; }
   cd "$d" || return
@@ -1351,11 +1362,26 @@ grupo_ponta_base() {
   # implícito (sem `=`) sem quebrar a consulta (Codex)
   git config remote.origin.mergexvazio ""
   git config remote.origin.mergexlinhas "$(printf 'um\ndois')"
+  # e o que o arquivo congelado precisa escapar: \, ", TAB e backspace no valor,
+  # \ e " na subseção, e `=` no nome (o url.<base>.insteadOf com `=` na base)
+  git config remote.origin.mergexescape "$(printf 'a\\b"c\td\be')"
+  git config 'url.file:///nada=x\"y/.insteadOf' 'nunca:'
   printf '[mergexteste]\n\timplicita\n' >> "$(git rev-parse --git-path config)"
   [ "$(git config --type=bool mergexteste.implicita)" = true ] && ok "controle: booleano implícito na configuração" || falha "controle: booleano implícito não montou"
-  reprova "configuração com valor vazio, de várias linhas e implícito: a consulta acha a base" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
+  # a configuração não passa por argumento de processo: um token de
+  # http.*.extraHeader não aparece na lista de processos (CodeAnt no mergex#87)
+  git config http.extraHeader "Authorization: Bearer mergex-segredo-de-teste"
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] && printf "%%s\\n" "$*" >> %q; done\n' "$sh/argv"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  rm -f "$sh/argv"
+  PATH="$sh:$PATH" reprova "configuração com valor vazio, de várias linhas, escapes, '=' no nome e implícito: a consulta acha a base" 4 "não foi buscada" "$FX_NOVO1" "$FX_NOVO2"
+  [ -s "$sh/argv" ] && ! grep -q 'mergex-segredo-de-teste\|remote\.mergex-consulta' "$sh/argv" \
+    && ok "a configuração congelada não vai em argumentos do ls-remote" || falha "a configuração foi em argumentos: $(tr '\n' '|' < "$sh/argv" 2>/dev/null)"
   desfaz
   git config --unset remote.origin.mergexvazio; git config --unset remote.origin.mergexlinhas
+  git config --unset remote.origin.mergexescape; git config --unset 'url.file:///nada=x\"y/.insteadOf'
+  git config --unset http.extraHeader
   git config --remove-section mergexteste
   # DM-323: um url.*.insteadOf que aparece DURANTE a consulta e some antes da trava
   # (no repositório ou no global) não desvia a consulta para outro servidor: ela
