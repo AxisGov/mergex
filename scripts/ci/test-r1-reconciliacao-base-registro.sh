@@ -1402,6 +1402,49 @@ grupo_ponta_base() {
     [ -z "$(git config --get-regexp '^url\.' 2>/dev/null; git config --file "$glob" --get-regexp '^url\.' 2>/dev/null)" ] \
       && ok "controle: o insteadOf $escopo saiu depois da consulta" || falha "controle: o insteadOf $escopo ficou"
   done
+  # DM-324: a foto que vale sob a trava é a configuração congelada inteira. Um
+  # core.sshCommand que estava na leitura e sumiu antes da trava invalida a
+  # consulta, como a URL trocada (CodeAnt no login#65)
+  git config core.sshCommand "$sh/ssh-que-nunca-roda"
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q -C %q config --unset core.sshCommand; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  PATH="$sh:$PATH" reprova "core.sshCommand mudou entre a consulta e a trava: recusa e manda buscar" 4 "mudou de URL ou de configuração" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git config --unset core.sshCommand 2>/dev/null
+  # o remoto da branch trocado entre a consulta e a trava (para um que não existe)
+  # não faz a ausência dele aceitar a local: a consulta foi a outro remoto (Codex)
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q -C %q config branch.feature/ft-rec.remote nao-existe; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  PATH="$sh:$PATH" reprova "o remoto da branch trocou entre a consulta e a trava: recusa" 4 "deixou de ser o remoto da branch" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  # o comando de busca sai com o quoting do shell: colado, um nome de base com `;`
+  # e `$(...)` não executa nada (Codex)
+  ( eval "$(sed -n '/^busca_da_base() {/p' "$RB")"
+    cmd="$(busca_da_base origin 'b;touch SENT$(touch SENT2)')"
+    eval "set -- $cmd"
+    [ "$#" = 4 ] && [ "$3" = origin ] && [ "$4" = '+refs/heads/b;touch SENT$(touch SENT2):refs/remotes/origin/b;touch SENT$(touch SENT2)' ] \
+      && [ ! -e SENT ] && [ ! -e SENT2 ] ) \
+    && ok "a busca sugerida tem quoting: o nome da base não vira comando" || falha "a busca sugerida sem quoting"
+  rm -f SENT SENT2
+  # DM-324: num clone de refspec estreito, `git fetch origin` não cria a ref de
+  # rastreio da base; a recusa dá o comando com o refspec explícito, e ele resolve
+  git config --replace-all remote.origin.fetch '+refs/heads/outra:refs/remotes/origin/outra'
+  git update-ref -d refs/remotes/origin/main 2>/dev/null
+  cmd_base="git fetch origin +refs/heads/main:refs/remotes/origin/main"
+  reprova "refspec estreito: a recusa dá a busca com o refspec explícito" 4 "$cmd_base" "$FX_NOVO1" "$FX_NOVO2"
+  git fetch -q origin 2>/dev/null
+  ! git rev-parse -q --verify refs/remotes/origin/main >/dev/null \
+    && ok "controle: com o refspec estreito, git fetch origin não cria refs/remotes/origin/main" || falha "controle: o refspec estreito trouxe a main"
+  $cmd_base -q 2>/dev/null
+  registra_ok "refspec estreito: depois da busca explícita, a ponta é a remota" "$FX_NOVO1" "$FX_NOVO2"
+  desfaz
+  git update-ref -d refs/remotes/origin/main
+  git config --replace-all remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
   git -C "$FX_REMOTO" update-ref -d refs/heads/main
   git remote remove origin
   registra_ok "repositório sem remoto: a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
