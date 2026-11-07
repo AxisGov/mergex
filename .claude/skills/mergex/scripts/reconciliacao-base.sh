@@ -1661,7 +1661,7 @@ if ! g rev-parse --verify -q "refs/remotes/$BRANCH_BASE^{commit}" >/dev/null 2>&
     case "$RC_LS" in
       2) ;;
       sem) estrutura base "a base $NOME_BASE de M não é a que o ENTREGA.md de HEAD declara, e o servidor não foi consultado por ela antes da trava: rode $(busca_da_base "$REMOTO_BASE" "$NOME_BASE") e registre de novo" ;; # guarda:EST
-      mudou) estrutura base "o remoto $CONSULTA_REMOTO mudou de URL ou de configuração, ou foi removido, ou deixou de ser o remoto da branch (agora $REMOTO_BASE), entre a consulta pela base $NOME_BASE e a trava: a consulta não vale para ele; rode $(busca_da_base "$REMOTO_BASE" "$NOME_BASE") e registre de novo" ;; # guarda:EST
+      mudou) estrutura base "o remoto $CONSULTA_REMOTO mudou de URL ou de configuração, ou foi removido, ou deixou de ser o remoto da branch (agora $REMOTO_BASE), entre a consulta pela base $NOME_BASE e a trava: a consulta não vale; confira o remoto da branch (branch.<atual>.remote) e a URL dele, rode $(busca_da_base "$CONSULTA_REMOTO" "$NOME_BASE") com o remoto certo e registre de novo" ;; # guarda:EST
       0) estrutura base "a base $NOME_BASE existe em $REMOTO_BASE, mas refs/remotes/$REMOTO_BASE/$NOME_BASE não foi buscada: a branch local não prova que B1 foi publicado; rode $(busca_da_base "$REMOTO_BASE" "$NOME_BASE") e registre de novo" ;; # guarda:EST
       *) estrutura base "a consulta a $REMOTO_BASE pela base $NOME_BASE falhou (ls-remote saiu $RC_LS): sem ela, não há prova de que a base não foi publicada; rode $(busca_da_base "$REMOTO_BASE" "$NOME_BASE"), ou repita com o remoto acessível" ;; # guarda:EST
     esac
