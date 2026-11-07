@@ -1475,6 +1475,22 @@ grupo_ponta_base() {
     *) falha "a recusa sem o pedido de configurar o remoto: $out" ;;
   esac
   git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  # um remoto só com `fetch`, sem URL: o `git remote get-url` devolve o próprio nome
+  # e sai 0; a recusa não pode tomá-lo por URL (CodeAnt no mergex#90)
+  git config remote.semurl.fetch '+refs/heads/*:refs/remotes/semurl/*'
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q -C %q config branch.feature/ft-rec.remote semurl; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  out="$(PATH="$sh:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"
+  case "$out" in
+    *"git fetch semurl"*) falha "a recusa sugere git fetch num remoto sem URL (só fetch): $out" ;;
+    *"configure o remoto semurl"*) ok "remoto só com fetch, sem URL: a recusa manda configurá-lo, sem git fetch" ;;
+    *) falha "remoto só com fetch: a recusa sem o pedido de configurar: $out" ;;
+  esac
+  desfaz
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  git config --remove-section remote.semurl
   # DM-326: o Git aceita remoto com `/` no nome; o diagnóstico do B1 fora da ponta
   # remota usa o remoto e a base conhecidos, sem cortar na primeira barra
   git remote add time/origin "$FX_REMOTO"

@@ -1290,11 +1290,14 @@ arvore_recusa_raso || para 4 "estrutura[raso]: $ARVORE_ERRO" # guarda:EST
 # Cada argumento sai com o quoting do shell: um nome de branch válido pode ter
 # `;` ou `$(...)`, e o comando é para ser colado (Codex)
 busca_da_base() { printf 'git fetch %q %q' "$1" "+refs/heads/$2:refs/remotes/$1/$2"; }
+# tem_url <remoto> — o remoto tem `remote.<r>.url`. O `git remote get-url` não serve:
+# sem URL, ele devolve o próprio nome e sai 0 (CodeAnt no mergex#90)
+tem_url() { [ -n "$(g config --get "remote.$1.url" 2>/dev/null)" ]; }
 # sugere_busca <remoto> <base> — "rode <busca>", só para remoto com URL agora; sem
 # ela, só o pedido de configurá-lo: `git fetch` num remoto que não existe não
 # resolve (DM-326, Codex)
 sugere_busca() {
-  if g remote get-url "$1" >/dev/null 2>&1; then printf 'rode %s' "$(busca_da_base "$1" "$2")"
+  if tem_url "$1"; then printf 'rode %s' "$(busca_da_base "$1" "$2")"
   else printf 'configure o remoto %q, que não tem URL agora (git remote add ou set-url), e busque a base %q nele' "$1" "$2"
   fi
 }
@@ -1306,7 +1309,7 @@ dica_ponta_remota() {
   local sim
   sim="$(g rev-parse --symbolic-full-name "$1" 2>/dev/null)" || return 0
   case "$sim" in refs/remotes/*) ;; *) return 0 ;; esac
-  if [ -n "${NOME_BASE:-}" ] && [ "$sim" = "refs/remotes/${REMOTO_BASE:-}/$NOME_BASE" ] && g remote get-url "$REMOTO_BASE" >/dev/null 2>&1; then
+  if [ -n "${NOME_BASE:-}" ] && [ "$sim" = "refs/remotes/${REMOTO_BASE:-}/$NOME_BASE" ] && tem_url "$REMOTO_BASE"; then
     printf '; a ponta é a ref remota, que pode estar desatualizada: rode %s e confira que o merge da base foi enviado' "$(busca_da_base "$REMOTO_BASE" "$NOME_BASE")"
   else
     printf '; a ponta é a ref remota %s, que pode estar desatualizada: busque-a de novo no remoto dela e confira que o merge da base foi enviado' "$sim"
