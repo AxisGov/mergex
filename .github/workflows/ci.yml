@@ -138,6 +138,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-classe-dos-agentes.sh
 
+      - name: Every Claude agent declares its decided role
+        shell: bash
+        run: bash scripts/ci/test-papel-dos-agentes.sh
+
       - name: Test mutation bench resources
         shell: bash
         run: bash scripts/ci/test-mutacao-recursos.sh
