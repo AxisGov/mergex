@@ -1445,6 +1445,62 @@ grupo_ponta_base() {
   desfaz
   git update-ref -d refs/remotes/origin/main
   git config --replace-all remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  # DM-326: com o remoto da branch trocado entre a consulta e a trava, buscar só no
+  # consultado não cria a ref que o próximo registro confere (a do remoto novo). A
+  # recusa dá as duas saídas, e cada busca só se o remoto tem URL agora (CodeAnt no
+  # conselhos#271, Codex)
+  git remote add outro "$FX_REMOTO"
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q -C %q config branch.feature/ft-rec.remote outro; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  PATH="$sh:$PATH" reprova "o remoto da branch trocou para outro que existe: a recusa manda buscar no novo" 4 \
+    "para registrar com outro, rode git fetch outro +refs/heads/main:refs/remotes/outro/main" "$FX_NOVO1" "$FX_NOVO2"
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  PATH="$sh:$PATH" reprova "o remoto da branch trocou para outro que existe: e dá a volta ao consultado" 4 \
+    "volte-o para origin e rode git fetch origin +refs/heads/main:refs/remotes/origin/main" "$FX_NOVO1" "$FX_NOVO2"
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  git remote remove outro
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q -C %q config branch.feature/ft-rec.remote nao-existe; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  PATH="$sh:$PATH" reprova "o remoto da branch trocou para um que não existe: a recusa manda configurá-lo antes de buscar" 4 \
+    "configure o remoto nao-existe" "$FX_NOVO1" "$FX_NOVO2"
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  out="$(PATH="$sh:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"
+  case "$out" in
+    *"configure o remoto nao-existe"*"git fetch nao-existe"*|*"git fetch nao-existe"*"configure o remoto nao-existe"*) falha "a recusa sugere git fetch num remoto sem URL" ;;
+    *"configure o remoto nao-existe"*) ok "a recusa não sugere git fetch num remoto sem URL" ;;
+    *) falha "a recusa sem o pedido de configurar o remoto: $out" ;;
+  esac
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  # um remoto só com `fetch`, sem URL: o `git remote get-url` devolve o próprio nome
+  # e sai 0; a recusa não pode tomá-lo por URL (CodeAnt no mergex#90)
+  git config remote.semurl.fetch '+refs/heads/*:refs/remotes/semurl/*'
+  { printf '#!/usr/bin/env bash\n'
+    printf 'for a in "$@"; do [ "$a" = ls-remote ] || continue\n'
+    printf '  %q "$@"; rc=$?; %q -C %q config branch.feature/ft-rec.remote semurl; exit "$rc"; done\n' "$(command -v git)" "$(command -v git)" "$d"
+    printf 'exec %q "$@"\n' "$(command -v git)"; } > "$sh/git"; chmod +x "$sh/git"
+  out="$(PATH="$sh:$PATH" "${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"
+  case "$out" in
+    *"git fetch semurl"*) falha "a recusa sugere git fetch num remoto sem URL (só fetch): $out" ;;
+    *"configure o remoto semurl"*) ok "remoto só com fetch, sem URL: a recusa manda configurá-lo, sem git fetch" ;;
+    *) falha "remoto só com fetch: a recusa sem o pedido de configurar: $out" ;;
+  esac
+  desfaz
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  git config --remove-section remote.semurl
+  # DM-326: o Git aceita remoto com `/` no nome; o diagnóstico do B1 fora da ponta
+  # remota usa o remoto e a base conhecidos, sem cortar na primeira barra
+  git remote add time/origin "$FX_REMOTO"
+  git config branch.feature/ft-rec.remote time/origin
+  git update-ref refs/remotes/time/origin/main "$FX_B0"
+  reprova "remoto com barra no nome: a busca sugerida é a do remoto inteiro" 4 \
+    "rode git fetch time/origin +refs/heads/main:refs/remotes/time/origin/main" "$FX_NOVO1" "$FX_NOVO2"
+  git update-ref -d refs/remotes/time/origin/main
+  git config --unset branch.feature/ft-rec.remote
+  git remote remove time/origin
   git -C "$FX_REMOTO" update-ref -d refs/heads/main
   git remote remove origin
   registra_ok "repositório sem remoto: a ponta é a local" "$FX_NOVO1" "$FX_NOVO2"
