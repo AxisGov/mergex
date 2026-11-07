@@ -1490,6 +1490,20 @@ grupo_ponta_base() {
   esac
   desfaz
   git config --unset branch.feature/ft-rec.remote 2>/dev/null
+  # DM-327: o remoto da branch já é o sem URL antes da consulta; ela não roda, e o
+  # `git remote get-url` devolve o nome, então a recusa cai no braço `sem`. A recusa
+  # continua (nada afrouxa), e a mensagem não sugere git fetch nele (CodeAnt no
+  # conselhos#271, sobre a 0.13.14)
+  git config branch.feature/ft-rec.remote semurl
+  out="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; rcx=$?
+  [ "$rcx" = 4 ] && ok "remoto da branch sem URL desde antes da consulta: recusa" || falha "remoto da branch sem URL: rc=$rcx: $out"
+  case "$out" in
+    *"git fetch semurl"*) falha "o braço sem sugere git fetch num remoto sem URL: $out" ;;
+    *"configure o remoto semurl"*) ok "o braço sem manda configurar o remoto sem URL, sem git fetch" ;;
+    *) falha "o braço sem sem o pedido de configurar o remoto: $out" ;;
+  esac
+  desfaz
+  git config --unset branch.feature/ft-rec.remote 2>/dev/null
   git config --remove-section remote.semurl
   # DM-326: o Git aceita remoto com `/` no nome; o diagnóstico do B1 fora da ponta
   # remota usa o remoto e a base conhecidos, sem cortar na primeira barra
