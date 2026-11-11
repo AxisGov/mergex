@@ -1541,6 +1541,11 @@ printf 'outro\n' > docs/sprintx/estimativas/CALIBRAGEM.md
 git add -f docs/sprintx/estimativas/CALIBRAGEM.md
 caso "outro arquivo em estimativas/ NAO e isento" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
 git reset -q; rm -f docs/sprintx/estimativas/CALIBRAGEM.md
+# fora da pasta do trabalho, nada sob docs/sprintx/ e isento alem do HISTORICO (da branch fix/p0-1-historico-hook, set/2026)
+printf 'solto\n' > docs/sprintx/NOTAS.md
+git add -f docs/sprintx/NOTAS.md
+caso "outro arquivo em docs/sprintx/ NAO e isento" mergex/arquivo-fora-do-plano.sh "$(bash_json 'git commit -m x')" 2
+git reset -q; rm -f docs/sprintx/NOTAS.md
 
 # 3 — a varredura de segredo vale igual no artefato de metodo
 caso "fechamento final: segredo no artefato barra" comum/sem-segredo.sh "$(write_json "token: \"$SK\"")" 2
