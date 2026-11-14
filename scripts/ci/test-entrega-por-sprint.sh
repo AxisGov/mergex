@@ -188,6 +188,14 @@ confere 'tasks.md que nao e arquivo regular: sai 2' $?
 escopo "$aux/s02.md" "$aux/nao-existe"
 [ "$rc" = 2 ] && [ ! -s "$aux/out" ]
 confere 'pasta do trabalho inexistente: sai 2' $?
+# Nome de pasta com quebra de linha (CodeAnt no mergex#93): o grep por linha aceitava
+# o prefixo `sprint-NN` e o caminho emitido se partia em duas linhas `tasks=`
+mkdir -p "$aux/nl/sprint-01" "$aux/nl/sprint-02"$'\n'"lixo"
+cp "$pasta/sprint-01/tasks.md" "$aux/nl/sprint-01/"; cp "$pasta/sprint-01/tasks.md" "$aux/nl/sprint-02"$'\n'"lixo/"
+escopo "$aux/antiga.md" "$aux/nl"
+[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'escopo=trabalho\ntasks=%s' "$aux/nl/sprint-01/tasks.md")" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+confere 'pasta com quebra de linha no nome nao e sprint-NN: fica fora do escopo' "$r"
 bash "$leitor" --entrega "$aux/s02.md" --rev HEAD --escopo-de-tasks --pasta "$pasta" >/dev/null 2>&1
 [ "$?" = 64 ]; confere '--escopo-de-tasks nao aceita --rev (o escopo e lido do disco)' $?
 bash "$leitor" --entrega "$aux/s02.md" --escopo-de-tasks >/dev/null 2>&1
@@ -936,6 +944,14 @@ confere '--retomar-planejamento grava sprint_atual null, a base, registrada_spri
 cp "$aux/ret.md" "$aux/ret-antes.md"; ret "$aux/ret.md" "$SHA_C"
 [ "$rc" = 0 ] && grep -qx 'retomada=sim' "$aux/out" && cmp -s "$aux/ret.md" "$aux/ret-antes.md"
 confere '--retomar-planejamento repetido com a mesma base: retomada, sem gravar' $?
+# A base gravada entre aspas ou com comentário YAML é a mesma base (CodeAnt no mergex#93)
+for forma in "\"$SHA_C\"" "'$SHA_C'" "$SHA_C # reancorada"; do
+  sed "s/^base_validada_sha: .*/base_validada_sha: $forma/" "$aux/ret-antes.md" > "$aux/ret-q.md"
+  cp "$aux/ret-q.md" "$aux/ret-q-antes.md"; ret "$aux/ret-q.md" "$SHA_C"
+  [ "$rc" = 0 ] && grep -qx 'retomada=sim' "$aux/out" && cmp -s "$aux/ret-q.md" "$aux/ret-q-antes.md"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+  confere "--retomar-planejamento com a base gravada como [$forma]: retomada, sem gravar" "$r"
+done
 ret "$aux/ret.md" "$SHA_A"
 [ "$rc" = 1 ] && cmp -s "$aux/ret.md" "$aux/ret-antes.md"
 confere '--retomar-planejamento ja retomado com outra base: recusa, sem gravar' $?

@@ -378,7 +378,8 @@ case "$ACAO" in
     lista=""
     for d in "$PASTA"/sprint-*; do
       [ -d "$d" ] || continue
-      grep -Eq '^sprint-[0-9]{2,}$' <<<"${d##*/}" || continue
+      # o nome inteiro, e não linha a linha: um nome com quebra de linha não é sprint (CodeAnt no mergex#93)
+      [[ "${d##*/}" =~ ^sprint-[0-9]{2,}$ ]] || continue
       f="$d/tasks.md"
       [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || ilegivel "${d##*/} sem tasks.md regular e legível: $f"
       lista="$lista$f
@@ -566,8 +567,12 @@ case "$ACAO" in
     [ "$p_estado" = merged ] || recusa 'o merge do PR de planejamento não está registrado: rode o E9, que o lê no serviço e o registra'
     if [ "$PLANEJAMENTO" != sim ]; then
       # já retomada (sprint_atual: null): a mesma base é retomada sem gravar; outra é recusa
-      b_atual="$(printf '%s\n' "$conteudo" | awk '{ sub(/\r$/, "") } NR == 1 { next } /^---/ { exit }
-        /^base_validada_sha:/ { sub(/^base_validada_sha:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit }')"
+      # o valor YAML: sem comentário no fim e sem as aspas (CodeAnt no mergex#93)
+      b_atual="$(printf '%s\n' "$conteudo" | awk -v q="'" '{ sub(/\r$/, "") } NR == 1 { next } /^---/ { exit }
+        /^base_validada_sha:/ { sub(/^base_validada_sha:[[:space:]]*/, ""); sub(/[[:space:]]+#.*$/, ""); sub(/[[:space:]]+$/, "")
+          a = substr($0, 1, 1); z = substr($0, length($0))
+          if (length($0) >= 2 && a == z && (a == "\"" || a == q)) $0 = substr($0, 2, length($0) - 2)
+          print; exit }')"
       [ "$b_atual" = "$BASE_VALIDADA" ] || recusa "a retomada do planejamento já está gravada com outra base ($b_atual)"
       printf 'retomada=sim\nbase_validada_sha=%s\n' "$BASE_VALIDADA"; exit 0
     fi
