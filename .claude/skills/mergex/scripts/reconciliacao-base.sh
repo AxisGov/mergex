@@ -1606,6 +1606,16 @@ else
   # B0 vem do ENTREGA.md de P1 (o de antes do merge), gravado ou, na entrega
   # legada, inferido uma única vez (base_do_registro).
   base_do_registro
+  # DM-328: a abertura do E0 (sprint e base reancorada) que está no disco e não em
+  # P1 não foi persistida antes de M (checkpoint e0-abertura). B0 sairia da sprint
+  # anterior, e o merge que trouxe a base antes do E0 voltaria à fila como "ordem".
+  if [ "$ORIGEM_BASE" = registrada_e0 ] && [ -f "$RAIZ/$ENTREGA" ]; then
+    for k in sprint_atual base_validada_sha origem_base; do
+      v_p1="$(catalogo_fm "$ENTREGA_P1" "$k")"; v_disco="$(catalogo_fm "$RAIZ/$ENTREGA" "$k")"
+      [ "$v_p1" = "$v_disco" ] && continue
+      para 5 "abertura do E0 não persistida antes de M: o $ENTREGA do primeiro pai de M ($(g rev-parse --short "$M^1" 2>/dev/null)) tem $k ${v_p1:-ausente}, e o do disco, ${v_disco:-ausente}. A base de M sairia da sprint anterior. Se M é anterior à abertura, ele já está na base reancorada e não se registra (DM-323). Se é posterior, a abertura tinha de ter sido persistida antes dele (persistir-metodo.sh --checkpoint e0-abertura, DM-328); desfazer M para persistir a abertura antes é decisão humana" # guarda:E0ABERTURA
+    done
+  fi
   ENTREGA_ORIGEM="$ORIGEM_BASE"
   INICIO="$B0"
   LIMITE="$B0"
@@ -1640,8 +1650,8 @@ fi
 PROXIMO="$(sed -n 1p "$TMP_DIR/merges")"
 if [ "$PROXIMO" != "$M" ]; then
   # o que trava a fila é um merge que não é de integração da base: nomeá-lo
-  if [ -n "$PROXIMO" ] && ! bash "$CONTRATO_SH" --validar-integracao --trabalho "$TRABALHO" --commit "$PROXIMO" >/dev/null 2>&1; then
-    para 5 "ordem: o merge $PROXIMO, anterior a M $M na linha de primeiro pai de HEAD, não é um commit de integração da base (Trabalho:/Integra-base:); ele precisa ser registrado ou resolvido antes de M" # guarda:ORDEM
+  if [ -n "$PROXIMO" ] && ! motivo_contrato="$(bash "$CONTRATO_SH" --validar-integracao --trabalho "$TRABALHO" --commit "$PROXIMO" 2>&1 >/dev/null)"; then
+    para 5 "ordem: o merge $PROXIMO, anterior a M $M na linha de primeiro pai de HEAD, não é um commit de integração da base (Trabalho:/Integra-base:); ele precisa ser registrado ou resolvido antes de M. O contrato diz: ${motivo_contrato#contrato-de-commit: }" # guarda:ORDEM
   fi
   para 5 "ordem: M $M não é o merge mais antigo ainda não registrado na linha de primeiro pai de HEAD (o próximo é ${PROXIMO:-nenhum}); registre os merges um por vez, do mais antigo, com --merge" # guarda:ORDEM
 fi

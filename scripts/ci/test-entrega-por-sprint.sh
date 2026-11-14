@@ -136,6 +136,102 @@ bash "$scripts/causa-do-portao.sh" --validar "$aux/s02.md" >/dev/null 2>&1 \
   && bash "$scripts/sequencia-de-commits.sh" --validar "$aux/s02.md" >/dev/null 2>&1
 confere 'causa-do-portao --validar e sequencia-de-commits --validar aceitam a entrega por sprint com prs' $?
 
+echo '== o escopo das tasks do portao (conselhos, onda 2) =='
+
+# plano <arquivo> <id> <status> — um tasks.md condensado com uma task
+plano() {
+  mkdir -p "$(dirname "$1")"
+  printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
+    'tasks:' "  - id: $2" "    status: $3" '    teste_integracao: t' '    teste_funcional: f' \
+    '    suite: parcial' '    arquivos:' '      cria: []' '      altera: []' '---' > "$1"
+}
+pasta="$aux/pasta"
+plano "$pasta/sprint-01/tasks.md" T-01.01 concluida
+plano "$pasta/sprint-02/tasks.md" T-02.01 pendente
+mkdir -p "$pasta/sprint-notas"   # nome fora de sprint-NN: não é sprint
+escopo() { le "$1" --escopo-de-tasks --pasta "${2:-$pasta}"; }
+
+escopo "$aux/s02.md"
+[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'escopo=sprint:02\ntasks=%s' "$pasta/sprint-02/tasks.md")" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+confere 'por_sprint com sprint_atual 02: o escopo e so a sprint-02' "$r"
+escopo "$aux/antiga.md"
+[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'escopo=trabalho\ntasks=%s\ntasks=%s' "$pasta/sprint-01/tasks.md" "$pasta/sprint-02/tasks.md")" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+confere 'por_trabalho: o escopo e o trabalho inteiro, em ordem, sem pasta fora de sprint-NN' "$r"
+entrega "$aux/plan.md" "sprint_atual: planejamento
+prs:
+$(item planejamento aberto null null null)"
+escopo "$aux/plan.md"
+[ "$rc" = 0 ] && [ "$(cat "$aux/out")" = 'escopo=planejamento' ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+confere 'PR de planejamento: escopo=planejamento, sem tasks' "$r"
+entrega "$aux/entre.md" "entrega: por_sprint
+sprint_atual: null
+prs:
+$(item planejamento merged $SHA_A humano $SHA_B)"
+escopo "$aux/entre.md"
+[ "$rc" = 2 ] && [ ! -s "$aux/out" ]
+confere 'por_sprint sem sprint aberta (entre o planejamento e a 01): sai 2, sem escopo' $?
+mkdir -p "$aux/so01/sprint-01"; cp "$pasta/sprint-01/tasks.md" "$aux/so01/sprint-01/"
+escopo "$aux/s02.md" "$aux/so01"
+[ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'sprint-02' "$aux/err"
+confere 'sprint_atual 02 sem sprint-02/tasks.md: sai 2' $?
+mkdir -p "$aux/buraco"; cp -R "$pasta/sprint-01" "$pasta/sprint-02" "$aux/buraco/"; mkdir -p "$aux/buraco/sprint-03"
+escopo "$aux/antiga.md" "$aux/buraco"
+[ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'sprint-03' "$aux/err"
+confere 'por_trabalho com sprint-03 sem tasks.md: sai 2 (nenhuma sprint e omitida)' $?
+mkdir -p "$aux/dir/sprint-02/tasks.md"
+escopo "$aux/s02.md" "$aux/dir"
+[ "$rc" = 2 ] && [ ! -s "$aux/out" ]
+confere 'tasks.md que nao e arquivo regular: sai 2' $?
+escopo "$aux/s02.md" "$aux/nao-existe"
+[ "$rc" = 2 ] && [ ! -s "$aux/out" ]
+confere 'pasta do trabalho inexistente: sai 2' $?
+bash "$leitor" --entrega "$aux/s02.md" --rev HEAD --escopo-de-tasks --pasta "$pasta" >/dev/null 2>&1
+[ "$?" = 64 ]; confere '--escopo-de-tasks nao aceita --rev (o escopo e lido do disco)' $?
+bash "$leitor" --entrega "$aux/s02.md" --escopo-de-tasks >/dev/null 2>&1
+[ "$?" = 64 ]; confere '--escopo-de-tasks sem --pasta: uso (64)' $?
+bash "$leitor" --entrega "$aux/s02.md" --pasta "$pasta" >/dev/null 2>&1
+[ "$?" = 64 ]; confere '--pasta so com --escopo-de-tasks: uso (64)' $?
+
+# A sprint 01 entregue com a 02 pendente: no escopo, V11 passa e a V1 nao ve a 02
+entrega "$aux/v11.md" "entrega: por_sprint
+sprint_atual: 01
+prs:
+$(item planejamento merged $SHA_A humano $SHA_B)
+$(item 01 null null null null)"
+sed -i "s/^commits: \[\]\$/commits:\n  - seq: 1\n    task: T-01.01\n    commit: $SHA_C/" "$aux/v11.md"
+escopo "$aux/v11.md"
+lista="$(sed -n 's/^tasks=//p' "$aux/out")"
+# shellcheck disable=SC2086
+[ "$rc" = 0 ] && [ "$lista" = "$pasta/sprint-01/tasks.md" ] \
+  && [ "$(bash "$scripts/prova-de-commit.sh" --verificar "$aux/v11.md" $lista 2>/dev/null | sed -n 1p)" = V11=OK ] \
+  && ! grep -q 'status: pendente' $lista
+r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+confere 'sprint 01 entregue com a 02 pendente: o escopo e a 01, V11 OK e nenhuma task pendente' "$r"
+
+# O bloco do 02-prontidao calcula o escopo pelo leitor, e V11 e V12 o usam
+bloco "$ref/02-prontidao.md" 'escopo-de-tasks' \
+  | sed 's|<trabalho_id>|plan|g; s|<slug>|plan|g' \
+  | sed "s#bash \.claude/skills/mergex/scripts/#bash '$scripts'/#g" > "$aux/escopo.sh"
+mkdir -p "$aux/blk/docs/entregas/plan" "$aux/blk/docs/sprintx/features"
+cp "$aux/s02.md" "$aux/blk/docs/entregas/plan/ENTREGA.md"; cp -R "$pasta" "$aux/blk/docs/sprintx/features/plan"
+r="$(cd "$aux/blk" && bash -c ". '$aux/escopo.sh' && printf '%s' \"\$tasks_do_escopo\"" 2>"$aux/err")"
+[ -s "$aux/escopo.sh" ] && [ "$r" = docs/sprintx/features/plan/sprint-02/tasks.md ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/escopo.sh" "$aux/err"
+confere '02-prontidao: o bloco do escopo devolve so a sprint do PR (por_sprint)' "$r"
+bloco "$ref/02-prontidao.md" 'prova-de-commit.sh --verificar' | grep -q '\$tasks_do_escopo' \
+  && bloco "$ref/02-prontidao.md" 'portao-v12.sh --verificar' | grep -q '\$tasks_do_escopo' \
+  && ! grep -q 'sprint-\*/tasks.md' "$ref/02-prontidao.md" \
+  && grep -Fq 'Leia o frontmatter de cada `tasks.md` do escopo' "$ref/02-prontidao.md" \
+  && grep -Fq 'A **V9 não**' "$ref/02-prontidao.md" \
+  && grep -Fq 'escopo-de-tasks' "$ref/integracao/sprintx.md" \
+  && grep -Fq 'tasks.md` do escopo' "$ref/03-atencao-humana.md" \
+  && grep -Fq 'tasks.md` do escopo' "$ref/04-descricao-pr.md" \
+  && grep -Fq 'tasks do escopo' "$ref/05-pacote-qa.md"
+confere 'V1, V11 e V12 no escopo; a V9 na uniao; E3, E4, E5 e a integracao com a sprintx citam o escopo' $?
+
 echo '== o modo efetivo =='
 
 mkdir -p "$aux/m"
@@ -706,6 +802,180 @@ pm "$d" e9-merge
 [ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
 confere 'e9-merge persiste o --completar-base da entrega por sprint entre o planejamento e a sprint 01' "$r"
+
+echo '== a abertura do E0 persistida antes da main seguinte (conselhos, onda 2; DM-328) =='
+
+# A sequência do conselhos: e9-merge da sprint 01 → merge da main (anterior ao E0) →
+# E0 --sprint 02 → E1 → a main entra de novo → --registrar desse merge. O
+# reconciliacao-base lê B0 do ENTREGA.md de M^1; sem a abertura commitada, B0 era a
+# base da sprint 01, o merge anterior ao E0 voltava à fila e a recusa dizia "ordem".
+rb() { # <dir> <M> — o --registrar; saída em $aux/rb.out/.err, código em $rc
+  (cd "$1" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+    bash "$scripts/reconciliacao-base.sh" --registrar --entrega docs/entregas/plan/ENTREGA.md \
+      --origem sprintx --trabalho plan --merge "$2" --) >"$aux/rb.out" 2>"$aux/rb.err"; rc=$?
+}
+# traz_main <dir> <ruim|bom> — merge da main com Trabalho/Integra-base; `ruim` deixa o
+# Co-Authored-By num parágrafo separado (os controles deixam de ser trailers)
+traz_main() {
+  local b; b="$(git -C "$1" rev-parse main)"
+  if [ "$2" = ruim ]; then
+    g -C "$1" merge -q --no-ff main -m 'chore: traz a main' -m "Trabalho: plan
+Integra-base: $b" -m 'Co-Authored-By: X <x@x>'
+  else
+    g -C "$1" merge -q --no-ff main -m 'chore: traz a main' -m "Trabalho: plan
+Integra-base: $b
+Co-Authored-By: X <x@x>"
+  fi
+}
+anda_main() { # <dir> <arquivo> — um commit na main sem trocar a branch (a árvore pode estar suja)
+  git -C "$1" worktree add -q "$aux/wt-main" main
+  printf 'm\n' > "$aux/wt-main/$2"; g -C "$aux/wt-main" add -A; g -C "$aux/wt-main" commit -q -m "main: $2"
+  git -C "$1" worktree remove --force "$aux/wt-main"
+}
+e1_so_task() { # <dir> <arquivo> <task> — o E1 commita só o arquivo da task (o ENTREGA.md fica sujo)
+  printf '%s\n' "$3" > "$1/$2"; g -C "$1" add -- "$2"
+  g -C "$1" commit -q -m "feat: $3" -m "Task: $3
+Trabalho: plan"
+}
+# ate_e0_02 <dir> <ruim|bom> — a sprint 01 entregue e mergeada, a main na branch, o E0 --sprint 02
+ate_e0_02() {
+  repo "$1" por_sprint
+  abre "$1" 01; task "$1" src/b.ts T-01.01
+  e8 "$1" https://github.com/dono/repo/pull/2 aberto
+  g -C "$1" add -A; g -C "$1" commit -q -m 'docs(mergex): E8' -m 'Trabalho: plan'
+  fecha01 "$1" merge
+  traz_main "$1" "$2"
+  e0s "$1" 02
+  [ "$rc" = 0 ] || { echo "        (E0 --sprint 02 saiu $rc)"; mostra "$aux/e0s.err"; }
+}
+eo="docs/entregas/plan/ENTREGA.md"
+
+for trailers in ruim bom; do
+  d="$aux/onda2-$trailers"; ate_e0_02 "$d" "$trailers"
+  base02="$(sed -n 's/^base_validada_sha: //p' "$d/$eo")"
+  pm "$d" e0-abertura
+  [ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e0-abertura' \
+    && [ "$(git -C "$d" diff --name-only HEAD~1 HEAD)" = "$eo" ] \
+    && git -C "$d" show "HEAD:$eo" | grep -qx 'sprint_atual: 02'
+  r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+  confere "e0-abertura persiste a abertura da sprint 02, só o ENTREGA.md (merge anterior com trailers $trailers)" "$r"
+  e1_so_task "$d" src/c.ts T-02.01
+  anda_main "$d" src/r.ts; traz_main "$d" bom; m2="$(git -C "$d" rev-parse HEAD)"
+  g -C "$d" add -- "$eo"; g -C "$d" commit -q -m 'docs: persiste metodo pre-e2 (simulado)' -m 'Trabalho: plan
+Metodo: pre-e2'
+  rb "$d" "$m2"
+  [ "$rc" = 0 ] && grep -qx "b0=$base02" "$aux/rb.out"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/rb.out" "$aux/rb.err"
+  confere "com a abertura persistida, a main seguinte registra com B0 = a base da sprint 02 (trailers $trailers antes do E0)" "$r"
+done
+
+# Sem o checkpoint: a recusa nomeia a abertura não persistida, não a "ordem"
+d="$aux/onda2-sem"; ate_e0_02 "$d" bom
+e1_so_task "$d" src/c.ts T-02.01
+anda_main "$d" src/r.ts; traz_main "$d" bom; m2="$(git -C "$d" rev-parse HEAD)"
+g -C "$d" add -- "$eo"; g -C "$d" commit -q -m 'docs: persiste metodo pre-e2 (simulado)' -m 'Trabalho: plan
+Metodo: pre-e2'
+rb "$d" "$m2"
+[ "$rc" = 5 ] && grep -q 'e0-abertura' "$aux/rb.err" && ! grep -q 'registre os merges um por vez' "$aux/rb.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/rb.out" "$aux/rb.err"
+confere 'sem a abertura persistida antes de M: --registrar recusa nomeando o e0-abertura, nao a ordem' "$r"
+
+# A retomada da mesma sprint não grava nada: noop, sem commit, mesmo com o ENTREGA.md sujo do E1
+d="$aux/onda2-retoma"; ate_e0_02 "$d" bom; pm "$d" e0-abertura
+e1_so_task "$d" src/c.ts T-02.01
+printf '\n' >> "$d/$eo"; h="$(git -C "$d" rev-parse HEAD)"
+e0s "$d" 02; e0rc=$rc
+pm "$d" e0-abertura
+[ "$e0rc" = 0 ] && [ "$rc" = 0 ] && grep -qx 'noop=true' "$aux/pm.out" && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+confere 'retomada do E0 --sprint 02 ja persistida: e0-abertura e noop, sem commit' "$r"
+
+# Mudança além da abertura: recusa, sem commit
+d="$aux/onda2-alem"; ate_e0_02 "$d" bom
+printf '\nNota fora da abertura.\n' >> "$d/$eo"; h="$(git -C "$d" rev-parse HEAD)"
+pm "$d" e0-abertura
+[ "$rc" != 0 ] && grep -q 'e0-abertura' "$aux/pm.err" && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+confere 'e0-abertura com o ENTREGA.md mudado alem da abertura: recusa, sem commit' "$r"
+
+# por_trabalho: a retomada depois do planejamento também reancora, e também persiste
+bloco "$ref/00-abertura.md" 'E0, retomada sem --planejamento' \
+  | sed 's|<trabalho_id>|plan|g; s|<slug>|plan|g; s|<base>|main|g' \
+  | sed "s#bash \.claude/skills/mergex/scripts/#bash '$scripts'/#g" > "$aux/e0r.sh"
+d="$aux/onda2-trab"; repo "$d" por_trabalho
+(cd "$d" && bash "$aux/e0r.sh") >"$aux/e0r.out" 2>"$aux/e0r.err"; e0rc=$?
+baset="$(git -C "$d" merge-base HEAD main)"
+pm "$d" e0-abertura
+[ "$e0rc" = 0 ] && [ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e0-abertura' \
+  && git -C "$d" show "HEAD:$eo" | grep -qx "base_validada_sha: $baset" \
+  && git -C "$d" show "HEAD:$eo" | grep -qx 'sprint_atual: null'
+r=$?; [ "$r" = 0 ] || mostra "$aux/e0r.out" "$aux/e0r.err" "$aux/pm.err"
+confere 'por_trabalho: a retomada depois do planejamento grava pelo leitor e o e0-abertura a persiste' "$r"
+e1_so_task "$d" src/b.ts T-01.01
+anda_main "$d" src/r.ts; traz_main "$d" bom; m2="$(git -C "$d" rev-parse HEAD)"
+g -C "$d" add -- "$eo"; g -C "$d" commit -q -m 'docs: persiste metodo pre-e2 (simulado)' -m 'Trabalho: plan
+Metodo: pre-e2'
+rb "$d" "$m2"
+[ "$rc" = 0 ] && grep -qx "b0=$baset" "$aux/rb.out"
+r=$?; [ "$r" = 0 ] || mostra "$aux/rb.out" "$aux/rb.err"
+confere 'por_trabalho: a main seguinte registra com B0 = a base reancorada' "$r"
+
+# O escritor da retomada: grava uma vez, retoma sem gravar, recusa por_sprint e o planejamento aberto
+entrega "$aux/ret.md" "sprint_atual: planejamento
+base_validada_sha: $SHA_B
+origem_base: registrada_e0
+prs:
+$(item planejamento merged $SHA_A humano $SHA_B)"
+ret() { (cd "$aux/oid-sha1" && bash "$leitor" --retomar-planejamento --base-validada-sha "$2" --entrega "$1") >"$aux/out" 2>"$aux/err"; rc=$?; }
+ret "$aux/ret.md" "$SHA_C"
+[ "$rc" = 0 ] && grep -qx 'sprint_atual: null' "$aux/ret.md" && grep -qx "base_validada_sha: $SHA_C" "$aux/ret.md" \
+  && grep -qx 'origem_base: registrada_sprint' "$aux/ret.md" && grep -qx 'pr_url: null' "$aux/ret.md" \
+  && grep -qx 'entrega: por_trabalho' "$aux/ret.md"
+r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err" "$aux/ret.md"
+confere '--retomar-planejamento grava sprint_atual null, a base, registrada_sprint e entrega por_trabalho' "$r"
+cp "$aux/ret.md" "$aux/ret-antes.md"; ret "$aux/ret.md" "$SHA_C"
+[ "$rc" = 0 ] && grep -qx 'retomada=sim' "$aux/out" && cmp -s "$aux/ret.md" "$aux/ret-antes.md"
+confere '--retomar-planejamento repetido com a mesma base: retomada, sem gravar' $?
+ret "$aux/ret.md" "$SHA_A"
+[ "$rc" = 1 ] && cmp -s "$aux/ret.md" "$aux/ret-antes.md"
+confere '--retomar-planejamento ja retomado com outra base: recusa, sem gravar' $?
+cp "$aux/s01.md" "$aux/ret-s.md"; ret "$aux/ret-s.md" "$SHA_C"
+[ "$rc" = 1 ] && cmp -s "$aux/ret-s.md" "$aux/s01.md"
+confere '--retomar-planejamento em entrega por_sprint: recusa (quem abre e o --abrir-sprint)' $?
+entrega "$aux/ret-a.md" "sprint_atual: planejamento
+prs:
+$(item planejamento aberto null null null)"
+cp "$aux/ret-a.md" "$aux/ret-a-antes.md"; ret "$aux/ret-a.md" "$SHA_C"
+[ "$rc" = 1 ] && grep -q 'E9' "$aux/err" && cmp -s "$aux/ret-a.md" "$aux/ret-a-antes.md"
+confere '--retomar-planejamento com o planejamento nao merged: recusa e manda rodar o E9' $?
+
+# Os controles fora do bloco final: o contrato diz o que houve, e o registrador repete
+printf '%s\n' 'chore: traz a main' '' 'Trabalho: plan' "Integra-base: $SHA_C" '' 'Co-Authored-By: X <x@x>' > "$aux/msg-ruim"
+printf '%s\n' 'chore: traz a main' '' 'Trabalho: plan' "Integra-base: $SHA_C" 'Co-Authored-By: X <x@x>' > "$aux/msg-boa"
+bash "$scripts/contrato-de-commit.sh" --validar-integracao --trabalho plan --arquivo "$aux/msg-ruim" >/dev/null 2>"$aux/err"; r1=$?
+bash "$scripts/contrato-de-commit.sh" --validar-integracao --trabalho plan --arquivo "$aux/msg-boa" >/dev/null 2>&1; r2=$?
+[ "$r1" = 2 ] && grep -q 'fora do bloco final' "$aux/err" && [ "$r2" = 0 ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/err"
+confere 'contrato: Trabalho/Integra-base fora do bloco final recusa dizendo isso; no mesmo bloco do Co-Authored-By passa' "$r"
+printf '%s\n' 'feat: x' '' 'Task: T-01.01' 'Trabalho: plan' '' 'Co-Authored-By: X <x@x>' > "$aux/msg-e1"
+bash "$scripts/contrato-de-commit.sh" --validar-e1 --trabalho plan --task T-01.01 --arquivo "$aux/msg-e1" >/dev/null 2>"$aux/err"
+[ "$?" = 2 ] && grep -q 'fora do bloco final' "$aux/err"
+confere 'contrato: Task/Trabalho do E1 fora do bloco final tambem e nomeado' $?
+d="$aux/onda2-depois"; ate_e0_02 "$d" bom; pm "$d" e0-abertura
+anda_main "$d" src/r.ts; traz_main "$d" ruim
+anda_main "$d" src/s.ts; traz_main "$d" bom; m2="$(git -C "$d" rev-parse HEAD)"
+rb "$d" "$m2"
+[ "$rc" = 5 ] && grep -q 'fora do bloco final' "$aux/rb.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/rb.out" "$aux/rb.err"
+confere 'registrador: o merge pendente com os controles fora do bloco final e nomeado com o motivo do contrato' "$r"
+
+grep -Fq -- '--checkpoint e0-abertura' "$ref/00-abertura.md" \
+  && grep -Fq -- '--retomar-planejamento' "$ref/00-abertura.md" \
+  && grep -Fq 'e0-abertura' "$ref/integracao/sprintx.md" \
+  && grep -Fq 'e0-abertura' "$ref/01-commits.md" \
+  && grep -Fq 'mesmo bloco' "$ref/01-commits.md" \
+  && grep -Fq 'mesmo bloco' "$ref/11-reconciliacao-base.md"
+confere '00-abertura manda persistir a abertura; 01-commits e 11-reconciliacao dao o modelo com os trailers no mesmo bloco' $?
 
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

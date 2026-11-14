@@ -1049,7 +1049,7 @@ grupo_integration() {
 
   grep -Fq 'persistir-metodo.sh' "$skill" \
     && ok 'SKILL torna o lifecycle executavel' || falha 'SKILL nao aponta ao executor de metodo'
-  grep -Fq 'Metodo: pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | pre-e6 | e8' "$commits" \
+  grep -Fq 'Metodo: pre-e2 | reconciliacao-base | predecessores | retomar-v9-predecessores | e9-merge | e0-abertura | pre-e6 | e8' "$commits" \
     && ok 'E1 documenta commit de metodo como classe propria' || falha 'E1 ainda nao define a classe metodo'
   ! grep -Fq 'Isto **não é uma etapa nova**: é o E1' "$commits" \
     && ok 'commit de metodo nao e descrito como E1 tardio' || falha 'reference ainda mistura metodo com E1'
