@@ -549,7 +549,7 @@ case "$ACAO" in
     # o modo é registrado uma vez: entrega por_trabalho registrada não abre sprint
     [ "$tem_m" = 0 ] || [ "$modo" = por_sprint ] || recusa "a entrega está registrada como $modo: --abrir-sprint só em por_sprint"
     if [ "$sprint" = "$NN" ]; then
-      [ "$u_estado" != merged ] || recusa "a sprint $NN já está merged: sprint fechada é imutável (defeito vira task da sprint seguinte)"
+      [ "$u_estado" != merged ] || recusa "a sprint $NN já está merged: sprint fechada é imutável (o destino do defeito está em 00-abertura.md: a sprint seguinte enquanto a F6 replaneja, senão OC da runx ou trabalho sucessor)"
       printf 'aberta=%s\nretomada=sim\n' "$NN"; exit 0
     fi
     [ "$p_sprint" = planejamento ] || recusa "a sprint $NN só abre depois do PR de planejamento (prs sem o item de planejamento)"

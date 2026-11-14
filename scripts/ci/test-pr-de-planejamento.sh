@@ -286,12 +286,13 @@ confere 'V9 --planejamento com --origem runx: uso (64)' $?
 echo '== A primeira sprint depois do merge do planejamento (DM-261) =='
 
 # O bloco da retomada do E0 (pré-condições e a base nova), com a base `main`
-bloco "$ref/00-abertura.md" 'origem_base=registrada_sprint' \
+bloco "$ref/00-abertura.md" 'E0, retomada sem --planejamento' \
   | sed 's|<trabalho_id>|plan|g; s|<base>|main|g' \
   | sed "s#bash \.claude/skills/mergex/scripts/entrega-de-planejamento\.sh#bash '$leitor'#" > "$aux/e0-retomada.sh"
 [ -s "$aux/e0-retomada.sh" ]; confere '00-abertura tem o bloco da retomada depois do planejamento' $?
 e0r() { (cd "$1" && bash "$aux/e0-retomada.sh") >"$aux/e0r.out" 2>"$aux/e0r.err"; rc=$?; }
-# reancora <dir> — aplica a saída do bloco como o E0 a grava (passo 5, caso 2) e commita
+# reancora <dir> — commita a retomada. Desde a DM-328 o bloco grava pelo leitor
+# (--retomar-planejamento); o sed abaixo é idempotente e só confere a forma
 reancora() {
   local d="$1" e="$1/docs/entregas/plan/ENTREGA.md" nb
   nb="$(sed -n 's/^base_validada_sha=//p' "$aux/e0r.out")"

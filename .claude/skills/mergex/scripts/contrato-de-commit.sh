@@ -78,7 +78,7 @@ fora_do_bloco() {
   for k in "$@"; do
     q="$(printf '%s\n' "$TRAILERS" | grep -Ec "^$k:[[:space:]]*")"
     [ "$q" = 0 ] || continue
-    printf '%s\n' "$TEXTO" | grep -Eq "^$k:[[:space:]]*[^[:space:]]" || continue
+    grep -Eq "^$k:[[:space:]]*[^[:space:]]" <<<"$TEXTO" || continue
     invalido "$k fora do bloco final de trailers: o Git só lê como trailer o último parágrafo da mensagem; ponha $k no último parágrafo, junto do Co-Authored-By e dos outros trailers, sem linha em branco entre eles"
   done
 }
