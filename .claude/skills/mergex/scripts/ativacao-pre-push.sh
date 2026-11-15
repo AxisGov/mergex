@@ -53,7 +53,9 @@
 #   como seguir: rodar o E0 e o E2 fora daquele ambiente ou, se a pessoa
 #   quiser, desfazer a configuração (`git config [--global] --unset`, com o
 #   escopo de onde o valor vem; vindo do ambiente do processo, quem o abriu é
-#   quem deixa de defini-lo). core.hooksPath nunca é alterado.
+#   quem deixa de defini-lo). core.hooksPath nunca é alterado. Exceção do
+#   --reverter: um chamador gerenciado que uma versão anterior deixou ali (o
+#   `NUL/pre-push` literal) é removido, só o arquivo com o marcador, e sai 0.
 #
 # --provar (E0 e E2)
 #   Prova por comportamento, nunca por busca textual no hook. Monta, sem tocar
@@ -236,7 +238,8 @@ hooks_inutilizavel() {
       return 0
     fi
   done
-  if [ -e "$HOOKS" ] && [ ! -d "$HOOKS" ]; then
+  # um link simbólico quebrado também ocupa o caminho (`-e` segue o link)
+  if { [ -e "$HOOKS" ] || [ -L "$HOOKS" ]; } && [ ! -d "$HOOKS" ]; then
     HOOKS_MOTIVO="o diretório de hooks efetivo $HOOKS (core.hooksPath) existe e não é um diretório: ali o Git não executa hook nenhum"
     return 0
   fi
@@ -248,6 +251,16 @@ hooks_inutilizavel() {
 CHAVE_HOOKS='core.hooksPath'
 HOOKS_MOTIVO=""
 if hooks_inutilizavel; then # guarda:ATVNUL
+  # --reverter diante de um chamador gerenciado que uma versão anterior deixou
+  # ali (o `NUL/pre-push` literal): remove só o arquivo, que tem o marcador, e
+  # sai 0; o diretório fica, porque o script não o criou nesta execução e um
+  # `NUL` literal no Windows só sai à mão. Nada é criado.
+  if [ "$MODO" = reverter ] && [ -f "$HOOKS/pre-push" ] && [ ! -L "$HOOKS/pre-push" ] \
+    && grep -Fxq -- "$MARCADOR" "$HOOKS/pre-push" 2>/dev/null; then
+    rm -f "$HOOKS/pre-push" || pre_requisito "não foi possível remover $HOOKS/pre-push"
+    diz "chamador gerenciado removido de $HOOKS/pre-push ($HOOKS_MOTIVO); o diretório $HOOKS não foi removido: se ele é um \`NUL\` literal criado por engano, remova-o à mão"
+    exit 0
+  fi
   # o escopo de onde vem o valor efetivo (o último lido pelo Git), para a
   # instrução de desfazer apontar o arquivo certo
   ESCOPO="$(git -C "$RAIZ" config --show-scope --get "$CHAVE_HOOKS" 2>/dev/null | cut -f1)"

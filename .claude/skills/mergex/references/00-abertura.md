@@ -538,7 +538,8 @@ segue a regra do hook de terceiro: só a prova funcional o aceita. Quando `core.
 para o dispositivo nulo (`NUL` em qualquer caixa, `/dev/null`) ou para um caminho que não é
 diretório, o script para com `3` **antes de criar qualquer arquivo ou diretório** e diz como
 seguir: rodar o E0 fora daquele ambiente ou, se a pessoa quiser, desfazer a configuração com
-`git config --unset core.hooksPath` (`references/12-barreira-de-push.md`).
+`git config --unset core.hooksPath` — com `--global`, `--system` ou `--worktree` quando o valor
+vem desse escopo, como a própria mensagem indica (`references/12-barreira-de-push.md`).
 
 **Código diferente de zero: `mergex E0 BLOQUEADO — pre-push`.** O E0 encerra ali — não siga para o
 item 4 nem devolva o controle como OK — e mostre ao usuário a instrução que o script imprimiu. Com

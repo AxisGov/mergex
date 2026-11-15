@@ -77,7 +77,9 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --instalar \
   exemplo) ou, se a pessoa quiser, desfazer a configuração com `git config --unset core.hooksPath`
   (`--global`, `--system` ou `--worktree` quando o valor vem desse escopo). Vindo do ambiente do
   processo (`git -c`, `GIT_CONFIG_COUNT`), não há arquivo a desfazer: quem abriu o ambiente é quem
-  deixa de defini-lo. `core.hooksPath` nunca é alterado pelo script.
+  deixa de defini-lo. `core.hooksPath` nunca é alterado pelo script. Exceção do `--reverter`: um
+  chamador gerenciado que uma versão anterior deixou ali (o `NUL/pre-push` literal) é removido —
+  só o arquivo, com o marcador — e o script sai `0`; o diretório fica, para ser removido à mão.
 - **Já é o chamador gerenciado:** nada muda (idempotente).
 - **Existe um `pre-push` de terceiro:** o E0 nunca o sobrescreve, renomeia ou edita. Quem decide é
   a prova funcional: aprovada, é **integração externa válida** e o E0 segue; reprovada, o script sai

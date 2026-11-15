@@ -1153,11 +1153,17 @@ grupo_hookspath_nulo() {
   # (a) NUL, nul e /dev/null na config local: o pre-push não pode existir ali
   for v in NUL nul Nul /dev/null; do
     git -C "$d" config core.hooksPath "$v"
-    for m in --instalar --provar --reverter; do nulo_espera "core.hooksPath=$v" "$d" "$m"; done
-    out_tem "core.hooksPath=$v: a mensagem diz que aponta para o dispositivo nulo" "aponta para o dispositivo nulo"
-    out_tem "core.hooksPath=$v: a mensagem diz que o pre-push não pode ser instalado ali" "não pode ser instalado"
-    out_tem "core.hooksPath=$v: a mensagem manda rodar fora desse ambiente" "fora deste ambiente"
-    out_tem "core.hooksPath=$v: a mensagem dá o comando para desfazer" "git config --unset core.hooksPath"
+    # a mensagem é conferida na saída de CADA modo; no --instalar, também a
+    # parada do E0 (`mergex E0 BLOQUEADO — pre-push`)
+    for m in --instalar --provar --reverter; do
+      nulo_espera "core.hooksPath=$v" "$d" "$m"
+      out_tem "core.hooksPath=$v: $m diz que aponta para o dispositivo nulo" "aponta para o dispositivo nulo"
+      out_tem "core.hooksPath=$v: $m diz que o pre-push não pode ser instalado ali" "não pode ser instalado"
+      out_tem "core.hooksPath=$v: $m manda rodar fora desse ambiente" "fora deste ambiente"
+      out_tem "core.hooksPath=$v: $m dá o comando para desfazer" "git config --unset core.hooksPath"
+    done
+    atv "$d" --instalar
+    out_tem "core.hooksPath=$v: --instalar é a parada do E0" "mergex E0 BLOQUEADO — pre-push: o core.hooksPath aponta para o dispositivo nulo"
   done
   git -C "$d" config --unset core.hooksPath
   # (b) NUL na config GLOBAL (temporária: GIT_CONFIG_GLOBAL só nos processos do caso)
@@ -1179,6 +1185,36 @@ grupo_hookspath_nulo() {
   out_tem "core.hooksPath num arquivo regular: a mensagem diz que não é um diretório" "não é um diretório"
   [ "$(assinatura "$f")" = "$a1" ] && ok "core.hooksPath num arquivo regular: o arquivo não muda" || falha "core.hooksPath num arquivo regular: o arquivo mudou"
   git -C "$d" config --unset core.hooksPath
+  # (c2) link simbólico quebrado no lugar do diretório de hooks: ocupa o
+  # caminho (`-e` é falso, `-L` é verdadeiro) e para nos três modos
+  if ln -s "$t/alvo-que-nao-existe" "$d/hooks-link-quebrado" 2>/dev/null && [ -L "$d/hooks-link-quebrado" ]; then
+    git -C "$d" config core.hooksPath hooks-link-quebrado
+    for m in --instalar --provar --reverter; do
+      nulo_espera "core.hooksPath num link simbólico quebrado" "$d" "$m"
+      out_tem "core.hooksPath num link simbólico quebrado: $m diz que não é um diretório" "não é um diretório"
+    done
+    [ ! -e "$t/alvo-que-nao-existe" ] && ok "core.hooksPath num link simbólico quebrado: o alvo não foi criado" || falha "o alvo do link quebrado foi criado"
+    git -C "$d" config --unset core.hooksPath; rm -f "$d/hooks-link-quebrado"
+  else
+    rm -f "$d/hooks-link-quebrado"
+    nao_executado "core.hooksPath num link simbólico quebrado — este ambiente não cria link simbólico quebrado (ln -s)"
+  fi
+  # (d) um chamador gerenciado que uma versão anterior deixou em <raiz>/NUL:
+  # --instalar e --provar param sem tocar nele; --reverter remove só o arquivo
+  # (com o marcador) e sai 0. O diretório fica (o teste o apaga no fim).
+  git -C "$d" config core.hooksPath NUL
+  mkdir "$d/NUL" && printf '%s\n' '#!/bin/sh' '# mergex: pre-push gerenciado' 'exit 0' > "$d/NUL/pre-push" || falha "controle: montar o NUL/pre-push antigo"
+  a1="$(assinatura "$d/NUL/pre-push")"
+  atv_espera "NUL/pre-push gerenciado antigo: --instalar sai 3" 3 "$d" --instalar
+  atv_espera "NUL/pre-push gerenciado antigo: --provar sai 3" 3 "$d" --provar
+  [ "$(assinatura "$d/NUL/pre-push")" = "$a1" ] && ok "NUL/pre-push gerenciado antigo: --instalar e --provar não tocam o arquivo" || falha "NUL/pre-push antigo foi tocado"
+  atv_espera "NUL/pre-push gerenciado antigo: --reverter sai 0" 0 "$d" --reverter
+  [ ! -e "$d/NUL/pre-push" ] && ok "NUL/pre-push gerenciado antigo: --reverter remove o chamador" || falha "NUL/pre-push antigo não foi removido"
+  out_tem "NUL/pre-push gerenciado antigo: --reverter diz que removeu" "chamador gerenciado removido"
+  printf '%s\n' '#!/bin/sh' 'exit 0' > "$d/NUL/pre-push"; a1="$(assinatura "$d/NUL/pre-push")"
+  atv_espera "NUL/pre-push de terceiro: --reverter sai 3 sem tocar" 3 "$d" --reverter
+  [ "$(assinatura "$d/NUL/pre-push")" = "$a1" ] && ok "NUL/pre-push de terceiro: --reverter não toca o arquivo" || falha "NUL/pre-push de terceiro foi tocado"
+  rm -rf "$d/NUL"; git -C "$d" config --unset core.hooksPath
   # controle: sem core.hooksPath, o mesmo cenário instala (a parada é só do caso nulo)
   atv_espera "controle: sem core.hooksPath o E0 instala (sai 0)" 0 "$d" --instalar
   [ -f "$d/.git/hooks/pre-push" ] && ok "controle: o chamador gerenciado foi instalado em .git/hooks" || falha "controle: sem pre-push em .git/hooks"
