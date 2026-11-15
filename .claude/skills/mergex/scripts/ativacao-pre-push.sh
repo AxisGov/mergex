@@ -238,11 +238,20 @@ hooks_inutilizavel() {
       return 0
     fi
   done
-  # um link simbólico quebrado também ocupa o caminho (`-e` segue o link)
-  if { [ -e "$HOOKS" ] || [ -L "$HOOKS" ]; } && [ ! -d "$HOOKS" ]; then
-    HOOKS_MOTIVO="o diretório de hooks efetivo $HOOKS (core.hooksPath) existe e não é um diretório: ali o Git não executa hook nenhum"
-    return 0
-  fi
+  # o caminho como configurado (o cru, relativo à raiz) e o resolvido: a forma
+  # absoluta do Git já resolve links simbólicos, então um link quebrado só
+  # aparece no cru. Um link quebrado ocupa o caminho (`-e` segue o link; `-L`
+  # não) e não é diretório.
+  case "$HOOKS_CRU" in
+    /*|[A-Za-z]:/*) c="$HOOKS_CRU" ;;
+    *) c="$RAIZ/$HOOKS_CRU" ;;
+  esac
+  for c in "$c" "$HOOKS"; do
+    if { [ -e "$c" ] || [ -L "$c" ]; } && [ ! -d "$c" ]; then
+      HOOKS_MOTIVO="o diretório de hooks efetivo $c (core.hooksPath) existe e não é um diretório: ali o Git não executa hook nenhum"
+      return 0
+    fi
+  done
   return 1
 }
 # A chave fica numa variável para que a linha da instrução não se pareça com
