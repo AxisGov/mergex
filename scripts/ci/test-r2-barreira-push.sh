@@ -5,7 +5,8 @@
 # O pre-push do Git decide só pelo que o Git entrega (refs e SHAs), pela mesma
 # regra (portao-regras.sh -> validade-do-portao.sh --rev) e pelo mesmo modo
 # (pr-so-com-portao em .expx/hooks.json). Grupos: `prepush` (Task 14),
-# `ativacao` e `entrypoints` (Task 15), `ci` (Task 16) e `modo` (Task 17: a
+# `ativacao` e `entrypoints` (Task 15), `hookspath_nulo` (core.hooksPath no
+# dispositivo nulo: o E0 para sem criar nada), `ci` (Task 16) e `modo` (Task 17: a
 # mesma entrada no pre-push, no CI e no hook do Claude), na ordem de
 # definição. Caso que depende de um ambiente ausente (Git
 # for Windows sobre \\wsl.localhost) imprime NAO_EXECUTADO e nunca conta como ok.
@@ -1128,6 +1129,101 @@ sem_pronto() {
     && printf '%s\n' "$REG_OUT" | grep -Fxq 'RESULTADO: BLOQUEADO — pre-push sem prova funcional' \
     && cmp -s "$e" "$2/antes"; then ok "$1"
   else falha "$1 — rc=$REG_RC: $(printf '%s' "$REG_OUT" | tr '\n' '|')"; fi
+}
+
+# nulo_espera <desc> <dir> <modo> — core.hooksPath no dispositivo nulo ou num
+# caminho inutilizável: o ativacao sai 3 com a mensagem clara e não cria nada
+# (a listagem da raiz e de .git/hooks é a mesma antes e depois; nenhum `NUL`)
+nulo_espera() {
+  local desc="$1" d="$2" modo="$3" raiz0 hooks0 cfg0
+  raiz0="$(ls -A "$d")"; hooks0="$(ls -A "$d/.git/hooks")"; cfg0="$(git -C "$d" config --show-origin --get-all core.hooksPath)"
+  atv_espera "$desc: $modo sai 3" 3 "$d" "$modo"
+  ( cd "$d" && [ ! -e NUL ] && [ ! -e nul ] ) && [ "$(ls -A "$d")" = "$raiz0" ] && [ "$(ls -A "$d/.git/hooks")" = "$hooks0" ] \
+    && ok "$desc: $modo não cria arquivo nem diretório (nenhum NUL)" || falha "$desc: $modo criou algo — raiz: $(ls -A "$d" | tr '\n' '|'); hooks: $(ls -A "$d/.git/hooks" | tr '\n' '|')"
+  [ "$(git -C "$d" config --show-origin --get-all core.hooksPath)" = "$cfg0" ] && ok "$desc: $modo não muda core.hooksPath" || falha "$desc: $modo mudou core.hooksPath"
+}
+
+grupo_hookspath_nulo() {
+  local t d f a1 m GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+  export FX_PORTAO_PUSH="$PP"
+  t="$(mktemp -d)"; TMPS="$TMPS $t"
+  # config global vazia e sem a do sistema, só neste grupo (as variáveis são
+  # locais à função): um core.hooksPath global ou de sistema da máquina não
+  # entra nos casos nem no controle final, que espera instalar em .git/hooks
+  : > "$t/gitconfig-vazia"; export GIT_CONFIG_GLOBAL="$t/gitconfig-vazia" GIT_CONFIG_NOSYSTEM=1
+  [ -z "$(git config --get-all core.hooksPath)" ] && ok "controle: nenhum core.hooksPath global ou de sistema neste grupo" \
+    || falha "controle: core.hooksPath herdado da máquina"
+  d="$t/repo"
+  fx_cenario "$d" || { falha "cenário não montou"; return; }
+  # (a) NUL, nul e /dev/null na config local: o pre-push não pode existir ali
+  for v in NUL nul Nul /dev/null; do
+    git -C "$d" config core.hooksPath "$v"
+    # a mensagem é conferida na saída de CADA modo; no --instalar, também a
+    # parada do E0 (`mergex E0 BLOQUEADO — pre-push`)
+    for m in --instalar --provar --reverter; do
+      nulo_espera "core.hooksPath=$v" "$d" "$m"
+      out_tem "core.hooksPath=$v: $m diz que aponta para o dispositivo nulo" "aponta para o dispositivo nulo"
+      out_tem "core.hooksPath=$v: $m diz que o pre-push não pode ser instalado ali" "não pode ser instalado"
+      out_tem "core.hooksPath=$v: $m manda rodar fora desse ambiente" "fora deste ambiente"
+      out_tem "core.hooksPath=$v: $m dá o comando para desfazer" "git config --unset core.hooksPath"
+    done
+    atv "$d" --instalar
+    out_tem "core.hooksPath=$v: --instalar é a parada do E0" "mergex E0 BLOQUEADO — pre-push: o core.hooksPath aponta para o dispositivo nulo"
+  done
+  git -C "$d" config --unset core.hooksPath
+  # (b) NUL na config GLOBAL (temporária: GIT_CONFIG_GLOBAL só nos processos do caso)
+  printf '[core]\n\thooksPath = NUL\n' > "$t/gitconfig-global"
+  GIT_CONFIG_GLOBAL="$t/gitconfig-global" nulo_espera "core.hooksPath=NUL global" "$d" --instalar
+  out_tem "core.hooksPath=NUL global: a mensagem diz que aponta para o dispositivo nulo" "aponta para o dispositivo nulo"
+  out_tem "core.hooksPath=NUL global: a mensagem lembra o escopo global" "git config --global --unset core.hooksPath"
+  [ "$(GIT_CONFIG_GLOBAL="$t/gitconfig-global" git config --global --get core.hooksPath)" = NUL ] \
+    && ok "core.hooksPath=NUL global: a config global não muda" || falha "core.hooksPath=NUL global: a config global mudou"
+  # (b2) NUL vindo do ambiente do processo (GIT_CONFIG_COUNT, como um `git -c`):
+  # não há arquivo de configuração a desfazer, e a mensagem diz isso
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=NUL nulo_espera "core.hooksPath=NUL no ambiente" "$d" --instalar
+  out_tem "core.hooksPath=NUL no ambiente: a mensagem diz que aponta para o dispositivo nulo" "aponta para o dispositivo nulo"
+  out_tem "core.hooksPath=NUL no ambiente: a mensagem diz que o valor vem do ambiente do processo" "vem do ambiente deste processo"
+  # (c) caminho inutilizável: um arquivo regular no lugar do diretório de hooks
+  f="$d/hooks-e-arquivo"; printf 'não é diretório\n' > "$f"; a1="$(assinatura "$f")"
+  git -C "$d" config core.hooksPath hooks-e-arquivo
+  nulo_espera "core.hooksPath num arquivo regular" "$d" --instalar
+  out_tem "core.hooksPath num arquivo regular: a mensagem diz que não é um diretório" "não é um diretório"
+  [ "$(assinatura "$f")" = "$a1" ] && ok "core.hooksPath num arquivo regular: o arquivo não muda" || falha "core.hooksPath num arquivo regular: o arquivo mudou"
+  git -C "$d" config --unset core.hooksPath
+  # (c2) link simbólico quebrado no lugar do diretório de hooks: ocupa o
+  # caminho (`-e` é falso, `-L` é verdadeiro) e para nos três modos
+  if ln -s "$t/alvo-que-nao-existe" "$d/hooks-link-quebrado" 2>/dev/null && [ -L "$d/hooks-link-quebrado" ]; then
+    git -C "$d" config core.hooksPath hooks-link-quebrado
+    for m in --instalar --provar --reverter; do
+      nulo_espera "core.hooksPath num link simbólico quebrado" "$d" "$m"
+      out_tem "core.hooksPath num link simbólico quebrado: $m diz que não é um diretório" "não é um diretório"
+    done
+    [ ! -e "$t/alvo-que-nao-existe" ] && ok "core.hooksPath num link simbólico quebrado: o alvo não foi criado" || falha "o alvo do link quebrado foi criado"
+    git -C "$d" config --unset core.hooksPath; rm -f "$d/hooks-link-quebrado"
+  else
+    rm -f "$d/hooks-link-quebrado"
+    nao_executado "core.hooksPath num link simbólico quebrado — este ambiente não cria link simbólico quebrado (ln -s)"
+  fi
+  # (d) um chamador gerenciado que uma versão anterior deixou em <raiz>/NUL:
+  # --instalar e --provar param sem tocar nele; --reverter remove só o arquivo
+  # (com o marcador) e sai 0. O diretório fica (o teste o apaga no fim).
+  git -C "$d" config core.hooksPath NUL
+  mkdir "$d/NUL" && printf '%s\n' '#!/bin/sh' '# mergex: pre-push gerenciado' 'exit 0' > "$d/NUL/pre-push" || falha "controle: montar o NUL/pre-push antigo"
+  a1="$(assinatura "$d/NUL/pre-push")"
+  atv_espera "NUL/pre-push gerenciado antigo: --instalar sai 3" 3 "$d" --instalar
+  atv_espera "NUL/pre-push gerenciado antigo: --provar sai 3" 3 "$d" --provar
+  [ "$(assinatura "$d/NUL/pre-push")" = "$a1" ] && ok "NUL/pre-push gerenciado antigo: --instalar e --provar não tocam o arquivo" || falha "NUL/pre-push antigo foi tocado"
+  atv_espera "NUL/pre-push gerenciado antigo: --reverter sai 0" 0 "$d" --reverter
+  [ ! -e "$d/NUL/pre-push" ] && ok "NUL/pre-push gerenciado antigo: --reverter remove o chamador" || falha "NUL/pre-push antigo não foi removido"
+  out_tem "NUL/pre-push gerenciado antigo: --reverter diz que removeu" "chamador gerenciado removido"
+  printf '%s\n' '#!/bin/sh' 'exit 0' > "$d/NUL/pre-push"; a1="$(assinatura "$d/NUL/pre-push")"
+  atv_espera "NUL/pre-push de terceiro: --reverter sai 3 sem tocar" 3 "$d" --reverter
+  [ "$(assinatura "$d/NUL/pre-push")" = "$a1" ] && ok "NUL/pre-push de terceiro: --reverter não toca o arquivo" || falha "NUL/pre-push de terceiro foi tocado"
+  rm -rf "$d/NUL"; git -C "$d" config --unset core.hooksPath
+  # controle: sem core.hooksPath, o mesmo cenário instala (a parada é só do caso nulo)
+  atv_espera "controle: sem core.hooksPath o E0 instala (sai 0)" 0 "$d" --instalar
+  [ -f "$d/.git/hooks/pre-push" ] && ok "controle: o chamador gerenciado foi instalado em .git/hooks" || falha "controle: sem pre-push em .git/hooks"
 }
 
 grupo_entrypoints() {

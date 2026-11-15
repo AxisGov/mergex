@@ -551,7 +551,12 @@ um `pre-push` de terceiro. Em todos os casos termina com a prova funcional
 por vários repositórios), o script **não instala** o chamador (DM-186): sai `3` com a instrução de
 composição, para quem mantém aquele diretório — instalado ali, o chamador viraria o `pre-push` de
 todos os repositórios da máquina, preso ao validador deste checkout. Um `pre-push` já presente ali
-segue a regra do hook de terceiro: só a prova funcional o aceita.
+segue a regra do hook de terceiro: só a prova funcional o aceita. Quando `core.hooksPath` aponta
+para o dispositivo nulo (`NUL` em qualquer caixa, `/dev/null`) ou para um caminho que não é
+diretório, o script para com `3` **antes de criar qualquer arquivo ou diretório** e diz como
+seguir: rodar o E0 fora daquele ambiente ou, se a pessoa quiser, desfazer a configuração com
+`git config --unset core.hooksPath` — com `--global`, `--system` ou `--worktree` quando o valor
+vem desse escopo, como a própria mensagem indica (`references/12-barreira-de-push.md`).
 
 **Código diferente de zero: `mergex E0 BLOQUEADO — pre-push`.** O E0 encerra ali — não siga para o
 item 4 nem devolva o controle como OK — e mostre ao usuário a instrução que o script imprimiu. Com
@@ -610,4 +615,4 @@ Devolva ao chamador uma linha só: `mergex E0 OK — branch <nome> (base <base>,
 | Pasta do trabalho em formato antigo | Trabalha nela onde está; **nunca move**, e registra qual pasta usou |
 | `.expx/` não existe | Segue sem gravar o estado da barra, sem erro e sem aviso; **nunca cria o diretório** |
 | Gravação do `estado.json` falhou | Segue, registrando `artefato_gravado` com `resultado: falha` (`10-estado.md`); o E0 continua OK |
-| `ativacao-pre-push.sh --instalar` saiu diferente de zero | `mergex E0 BLOQUEADO — pre-push`: encerra o E0 e mostra a instrução do script (com hook de terceiro, a de composição); nunca edita o hook nem `core.hooksPath` |
+| `ativacao-pre-push.sh --instalar` saiu diferente de zero | `mergex E0 BLOQUEADO — pre-push`: encerra o E0 e mostra a instrução do script (com hook de terceiro, a de composição; com `core.hooksPath` no dispositivo nulo, rodar fora daquele ambiente ou desfazer a configuração); nunca edita o hook nem `core.hooksPath` |

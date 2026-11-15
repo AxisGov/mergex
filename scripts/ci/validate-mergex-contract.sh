@@ -1525,6 +1525,12 @@ grep -Fq 'o `pre-push` funcional quando o `ENTREGA.md` tem `portao: pronto`' "$p
 # comando. Fora de um repositório Git, --instalar sai 0 sem instalar.
 grep -Fq 'hooks_no_repositorio || fora_do_repositorio' "$ativacao_sh" \
   || fail 'ativacao-pre-push.sh: o braço instalar) não recusa o diretório efetivo fora do repositório (DM-186)'
+# core.hooksPath no dispositivo nulo (NUL, /dev/null) ou inutilizável: a parada
+# vem antes de qualquer criação de arquivo ou diretório (nunca um NUL literal)
+grep -Fq 'if hooks_inutilizavel; then # guarda:ATVNUL' "$ativacao_sh" \
+  || fail 'ativacao-pre-push.sh: não para quando core.hooksPath aponta para o dispositivo nulo'
+[ "$(grep -n 'guarda:ATVNUL' "$ativacao_sh" | head -n1 | cut -d: -f1)" -lt "$(grep -n '^instala() {' "$ativacao_sh" | cut -d: -f1)" ] \
+  || fail 'ativacao-pre-push.sh: a parada do core.hooksPath nulo não vem antes da instalação'
 grep -Fq 'pwd -P' "$ativacao_sh" || fail 'ativacao-pre-push.sh: a comparação do diretório efetivo não é por caminho canônico (pwd -P)'
 for f in "$barreira_ref" "$abertura" "$abrir_cmd" "$abrir_oc"; do
   grep -Fq 'fora da árvore de trabalho e do diretório Git comum' "$f" \

@@ -232,6 +232,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-worktrees-entregues.sh
 
+      - name: Test core.hooksPath no dispositivo nulo (E0 para sem criar nada)
+        shell: bash
+        run: bash scripts/ci/test-r2-barreira-push.sh hookspath_nulo
+
       - name: Fechamento depois do merge
         shell: bash
         run: bash scripts/ci/test-fechamento-pos-merge.sh
