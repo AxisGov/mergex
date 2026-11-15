@@ -267,10 +267,15 @@ O E1 commita uma task por vez e registra a prova em `ENTREGA.commits`, um item `
 Para cada task marcada `concluida` no plano executado, tem que existir **pelo menos um** item em `ENTREGA.commits` cujo campo `task` seja **exatamente** o id dessa task, com `commit` preenchido e válido.
 
 ```
-bash .claude/skills/mergex/scripts/prova-de-commit.sh --verificar \
-  docs/entregas/<trabalho_id>/ENTREGA.md \
-  $tasks_do_escopo
+case "$escopo" in
+  escopo=planejamento*) printf 'V11=n/a\nmotivo=planejamento: nenhuma task executada\n' ;;
+  *) bash .claude/skills/mergex/scripts/prova-de-commit.sh --verificar \
+       docs/entregas/<trabalho_id>/ENTREGA.md \
+       $tasks_do_escopo ;;
+esac
 ```
+
+`$escopo` e `$tasks_do_escopo` são os do bloco de "O escopo das tasks". No PR de planejamento a lista vem vazia, e o `prova-de-commit.sh` sem nenhum `tasks.md` responde `V11=SEM_PROVA` (`nenhum-tasks-md-informado`); por isso a guarda vem antes dele, e o resultado é `n/a` (seção "Entrega de planejamento"). Fora do planejamento, lista vazia continua `SEM_PROVA`.
 
 Falha: qualquer task `concluida` sem item que a prove. **Nomeie cada uma** (id e o `tasks.md` onde está). A saída do script é a lista, uma task por linha.
 
