@@ -160,6 +160,11 @@ echo '== V12: uso e casos sem revisao =='
 [ "$rc" = 64 ] && passa 'sem argumentos: 64' || quebra "sem argumentos: $(mostra)"
 (cd "$aux" && "$BASH" "$V12" --verificar --entrega "$aux/ENTREGA.md" --trabalho w > "$aux/out" 2> "$aux/err"); rc=$?
 [ "$rc" = 64 ] && passa 'sem tasks.md: 64' || quebra "sem tasks.md: $(mostra)"
+# dentro de um repositório, numa entrega que não é de planejamento: continua uso
+projeto sem-tasks -; entrega true
+(cd "$P" && "$BASH" "$V12" --verificar --entrega docs/entregas/w/ENTREGA.md --trabalho w --raiz "$P" -- > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 64 ] && grep -q 'nenhum tasks.md informado' "$aux/err" \
+  && passa 'sem tasks.md fora do planejamento: 64' || quebra "sem tasks.md fora do planejamento: $(mostra)"
 
 # fora de um repositório Git: `versionado: false` é n/a (DM-238), sem node; `versionado: true` é SEM_PROVA
 fora="$aux/fora-do-git"; mkdir -p "$fora"; ITENS=""; tarefas T-01.01:concluida
@@ -272,6 +277,12 @@ projeto planejamento obrigatoria; escreve src/a.ts; commita T-01.01; entrega tru
 roda PATH="$aux/espia:$PATH"
 [ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=planejamento: nenhuma task executada' && ! chamou_node \
   && passa 'entrega de planejamento: n/a sem chamar o conferir' || quebra "entrega de planejamento: $(mostra)"
+# o bloco da V12 no PR de planejamento: o escopo não tem tasks, e nada vem depois do `--`
+# (CodeAnt no login#93): n/a, não uso
+(cd "$P" && env PATH="$aux/espia:$PATH" "$BASH" "$V12" --verificar --entrega docs/entregas/w/ENTREGA.md --trabalho w --raiz "$P" \
+   -- > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=planejamento: nenhuma task executada' && ! chamou_node \
+  && passa 'entrega de planejamento sem tasks.md depois do --: n/a, nao 64' || quebra "planejamento sem tasks.md: $(mostra)"
 # incoerente: sprint_atual sem prs
 entrega true 'sprint_atual: planejamento'
 roda PATH="$aux/espia:$PATH"
