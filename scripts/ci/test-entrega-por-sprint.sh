@@ -401,6 +401,48 @@ e0s "$aux/r0" 01
 [ "$rc" = 1 ] && grep -q 'E9' "$aux/e0s.err" && cmp -s "$aux/r0/docs/entregas/plan/ENTREGA.md" "$aux/r0-antes.md"
 confere 'E0 --sprint 01 com o planejamento ainda nao merged: recusa e manda rodar o E9, sem escrever' $?
 
+# DM-329 (conselhos, onda 2): o plano feito fora da F5 não tem PR de planejamento. O
+# E0 --sprint diz logo que por_sprint o exige e dá as duas saídas, sem escrever nada
+sem_planejamento() { # <dir> — feature/plan com o plano por_sprint commitado e nenhuma entrega
+  local d="$1"
+  git init -q -b main "$d"; git -C "$d" config core.autocrlf false
+  mkdir -p "$d/src"; printf 'a\n' > "$d/src/a.ts"
+  g -C "$d" add -A; g -C "$d" commit -q -m base
+  git -C "$d" switch -q -c feature/plan
+  mkdir -p "$d/docs/sprintx/features/plan/sprint-01"
+  printf '%s\n' '---' 'kind: planejamento' 'trabalho_id: plan' 'entrega: por_sprint' '---' \
+    > "$d/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
+  printf '%s\n' '---' 'kind: plano' 'trabalho_id: plan' 'tasks: []' '---' \
+    > "$d/docs/sprintx/features/plan/sprint-01/tasks.md"
+  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(sprintx): planejamento feito fora da F5' -m 'Trabalho: plan'
+}
+diz_as_saidas() { # o motivo e as duas saídas, com o comando e o lugar exatos
+  grep -q 'por_sprint exige o PR de planejamento' "$aux/e0s.err" \
+    && grep -q 'E0 --planejamento' "$aux/e0s.err" \
+    && grep -Fq 'entrega: por_trabalho' "$aux/e0s.err" \
+    && grep -Fq 'docs/sprintx/features/plan/00-PLANEJAMENTO.md' "$aux/e0s.err"
+}
+sem_planejamento "$aux/sp1"
+e0s "$aux/sp1" 01
+[ "$rc" = 1 ] && diz_as_saidas && [ ! -e "$aux/sp1/docs/entregas" ] && [ -z "$(git -C "$aux/sp1" status --porcelain)" ]
+r=$?; [ "$r" = 0 ] || { echo "        (saiu $rc)"; mostra "$aux/e0s.err"; }
+confere 'E0 --sprint 01 sem entrega nem PR de planejamento: diz que por_sprint o exige e as duas saidas, sem escrever' "$r"
+
+sem_planejamento "$aux/sp2"
+entrega "$aux/sp2/docs/entregas/plan/ENTREGA.md" 'sprint_atual: null
+prs: []'
+g -C "$aux/sp2" add -A; g -C "$aux/sp2" commit -q -m 'docs(mergex): entrega sem planejamento' -m 'Trabalho: plan'
+cp "$aux/sp2/docs/entregas/plan/ENTREGA.md" "$aux/sp2-antes.md"
+e0s "$aux/sp2" 01
+[ "$rc" = 1 ] && diz_as_saidas && cmp -s "$aux/sp2/docs/entregas/plan/ENTREGA.md" "$aux/sp2-antes.md"
+r=$?; [ "$r" = 0 ] || { echo "        (saiu $rc)"; mostra "$aux/e0s.err"; }
+confere 'E0 --sprint 01 com entrega sem o item de planejamento: a mesma recusa, com as duas saidas, sem escrever' "$r"
+
+(cd "$aux/sp2" && bash "$leitor" --abrir-sprint 01 --base-validada-sha "$(git rev-parse main)" \
+  --entrega docs/entregas/plan/ENTREGA.md) >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" = 1 ] && grep -q 'E0 --planejamento' "$aux/err" && grep -Fq 'entrega: por_trabalho' "$aux/err"
+confere '--abrir-sprint sem o item de planejamento: a recusa do escritor tambem da as duas saidas' $?
+
 repo "$aux/r1" por_sprint
 e0s "$aux/r1" 01
 le_repo "$aux/r1"
