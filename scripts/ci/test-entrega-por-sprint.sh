@@ -196,6 +196,23 @@ escopo "$aux/antiga.md" "$aux/nl"
 [ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'escopo=trabalho\ntasks=%s' "$aux/nl/sprint-01/tasks.md")" ]
 r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
 confere 'pasta com quebra de linha no nome nao e sprint-NN: fica fora do escopo' "$r"
+# sprint-NN que é link para fora da pasta (CodeAnt no login#93): o [ -d ] segue o link, e
+# as tasks de fora entravam no escopo. Recusa (sai 2), nos dois ramos; nunca omite.
+mkdir -p "$aux/fora/sprint-09" "$aux/lnk/sprint-01"
+cp "$pasta/sprint-01/tasks.md" "$aux/lnk/sprint-01/"; cp "$pasta/sprint-01/tasks.md" "$aux/fora/sprint-09/"
+ln -s "$aux/fora/sprint-09" "$aux/lnk/sprint-02" 2>/dev/null
+if [ -L "$aux/lnk/sprint-02" ]; then
+  escopo "$aux/antiga.md" "$aux/lnk"
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'sprint-02' "$aux/err"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+  confere 'por_trabalho com sprint-NN que e link: sai 2, sem as tasks de fora' "$r"
+  escopo "$aux/s02.md" "$aux/lnk"
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'sprint-02' "$aux/err"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+  confere 'sprint_atual 02 com sprint-02 que e link: sai 2' "$r"
+else
+  printf '  pula  sprint-NN que e link (este sistema nao cria link simbolico; o CI em Linux cobre)\n'
+fi
 bash "$leitor" --entrega "$aux/s02.md" --rev HEAD --escopo-de-tasks --pasta "$pasta" >/dev/null 2>&1
 [ "$?" = 64 ]; confere '--escopo-de-tasks nao aceita --rev (o escopo e lido do disco)' $?
 bash "$leitor" --entrega "$aux/s02.md" --escopo-de-tasks >/dev/null 2>&1

@@ -370,6 +370,7 @@ case "$ACAO" in
     case "$sprint" in
       [0-9][0-9])
         f="$PASTA/sprint-$sprint/tasks.md"
+        [ ! -L "$PASTA/sprint-$sprint" ] || ilegivel "sprint-$sprint é link simbólico: a sprint fica dentro da pasta do trabalho"
         [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || ilegivel "sprint_atual $sprint sem tasks.md regular e legível: $f"
         printf 'escopo=sprint:%s\ntasks=%s\n' "$sprint" "$f"; exit 0 ;;
     esac
@@ -377,9 +378,12 @@ case "$ACAO" in
     # o trabalho inteiro: toda pasta sprint-NN, em ordem lexical; nenhuma é omitida
     lista=""
     for d in "$PASTA"/sprint-*; do
-      [ -d "$d" ] || continue
       # o nome inteiro, e não linha a linha: um nome com quebra de linha não é sprint (CodeAnt no mergex#93)
       [[ "${d##*/}" =~ ^sprint-[0-9]{2,}$ ]] || continue
+      # o [ -d ] segue link: uma sprint-NN que aponta para fora traria tasks de outra pasta
+      # para o escopo. Recusa, nunca omite (CodeAnt no login#93)
+      [ ! -L "$d" ] || ilegivel "${d##*/} é link simbólico: a sprint fica dentro da pasta do trabalho"
+      [ -d "$d" ] || continue
       f="$d/tasks.md"
       [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || ilegivel "${d##*/} sem tasks.md regular e legível: $f"
       lista="$lista$f
