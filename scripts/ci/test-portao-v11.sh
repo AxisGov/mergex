@@ -538,6 +538,35 @@ verifica OK "a mesma task em seq 2 e seq 7 continua provada" "$E" "$T"
   || falha "a leitura perdeu uma das duas passagens de T-04.03"
 
 echo
+echo "== o bloco da V11 no 02-prontidao.md, com o escopo das tasks =="
+# CodeAnt no login#93: no escopo=planejamento, $tasks_do_escopo vem vazio e o
+# prova-de-commit.sh dava V11=SEM_PROVA (nenhum-tasks-md-informado). O bloco é o
+# que o E2 roda: ele mesmo tem que dar n/a no PR de planejamento.
+PRONTIDAO="$REPO/.claude/skills/mergex/references/02-prontidao.md"
+awk '/^```/ { if (dentro) { if (achou) { printf "%s", buf; exit } dentro = 0; next }
+              dentro = 1; buf = ""; achou = 0; next }
+     dentro { buf = buf $0 "\n"; if (index($0, "prova-de-commit.sh --verificar")) achou = 1 }' "$PRONTIDAO" \
+  | sed "s#bash \.claude/skills/mergex/scripts/prova-de-commit\.sh#bash '$PROVA'#; s#docs/entregas/<trabalho_id>/ENTREGA\.md#'$E'#" \
+  > "$D/bloco-v11.sh"
+bloco_v11() { # <escopo> <tasks_do_escopo> — saída em $D/b11.out, código em $rc
+  (escopo="$1"; tasks_do_escopo="$2"; . "$D/bloco-v11.sh") > "$D/b11.out" 2>&1; rc=$?
+}
+entrega_seq "$E" 1:T-04.03:bbb2222
+bloco_v11 'escopo=planejamento' ''
+[ "$rc" = 0 ] && [ "$(head -n 1 "$D/b11.out")" = 'V11=n/a' ] \
+  && grep -qx 'motivo=planejamento: nenhuma task executada' "$D/b11.out" \
+  && ok "bloco da V11 no PR de planejamento: n/a, sem chamar o script" \
+  || falha "bloco da V11 no PR de planejamento — rc=$rc saida=$(tr '\n' '|' < "$D/b11.out")"
+bloco_v11 "$(printf 'escopo=sprint:04\ntasks=%s' "$T")" "$T"
+[ "$rc" = 0 ] && [ "$(head -n 1 "$D/b11.out")" = 'V11=OK' ] \
+  && ok "bloco da V11 com escopo de sprint: o script verifica as tasks" \
+  || falha "bloco da V11 com escopo de sprint — rc=$rc saida=$(tr '\n' '|' < "$D/b11.out")"
+bloco_v11 'escopo=trabalho' ''
+[ "$rc" = 2 ] && grep -qx 'motivo=nenhum-tasks-md-informado' "$D/b11.out" \
+  && ok "bloco da V11 fora do planejamento sem tasks.md: continua SEM_PROVA" \
+  || falha "bloco da V11 fora do planejamento sem tasks.md — rc=$rc saida=$(tr '\n' '|' < "$D/b11.out")"
+
+echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = "0" ]

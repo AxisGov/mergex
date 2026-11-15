@@ -196,6 +196,23 @@ escopo "$aux/antiga.md" "$aux/nl"
 [ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'escopo=trabalho\ntasks=%s' "$aux/nl/sprint-01/tasks.md")" ]
 r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
 confere 'pasta com quebra de linha no nome nao e sprint-NN: fica fora do escopo' "$r"
+# sprint-NN que é link para fora da pasta (CodeAnt no login#93): o [ -d ] segue o link, e
+# as tasks de fora entravam no escopo. Recusa (sai 2), nos dois ramos; nunca omite.
+mkdir -p "$aux/fora/sprint-09" "$aux/lnk/sprint-01"
+cp "$pasta/sprint-01/tasks.md" "$aux/lnk/sprint-01/"; cp "$pasta/sprint-01/tasks.md" "$aux/fora/sprint-09/"
+ln -s "$aux/fora/sprint-09" "$aux/lnk/sprint-02" 2>/dev/null
+if [ -L "$aux/lnk/sprint-02" ]; then
+  escopo "$aux/antiga.md" "$aux/lnk"
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'sprint-02' "$aux/err"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+  confere 'por_trabalho com sprint-NN que e link: sai 2, sem as tasks de fora' "$r"
+  escopo "$aux/s02.md" "$aux/lnk"
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'sprint-02' "$aux/err"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+  confere 'sprint_atual 02 com sprint-02 que e link: sai 2' "$r"
+else
+  printf '  pula  sprint-NN que e link (este sistema nao cria link simbolico; o CI em Linux cobre)\n'
+fi
 bash "$leitor" --entrega "$aux/s02.md" --rev HEAD --escopo-de-tasks --pasta "$pasta" >/dev/null 2>&1
 [ "$?" = 64 ]; confere '--escopo-de-tasks nao aceita --rev (o escopo e lido do disco)' $?
 bash "$leitor" --entrega "$aux/s02.md" --escopo-de-tasks >/dev/null 2>&1
@@ -905,6 +922,22 @@ pm "$d" e0-abertura
 [ "$rc" != 0 ] && grep -q 'e0-abertura' "$aux/pm.err" && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
 confere 'e0-abertura com o ENTREGA.md mudado alem da abertura: recusa, sem commit' "$r"
+
+# Sem abertura nenhuma (CodeAnt no login#93): sprint_atual, base_validada_sha e origem_base
+# ausentes em HEAD e no disco eram "a mesma abertura", e o --verificar dava ok=true. Não há
+# o que persistir: recusa, nos dois modos, sem commit
+d="$aux/onda2-sem-abertura"; repo "$d" por_sprint
+sed -i.bak -e '/^sprint_atual:/d' -e '/^base_validada_sha:/d' -e '/^origem_base:/d' "$d/$eo" && rm -f "$d/$eo.bak"
+g -C "$d" add -- "$eo"; g -C "$d" commit -q -m 'docs: entrega sem abertura' -m 'Trabalho: plan'
+h="$(git -C "$d" rev-parse HEAD)"
+pm "$d" e0-abertura verificar
+[ "$rc" != 0 ] && ! grep -qx 'ok=true' "$aux/pm.out" && grep -q 'e0-abertura' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+confere 'e0-abertura --verificar sem abertura em HEAD nem no disco: recusa, nunca ok=true' "$r"
+pm "$d" e0-abertura
+[ "$rc" != 0 ] && ! grep -qx 'noop=true' "$aux/pm.out" && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+confere 'e0-abertura --persistir sem abertura: recusa, sem noop e sem commit' "$r"
 
 # por_trabalho: a retomada depois do planejamento também reancora, e também persiste
 bloco "$ref/00-abertura.md" 'E0, retomada sem --planejamento' \
