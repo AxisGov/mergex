@@ -15,7 +15,7 @@ bash .claude/skills/mergex/scripts/ativacao-pre-push.sh --provar \
   --entrega docs/entregas/<trabalho_id>/ENTREGA.md
 ```
 
-Falhou: o E2 não começa e nada é gravado; mande rodar o E0 (`ativacao-pre-push.sh --instalar`).
+Falhou: o E2 não começa e nada é gravado; mande rodar o E0 (`ativacao-pre-push.sh --instalar`). Se a saída diz que o `core.hooksPath` aponta para o dispositivo nulo (`NUL`, `/dev/null`) ou para um caminho que não é diretório, o E0 também não instala nada ali: relate a mensagem — rodar o E0 e o E2 fora daquele ambiente ou, se a pessoa quiser, `git config --unset core.hooksPath` — e nunca crie o diretório de hooks à mão.
 
 **Fora de um repositório Git** (`git rev-parse --show-toplevel` falha): não há push a proteger — não rode a prova; o `registrar-portao.sh` também a dispensa e grava `portao_sha: null`. O critério é só o Git real, **nunca pelo campo `versionado`** do `ENTREGA.md`: dentro de um repositório Git, um `ENTREGA.md` com `versionado: false` continua exigindo a prova.
 
