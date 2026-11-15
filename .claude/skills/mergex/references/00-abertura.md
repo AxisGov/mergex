@@ -283,8 +283,10 @@ O commit leva só o `ENTREGA.md`, com `Metodo: e0-abertura`. A prova refaz a gra
 `ENTREGA.md` de `HEAD` (`--abrir-sprint <NN>` ou `--retomar-planejamento`, com a base que o disco
 traz) e exige o resultado do disco, salvo a data de `atualizado_em`; qualquer outra mudança no
 arquivo recusa, sem commit. Com a abertura já em `HEAD` (a retomada da mesma sprint, ou o E0
-repetido), sai `noop=true`, sem commit, mesmo com o `ENTREGA.md` sujo dos appends do E1. Não exige
-a árvore limpa: os artefatos da F5 e o que mais estiver sujo ficam como estão.
+repetido), sai `noop=true`, sem commit, mesmo com o `ENTREGA.md` sujo dos appends do E1. Sem
+abertura nenhuma (`base_validada_sha` ausente em `HEAD` e no disco), não há o que persistir: recusa,
+nos dois modos, e o `--verificar` nunca diz `ok=true`. Não exige a árvore limpa: os artefatos da F5
+e o que mais estiver sujo ficam como estão.
 
 ## Passo 1 — Detectar se o repositório usa versionamento
 

@@ -923,6 +923,22 @@ pm "$d" e0-abertura
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
 confere 'e0-abertura com o ENTREGA.md mudado alem da abertura: recusa, sem commit' "$r"
 
+# Sem abertura nenhuma (CodeAnt no login#93): sprint_atual, base_validada_sha e origem_base
+# ausentes em HEAD e no disco eram "a mesma abertura", e o --verificar dava ok=true. Não há
+# o que persistir: recusa, nos dois modos, sem commit
+d="$aux/onda2-sem-abertura"; repo "$d" por_sprint
+sed -i.bak -e '/^sprint_atual:/d' -e '/^base_validada_sha:/d' -e '/^origem_base:/d' "$d/$eo" && rm -f "$d/$eo.bak"
+g -C "$d" add -- "$eo"; g -C "$d" commit -q -m 'docs: entrega sem abertura' -m 'Trabalho: plan'
+h="$(git -C "$d" rev-parse HEAD)"
+pm "$d" e0-abertura verificar
+[ "$rc" != 0 ] && ! grep -qx 'ok=true' "$aux/pm.out" && grep -q 'e0-abertura' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+confere 'e0-abertura --verificar sem abertura em HEAD nem no disco: recusa, nunca ok=true' "$r"
+pm "$d" e0-abertura
+[ "$rc" != 0 ] && ! grep -qx 'noop=true' "$aux/pm.out" && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+confere 'e0-abertura --persistir sem abertura: recusa, sem noop e sem commit' "$r"
+
 # por_trabalho: a retomada depois do planejamento também reancora, e também persiste
 bloco "$ref/00-abertura.md" 'E0, retomada sem --planejamento' \
   | sed 's|<trabalho_id>|plan|g; s|<slug>|plan|g; s|<base>|main|g' \
