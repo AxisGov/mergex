@@ -1144,10 +1144,16 @@ nulo_espera() {
 }
 
 grupo_hookspath_nulo() {
-  local t d f a1 m
+  local t d f a1 m GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
   . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
   export FX_PORTAO_PUSH="$PP"
   t="$(mktemp -d)"; TMPS="$TMPS $t"
+  # config global vazia e sem a do sistema, só neste grupo (as variáveis são
+  # locais à função): um core.hooksPath global ou de sistema da máquina não
+  # entra nos casos nem no controle final, que espera instalar em .git/hooks
+  : > "$t/gitconfig-vazia"; export GIT_CONFIG_GLOBAL="$t/gitconfig-vazia" GIT_CONFIG_NOSYSTEM=1
+  [ -z "$(git config --get-all core.hooksPath)" ] && ok "controle: nenhum core.hooksPath global ou de sistema neste grupo" \
+    || falha "controle: core.hooksPath herdado da máquina"
   d="$t/repo"
   fx_cenario "$d" || { falha "cenário não montou"; return; }
   # (a) NUL, nul e /dev/null na config local: o pre-push não pode existir ali
