@@ -163,7 +163,8 @@ pasta="$aux/pasta"
 plano "$pasta/sprint-01/tasks.md" T-01.01 concluida
 plano "$pasta/sprint-02/tasks.md" T-02.01 pendente
 mkdir -p "$pasta/sprint-notas"   # nome fora de sprint-NN: não é sprint
-escopo() { le "$1" --escopo-de-tasks --pasta "${2:-$pasta}"; }
+# da raiz do "repositório" (o $aux, fora de qualquer Git): a pasta tem de resolver dentro dela
+escopo() { local f="$1" p="${2:-$pasta}"; cd "$aux" && le "$f" --escopo-de-tasks --pasta "$p"; local r=$rc; cd - >/dev/null; rc=$r; }
 
 escopo "$aux/s02.md"
 [ "$rc" = 0 ] && [ "$(cat "$aux/out")" = "$(printf 'escopo=sprint:02\ntasks=%s' "$pasta/sprint-02/tasks.md")" ]
@@ -224,6 +225,18 @@ if [ -L "$aux/lnk/sprint-02" ]; then
   [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'sprint-02' "$aux/err"
   r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
   confere 'sprint_atual 02 com sprint-02 que e link: sai 2' "$r"
+  # a propria --pasta, ou um ancestral, que e link para fora da raiz (CodeAnt no login#95)
+  fora2="$(mktemp -d)"; mkdir -p "$fora2/trab/sprint-02"; cp "$pasta/sprint-01/tasks.md" "$fora2/trab/sprint-02/"
+  ln -s "$fora2/trab" "$aux/pasta-link"; ln -s "$fora2" "$aux/anc-link"
+  escopo "$aux/s02.md" "$aux/pasta-link"
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'fora da raiz' "$aux/err"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+  confere '--pasta que e link para fora da raiz: sai 2, sem as tasks de fora' "$r"
+  escopo "$aux/s02.md" "$aux/anc-link/trab"
+  [ "$rc" = 2 ] && [ ! -s "$aux/out" ] && grep -q 'fora da raiz' "$aux/err"
+  r=$?; [ "$r" = 0 ] || mostra "$aux/out" "$aux/err"
+  confere 'ancestral da --pasta que e link para fora da raiz: sai 2' "$r"
+  rm -rf "$fora2"
 else
   printf '  pula  sprint-NN que e link (este sistema nao cria link simbolico; o CI em Linux cobre)\n'
 fi
@@ -1057,6 +1070,14 @@ pm "$d" e0-abertura
 [ "$rc" != 0 ] && ! grep -qx 'noop=true' "$aux/pm.out" && [ "$(git -C "$d" rev-parse HEAD)" = "$h" ]
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
 confere 'e0-abertura --persistir sem abertura: recusa, sem noop e sem commit' "$r"
+# base_validada_sha: ~ (o nulo do YAML) em HEAD e no disco tambem nao e abertura (CodeAnt no login#95)
+d="$aux/onda2-til"; repo "$d" por_sprint
+sed -i.bak -e '/^sprint_atual:/d' -e 's/^base_validada_sha:.*/base_validada_sha: ~/' -e '/^origem_base:/d' "$d/$eo" && rm -f "$d/$eo.bak"
+g -C "$d" add -- "$eo"; g -C "$d" commit -q -m 'docs: entrega com base nula' -m 'Trabalho: plan'
+pm "$d" e0-abertura verificar
+[ "$rc" != 0 ] && ! grep -qx 'ok=true' "$aux/pm.out" && grep -q 'e0-abertura' "$aux/pm.err"
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.out" "$aux/pm.err"
+confere 'e0-abertura --verificar com base_validada_sha: ~ em HEAD e no disco: recusa, nunca ok=true' "$r"
 
 # por_trabalho: a retomada depois do planejamento também reancora, e também persiste
 bloco "$ref/00-abertura.md" 'E0, retomada sem --planejamento' \
