@@ -366,6 +366,15 @@ case "$ACAO" in
   escopo-de-tasks)
     [ -d "$PASTA" ] || ilegivel "pasta do trabalho inexistente: $PASTA"
     PASTA="${PASTA%/}"
+    # a pasta, ou um ancestral dela, que é link para fora da raiz traria tasks de outro lugar
+    # para o escopo do portão: o caminho real tem de ficar dentro da raiz (CodeAnt no login#95)
+    raiz_e="$(git rev-parse --show-toplevel 2>/dev/null)" || raiz_e=.
+    raiz_e="$(cd "$raiz_e" 2>/dev/null && pwd -P)" || ilegivel 'raiz do repositório ilegível'
+    real_p="$(cd "$PASTA" 2>/dev/null && pwd -P)" || ilegivel "pasta do trabalho ilegível: $PASTA"
+    case "$real_p" in
+      "$raiz_e"|"$raiz_e"/*) ;;
+      *) ilegivel "a pasta do trabalho resolve para fora da raiz do repositório (link simbólico nela ou num ancestral): $PASTA" ;;
+    esac
     if [ "$PLANEJAMENTO" = sim ]; then printf 'escopo=planejamento\n'; exit 0; fi
     case "$sprint" in
       [0-9][0-9])
