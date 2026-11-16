@@ -169,13 +169,14 @@ retomada de um arquivo sem a chave), com o modo que o mesmo `--modo-efetivo` dis
 **A sequência**, conferida antes de qualquer escrita (a gravação é de
 `entrega-de-planejamento.sh --abrir-sprint`, o escritor único de `entrega`, `sprint_atual` e `prs`):
 
-1. a sprint 01 só abre com o PR de planejamento `merged` (`prs[0]`); a sprint N+1, com o PR da N
-   `merged` — sem o registro do merge, o E0 recusa e manda rodar o E9, que o lê no serviço. **Sem
-   PR de planejamento nenhum** (o plano feito fora da F5: sem `ENTREGA.md`, ou `prs` sem o item de
-   planejamento), a recusa vem primeiro, e diz que `por_sprint` não entrega sem ele (DM-259) e as
-   duas saídas: abrir o PR de planejamento com o E0 `--planejamento` ("A entrega de
-   planejamento", acima), ou gravar `entrega: por_trabalho` no frontmatter do `00-PLANEJAMENTO.md`
-   e entregar o trabalho num PR só, enquanto a entrega não registrou o modo (DM-329);
+1. a sprint 01 abre com o PR de planejamento `merged` (`prs[0]`), quando ele existe; a sprint N+1,
+   com o PR da N `merged` — sem o registro do merge, o E0 recusa e manda rodar o E9, que o lê no
+   serviço. **O PR de planejamento é opcional** (DM-330, que substitui a recusa da DM-329): sem
+   ele (o plano feito fora da F5, `prs` sem o item de planejamento), a sprint 01 abre direto, com
+   um aviso de uma linha, e o plano vai junto no PR dela. Quem separa o plano grande é o limite do
+   PR no E7 (L3, os 100 arquivos que o app de revisão conta): estourado, o E7 recusa e o plano vai
+   num PR de planejamento (E0 `--planejamento`). Sem `ENTREGA.md`, o E0 cria o arquivo pelo caso 1
+   do passo 5 (sem `--planejamento`: `sprint_atual: null` e `prs: []`) e repete este bloco;
 2. a sprint pedida é a seguinte à última de `prs`: fora de sequência, recusa;
 3. o `merge_sha` do último PR fechado é ancestral da base buscada, e a base buscada é ancestral do
    `HEAD` (a branch foi atualizada a partir da main depois do merge);
@@ -227,19 +228,17 @@ fi
 case "$modo" in entrega=por_sprint*) ;; *)
   printf 'mergex E0 BLOQUEADO — --sprint num trabalho por_trabalho (%s)\n' "$(printf '%s\n' "$modo" | tr '\n' ' ')" >&2; exit 1 ;;
 esac
-# por_sprint exige o PR de planejamento merged antes da sprint 01 (DM-259); o plano feito fora
-# da F5 não tem nenhum, e a recusa dá as duas saídas antes de qualquer escrita (DM-329)
-marca=""
-[ ! -e "$entrega" ] || { marca="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2; }
-if ! printf '%s\n' "$marca" | grep -q '^pr=planejamento'; then
-  saida2="  2. entregar o trabalho num PR só: grave 'entrega: por_trabalho' no frontmatter de $plano (entre os ---), e a F6 chama o E0 sem --sprint."
-  printf '%s\n' "$modo" | grep -qx 'origem=registrada' \
-    && saida2="  2. (fechada: $entrega já registrou entrega: por_sprint, e o modo registrado não muda; entrega: por_trabalho no plano não vale mais)"
-  printf '%s\n' "mergex E0 BLOQUEADO — por_sprint exige o PR de planejamento mergeado antes da sprint 01, e nenhum está registrado em $entrega (plano feito fora da F5?). Saídas:" \
-    "  1. abrir o PR de planejamento: commite a pasta docs/sprintx/features/<slug>/ e rode a mergex E0 --planejamento (e E2–E8 com --planejamento); com o merge registrado pelo E9, o E0 --sprint 01 abre a sprint;" \
-    "$saida2" >&2
-  exit 1
-fi
+# o PR de planejamento é opcional no por_sprint (DM-330): sem ele, a sprint 01 abre e o plano
+# vai junto no PR dela; quem separa o plano grande é o limite do PR no E7 (L3), não o E0
+[ -e "$entrega" ] || {
+  printf 'mergex E0: sem %s — crie-o pelo caso 1 do passo 5 (sem --planejamento: sprint_atual: null, prs: []) e repita o E0 --sprint %s
+' "$entrega" "$sprint" >&2
+  exit 2
+}
+marca="$(bash .claude/skills/mergex/scripts/entrega-de-planejamento.sh --entrega "$entrega")" || exit 2
+printf '%s
+' "$marca" | grep -q '^pr='   || printf 'mergex E0: aviso — sem PR de planejamento; o plano vai junto no PR da sprint %s (DM-330)
+' "$sprint" >&2
 atual="$(printf '%s\n' "$marca" | sed -n 's/^sprint_atual=//p')"
 fechada_sha="$(printf '%s\n' "$marca" | sed -n 's/^fechada_merge_sha=//p')"
 base_sha="$(git rev-parse --verify -q "<base>^{commit}")" || { printf 'mergex E0: base <base> inexistente\n' >&2; exit 2; }
