@@ -537,6 +537,57 @@ v9 "$aux/r1"
 [ "$rc" = 1 ] && [ "$(grep -c '^fora_do_plano' "$aux/v9.out")" = 1 ] && grep -qx "$(printf 'fora_do_plano\tsrc/z.ts')" "$aux/v9.out"
 confere 'squash da sprint 01: V9 da sprint 02 so ve a 02 (src/z.ts fora; a 01 e a main nao)' $?
 
+# DM-330 de ponta a ponta: sem PR de planejamento, a sprint 01 fica na base do E0 (registrada_e0),
+# e a 02 reancora com o merge da 01 como ancora da V9 (CodeAnt no mergex#98)
+d="$aux/sp9"
+git init -q -b main "$d"; git -C "$d" config core.autocrlf false
+mkdir -p "$d/src"; printf 'a\n' > "$d/src/a.ts"
+g -C "$d" add -A; g -C "$d" commit -q -m base
+b9="$(git -C "$d" rev-parse HEAD)"
+git -C "$d" switch -q -c feature/plan
+mkdir -p "$d/docs/sprintx/features/plan/sprint-01" "$d/docs/sprintx/features/plan/sprint-02"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: planejamento' 'trabalho_id: plan' \
+  'entrega: por_sprint' '---' > "$d/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: orquestrador' 'trabalho_id: plan' '---' \
+  > "$d/docs/sprintx/features/plan/ORQUESTRADOR.md"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
+  'tasks:' '  - id: T-01.01' '    status: pendente' '    arquivos:' '      cria: [src/b.ts]' \
+  '      altera: []' '---' > "$d/docs/sprintx/features/plan/sprint-01/tasks.md"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
+  'tasks:' '  - id: T-02.01' '    status: pendente' '    arquivos:' '      cria: [src/c.ts]' \
+  '      altera: []' '---' > "$d/docs/sprintx/features/plan/sprint-02/tasks.md"
+entrega "$d/docs/entregas/plan/ENTREGA.md" "base_validada_sha: $b9
+origem_base: registrada_e0
+reconciliacoes: []
+branch: feature/plan
+branch_base: main
+sprint_atual: null
+prs: []"
+g -C "$d" add -A; g -C "$d" commit -q -m 'docs(sprintx): plano e entrega sem planejamento' -m 'Trabalho: plan'
+e="$aux/sp9/docs/entregas/plan/ENTREGA.md"
+abre "$aux/sp9" 01
+grep -qx 'origem_base: registrada_e0' "$e" && grep -qx "base_validada_sha: $b9" "$e" && grep -q 'PR da sprint 01' "$aux/e0s.err"
+confere 'sem planejamento: a sprint 01 abre na base do E0, sem reancorar (registrada_e0)' $?
+task "$aux/sp9" src/b.ts T-01.01
+v9 "$aux/sp9"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+r=$?; [ "$r" = 0 ] || mostra "$aux/v9.out"
+confere 'sem planejamento: V9 da sprint 01 passa' "$r"
+fecha01 "$aux/sp9" squash
+g -C "$aux/sp9" merge -q --no-edit -X ours main
+abre "$aux/sp9" 02
+grep -qx 'origem_base: registrada_sprint' "$e" && grep -qx "base_validada_sha: $(git -C "$aux/sp9" rev-parse main)" "$e"
+confere 'sem planejamento: a sprint 02 reancora na main nova (registrada_sprint)' $?
+task "$aux/sp9" src/c.ts T-02.01
+v9 "$aux/sp9"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out" && grep -qx 'origem_base=registrada_sprint' "$aux/v9.out"
+r=$?; [ "$r" = 0 ] || mostra "$aux/v9.out"
+confere 'sem planejamento: V9 da sprint 02 passa, ancorada no merge da 01' "$r"
+printf 'z\n' > "$aux/sp9/src/z.ts"; g -C "$aux/sp9" add -A; g -C "$aux/sp9" commit -q -m 'feat: z' -m 'Trabalho: plan'
+v9 "$aux/sp9"
+[ "$rc" = 1 ] && [ "$(grep -c '^fora_do_plano' "$aux/v9.out")" = 1 ]
+confere 'sem planejamento: V9 da sprint 02 so ve a 02 (src/z.ts fora)' $?
+
 repo "$aux/r2" por_sprint
 abre "$aux/r2" 01; task "$aux/r2" src/b.ts T-01.01
 e8 "$aux/r2" https://github.com/dono/repo/pull/2 aberto

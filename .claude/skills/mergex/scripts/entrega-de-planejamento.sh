@@ -559,8 +559,20 @@ case "$ACAO" in
     fi
     esperado="$(proxima "${ultima_nn:-00}")"
     [ "$NN" = "$esperado" ] || recusa "sprint $NN fora de sequência: a próxima é a $esperado"
-    # sem item nenhum (plano sem PR de planejamento, DM-330), a 01 abre direto: o plano vai no PR dela
-    [ "$u_pos" = 0 ] || [ "$u_estado" = merged ] || recusa "$(nome_pr "$u_sprint") não está merged: a sprint $NN só abre depois do merge dele (rode o E9, que o registra)"
+    if [ "$u_pos" = 0 ]; then
+      # sem item nenhum (plano sem PR de planejamento, DM-330): a 01 abre direto e o plano vai no
+      # PR dela. Nada foi mergeado antes, então a base não se reancora: fica a do E0 (registrada_e0),
+      # e a V9 não precisa de merge que justifique uma registrada_sprint
+      b_e0="$(printf '%s\n' "$conteudo" | awk '{ sub(/\r$/, "") } NR == 1 { next } /^---/ { exit }
+        /^base_validada_sha:/ { sub(/^base_validada_sha:[[:space:]]*/, ""); sub(/[[:space:]]+#.*$/, ""); sub(/[[:space:]]+$/, ""); print; exit }')"
+      topo_base=""
+      sha_ok "$b_e0" || { b_e0="$BASE_VALIDADA"; topo_base="base_validada_sha=$b_e0;origem_base=registrada_e0;"; }
+      grava 0 "" "entrega=por_sprint;sprint_atual=$NN;pr_url=null;pr_estado=null;${topo_base}atualizado_em=$hoje" "$NN"
+      confere_e_troca "entrega=por_sprint" "sprint_atual=$NN" "atual_estado=null"
+      printf 'aberta=%s\nbase_validada_sha=%s\norigem_base=registrada_e0\n' "$NN" "$b_e0"
+      exit 0
+    fi
+    [ "$u_estado" = merged ] || recusa "$(nome_pr "$u_sprint") não está merged: a sprint $NN só abre depois do merge dele (rode o E9, que o registra)"
     grava 0 "" "entrega=por_sprint;sprint_atual=$NN;pr_url=null;pr_estado=null;base_validada_sha=$BASE_VALIDADA;origem_base=registrada_sprint;atualizado_em=$hoje" "$NN"
     confere_e_troca "entrega=por_sprint" "sprint_atual=$NN" "atual_estado=null"
     printf 'aberta=%s\nbase_validada_sha=%s\norigem_base=registrada_sprint\n' "$NN" "$BASE_VALIDADA" ;;
