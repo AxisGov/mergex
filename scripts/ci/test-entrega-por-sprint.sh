@@ -91,6 +91,24 @@ le "$aux/s02.md"
 [ "$rc" = 0 ] && [ "$(linha sprint_atual)" = 02 ] && [ "$(linha fechada)" = 01 ] && [ "$(linha fechada_merge_sha)" = $SHA_C ]
 confere 'sprint 02 com a 01 merged: a fechada e a 01' $?
 
+# decisao do dono (2026-11-16, DM-330): o PR de planejamento e opcional no por_sprint
+entrega "$aux/s01-sem-plan.md" "entrega: por_sprint
+sprint_atual: 01
+prs:
+$(item 01 aberto null null null)"
+le "$aux/s01-sem-plan.md"
+[ "$rc" = 0 ] && [ "$(linha sprint_atual)" = 01 ] && [ "$(linha entrega)" = por_sprint ]   && [ -z "$(linha fechada)" ] && [ "$(grep -c '^pr=' "$aux/out")" = 1 ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/err"
+confere 'sprint 01 sem o item de planejamento (DM-330): legivel, sem fechada' "$r"
+entrega "$aux/s02-sem-plan.md" "entrega: por_sprint
+sprint_atual: 02
+prs:
+$(item 01 merged $SHA_C humano $SHA_A)
+$(item 02 null null null null)"
+le "$aux/s02-sem-plan.md"
+[ "$rc" = 0 ] && [ "$(linha fechada)" = 01 ] && [ "$(linha fechada_merge_sha)" = $SHA_C ]
+confere 'sprint 02 sem o item de planejamento, com a 01 merged: a fechada e a 01' $?
+
 incoerente() { # <nome> <linhas extras>
   entrega "$aux/inc.md" "$2"; le "$aux/inc.md"; [ "$rc" = 2 ]; confere "$1" $?
 }
@@ -106,10 +124,6 @@ prs:
 $(item planejamento merged $SHA_A humano $SHA_B)
 $(item 01 merged $SHA_C humano $SHA_A)
 $(item 03 null null null null)"
-incoerente 'item de sprint sem o planejamento antes: sai 2' "entrega: por_sprint
-sprint_atual: 01
-prs:
-$(item 01 null null null null)"
 incoerente 'sprint 01 com o planejamento ainda nao merged: sai 2' "entrega: por_sprint
 sprint_atual: 01
 prs:
@@ -401,8 +415,6 @@ e0s "$aux/r0" 01
 [ "$rc" = 1 ] && grep -q 'E9' "$aux/e0s.err" && cmp -s "$aux/r0/docs/entregas/plan/ENTREGA.md" "$aux/r0-antes.md"
 confere 'E0 --sprint 01 com o planejamento ainda nao merged: recusa e manda rodar o E9, sem escrever' $?
 
-# DM-329 (conselhos, onda 2): o plano feito fora da F5 não tem PR de planejamento. O
-# E0 --sprint diz logo que por_sprint o exige e dá as duas saídas, sem escrever nada
 sem_planejamento() { # <dir> — feature/plan com o plano por_sprint commitado e nenhuma entrega
   local d="$1"
   git init -q -b main "$d"; git -C "$d" config core.autocrlf false
@@ -416,32 +428,46 @@ sem_planejamento() { # <dir> — feature/plan com o plano por_sprint commitado e
     > "$d/docs/sprintx/features/plan/sprint-01/tasks.md"
   g -C "$d" add -A; g -C "$d" commit -q -m 'docs(sprintx): planejamento feito fora da F5' -m 'Trabalho: plan'
 }
-diz_as_saidas() { # o motivo e as duas saídas, com o comando e o lugar exatos
-  grep -q 'por_sprint exige o PR de planejamento' "$aux/e0s.err" \
-    && grep -q 'E0 --planejamento' "$aux/e0s.err" \
-    && grep -Fq 'entrega: por_trabalho' "$aux/e0s.err" \
-    && grep -Fq 'docs/sprintx/features/plan/00-PLANEJAMENTO.md' "$aux/e0s.err"
+# DM-330 (decisao do dono, 2026-11-16; substitui a recusa da DM-329): sem PR de
+# planejamento, o por_sprint abre a sprint 01 e o plano vai junto no PR dela. O limite do
+# PR (E7, L3) e que separa o plano grande, nao o E0
+sem_entrega_diz_o_caso_1() {
+  grep -q 'caso 1' "$aux/e0s.err" && grep -Fq 'docs/entregas/plan/ENTREGA.md' "$aux/e0s.err"
 }
 sem_planejamento "$aux/sp1"
 e0s "$aux/sp1" 01
-[ "$rc" = 1 ] && diz_as_saidas && [ ! -e "$aux/sp1/docs/entregas" ] && [ -z "$(git -C "$aux/sp1" status --porcelain)" ]
+[ "$rc" = 2 ] && sem_entrega_diz_o_caso_1 && [ ! -e "$aux/sp1/docs/entregas" ] && [ -z "$(git -C "$aux/sp1" status --porcelain)" ]
 r=$?; [ "$r" = 0 ] || { echo "        (saiu $rc)"; mostra "$aux/e0s.err"; }
-confere 'E0 --sprint 01 sem entrega nem PR de planejamento: diz que por_sprint o exige e as duas saidas, sem escrever' "$r"
+confere 'E0 --sprint 01 sem ENTREGA.md: manda criar pelo caso 1 do passo 5, sem escrever' "$r"
 
 sem_planejamento "$aux/sp2"
-entrega "$aux/sp2/docs/entregas/plan/ENTREGA.md" 'sprint_atual: null
+entrega "$aux/sp2/docs/entregas/plan/ENTREGA.md" 'branch: feature/plan
+branch_base: main
+sprint_atual: null
 prs: []'
+printf '%s
+' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: orquestrador' 'trabalho_id: plan' '---'   > "$aux/sp2/docs/sprintx/features/plan/ORQUESTRADOR.md"
 g -C "$aux/sp2" add -A; g -C "$aux/sp2" commit -q -m 'docs(mergex): entrega sem planejamento' -m 'Trabalho: plan'
-cp "$aux/sp2/docs/entregas/plan/ENTREGA.md" "$aux/sp2-antes.md"
+cp -r "$aux/sp2" "$aux/sp3"
 e0s "$aux/sp2" 01
-[ "$rc" = 1 ] && diz_as_saidas && cmp -s "$aux/sp2/docs/entregas/plan/ENTREGA.md" "$aux/sp2-antes.md"
-r=$?; [ "$r" = 0 ] || { echo "        (saiu $rc)"; mostra "$aux/e0s.err"; }
-confere 'E0 --sprint 01 com entrega sem o item de planejamento: a mesma recusa, com as duas saidas, sem escrever' "$r"
+rc_e0=$rc
+le_repo "$aux/sp2"
+[ "$rc_e0" = 0 ] && [ "$rc" = 0 ] && [ "$(linha entrega)" = por_sprint ] && [ "$(linha sprint_atual)" = 01 ]   && [ "$(grep -c '^pr=' "$aux/out")" = 1 ] && grep -q '^pr=01' "$aux/out"   && grep -qx "base_validada_sha: $(git -C "$aux/sp2" merge-base HEAD main)" "$aux/sp2/docs/entregas/plan/ENTREGA.md"   && grep -q 'PR da sprint 01' "$aux/e0s.err"
+r=$?; [ "$r" = 0 ] || { echo "        (saiu $rc_e0)"; mostra "$aux/e0s.err" "$aux/err"; }
+confere 'E0 --sprint 01 sem PR de planejamento (DM-330): abre a 01, reancora a base e avisa que o plano vai no PR dela' "$r"
 
-(cd "$aux/sp2" && bash "$leitor" --abrir-sprint 01 --base-validada-sha "$(git rev-parse main)" \
-  --entrega docs/entregas/plan/ENTREGA.md) >"$aux/out" 2>"$aux/err"; rc=$?
-[ "$rc" = 1 ] && grep -q 'E0 --planejamento' "$aux/err" && grep -Fq 'entrega: por_trabalho' "$aux/err"
-confere '--abrir-sprint sem o item de planejamento: a recusa do escritor tambem da as duas saidas' $?
+(cd "$aux/sp2" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t   bash "$scripts/persistir-metodo.sh" --persistir --entrega docs/entregas/plan/ENTREGA.md     --origem sprintx --trabalho plan --checkpoint e0-abertura) >"$aux/pm.out" 2>"$aux/pm.err"; rc=$?
+[ "$rc" = 0 ] && git -C "$aux/sp2" log -1 --format=%B | grep -qx 'Metodo: e0-abertura'
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e0-abertura persiste a sprint 01 aberta sem PR de planejamento' "$r"
+
+(cd "$aux/sp3" && bash "$leitor" --abrir-sprint 02 --base-validada-sha "$(git rev-parse main)"   --entrega docs/entregas/plan/ENTREGA.md) >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" = 1 ] && grep -q 'a próxima é a 01' "$aux/err"
+confere '--abrir-sprint 02 sem nenhum item: recusa, a proxima e a 01' $?
+(cd "$aux/sp3" && bash "$leitor" --abrir-sprint 01 --base-validada-sha "$(git rev-parse main)"   --entrega docs/entregas/plan/ENTREGA.md) >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" = 0 ] && grep -qx 'aberta=01' "$aux/out"
+r=$?; [ "$r" = 0 ] || mostra "$aux/err"
+confere '--abrir-sprint 01 sem o item de planejamento: o escritor abre a 01' "$r"
 
 repo "$aux/r1" por_sprint
 e0s "$aux/r1" 01
@@ -510,6 +536,57 @@ printf 'z\n' > "$aux/r1/src/z.ts"; g -C "$aux/r1" add -A; g -C "$aux/r1" commit 
 v9 "$aux/r1"
 [ "$rc" = 1 ] && [ "$(grep -c '^fora_do_plano' "$aux/v9.out")" = 1 ] && grep -qx "$(printf 'fora_do_plano\tsrc/z.ts')" "$aux/v9.out"
 confere 'squash da sprint 01: V9 da sprint 02 so ve a 02 (src/z.ts fora; a 01 e a main nao)' $?
+
+# DM-330 de ponta a ponta: sem PR de planejamento, a sprint 01 fica na base do E0 (registrada_e0),
+# e a 02 reancora com o merge da 01 como ancora da V9 (CodeAnt no mergex#98)
+d="$aux/sp9"
+git init -q -b main "$d"; git -C "$d" config core.autocrlf false
+mkdir -p "$d/src"; printf 'a\n' > "$d/src/a.ts"
+g -C "$d" add -A; g -C "$d" commit -q -m base
+b9="$(git -C "$d" rev-parse HEAD)"
+git -C "$d" switch -q -c feature/plan
+mkdir -p "$d/docs/sprintx/features/plan/sprint-01" "$d/docs/sprintx/features/plan/sprint-02"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: planejamento' 'trabalho_id: plan' \
+  'entrega: por_sprint' '---' > "$d/docs/sprintx/features/plan/00-PLANEJAMENTO.md"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: orquestrador' 'trabalho_id: plan' '---' \
+  > "$d/docs/sprintx/features/plan/ORQUESTRADOR.md"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
+  'tasks:' '  - id: T-01.01' '    status: pendente' '    arquivos:' '      cria: [src/b.ts]' \
+  '      altera: []' '---' > "$d/docs/sprintx/features/plan/sprint-01/tasks.md"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
+  'tasks:' '  - id: T-02.01' '    status: pendente' '    arquivos:' '      cria: [src/c.ts]' \
+  '      altera: []' '---' > "$d/docs/sprintx/features/plan/sprint-02/tasks.md"
+entrega "$d/docs/entregas/plan/ENTREGA.md" "base_validada_sha: $b9
+origem_base: registrada_e0
+reconciliacoes: []
+branch: feature/plan
+branch_base: main
+sprint_atual: null
+prs: []"
+g -C "$d" add -A; g -C "$d" commit -q -m 'docs(sprintx): plano e entrega sem planejamento' -m 'Trabalho: plan'
+e="$aux/sp9/docs/entregas/plan/ENTREGA.md"
+abre "$aux/sp9" 01
+grep -qx 'origem_base: registrada_e0' "$e" && grep -qx "base_validada_sha: $b9" "$e" && grep -q 'PR da sprint 01' "$aux/e0s.err"
+confere 'sem planejamento: a sprint 01 abre na base do E0, sem reancorar (registrada_e0)' $?
+task "$aux/sp9" src/b.ts T-01.01
+v9 "$aux/sp9"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+r=$?; [ "$r" = 0 ] || mostra "$aux/v9.out"
+confere 'sem planejamento: V9 da sprint 01 passa' "$r"
+fecha01 "$aux/sp9" squash
+g -C "$aux/sp9" merge -q --no-edit -X ours main
+abre "$aux/sp9" 02
+grep -qx 'origem_base: registrada_sprint' "$e" && grep -qx "base_validada_sha: $(git -C "$aux/sp9" rev-parse main)" "$e"
+confere 'sem planejamento: a sprint 02 reancora na main nova (registrada_sprint)' $?
+task "$aux/sp9" src/c.ts T-02.01
+v9 "$aux/sp9"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out" && grep -qx 'origem_base=registrada_sprint' "$aux/v9.out"
+r=$?; [ "$r" = 0 ] || mostra "$aux/v9.out"
+confere 'sem planejamento: V9 da sprint 02 passa, ancorada no merge da 01' "$r"
+printf 'z\n' > "$aux/sp9/src/z.ts"; g -C "$aux/sp9" add -A; g -C "$aux/sp9" commit -q -m 'feat: z' -m 'Trabalho: plan'
+v9 "$aux/sp9"
+[ "$rc" = 1 ] && [ "$(grep -c '^fora_do_plano' "$aux/v9.out")" = 1 ]
+confere 'sem planejamento: V9 da sprint 02 so ve a 02 (src/z.ts fora)' $?
 
 repo "$aux/r2" por_sprint
 abre "$aux/r2" 01; task "$aux/r2" src/b.ts T-01.01
