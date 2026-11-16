@@ -191,7 +191,9 @@ Então grava `entrega: por_sprint`, `sprint_atual: <NN>`, o item novo `{sprint: 
 estado: null, merge_sha: null, merge: null, base_sha: null}` no fim de `prs`, volta `pr_url` e
 `pr_estado` a `null`, e **reancora a base validada**: `base_validada_sha` = `git merge-base HEAD
 <base>` e `origem_base: registrada_sprint` (a mesma exceção da retomada depois do planejamento,
-DM-261). Com `--sprint <NN>` igual à `sprint_atual` e o PR dela ainda não `merged`, é retomada da
+DM-261). **Exceção, a sprint 01 sem PR de planejamento (DM-330):** nada foi mergeado antes dela,
+então a base não se reancora — fica a do caso 1 do passo 5 (`origem_base: registrada_e0`); a
+primeira reancoragem é a da sprint 02, e a V9 a ancora no merge do PR da sprint 01. Com `--sprint <NN>` igual à `sprint_atual` e o PR dela ainda não `merged`, é retomada da
 mesma sprint: nada disso muda. **Sprint fechada é imutável:** `--sprint <NN>` de uma sprint já
 `merged` é recusa — defeito achado depois do merge vira task da sprint seguinte, enquanto a F6
 ainda pode replanejar, ou correção própria, nunca reabertura. Com o teto da F6 esgotado
