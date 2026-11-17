@@ -1157,7 +1157,9 @@ grupo_hookspath_nulo() {
   d="$t/repo"
   fx_cenario "$d" || { falha "cenário não montou"; return; }
   # (a) NUL, nul e /dev/null na config local, e NUL no meio do caminho (conselhos#346): o pre-push não pode existir ali
-  for v in NUL nul Nul /dev/null NUL/hooks sub/nul/hooks; do
+  # o `nul` no meio do caminho só para no Windows; no POSIX é diretório válido (conselhos#350)
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) meio="NUL/hooks sub/nul/hooks" ;; *) meio="" ;; esac
+  for v in NUL nul Nul /dev/null sub/nul $meio; do
     git -C "$d" config core.hooksPath "$v"
     # a mensagem é conferida na saída de CADA modo; no --instalar, também a
     # parada do E0 (`mergex E0 BLOQUEADO — pre-push`)
@@ -1171,6 +1173,12 @@ grupo_hookspath_nulo() {
     atv "$d" --instalar
     out_tem "core.hooksPath=$v: --instalar é a parada do E0" "mergex E0 BLOQUEADO — pre-push: o core.hooksPath aponta para o dispositivo nulo"
   done
+  if [ -z "$meio" ]; then
+    git -C "$d" config core.hooksPath tools/nul/hooks
+    atv "$d" --provar
+    case "$ATV_OUT" in *"dispositivo nulo"*) falha "POSIX: tools/nul/hooks não é o dispositivo nulo — $(printf '%s' "$ATV_OUT" | tr '\n' '|')" ;;
+      *) ok "POSIX: tools/nul/hooks não é o dispositivo nulo" ;; esac
+  fi
   git -C "$d" config --unset core.hooksPath
   # (b) NUL na config GLOBAL (temporária: GIT_CONFIG_GLOBAL só nos processos do caso)
   printf '[core]\n\thooksPath = NUL\n' > "$t/gitconfig-global"
