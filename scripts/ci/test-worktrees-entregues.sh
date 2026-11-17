@@ -61,12 +61,16 @@ git -C "$T/mergeada" -c user.name=t -c user.email=t@t merge -q --no-ff --no-edit
 wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/comsub" add .; git -C "$T/comsub" -c user.name=t -c user.email=t@t commit -q -m sub; integra comsub
 # o pre-push instalado (compartilhado por todas as worktrees) que chama o validador de UMA delas
 # pelo caminho absoluto: ela nao sai (login, depois do #96). Sem bit de execucao, o Git nao o roda.
+# o diretorio de hooks e o do teste (config local vence a global): um core.hooksPath global da
+# maquina nunca e gravado nem apagado aqui (CodeAnt no mergex#103)
+mkdir -p "$T/hooks-teste"; g config core.hooksPath "$T/hooks-teste"
 HK="$(git -C "$T/r" rev-parse --path-format=absolute --git-path hooks/pre-push)"
+case "$HK" in "$T"/*) ;; *) echo "FALHA diretorio de hooks fora do teste: $HK" >&2; exit 1 ;; esac
 printf '#!/usr/bin/env bash\n# mergex: chamador gerenciado\nMERGEX_PORTAO_PUSH=%s\n' "$T/donapush/.claude/skills/mergex/scripts/portao-push.sh" > "$HK"
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida" 2>&1; rc=$?
 cp "$T/saida" "$T/saida-com-hook"
 printf '#!/usr/bin/env bash\nMERGEX_PORTAO_PUSH="$MERGEX_RAIZ"/.claude/skills/mergex/scripts/portao-push.sh\n' > "$HK"
-(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-relativo" 2>&1; rm -f "$HK"
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-relativo" 2>&1; rm -f "$HK"; g config --unset core.hooksPath
 grep -qF "removivel	-	$T/donapush	" "$T/saida-relativo"; afirma "chamador relativo a raiz nao prende worktree" $?
 
 [ "$rc" = 0 ];                          afirma "listar sai 0" $?
