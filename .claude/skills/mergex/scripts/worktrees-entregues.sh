@@ -44,9 +44,16 @@ BASE="refs/remotes/origin/$BASE"
 # build quando a pasta-mae tem um manifesto de build: uma pasta qualquer com esse nome pode
 # guardar dado que nao se refaz (CodeAnt no conselhos-municipais#350).
 # descartavel <caminho-ignorado> <worktree>
-# gitignore_do_hook <arquivo> — 0 quando e um arquivo comum cujo conteudo e so `*`
+# gitignore_do_hook <arquivo> — 0 quando e o marcador exato que o hook grava.
+# CRLF e aceito porque o rastro pode passar por checkout que normaliza linhas.
 gitignore_do_hook() {
-  [ -f "$1" ] && [ ! -L "$1" ] && [ "$(tr -d '\r' < "$1" 2>/dev/null)" = '*' ]
+  local esperado conteudo
+  esperado='# Rastro de eventos expx: local da maquina, nao versionado.
+*
+'
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  conteudo="$(tr -d '\r' < "$1" 2>/dev/null; printf .)" || return 1
+  [ "$conteudo" = "${esperado}." ]
 }
 # so_gitignores_do_hook <lista> — 0 quando cada caminho da lista (um por linha) e `.gitignore` do hook
 so_gitignores_do_hook() {
@@ -66,7 +73,7 @@ descartavel() {
   esac
   # a pasta ignorada que so tem `.gitignore` (o `*` que o hook do rastro grava em docs/eventos/)
   # nao guarda nada: sem nenhum outro arquivo, sai junto (login, depois do DM-331)
-  # So vale o `.gitignore` que e exatamente o do hook (`*`): outro conteudo foi escrito por alguem
+  # So vale o `.gitignore` que e exatamente o do hook: outro conteudo foi escrito por alguem
   # e bloqueia. O `find` que falha numa parte da pasta nao a declara vazia (CodeAnt no
   # conselhos-municipais#354).
   case "$1" in

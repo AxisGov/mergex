@@ -150,7 +150,22 @@ case "$ACAO" in
   registrar-merge|completar-base|registrar-pr|abrir-sprint|retomar-planejamento)
     LOCK_DIR="$ENTREGA.lock"
     tentativas=0
-    until { mkdir "$LOCK_DIR" && ( set -C; printf '%s\n' "$$" > "$LOCK_DIR/.dono" ); } 2>/dev/null; do
+    while :; do
+      if mkdir "$LOCK_DIR" 2>/dev/null; then
+        if ( set -C; : > "$LOCK_DIR/.dono" ) 2>/dev/null; then
+          if printf '%s\n' "$$" > "$LOCK_DIR/.dono" 2>/dev/null; then
+            break
+          fi
+          rm -f -- "$LOCK_DIR/.dono"
+          rmdir "$LOCK_DIR" 2>/dev/null || :
+          recusa "não consegui registrar o dono do lock: $LOCK_DIR"
+        fi
+        # Sem marca, a aquisição falhou antes de haver dono: não deixe a pasta órfã.
+        # Com marca, outra execução ganhou a posse e segue o mesmo caminho de espera.
+        if [ ! -e "$LOCK_DIR/.dono" ] && [ ! -L "$LOCK_DIR/.dono" ]; then
+          rmdir "$LOCK_DIR" 2>/dev/null || :
+        fi
+      fi
       tentativas=$((tentativas + 1))
       [ "$tentativas" -lt 100 ] || recusa "entrega ocupada ou lock órfão: $LOCK_DIR (verifique antes de removê-lo)"
       sleep 0.1
