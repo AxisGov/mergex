@@ -622,6 +622,15 @@ sed "s/^base_validada_sha: .*/base_validada_sha: \"$b9\"/" "$e" > "$aux/sp9-aspa
   --entrega "$aux/sp9-aspas.md") >"$aux/out" 2>"$aux/err"; rc=$?
 [ "$rc" = 0 ] && grep -qx "base_validada_sha=$b9" "$aux/out" && ! grep -q 1111111111 "$aux/sp9-aspas.md"
 confere 'sem planejamento: base do E0 entre aspas nao e trocada pela nova' $?
+# a trava do ENTREGA.md (pasta + marca .dono, DM-334) sai inteira no fim, e a ocupada recusa sem gravar
+[ ! -e "$aux/sp9-aspas.md.lock" ]
+confere 'trava do ENTREGA.md solta depois da gravacao (sem .dono sobrando)' $?
+mkdir "$aux/sp9-aspas.md.lock"; printf '1\n' > "$aux/sp9-aspas.md.lock/.dono"; ck="$(cksum < "$aux/sp9-aspas.md")"
+(cd "$aux/sp9" && bash "$leitor" --abrir-sprint 02 --base-validada-sha 1111111111111111111111111111111111111111 \
+  --entrega "$aux/sp9-aspas.md") >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" != 0 ] && grep -q 'entrega ocupada' "$aux/err" && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
+confere 'trava do ENTREGA.md ocupada: recusa e nao grava' $?
+rm -rf "$aux/sp9-aspas.md.lock"
 abre "$aux/sp9" 01
 grep -qx 'origem_base: registrada_e0' "$e" && grep -qx "base_validada_sha: $b9" "$e" && grep -q 'PR da sprint 01' "$aux/e0s.err"
 confere 'sem planejamento: a sprint 01 abre na base do E0, sem reancorar (registrada_e0)' $?

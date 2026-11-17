@@ -4,7 +4,7 @@ set -uo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$RAIZ/.claude/skills/mergex/scripts/worktrees-entregues.sh"
-T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+T="$(mktemp -d)"; trap 'chmod -R u+rwx "$T" 2>/dev/null; rm -rf "$T"' EXIT
 ok=0; falhou=0
 afirma() { if [ "$2" = 0 ]; then ok=$((ok+1)); printf '  ok    %s\n' "$1"; else falhou=$((falhou+1)); printf '  FALHA %s\n' "$1"; fi; }
 
@@ -38,6 +38,12 @@ printf 'b\n' > "$T/distrastro/dist/b"; printf 'r\n' > "$T/distrastro/docs/evento
 # docs/eventos/ so com o `.gitignore` que o hook grava, sem rastro nenhum (login, depois do DM-331)
 wt rastrovazio; integra rastrovazio; mkdir -p "$T/rastrovazio/docs/eventos"; printf '*\n' > "$T/rastrovazio/docs/eventos/.gitignore"
 mkdir -p "$T/rastrovazio/outra/eventos"; printf '*\n' > "$T/rastrovazio/outra/eventos/.gitignore"
+# .gitignore escrito por alguem (outro conteudo) bloqueia; o find que nao le a pasta tambem (conselhos#354)
+wt gitignoreproprio; integra gitignoreproprio; mkdir -p "$T/gitignoreproprio/outra/notas"
+printf '*\n# regras do time: manter\n' > "$T/gitignoreproprio/outra/notas/.gitignore"
+wt donapush; integra donapush # antes do comsub: o .gitmodules integrado iria para ela
+wt pastafechada; integra pastafechada; mkdir -p "$T/pastafechada/docs/eventos/sub"; printf '*\n' > "$T/pastafechada/docs/eventos/.gitignore"
+printf 'r\n' > "$T/pastafechada/docs/eventos/sub/r.jsonl"; chmod 000 "$T/pastafechada/docs/eventos/sub"
 wt suja; integra suja; printf 'b\n' >> "$T/suja/a"
 wt nova; integra nova; printf 'n\n' > "$T/nova/novo.txt"
 wt localonly
@@ -53,7 +59,19 @@ wt pulada; integra pulada; printf 'p\n' >> "$T/pulada/a"; git -C "$T/pulada" upd
 wt mesclada; integra mesclada; g worktree add -q -b b-mergeada "$T/mergeada" main~1
 git -C "$T/mergeada" -c user.name=t -c user.email=t@t merge -q --no-ff --no-edit b-mesclada
 wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/comsub" add .; git -C "$T/comsub" -c user.name=t -c user.email=t@t commit -q -m sub; integra comsub
+# o pre-push instalado (compartilhado por todas as worktrees) que chama o validador de UMA delas
+# pelo caminho absoluto: ela nao sai (login, depois do #96). Sem bit de execucao, o Git nao o roda.
+# o diretorio de hooks e o do teste (config local vence a global): um core.hooksPath global da
+# maquina nunca e gravado nem apagado aqui (CodeAnt no mergex#103)
+mkdir -p "$T/hooks-teste"; g config core.hooksPath "$T/hooks-teste"
+HK="$(git -C "$T/r" rev-parse --path-format=absolute --git-path hooks/pre-push)"
+case "$HK" in "$T"/*) ;; *) echo "FALHA diretorio de hooks fora do teste: $HK" >&2; exit 1 ;; esac
+printf '#!/usr/bin/env bash\n# mergex: chamador gerenciado\nMERGEX_PORTAO_PUSH=%s\n' "$T/donapush/.claude/skills/mergex/scripts/portao-push.sh" > "$HK"
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida" 2>&1; rc=$?
+cp "$T/saida" "$T/saida-com-hook"
+printf '#!/usr/bin/env bash\nMERGEX_PORTAO_PUSH="$MERGEX_RAIZ"/.claude/skills/mergex/scripts/portao-push.sh\n' > "$HK"
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-relativo" 2>&1; rm -f "$HK"; g config --unset core.hooksPath
+grep -qF "removivel	-	$T/donapush	" "$T/saida-relativo"; afirma "chamador relativo a raiz nao prende worktree" $?
 
 [ "$rc" = 0 ];                          afirma "listar sai 0" $?
 [ "$(estado entregue)" = removivel ];   afirma "entregue e limpa: removivel" $?
@@ -63,6 +81,14 @@ wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/coms
 [ "$(estado distrastro)" = bloqueada ] && [ "$(motivo distrastro)" = ignorado ]; afirma "build junto com rastro: o rastro bloqueia" $?
 [ "$(estado distsolta)" = bloqueada ] && [ "$(motivo distsolta)" = ignorado ]; afirma "dist/ sem manifesto de build ao lado bloqueia (DM-333)" $?
 [ "$(estado rastrovazio)" = removivel ]; afirma "docs/eventos/ so com o .gitignore do hook: removivel" $?
+[ "$(estado gitignoreproprio)" = bloqueada ] && [ "$(motivo gitignoreproprio)" = ignorado ]; afirma ".gitignore com outro conteudo que o do hook bloqueia" $?
+[ "$(estado donapush)" = bloqueada ] && [ "$(motivo donapush)" = validador_do_pre_push ]; afirma "worktree dona do validador do pre-push instalado bloqueia" $?
+[ "$(estado entregue)" = removivel ]; afirma "com o mesmo pre-push, as outras worktrees continuam removiveis" $?
+if [ "$(id -u)" != 0 ] && ! ls "$T/pastafechada/docs/eventos/sub" >/dev/null 2>&1; then
+  [ "$(estado pastafechada)" = bloqueada ] && [ "$(motivo pastafechada)" = ignorado ]; afirma "pasta ignorada que o find nao consegue ler bloqueia" $?
+else
+  echo "  (sem pasta ilegivel neste ambiente: caso pulado)"
+fi
 [ "$(estado suja)" = bloqueada ] && [ "$(motivo suja)" = alterada ];            afirma "alteracao rastreada bloqueia" $?
 [ "$(estado nova)" = bloqueada ] && [ "$(motivo nova)" = alterada ];            afirma "arquivo novo bloqueia" $?
 [ "$(estado localonly)" = bloqueada ] && [ "$(motivo localonly)" = nao_entregue ]; afirma "commit fora da base bloqueia" $?

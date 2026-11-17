@@ -527,6 +527,26 @@ grupo_prepush() {
   err_sem "chamador sem validador: sem o erro cru do bash" "No such file"
   rm -f "$d3/.git/hooks/pre-push"
 
+  # a skill dentro da árvore, aberta por outro nome (link; no Git Bash, `F:/x` contra `/f/x`): o
+  # chamador guarda o validador relativo à raiz, nunca o caminho absoluto da worktree, que quebra o
+  # push quando ela sai (login, depois do #96)
+  if ln -s "$d3" "$t3/apelido" 2>/dev/null && [ -L "$t3/apelido" ]; then
+    mkdir -p "$d3/.claude/skills/mx-copia" && cp -R "$S" "$d3/.claude/skills/mx-copia/scripts" \
+      && cp -R "$S/../assets" "$d3/.claude/skills/mx-copia/assets" || falha "cópia da skill na árvore"
+    ( cd "$t3/apelido" && bash "$t3/apelido/.claude/skills/mx-copia/scripts/ativacao-pre-push.sh" --instalar --entrega docs/entregas/ft-rec/ENTREGA.md ) >/dev/null 2>&1; rc=$?
+    [ "$rc" = 0 ] && grep -Fq 'MERGEX_PORTAO_PUSH="$MERGEX_RAIZ"/.claude/skills/mx-copia/scripts/portao-push.sh' "$d3/.git/hooks/pre-push" \
+      && ! grep -Fq "$t3/apelido" "$d3/.git/hooks/pre-push" \
+      && ok "skill na árvore aberta por um link: o chamador guarda o validador relativo à raiz" \
+      || falha "skill por link: rc=$rc $(grep '^MERGEX_PORTAO_PUSH=' "$d3/.git/hooks/pre-push" 2>/dev/null)"
+    rm -f "$d3/.git/hooks/pre-push"; rm -rf "$d3/.claude/skills/mx-copia" "$t3/apelido"
+  else
+    ok "(sem links simbólicos: caso do validador por link pulado)"
+  fi
+  # o --reverter não lê a entrega: roda sem --entrega (login, depois do #96)
+  out="$( cd "$d3" && bash "$ATV" --reverter 2>&1 )"; rc=$?
+  [ "$rc" = 0 ] && case "$out" in *"nada a reverter"*) true ;; *) false ;; esac \
+    && ok "--reverter sem --entrega: roda" || falha "--reverter sem --entrega: rc=$rc $(printf '%s' "$out" | tr '\n' '|')"
+
   git remote set-head origin -d >/dev/null 2>&1
   git rev-parse -q --verify refs/remotes/origin/HEAD >/dev/null 2>&1 && falha "controle: origin/HEAD ainda existe" || ok "controle: sem refs/remotes/origin/HEAD"
   FX_PUSH_REF=refs/heads/zz-sem-base push_espera "sem base, sem nome e sem trailer, com ENTREGA na árvore, avisa cobertura_indeterminada (passa)" 0 "$pB" "$d3" "$FX_REMOTO" "$pB:refs/heads/zz-sem-base"
