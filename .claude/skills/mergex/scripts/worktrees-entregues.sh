@@ -55,7 +55,7 @@ descartavel() {
   case "$1" in
     # sem a pasta no .gitignore da raiz, o Git mostra o proprio `.gitignore` que se ignora
     .gitignore|*/.gitignore) return 0 ;;
-    */) [ -d "$c/$1" ] && [ -z "$(find "$c/$1" ! -type d ! -name .gitignore -print 2>/dev/null | head -1)" ] && return 0 ;;
+    */) [ -d "$c/$1" ] && [ -z "$(find "$c/$1" ! -type d ! -name .gitignore -print 2>/dev/null)" ] && return 0 ;;
   esac
   while [ -n "$resto" ]; do
     comp="${resto%%/*}"
