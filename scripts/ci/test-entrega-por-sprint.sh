@@ -474,6 +474,43 @@ confere 'E0 --sprint 01 sem PR de planejamento (DM-330): abre a 01, reancora a b
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
 confere 'e0-abertura persiste a sprint 01 aberta sem PR de planejamento' "$r"
 
+# DM-332 (CodeAnt no conselhos-municipais#346): o caso 1 e a abertura da 01 sem commit no meio.
+# O ENTREGA.md ainda nao esta em HEAD, e o e0-abertura o persiste inteiro, com a prova do caso 1.
+sem_planejamento "$aux/sp4"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: orquestrador' 'trabalho_id: plan' '---' \
+  > "$aux/sp4/docs/sprintx/features/plan/ORQUESTRADOR.md"
+g -C "$aux/sp4" add -A; g -C "$aux/sp4" commit -q -m 'docs(sprintx): orquestrador' -m 'Trabalho: plan'
+entrega "$aux/sp4/docs/entregas/plan/ENTREGA.md" 'branch: feature/plan
+branch_base: main
+sprint_atual: null
+prs: []'
+cp -r "$aux/sp4" "$aux/sp5"
+e0s "$aux/sp4" 01; rc_e0=$rc
+pm_novo() { # pm_novo <repo> [verificar]
+  (cd "$1" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+    bash "$scripts/persistir-metodo.sh" --"${2:-persistir}" --entrega docs/entregas/plan/ENTREGA.md \
+    --origem sprintx --trabalho plan --checkpoint e0-abertura) >"$aux/pm.out" 2>"$aux/pm.err"; rc=$?
+}
+pm_novo "$aux/sp4" verificar
+[ "$rc_e0" = 0 ] && [ "$rc" != 0 ] && ! grep -qx 'ok=true' "$aux/pm.out"
+r=$?; [ "$r" = 0 ] || { echo "        (e0 $rc_e0, verificar $rc)"; mostra "$aux/e0s.err" "$aux/pm.err"; }
+confere 'e0-abertura --verificar com o ENTREGA.md novo, fora de HEAD: pendente, nunca ok=true' "$r"
+pm_novo "$aux/sp4"
+[ "$rc" = 0 ] && git -C "$aux/sp4" log -1 --format=%B | grep -qx 'Metodo: e0-abertura' \
+  && [ "$(git -C "$aux/sp4" show --name-only --format= HEAD)" = docs/entregas/plan/ENTREGA.md ] \
+  && [ -z "$(git -C "$aux/sp4" status --porcelain)" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e0-abertura persiste o ENTREGA.md novo da sprint 01, so ele, sem commit antes (DM-332)' "$r"
+pm_novo "$aux/sp4" verificar
+[ "$rc" = 0 ] && grep -qx 'ok=true' "$aux/pm.out"
+confere 'depois de persistido, o e0-abertura --verificar sai ok=true' $?
+# o ENTREGA.md novo que nao abre a 01 (o caso 1 puro) nao e abertura: recusa, sem commit
+h="$(git -C "$aux/sp5" rev-parse HEAD)"
+pm_novo "$aux/sp5"
+[ "$rc" != 0 ] && grep -q 'ausente de HEAD' "$aux/pm.err" && [ "$(git -C "$aux/sp5" rev-parse HEAD)" = "$h" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'e0-abertura com o ENTREGA.md novo sem a sprint 01 aberta: recusa, sem commit' "$r"
+
 (cd "$aux/sp3" && bash "$leitor" --abrir-sprint 02 --base-validada-sha "$(git rev-parse main)"   --entrega docs/entregas/plan/ENTREGA.md) >"$aux/out" 2>"$aux/err"; rc=$?
 [ "$rc" = 1 ] && grep -q 'a próxima é a 01' "$aux/err"
 confere '--abrir-sprint 02 sem nenhum item: recusa, a proxima e a 01' $?
