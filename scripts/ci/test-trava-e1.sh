@@ -578,6 +578,26 @@ if grupo EXTRA; then
   igual '--concluir liberou a trava' "$( [ -d "$(trava_de "$P")" ] && echo sim || echo nao )" nao
 fi
 
+# CORRIDA — dois --adquirir no mesmo instante. O `mkdir` do uutils coreutils (Ubuntu 26.04) sai
+# 0 nos dois; quem decide é o `dono` criado com O_EXCL (DM-334). Nunca os dois vencem.
+if grupo CORRIDA; then
+  echo
+  echo "CORRIDA — dois --adquirir simultâneos na mesma worktree"
+  Q="$D/corrida"; repo "$Q" >/dev/null 2>&1
+  dois=0; nenhum=0
+  for i in $(seq 1 30); do
+    ( cd "$Q" && bash "$TRAVA" --adquirir T-01.01 >/dev/null 2>&1; printf '%s\n' "$?" >"$D/q1.rc" ) &
+    ( cd "$Q" && bash "$TRAVA" --adquirir T-01.02 >/dev/null 2>&1; printf '%s\n' "$?" >"$D/q2.rc" ) &
+    wait
+    q1="$(cat "$D/q1.rc")"; q2="$(cat "$D/q2.rc")"
+    [ "$q1" = 0 ] && [ "$q2" = 0 ] && dois=$((dois+1))
+    [ "$q1" != 0 ] && [ "$q2" != 0 ] && nenhum=$((nenhum+1))
+    t="$(trava_de "$Q")"; rm -f "$t/dono"; rmdir "$t" 2>/dev/null
+  done
+  igual 'dois --adquirir simultâneos: nunca os dois vencem' "$dois" 0
+  igual 'dois --adquirir simultâneos: sempre um vence' "$nenhum" 0
+fi
+
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"

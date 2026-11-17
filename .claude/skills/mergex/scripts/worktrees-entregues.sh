@@ -50,6 +50,13 @@ descartavel() {
     node_modules/*|*/node_modules/*|__pycache__/*|*/__pycache__/*|.pytest_cache/*|*/.pytest_cache/*) return 0 ;;
     .mypy_cache/*|*/.mypy_cache/*|.ruff_cache/*|*/.ruff_cache/*) return 0 ;;
   esac
+  # a pasta ignorada que so tem `.gitignore` (o `*` que o hook do rastro grava em docs/eventos/)
+  # nao guarda nada: sem nenhum outro arquivo, sai junto (login, depois do DM-331)
+  case "$1" in
+    # sem a pasta no .gitignore da raiz, o Git mostra o proprio `.gitignore` que se ignora
+    .gitignore|*/.gitignore) return 0 ;;
+    */) [ -d "$c/$1" ] && [ -z "$(find "$c/$1" ! -type d ! -name .gitignore -print 2>/dev/null | head -1)" ] && return 0 ;;
+  esac
   while [ -n "$resto" ]; do
     comp="${resto%%/*}"
     [ "$comp" != "$resto" ] || return 1 # ultimo componente: arquivo, nao pasta

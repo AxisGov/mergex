@@ -35,6 +35,9 @@ wt comdist; integra comdist; mkdir -p "$T/comdist/dist" "$T/comdist/packages/p/d
 printf 'b\n' > "$T/comdist/dist/b"; printf 'b\n' > "$T/comdist/packages/p/dist/b"; printf 'c\n' > "$T/comdist/coverage/c"
 wt distrastro; integra distrastro; mkdir -p "$T/distrastro/dist" "$T/distrastro/docs/eventos"
 printf 'b\n' > "$T/distrastro/dist/b"; printf 'r\n' > "$T/distrastro/docs/eventos/r.jsonl"
+# docs/eventos/ so com o `.gitignore` que o hook grava, sem rastro nenhum (login, depois do DM-331)
+wt rastrovazio; integra rastrovazio; mkdir -p "$T/rastrovazio/docs/eventos"; printf '*\n' > "$T/rastrovazio/docs/eventos/.gitignore"
+mkdir -p "$T/rastrovazio/outra/eventos"; printf '*\n' > "$T/rastrovazio/outra/eventos/.gitignore"
 wt suja; integra suja; printf 'b\n' >> "$T/suja/a"
 wt nova; integra nova; printf 'n\n' > "$T/nova/novo.txt"
 wt localonly
@@ -59,6 +62,7 @@ wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/coms
 [ "$(estado comdist)" = removivel ];    afirma "saida de build e cobertura ignoradas: removivel (DM-331)" $?
 [ "$(estado distrastro)" = bloqueada ] && [ "$(motivo distrastro)" = ignorado ]; afirma "build junto com rastro: o rastro bloqueia" $?
 [ "$(estado distsolta)" = bloqueada ] && [ "$(motivo distsolta)" = ignorado ]; afirma "dist/ sem manifesto de build ao lado bloqueia (DM-333)" $?
+[ "$(estado rastrovazio)" = removivel ]; afirma "docs/eventos/ so com o .gitignore do hook: removivel" $?
 [ "$(estado suja)" = bloqueada ] && [ "$(motivo suja)" = alterada ];            afirma "alteracao rastreada bloqueia" $?
 [ "$(estado nova)" = bloqueada ] && [ "$(motivo nova)" = alterada ];            afirma "arquivo novo bloqueia" $?
 [ "$(estado localonly)" = bloqueada ] && [ "$(motivo localonly)" = nao_entregue ]; afirma "commit fora da base bloqueia" $?
