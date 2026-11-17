@@ -10,7 +10,7 @@ afirma() { if [ "$2" = 0 ]; then ok=$((ok+1)); printf '  ok    %s\n' "$1"; else 
 
 g() { git -C "$T/r" -c user.name=t -c user.email=t@t "$@"; }
 git init -q --bare "$T/origem.git"
-git init -q -b main "$T/r"; printf 'node_modules/\ndist/\ndocs/eventos/\n' > "$T/r/.gitignore"; printf 'a\n' > "$T/r/a"
+git init -q -b main "$T/r"; printf 'node_modules/\ndist/\ncoverage/\ndocs/eventos/\n' > "$T/r/.gitignore"; printf 'a\n' > "$T/r/a"
 g add .; g commit -q -m base; g remote add origin "$T/origem.git"; g push -q origin main
 
 wt() { # wt <nome> — branch e worktree novos, com um commit
@@ -26,7 +26,10 @@ motivo() { linha "$1" | cut -f2; }
 wt entregue; integra entregue
 wt comcache; integra comcache; mkdir -p "$T/comcache/node_modules/x"; printf 'y\n' > "$T/comcache/node_modules/x/y"
 wt comrastro; integra comrastro; mkdir -p "$T/comrastro/docs/eventos"; printf 'r\n' > "$T/comrastro/docs/eventos/r.jsonl"
-wt comdist; integra comdist; mkdir -p "$T/comdist/dist"; printf 'b\n' > "$T/comdist/dist/b"
+wt comdist; integra comdist; mkdir -p "$T/comdist/dist" "$T/comdist/packages/p/dist" "$T/comdist/coverage"
+printf 'b\n' > "$T/comdist/dist/b"; printf 'b\n' > "$T/comdist/packages/p/dist/b"; printf 'c\n' > "$T/comdist/coverage/c"
+wt distrastro; integra distrastro; mkdir -p "$T/distrastro/dist" "$T/distrastro/docs/eventos"
+printf 'b\n' > "$T/distrastro/dist/b"; printf 'r\n' > "$T/distrastro/docs/eventos/r.jsonl"
 wt suja; integra suja; printf 'b\n' >> "$T/suja/a"
 wt nova; integra nova; printf 'n\n' > "$T/nova/novo.txt"
 wt localonly
@@ -48,7 +51,8 @@ wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/coms
 [ "$(estado entregue)" = removivel ];   afirma "entregue e limpa: removivel" $?
 [ "$(estado comcache)" = removivel ];   afirma "so dependencia ignorada: removivel" $?
 [ "$(estado comrastro)" = bloqueada ] && [ "$(motivo comrastro)" = ignorado ]; afirma "rastro ignorado bloqueia" $?
-[ "$(estado comdist)" = bloqueada ] && [ "$(motivo comdist)" = ignorado ];    afirma "dist ignorado bloqueia" $?
+[ "$(estado comdist)" = removivel ];    afirma "saida de build e cobertura ignoradas: removivel (DM-331)" $?
+[ "$(estado distrastro)" = bloqueada ] && [ "$(motivo distrastro)" = ignorado ]; afirma "build junto com rastro: o rastro bloqueia" $?
 [ "$(estado suja)" = bloqueada ] && [ "$(motivo suja)" = alterada ];            afirma "alteracao rastreada bloqueia" $?
 [ "$(estado nova)" = bloqueada ] && [ "$(motivo nova)" = alterada ];            afirma "arquivo novo bloqueia" $?
 [ "$(estado localonly)" = bloqueada ] && [ "$(motivo localonly)" = nao_entregue ]; afirma "commit fora da base bloqueia" $?
@@ -82,6 +86,11 @@ printf '#!/bin/sh\ncase "$*" in *"worktree list"*) "%s" "$@"; exit 1;; esac\nexe
 [ "$rc" = 1 ] && [ -d "$T/suja" ]; afirma "--remover recusa a bloqueada" $?
 (cd "$T/r" && bash "$SCRIPT" --remover "$T/entregue") > "$T/saida2" 2>&1; rc=$?
 [ "$rc" = 0 ] && [ ! -d "$T/entregue" ]; afirma "--remover remove a entregue" $?
+(cd "$T/r" && bash "$SCRIPT" --remover "$T/distrastro") > "$T/saida2" 2>&1; rc=$?
+[ "$rc" = 1 ] && [ -d "$T/distrastro" ] && grep -qx '  ignorado que nao se refaz: docs/eventos/' "$T/saida2" \
+  && ! grep -q 'nao se refaz: dist/' "$T/saida2"; afirma "--remover parado lista so o ignorado que nao se refaz" $?
+(cd "$T/r" && bash "$SCRIPT" --remover "$T/comdist") > "$T/saida2" 2>&1; rc=$?
+[ "$rc" = 0 ] && [ ! -d "$T/comdist" ]; afirma "--remover remove a worktree com dist/ e coverage/" $?
 g rev-parse -q --verify b-entregue >/dev/null; afirma "a branch fica" $?
 (cd "$T/comcache" && bash "$SCRIPT" --remover "$T/comcache") > "$T/saida2" 2>&1; rc=$?
 [ "$rc" = 1 ] && [ -d "$T/comcache" ]; afirma "nao remove a worktree em que esta rodando" $?
