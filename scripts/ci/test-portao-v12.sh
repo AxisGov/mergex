@@ -182,6 +182,13 @@ for v in false true; do
       || quebra "fora do Git, versionado true: $(mostra)"
   fi
 done
+# entrega de planejamento fora do Git, sem tasks.md: o versionado: false vem antes e e n/a, nao 64
+# (CodeAnt no conselhos-municipais#354)
+entrega false; rm -f "$aux/node.log"
+(cd "$fora" && env GIT_CEILING_DIRECTORIES="$aux" PATH="$aux/sem-node" "$BASH" "$V12" --verificar \
+   --entrega "$aux/ENTREGA.md" --trabalho w -- > "$aux/out" 2> "$aux/err"); rc=$?
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=n/a' ] && tem 'motivo=sem-versionador' \
+  && passa 'fora do Git, versionado: false e sem tasks.md: n/a' || quebra "fora do Git sem tasks.md: $(mostra)"
 # o Git falhou por outro motivo (aqui, GIT_DIR inválido): não é "sem repositório", mesmo com versionado: false
 entrega false; rm -f "$aux/node.log"
 (cd "$fora" && env GIT_CEILING_DIRECTORIES="$aux" GIT_DIR="$aux/nao-existe" PATH="$aux/sem-node" "$BASH" "$V12" --verificar \
