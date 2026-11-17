@@ -1156,8 +1156,8 @@ grupo_hookspath_nulo() {
     || falha "controle: core.hooksPath herdado da máquina"
   d="$t/repo"
   fx_cenario "$d" || { falha "cenário não montou"; return; }
-  # (a) NUL, nul e /dev/null na config local: o pre-push não pode existir ali
-  for v in NUL nul Nul /dev/null; do
+  # (a) NUL, nul e /dev/null na config local, e NUL no meio do caminho (conselhos#346): o pre-push não pode existir ali
+  for v in NUL nul Nul /dev/null NUL/hooks sub/nul/hooks; do
     git -C "$d" config core.hooksPath "$v"
     # a mensagem é conferida na saída de CADA modo; no --instalar, também a
     # parada do E0 (`mergex E0 BLOQUEADO — pre-push`)
