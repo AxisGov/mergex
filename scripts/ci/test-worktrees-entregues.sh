@@ -10,7 +10,9 @@ afirma() { if [ "$2" = 0 ]; then ok=$((ok+1)); printf '  ok    %s\n' "$1"; else 
 
 g() { git -C "$T/r" -c user.name=t -c user.email=t@t "$@"; }
 git init -q --bare "$T/origem.git"
-git init -q -b main "$T/r"; printf 'node_modules/\ndist/\ncoverage/\ndocs/eventos/\n' > "$T/r/.gitignore"; printf 'a\n' > "$T/r/a"
+git init -q -b main "$T/r"; printf 'node_modules/\ndist/\ncoverage/\n.mypy_cache/\ndocs/eventos/\n' > "$T/r/.gitignore"; printf 'a\n' > "$T/r/a"
+# manifestos de build: so com eles ao lado `dist/` e `coverage/` sao saida de build (DM-333)
+mkdir -p "$T/r/packages/p"; printf '{}\n' > "$T/r/package.json"; printf '{}\n' > "$T/r/packages/p/package.json"
 g add .; g commit -q -m base; g remote add origin "$T/origem.git"; g push -q origin main
 
 wt() { # wt <nome> — branch e worktree novos, com um commit
@@ -25,6 +27,9 @@ motivo() { linha "$1" | cut -f2; }
 
 wt entregue; integra entregue
 wt comcache; integra comcache; mkdir -p "$T/comcache/node_modules/x"; printf 'y\n' > "$T/comcache/node_modules/x/y"
+mkdir -p "$T/comcache/.mypy_cache/3.12"; printf 'm\n' > "$T/comcache/.mypy_cache/3.12/m.json"
+# `dist/` numa pasta sem manifesto de build pode ser dado que nao se refaz (CodeAnt no conselhos#350)
+wt distsolta; integra distsolta; mkdir -p "$T/distsolta/dados/dist"; printf 'd\n' > "$T/distsolta/dados/dist/base.csv"
 wt comrastro; integra comrastro; mkdir -p "$T/comrastro/docs/eventos"; printf 'r\n' > "$T/comrastro/docs/eventos/r.jsonl"
 wt comdist; integra comdist; mkdir -p "$T/comdist/dist" "$T/comdist/packages/p/dist" "$T/comdist/coverage"
 printf 'b\n' > "$T/comdist/dist/b"; printf 'b\n' > "$T/comdist/packages/p/dist/b"; printf 'c\n' > "$T/comdist/coverage/c"
@@ -53,6 +58,7 @@ wt comsub; printf '[submodule "x"]\n' > "$T/comsub/.gitmodules"; git -C "$T/coms
 [ "$(estado comrastro)" = bloqueada ] && [ "$(motivo comrastro)" = ignorado ]; afirma "rastro ignorado bloqueia" $?
 [ "$(estado comdist)" = removivel ];    afirma "saida de build e cobertura ignoradas: removivel (DM-331)" $?
 [ "$(estado distrastro)" = bloqueada ] && [ "$(motivo distrastro)" = ignorado ]; afirma "build junto com rastro: o rastro bloqueia" $?
+[ "$(estado distsolta)" = bloqueada ] && [ "$(motivo distsolta)" = ignorado ]; afirma "dist/ sem manifesto de build ao lado bloqueia (DM-333)" $?
 [ "$(estado suja)" = bloqueada ] && [ "$(motivo suja)" = alterada ];            afirma "alteracao rastreada bloqueia" $?
 [ "$(estado nova)" = bloqueada ] && [ "$(motivo nova)" = alterada ];            afirma "arquivo novo bloqueia" $?
 [ "$(estado localonly)" = bloqueada ] && [ "$(motivo localonly)" = nao_entregue ]; afirma "commit fora da base bloqueia" $?
