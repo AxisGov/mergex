@@ -42,6 +42,10 @@ HOOK_GI='# Rastro de eventos expx: local da maquina, nao versionado.\n*\n'
 grep -qF "printf '$HOOK_GI'" "$RAIZ/.claude/hooks/comum/base.sh"; afirma "o teste usa o mesmo .gitignore que o hook grava" $?
 wt rastrovazio; integra rastrovazio; mkdir -p "$T/rastrovazio/docs/eventos"; printf "$HOOK_GI" > "$T/rastrovazio/docs/eventos/.gitignore"
 mkdir -p "$T/rastrovazio/outra/eventos"; printf "$HOOK_GI" | sed 's/$/\r/' > "$T/rastrovazio/outra/eventos/.gitignore"
+# um CR dentro do padrao nao e fim de linha: o .gitignore deixa de ser o do hook (CodeAnt no
+# conselhos-municipais#365)
+wt crdentro; integra crdentro; mkdir -p "$T/crdentro/docs/eventos"
+printf '# Rastro de eventos expx: local da maquina, nao versionado.\n\r*\n' > "$T/crdentro/docs/eventos/.gitignore"
 # so `*`, sem o comentario do hook, foi escrito por alguem: bloqueia (DM-336)
 # um nome com quebra de linha nao vira varios caminhos: os pedacos aqui sao `.gitignore` do hook
 # que existem (o segundo relativo ao diretorio de onde o script roda), e o `.gitignore` escrito a
@@ -111,6 +115,16 @@ grep -qF "removivel	-	$T/donapush	" "$T/saida-relativo"; afirma "chamador relati
 # core.hooksPath dentro de uma worktree: o hook mora nela, e remove-la apagaria o pre-push de
 # todos os checkouts, mesmo com o chamador relativo a raiz (CodeAnt no conselhos#361, DM-338).
 # O hook vem commitado e integrado (a worktree nasce antes do comsub): sem a guarda, seria removivel.
+# Relativo, o hooksPath e de cada checkout: o hook da worktree e so dela, e ela sai (CodeAnt no
+# conselhos-municipais#365)
+g config core.hooksPath .githooks
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-hookrel" 2>&1
+grep -qF "removivel	-	$T/hookdentro	" "$T/saida-hookrel"; afirma "hooksPath relativo: o hook da worktree e so dela e nao a prende" $?
+# o pre-push de fora que e link para dentro da worktree: o --git-path do Git resolve o link (CodeAnt no conselhos-municipais#365)
+mkdir -p "$T/hooks-ext"; ln -s "$T/hookdentro/.githooks/pre-push" "$T/hooks-ext/pre-push"; g config core.hooksPath "$T/hooks-ext"
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-hookext" 2>&1
+grep -qF "bloqueada	validador_do_pre_push	$T/hookdentro	" "$T/saida-hookext"; afirma "pre-push de fora que e link para dentro da worktree: ela e dona e bloqueia" $?
+rm -f "$T/hooks-ext/pre-push"
 g config core.hooksPath "$T/hookdentro/.githooks"
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-hookdentro" 2>&1
 grep -qF "bloqueada	validador_do_pre_push	$T/hookdentro	" "$T/saida-hookdentro"; afirma "hooksPath dentro da worktree: ela e dona do pre-push e bloqueia" $?
@@ -130,6 +144,7 @@ g config --unset core.hooksPath; g worktree remove --force "$T/hookdentro"; g wo
 [ "$(estado distrastro)" = bloqueada ] && [ "$(motivo distrastro)" = ignorado ]; afirma "build junto com rastro: o rastro bloqueia" $?
 [ "$(estado distsolta)" = bloqueada ] && [ "$(motivo distsolta)" = ignorado ]; afirma "dist/ sem manifesto de build ao lado bloqueia (DM-333)" $?
 [ "$(estado rastrovazio)" = removivel ]; afirma "docs/eventos/ so com o .gitignore do hook: removivel" $?
+[ "$(estado crdentro)" = bloqueada ] && [ "$(motivo crdentro)" = ignorado ]; afirma ".gitignore com CR dentro do padrao nao e o do hook: bloqueia" $?
 [ "$(estado gitignoreproprio)" = bloqueada ] && [ "$(motivo gitignoreproprio)" = ignorado ]; afirma ".gitignore com outro conteudo que o do hook bloqueia" $?
 [ "$(estado nlnome)" = bloqueada ] && [ "$(motivo nlnome)" = ignorado ]; afirma "nome com quebra de linha na pasta ignorada bloqueia" $?
 [ "$(estado soestrela)" = bloqueada ] && [ "$(motivo soestrela)" = ignorado ]; afirma ".gitignore so com '*', sem o comentario do hook, bloqueia (DM-336)" $?
