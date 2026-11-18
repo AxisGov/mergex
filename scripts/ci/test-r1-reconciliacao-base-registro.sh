@@ -837,6 +837,15 @@ EOF
   cd "$d" || return
   reprova "merge anterior ao E0 que editou o caminho por conta própria: a prova 2 o conta" 4 "prova 2: $FX_NOVO1" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
+  # o merge da branch do plano, anterior à abertura do E0, fora da base e sem
+  # trailer, não trava a fila do 001: não é reconciliação (conselhos-municipais#359)
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_plano_pre_e0 fx_cenario "$d" || { falha "merge_plano_pre_e0 não montou"; return; }
+  cd "$d" || return
+  q="$(git rev-list --first-parent --merges "$FX_B0..$FX_P1")"
+  [ -n "$q" ] && ! git merge-base --is-ancestor "$q^2" "$FX_B0" \
+    && ok "controle: um merge do plano anterior ao E0, com o segundo pai fora da base" || falha "controle: merge_plano_pre_e0 sem o merge do plano"
+  registra_ok "merge do plano anterior ao E0: fora da fila" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
   # o merge "sem efeito" de um commit antigo da base, já contido na feature, não
   # trouxe base nenhuma: a reversão que ele faz é da feature, e ele não sai da
   # fila nem da prova 2 (CodeAnt no mergex#87)
