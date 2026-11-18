@@ -127,7 +127,13 @@ dona_do_pre_push() {
   # desta worktree, e removê-la não tira o de ninguém (CodeAnt no mergex#107 e no
   # conselhos-municipais#365).
   hp="$(git -C "$c" config --get core.hooksPath 2>/dev/null)" || hp=""
-  case "$hp" in ''|/*|[A-Za-z]:/*|'~'*) ;; *) return 1 ;; esac
+  # Com `..`, o relativo pode levar todos os checkouts à mesma pasta dentro de uma
+  # worktree (`../dona/.githooks`): esse segue para as conferências abaixo (CodeAnt no
+  # mergex#109).
+  case "$hp" in
+    ''|/*|[A-Za-z]:/*|'~'*) ;;
+    *) case "/$hp/" in */../*) ;; *) return 1 ;; esac ;;
+  esac
   cfis="$(cd -P -- "$c" 2>/dev/null && pwd -P)" || cfis="$c"
   hookfis="$(cd -P -- "${hook%/*}" 2>/dev/null && pwd -P)" || hookfis="${hook%/*}"
   # core.hooksPath é compartilhado pelas worktrees: se o próprio chamador mora

@@ -120,6 +120,10 @@ grep -qF "removivel	-	$T/donapush	" "$T/saida-relativo"; afirma "chamador relati
 g config core.hooksPath .githooks
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-hookrel" 2>&1
 grep -qF "removivel	-	$T/hookdentro	" "$T/saida-hookrel"; afirma "hooksPath relativo: o hook da worktree e so dela e nao a prende" $?
+# relativo com `..`: todos os checkouts caem na mesma pasta dentro da worktree (CodeAnt no mergex#109)
+g config core.hooksPath ../hookdentro/.githooks
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-hookrel" 2>&1
+grep -qF "bloqueada	validador_do_pre_push	$T/hookdentro	" "$T/saida-hookrel"; afirma "hooksPath relativo com ..: a pasta comum na worktree a prende" $?
 # o pre-push de fora que e link para dentro da worktree: o --git-path do Git resolve o link (CodeAnt no conselhos-municipais#365)
 mkdir -p "$T/hooks-ext"; ln -s "$T/hookdentro/.githooks/pre-push" "$T/hooks-ext/pre-push"; g config core.hooksPath "$T/hooks-ext"
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-hookext" 2>&1
