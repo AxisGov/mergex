@@ -54,6 +54,7 @@
 # Bash 3.2 (macOS): nada de mapfile, arrays associativos ou ${v,,}.
 
 set -uo pipefail
+set +C # noclobber herdado (BASH_ENV, SHELLOPTS) quebra as escritas que substituem arquivo (CodeAnt no sprintx#89)
 
 uso() {
   [ -z "${1:-}" ] || printf 'entrega-de-planejamento: %s\n' "$1" >&2
@@ -153,7 +154,7 @@ case "$ACAO" in
     while :; do
       if mkdir "$LOCK_DIR" 2>/dev/null; then
         if ( set -C; : > "$LOCK_DIR/.dono" ) 2>/dev/null; then
-          if printf '%s\n' "$$" > "$LOCK_DIR/.dono" 2>/dev/null; then
+          if printf '%s\n' "$$" >| "$LOCK_DIR/.dono" 2>/dev/null; then
             break
           fi
           rm -f -- "$LOCK_DIR/.dono"
