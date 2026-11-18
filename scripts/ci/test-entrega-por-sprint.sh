@@ -631,6 +631,33 @@ mkdir "$aux/sp9-aspas.md.lock"; printf '1\n' > "$aux/sp9-aspas.md.lock/.dono"; c
 [ "$rc" != 0 ] && grep -q 'entrega ocupada' "$aux/err" && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
 confere 'trava do ENTREGA.md ocupada: recusa e nao grava' $?
 rm -rf "$aux/sp9-aspas.md.lock"
+# a marca que nao se cria, sem outra marca na pasta, nao deixa a pasta orfa; a escrita do PID que
+# falha depois da marca criada tambem nao (CodeAnt no conselhos-municipais#356, DM-336)
+if [ "$(id -u)" != 0 ]; then
+  mkdir -p "$aux/shim-mkdir"
+  printf '%s\n' '#!/usr/bin/env bash' 'command -p mkdir "$@" || exit $?' \
+    'for a; do case "$a" in *.lock) chmod 555 "$a" ;; esac; done' > "$aux/shim-mkdir/mkdir"
+  chmod +x "$aux/shim-mkdir/mkdir"
+  (cd "$aux/sp9" && PATH="$aux/shim-mkdir:$PATH" bash "$leitor" --abrir-sprint 02 \
+    --base-validada-sha 1111111111111111111111111111111111111111 --entrega "$aux/sp9-aspas.md") >"$aux/out" 2>"$aux/err"; rc=$?
+  [ "$rc" != 0 ] && [ ! -e "$aux/sp9-aspas.md.lock" ] && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
+  confere 'trava do ENTREGA.md: marca que nao se cria sem outra marca tira a pasta' $?
+  chmod -R u+rwx "$aux/sp9-aspas.md.lock" 2>/dev/null; rm -rf "$aux/sp9-aspas.md.lock"
+else
+  echo "  (root ignora permissao: caso da marca que nao se cria pulado)"
+fi
+(cd "$aux/sp9" && trap '' XFSZ && ulimit -f 0 && bash "$leitor" --abrir-sprint 02 \
+  --base-validada-sha 1111111111111111111111111111111111111111 --entrega "$aux/sp9-aspas.md") >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" != 0 ] && [ ! -e "$aux/sp9-aspas.md.lock" ] && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
+confere 'trava do ENTREGA.md: PID que nao se escreve tira a marca e a pasta' $?
+# noclobber herdado (`set -C`) nao impede a escrita do PID na marca recem-criada (CodeAnt no sprintx#89)
+cp "$e" "$aux/sp9-noclobber.md"; printf 'set -C\n' > "$aux/noclobber.env"
+(cd "$aux/sp9" && BASH_ENV="$aux/noclobber.env" bash "$leitor" --abrir-sprint 01 \
+  --base-validada-sha 1111111111111111111111111111111111111111 --entrega "$aux/sp9-noclobber.md") >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" = 0 ] && [ ! -e "$aux/sp9-noclobber.md.lock" ]
+r=$?; [ "$r" = 0 ] || sed -n 1,5p "$aux/err"
+confere 'trava do ENTREGA.md: noclobber herdado adquire e solta a trava' $r
+rm -rf "$aux/sp9-aspas.md.lock"
 abre "$aux/sp9" 01
 grep -qx 'origem_base: registrada_e0' "$e" && grep -qx "base_validada_sha: $b9" "$e" && grep -q 'PR da sprint 01' "$aux/e0s.err"
 confere 'sem planejamento: a sprint 01 abre na base do E0, sem reancorar (registrada_e0)' $?

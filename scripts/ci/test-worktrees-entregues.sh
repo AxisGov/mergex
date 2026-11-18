@@ -35,14 +35,31 @@ wt comdist; integra comdist; mkdir -p "$T/comdist/dist" "$T/comdist/packages/p/d
 printf 'b\n' > "$T/comdist/dist/b"; printf 'b\n' > "$T/comdist/packages/p/dist/b"; printf 'c\n' > "$T/comdist/coverage/c"
 wt distrastro; integra distrastro; mkdir -p "$T/distrastro/dist" "$T/distrastro/docs/eventos"
 printf 'b\n' > "$T/distrastro/dist/b"; printf 'r\n' > "$T/distrastro/docs/eventos/r.jsonl"
-# docs/eventos/ so com o `.gitignore` que o hook grava, sem rastro nenhum (login, depois do DM-331)
-wt rastrovazio; integra rastrovazio; mkdir -p "$T/rastrovazio/docs/eventos"; printf '*\n' > "$T/rastrovazio/docs/eventos/.gitignore"
-mkdir -p "$T/rastrovazio/outra/eventos"; printf '*\n' > "$T/rastrovazio/outra/eventos/.gitignore"
+# docs/eventos/ so com o `.gitignore` que o hook grava, sem rastro nenhum (login, depois do DM-331).
+# O conteudo e o que o hook grava de verdade (.claude/hooks/comum/base.sh), nao so `*`: o teste com
+# `*` passava enquanto o docs/eventos/ real bloqueava (CodeAnt no conselhos-municipais#356, DM-336)
+HOOK_GI='# Rastro de eventos expx: local da maquina, nao versionado.\n*\n'
+grep -qF "printf '$HOOK_GI'" "$RAIZ/.claude/hooks/comum/base.sh"; afirma "o teste usa o mesmo .gitignore que o hook grava" $?
+wt rastrovazio; integra rastrovazio; mkdir -p "$T/rastrovazio/docs/eventos"; printf "$HOOK_GI" > "$T/rastrovazio/docs/eventos/.gitignore"
+mkdir -p "$T/rastrovazio/outra/eventos"; printf "$HOOK_GI" | sed 's/$/\r/' > "$T/rastrovazio/outra/eventos/.gitignore"
+# so `*`, sem o comentario do hook, foi escrito por alguem: bloqueia (DM-336)
+# um nome com quebra de linha nao vira varios caminhos: os pedacos aqui sao `.gitignore` do hook
+# que existem (o segundo relativo ao diretorio de onde o script roda), e o `.gitignore` escrito a
+# mao dentro da pasta sairia junto (CodeAnt no login#101)
+wt nlnome; integra nlnome; mkdir -p "$T/nlnome/docs/eventos/.gitignore
+sub" "$T/r/sub"; printf "$HOOK_GI" > "$T/nlnome/docs/eventos/.gitignore"; printf "$HOOK_GI" > "$T/r/sub/.gitignore"
+printf 'regras do time\n' > "$T/nlnome/docs/eventos/.gitignore
+sub/.gitignore"
+wt soestrela; integra soestrela; mkdir -p "$T/soestrela/outra/eventos"; printf '*\n' > "$T/soestrela/outra/eventos/.gitignore"
 # .gitignore escrito por alguem (outro conteudo) bloqueia; o find que nao le a pasta tambem (conselhos#354)
 wt gitignoreproprio; integra gitignoreproprio; mkdir -p "$T/gitignoreproprio/outra/notas"
 printf '*\n# regras do time: manter\n' > "$T/gitignoreproprio/outra/notas/.gitignore"
 wt donapush; integra donapush # antes do comsub: o .gitmodules integrado iria para ela
-wt pastafechada; integra pastafechada; mkdir -p "$T/pastafechada/docs/eventos/sub"; printf '*\n' > "$T/pastafechada/docs/eventos/.gitignore"
+# a dona com `\` literal no nome (o validador dela e gravado com `printf '%q'`, login#101)
+g worktree add -q -b b-donabarra "$T/dona\\barra" main
+printf 'x\n' > "$T/dona\\barra/f-donabarra"; git -C "$T/dona\\barra" add .
+git -C "$T/dona\\barra" -c user.name=t -c user.email=t@t commit -q -m donabarra; integra donabarra
+wt pastafechada; integra pastafechada; mkdir -p "$T/pastafechada/docs/eventos/sub"; printf "$HOOK_GI" > "$T/pastafechada/docs/eventos/.gitignore"
 printf 'r\n' > "$T/pastafechada/docs/eventos/sub/r.jsonl"; chmod 000 "$T/pastafechada/docs/eventos/sub"
 wt suja; integra suja; printf 'b\n' >> "$T/suja/a"
 wt nova; integra nova; printf 'n\n' > "$T/nova/novo.txt"
@@ -69,6 +86,17 @@ case "$HK" in "$T"/*) ;; *) echo "FALHA diretorio de hooks fora do teste: $HK" >
 printf '#!/usr/bin/env bash\n# mergex: chamador gerenciado\nMERGEX_PORTAO_PUSH=%s\n' "$T/donapush/.claude/skills/mergex/scripts/portao-push.sh" > "$HK"
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida" 2>&1; rc=$?
 cp "$T/saida" "$T/saida-com-hook"
+# o caminho vem do `printf '%q'` do --instalar: o `\` literal se desfaz certo, e a forma `$'...'`
+# (quebra de linha) bloqueia na duvida (CodeAnt no login#101)
+printf '#!/usr/bin/env bash\n# mergex: chamador gerenciado\nMERGEX_PORTAO_PUSH=%s\n' "$(printf '%q' "$T/dona\\barra/.claude/skills/mergex/scripts/portao-push.sh")" > "$HK"
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-barra" 2>&1
+grep -qF "bloqueada	validador_do_pre_push	$T/dona\\barra	" "$T/saida-barra"; afirma "validador com \\ literal no caminho: a worktree dona bloqueia" $?
+printf '#!/usr/bin/env bash\n# mergex: chamador gerenciado\nMERGEX_PORTAO_PUSH=%s\n' "$(printf '%q' "$T/dona
+nl/portao-push.sh")" > "$HK"
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-nl" 2>&1
+grep -qF "bloqueada	validador_do_pre_push	$T/dona\\barra	" "$T/saida-nl"; afirma "validador com quebra de linha no caminho: na duvida bloqueia" $?
+g worktree remove --force "$T/dona\\barra"
+printf '#!/usr/bin/env bash\n# mergex: chamador gerenciado\nMERGEX_PORTAO_PUSH=%s\n' "$T/donapush/.claude/skills/mergex/scripts/portao-push.sh" > "$HK"
 printf '#!/usr/bin/env bash\nMERGEX_PORTAO_PUSH="$MERGEX_RAIZ"/.claude/skills/mergex/scripts/portao-push.sh\n' > "$HK"
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-relativo" 2>&1; rm -f "$HK"; g config --unset core.hooksPath
 grep -qF "removivel	-	$T/donapush	" "$T/saida-relativo"; afirma "chamador relativo a raiz nao prende worktree" $?
@@ -82,6 +110,8 @@ grep -qF "removivel	-	$T/donapush	" "$T/saida-relativo"; afirma "chamador relati
 [ "$(estado distsolta)" = bloqueada ] && [ "$(motivo distsolta)" = ignorado ]; afirma "dist/ sem manifesto de build ao lado bloqueia (DM-333)" $?
 [ "$(estado rastrovazio)" = removivel ]; afirma "docs/eventos/ so com o .gitignore do hook: removivel" $?
 [ "$(estado gitignoreproprio)" = bloqueada ] && [ "$(motivo gitignoreproprio)" = ignorado ]; afirma ".gitignore com outro conteudo que o do hook bloqueia" $?
+[ "$(estado nlnome)" = bloqueada ] && [ "$(motivo nlnome)" = ignorado ]; afirma "nome com quebra de linha na pasta ignorada bloqueia" $?
+[ "$(estado soestrela)" = bloqueada ] && [ "$(motivo soestrela)" = ignorado ]; afirma ".gitignore so com '*', sem o comentario do hook, bloqueia (DM-336)" $?
 [ "$(estado donapush)" = bloqueada ] && [ "$(motivo donapush)" = validador_do_pre_push ]; afirma "worktree dona do validador do pre-push instalado bloqueia" $?
 [ "$(estado entregue)" = removivel ]; afirma "com o mesmo pre-push, as outras worktrees continuam removiveis" $?
 if [ "$(id -u)" != 0 ] && ! ls "$T/pastafechada/docs/eventos/sub" >/dev/null 2>&1; then
