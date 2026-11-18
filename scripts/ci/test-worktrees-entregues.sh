@@ -158,6 +158,22 @@ printf '#!/bin/sh\ncase "$*" in *"worktree list"*) "%s" "$@"; exit 1;; esac\nexe
 (cd "$T/r" && bash "$SCRIPT" --remover "$T/comdist") > "$T/saida2" 2>&1; rc=$?
 [ "$rc" = 0 ] && [ ! -d "$T/comdist" ]; afirma "--remover remove a worktree com dist/ e coverage/" $?
 g rev-parse -q --verify b-entregue >/dev/null; afirma "a branch fica" $?
+# O Git for Windows tira a worktree do registro e deixa a pasta com as junctions do node_modules
+# dos workspaces, pendentes (login, depois da 0.14.13). O shim refaz essa casca depois do remove
+# real: um link pendente e um vivo, para um destino fora que nao pode ser seguido
+mkdir -p "$T/fora"; printf 'dado\n' > "$T/fora/importante"
+printf '%s\n' '#!/bin/sh' "\"$(command -v git)\" \"\$@\" || exit \$?" \
+  'case "$*" in *"worktree remove"*) eval "c=\${$#}"' \
+  '  mkdir -p "$c/node_modules/@a" && ln -s "$c/packages/p" "$c/node_modules/@a/pend" && ln -s "$FORA" "$c/node_modules/viva"' \
+  '  [ -z "${SOBRA:-}" ] || printf "x\n" > "$c/node_modules/$SOBRA" ;; esac' > "$T/shim/git"
+chmod +x "$T/shim/git"
+(cd "$T/r" && FORA="$T/fora" PATH="$T/shim:$PATH" bash "$SCRIPT" --remover "$T/rastrovazio") > "$T/saida2" 2>&1; rc=$?
+[ "$rc" = 0 ] && [ ! -e "$T/rastrovazio" ] && [ "$(cat "$T/fora/importante")" = dado ] && grep -qx "removida: $T/rastrovazio" "$T/saida2"
+afirma "--remover tira a casca de links pendentes que o Git deixa, sem seguir o link vivo" $?
+(cd "$T/r" && FORA="$T/fora" SOBRA=anotacao.txt PATH="$T/shim:$PATH" bash "$SCRIPT" --remover "$T/com espaco") > "$T/saida2" 2>&1; rc=$?
+[ "$rc" = 1 ] && [ -f "$T/com espaco/node_modules/anotacao.txt" ] && [ -L "$T/com espaco/node_modules/viva" ] \
+  && grep -qF "  $T/com espaco/node_modules/anotacao.txt" "$T/saida2" && ! grep -q '^removida' "$T/saida2"
+afirma "--remover com arquivo comum na sobra para e mostra o caminho, sem apagar nada" $?
 (cd "$T/comcache" && bash "$SCRIPT" --remover "$T/comcache") > "$T/saida2" 2>&1; rc=$?
 [ "$rc" = 1 ] && [ -d "$T/comcache" ]; afirma "nao remove a worktree em que esta rodando" $?
 
