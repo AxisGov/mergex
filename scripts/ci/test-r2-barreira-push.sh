@@ -864,6 +864,9 @@ grupo_ativacao() {
 
   # ---- instalação e idempotência ------------------------------------------------
   lista1="$(ls -A "$h" | grep -vx pre-push)"
+  # o <id> da entrega e um diretorio so: o `*` do case casava `/` (CodeAnt no conselhos-municipais#360)
+  atv_espera "--entrega com <id> em dois niveis e uso, sem instalar" 64 "$d" --instalar docs/entregas/a/b/ENTREGA.md
+  [ ! -e "$hk" ] && ok "controle: o uso recusado nao instalou o pre-push" || falha "uso recusado instalou o pre-push"
   atv_espera "instala sem pre-push (E0 sai 0)" 0 "$d" --instalar
   [ -f "$hk" ] && [ -x "$hk" ] && grep -Fxq '# mergex: pre-push gerenciado' "$hk" \
     && ok "instala o chamador gerenciado, executável e com o marcador" || falha "chamador gerenciado não instalado em $hk"
