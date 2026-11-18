@@ -658,6 +658,18 @@ chmod +x "$aux/shim-term/mkdir"
 [ "$rc" = 143 ] && [ ! -e "$aux/sp9-aspas.md.lock" ] && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
 confere 'trava do ENTREGA.md: TERM entre o mkdir e a marca nao deixa trava orfa' $?
 rm -rf "$aux/sp9-aspas.md.lock"
+# a marca nasce no proprio shell, que anota o sinal; o subshell morreria antes da posse
+# (CodeAnt no conselhos-municipais#365)
+! grep -qF '( set -C; : > "$LOCK_DIR/.dono" )' "$leitor"
+confere 'trava do ENTREGA.md: a marca nao nasce num subshell' $?
+# um link no nome previsivel do temporario nao e seguido: o `exec` mantem o PID que o script
+# usa no nome (CodeAnt no conselhos-municipais#365)
+sed "s/^base_validada_sha: .*/base_validada_sha: \"$b9\"/" "$e" > "$aux/sp9-t5.md"; printf 'intacto\n' > "$aux/alvo-t5"
+(cd "$aux/sp9" && bash -c 'ln -s "$1" "$2.tmp.$$" && exec bash "$3" --abrir-sprint 01 --base-validada-sha 1111111111111111111111111111111111111111 --entrega "$2"' \
+  _ "$aux/alvo-t5" "$aux/sp9-t5.md" "$leitor") >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" != 0 ] && [ "$(cat "$aux/alvo-t5")" = intacto ] && [ ! -L "$aux/sp9-t5.md" ]
+confere 'temporario do ENTREGA.md: link no nome previsivel nao e seguido' $?
+rm -f "$aux"/sp9-t5.md* "$aux/alvo-t5"
 (cd "$aux/sp9" && trap '' XFSZ && ulimit -f 0 && bash "$leitor" --abrir-sprint 02 \
   --base-validada-sha 1111111111111111111111111111111111111111 --entrega "$aux/sp9-aspas.md") >"$aux/out" 2>"$aux/err"; rc=$?
 [ "$rc" != 0 ] && [ ! -e "$aux/sp9-aspas.md.lock" ] && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
