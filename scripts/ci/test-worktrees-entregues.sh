@@ -55,6 +55,14 @@ wt soestrela; integra soestrela; mkdir -p "$T/soestrela/outra/eventos"; printf '
 wt gitignoreproprio; integra gitignoreproprio; mkdir -p "$T/gitignoreproprio/outra/notas"
 printf '*\n# regras do time: manter\n' > "$T/gitignoreproprio/outra/notas/.gitignore"
 wt donapush; integra donapush # antes do comsub: o .gitmodules integrado iria para ela
+# a worktree que guarda o diretorio de hooks (core.hooksPath dentro dela, DM-338)
+g worktree add -q -b b-hookdentro "$T/hookdentro" main; mkdir -p "$T/hookdentro/.githooks"
+printf '#!/usr/bin/env bash\nMERGEX_PORTAO_PUSH="$MERGEX_RAIZ"/.claude/skills/mergex/scripts/portao-push.sh\n' > "$T/hookdentro/.githooks/pre-push"
+git -C "$T/hookdentro" add .; git -C "$T/hookdentro" -c user.name=t -c user.email=t@t commit -q -m hookdentro; integra hookdentro
+# a worktree com um link para o diretorio de hooks de fora (CodeAnt no mergex#107)
+mkdir -p "$T/hooks-fora"; printf '#!/usr/bin/env bash\nMERGEX_PORTAO_PUSH="$MERGEX_RAIZ"/.claude/skills/mergex/scripts/portao-push.sh\n' > "$T/hooks-fora/pre-push"
+g worktree add -q -b b-hooklink "$T/hooklink" main; ln -s "$T/hooks-fora" "$T/hooklink/.hooks-link"
+git -C "$T/hooklink" add .; git -C "$T/hooklink" -c user.name=t -c user.email=t@t commit -q -m hooklink; integra hooklink
 # a dona com `\` literal no nome (o validador dela e gravado com `printf '%q'`, login#101)
 g worktree add -q -b b-donabarra "$T/dona\\barra" main
 printf 'x\n' > "$T/dona\\barra/f-donabarra"; git -C "$T/dona\\barra" add .
@@ -100,6 +108,19 @@ printf '#!/usr/bin/env bash\n# mergex: chamador gerenciado\nMERGEX_PORTAO_PUSH=%
 printf '#!/usr/bin/env bash\nMERGEX_PORTAO_PUSH="$MERGEX_RAIZ"/.claude/skills/mergex/scripts/portao-push.sh\n' > "$HK"
 (cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-relativo" 2>&1; rm -f "$HK"; g config --unset core.hooksPath
 grep -qF "removivel	-	$T/donapush	" "$T/saida-relativo"; afirma "chamador relativo a raiz nao prende worktree" $?
+# core.hooksPath dentro de uma worktree: o hook mora nela, e remove-la apagaria o pre-push de
+# todos os checkouts, mesmo com o chamador relativo a raiz (CodeAnt no conselhos#361, DM-338).
+# O hook vem commitado e integrado (a worktree nasce antes do comsub): sem a guarda, seria removivel.
+g config core.hooksPath "$T/hookdentro/.githooks"
+(cd "$T/r" && bash "$SCRIPT" --listar) > "$T/saida-hookdentro" 2>&1
+grep -qF "bloqueada	validador_do_pre_push	$T/hookdentro	" "$T/saida-hookdentro"; afirma "hooksPath dentro da worktree: ela e dona do pre-push e bloqueia" $?
+(cd "$T/r" && bash "$SCRIPT" --remover "$T/hookdentro") > "$T/saida2" 2>&1; rc_hd=$?
+[ "$rc_hd" = 1 ] && [ -f "$T/hookdentro/.githooks/pre-push" ]; afirma "--remover nao apaga o pre-push que mora na worktree" $?
+g config core.hooksPath "$T/hooklink/.hooks-link"
+(cd "$T/r" && bash "$SCRIPT" --remover "$T/hooklink") > "$T/saida2" 2>&1; rc_hd=$?
+[ "$rc_hd" = 1 ] && [ -L "$T/hooklink/.hooks-link" ] && grep -qF validador_do_pre_push "$T/saida2"
+afirma "hooksPath por link dentro da worktree para fora: ela e dona e o --remover para" $?
+g config --unset core.hooksPath; g worktree remove --force "$T/hookdentro"; g worktree remove --force "$T/hooklink"
 
 [ "$rc" = 0 ];                          afirma "listar sai 0" $?
 [ "$(estado entregue)" = removivel ];   afirma "entregue e limpa: removivel" $?

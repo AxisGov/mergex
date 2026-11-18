@@ -646,6 +646,18 @@ if [ "$(id -u)" != 0 ]; then
 else
   echo "  (root ignora permissao: caso da marca que nao se cria pulado)"
 fi
+# o TERM que chega logo depois do mkdir, antes da marca com o PID, nao deixa a trava orfa: o
+# sinal fica anotado, vale depois da posse e a saida solta a trava (CodeAnt no
+# conselhos-municipais#361, DM-338)
+mkdir -p "$aux/shim-term"
+printf '%s\n' '#!/usr/bin/env bash' 'command -p mkdir "$@" || exit $?' \
+  'for a; do case "$a" in *.lock) kill -TERM "$PPID" ;; esac; done' > "$aux/shim-term/mkdir"
+chmod +x "$aux/shim-term/mkdir"
+(cd "$aux/sp9" && PATH="$aux/shim-term:$PATH" bash "$leitor" --abrir-sprint 02 \
+  --base-validada-sha 1111111111111111111111111111111111111111 --entrega "$aux/sp9-aspas.md") >"$aux/out" 2>"$aux/err"; rc=$?
+[ "$rc" = 143 ] && [ ! -e "$aux/sp9-aspas.md.lock" ] && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
+confere 'trava do ENTREGA.md: TERM entre o mkdir e a marca nao deixa trava orfa' $?
+rm -rf "$aux/sp9-aspas.md.lock"
 (cd "$aux/sp9" && trap '' XFSZ && ulimit -f 0 && bash "$leitor" --abrir-sprint 02 \
   --base-validada-sha 1111111111111111111111111111111111111111 --entrega "$aux/sp9-aspas.md") >"$aux/out" 2>"$aux/err"; rc=$?
 [ "$rc" != 0 ] && [ ! -e "$aux/sp9-aspas.md.lock" ] && [ "$(cksum < "$aux/sp9-aspas.md")" = "$ck" ]
