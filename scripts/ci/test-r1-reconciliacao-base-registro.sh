@@ -846,6 +846,15 @@ EOF
     && ok "controle: um merge do plano anterior ao E0, com o segundo pai fora da base" || falha "controle: merge_plano_pre_e0 sem o merge do plano"
   registra_ok "merge do plano anterior ao E0: fora da fila" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
+  # a primeira sprint reancorada depois do PR de planejamento grava registrada_sprint
+  # (DM-261): a abertura também se acha, e o merge anterior a ela sai da fila
+  # (CodeAnt no conselhos-municipais#368, DM-341)
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_plano_pre_sprint fx_cenario "$d" || { falha "merge_plano_pre_sprint não montou"; return; }
+  cd "$d" || return
+  grep -qx 'origem_base: registrada_sprint' docs/entregas/ft-rec/ENTREGA.md \
+    && ok "controle: a entrega da primeira sprint tem origem_base registrada_sprint" || falha "controle: merge_plano_pre_sprint sem registrada_sprint"
+  registra_ok "merge do plano anterior à reancoragem da sprint: fora da fila" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
   # o merge "sem efeito" de um commit antigo da base, já contido na feature, não
   # trouxe base nenhuma: a reversão que ele faz é da feature, e ele não sai da
   # fila nem da prova 2 (CodeAnt no mergex#87)
