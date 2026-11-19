@@ -871,6 +871,24 @@ EOF
     falha "controle: o blob do ENTREGA.md mais antigo não é solto nem único ($blob)"
   fi
   cd "$REPO" || return
+  # o rev-list da busca da abertura que entrega parte da lista e falha (árvore ilegível no
+  # meio): a busca não para num commit mais novo, o registro para (CodeAnt no
+  # conselhos-municipais#373, DM-344)
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_plano_pre_e0 fx_cenario "$d" || { falha "merge_plano_pre_e0 (rev-list) não montou"; return; }
+  cd "$d" || return
+  local shim_rl git_real r_sav
+  shim_rl="$(mktemp -d)"; TMPS+=("$shim_rl")
+  git_real="$(command -v git)"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    "case \" \$* \" in *' rev-list --first-parent '*'$FX_ENTREGA'*) \"$git_real\" \"\$@\" | sed -n 1p; exit 128 ;; esac" \
+    "exec \"$git_real\" \"\$@\"" > "$shim_rl/git"
+  chmod +x "$shim_rl/git"
+  [ "$(git rev-list --first-parent "$FX_M^1" -- "$FX_ENTREGA" | grep -c .)" -ge 2 ] \
+    && ok "controle: a busca da abertura tem mais de um commit para o shim cortar" || falha "controle: a busca da abertura tem um commit só"
+  r_sav=("${r[@]}"); r=(env PATH="$shim_rl:$PATH" "${r_sav[@]}")
+  reprova "rev-list da busca da abertura que falha no meio: o registro para" 4 "estrutura[ordem]: histórico do ENTREGA.md ilegível" "$FX_NOVO1" "$FX_NOVO2"
+  r=("${r_sav[@]}")
+  cd "$REPO" || return
   # uma pasta com o nome do ENTREGA.md num commit antigo não é blob ilegível: a busca
   # acaba ali e o registro segue (CodeAnt no mergex#111)
   d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_plano_pasta_entrega fx_cenario "$d" || { falha "merge_plano_pasta_entrega não montou"; return; }
