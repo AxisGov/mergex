@@ -376,6 +376,12 @@ repo_atualizado() {
   g -C "$d" switch -q main
   g -C "$d" merge -q --no-ff --no-edit feature/plan
   m="$(git -C "$d" rev-parse HEAD)"
+  # `avancada`: a main anda depois do merge do planejamento, sem tocar a pasta, antes
+  # do Update branch: o 2º pai do merge descende do descontado (conselhos-municipais#367)
+  if [ "${2:-}" = avancada ]; then
+    printf 'u
+' > "$d/src/u.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'main anda depois do planejamento'
+  fi
   g -C "$d" switch -q lateral
   g -C "$d" merge -q --no-edit main
   if [ "${2:-}" = maligno ]; then
@@ -399,6 +405,19 @@ e0r "$aux/s1w"; reancora "$aux/s1w"; sprint1 "$aux/s1w"
 v9 "$aux/s1w"
 [ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out" && grep -qx 'origem_base=registrada_sprint' "$aux/v9.out"
 confere 'V9 com o merge do Update branch de um PR lateral na base: passa (DM-309)' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
+# o Update branch traz a main que já andou depois do planejamento: o pai do merge
+# descende do descontado, com a mesma pasta e a mesma entrega (conselhos-municipais#367, DM-343)
+repo_atualizado "$aux/s1v" avancada
+up="$(git -C "$aux/s1v" rev-parse lateral)"
+m_v="$(git -C "$aux/s1v" rev-parse "$up^2")"
+[ -z "$(git -C "$aux/s1v" diff "$m_v" "$up" -- docs/sprintx/features/plan docs/entregas/plan)" ]   && git -C "$aux/s1v" cat-file -e "$m_v:src/u.ts"
+confere 'controle: o 2o pai do Update branch e a main depois do planejamento, com a mesma pasta' $?
+e0r "$aux/s1v"; reancora "$aux/s1v"; sprint1 "$aux/s1v"
+v9 "$aux/s1v"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out" && grep -qx 'origem_base=registrada_sprint' "$aux/v9.out"
+confere 'V9 com o Update branch da main que andou depois do planejamento: passa (DM-343)' $?
 [ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
 
 repo_atualizado "$aux/s1x" maligno
