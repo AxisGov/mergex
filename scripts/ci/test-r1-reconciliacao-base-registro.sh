@@ -569,7 +569,10 @@ grupo_provas() {
 
   # Artefato legítimo da SprintX criado antes da reconciliação: integrações de
   # base pós-E8 não podem confundi-lo com produto fora do plano. O catálogo
-  # continua fechado: um nome arbitrário na mesma pasta segue reprovado.
+  # continua fechado, mas o inventário aceita o arquivo da pasta do trabalho que
+  # o merge trouxe de P1 sem mudança, como a V9 (DM-345): o nome arbitrário
+  # vindo da feature passa; o criado ou alterado pelo merge segue reprovado
+  # (merge_area_base e grupo_pasta_do_trabalho).
   d="$(mktemp -d)"; TMPS+=("$d")
   FX_VARIANTE=preflight_metodo fx_cenario "$d" || { falha "cenário com PREFLIGHT.md não montou"; return; }
   cd "$d" || return
@@ -584,8 +587,10 @@ grupo_provas() {
   FX_VARIANTE=preflight_e_arbitrario fx_cenario "$d" || { falha "cenário com arquivo arbitrário não montou"; return; }
   cd "$d" || return
   r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
-  reprova "arquivo arbitrário ao lado de PREFLIGHT.md continua fora do catálogo" 4 \
-    "inventário: docs/sprintx/features/ft-rec/RASCUNHO.md" "$FX_NOVO1" "$FX_NOVO2"
+  registra_ok "arquivo arbitrário da pasta vindo de P1 passa pelo inventário (DM-345)" "$FX_NOVO1" "$FX_NOVO2"
+  grep -q 'RASCUNHO.md' docs/entregas/ft-rec/RECONCILIACAO-BASE-001.md \
+    && falha "RASCUNHO.md entrou no artefato como reconciliado" || ok "RASCUNHO.md não vira caminho reconciliado"
+  desfaz
   cd "$REPO" || return
 
   local rce
