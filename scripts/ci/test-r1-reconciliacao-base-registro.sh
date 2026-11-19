@@ -1031,6 +1031,18 @@ grupo_pasta_do_trabalho() {
   reprova "pasta do trabalho alterada pelo merge" 4 "inventário: $p/00-INDICE.md" "$FX_NOVO1" "$FX_NOVO2"
   cd "$REPO" || return
 
+  # A base alterou o arquivo entre B0 e B1 e o merge ficou com o lado da
+  # feature: M igual a P1 não basta, a mudança da base sumiria sem revisão
+  # (CodeAnt no mergex#113).
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$p/00-INDICE.md" FX_VARIANTE=evidencia_base_alterou fx_cenario "$d" || { falha "cenário base alterou não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  git cat-file -e "$FX_B1:$p/00-INDICE.md" && ok "controle: a base tem o índice em B1" || falha "controle: o índice fora de B1"
+  [ "$(git rev-parse "$FX_M:$p/00-INDICE.md")" = "$(git rev-parse "$FX_P1:$p/00-INDICE.md")" ] && ok "controle: M ficou com o lado de P1" || falha "controle: M não é P1"
+  reprova "pasta do trabalho que a base alterou" 4 "inventário: $p/00-INDICE.md" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
   x=docs/sprintx/features/outro/00-INDICE.md
   d="$(mktemp -d)"; TMPS+=("$d")
   FX_EVIDENCIA="$x" FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário outra pasta não montou"; return; }
