@@ -238,7 +238,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
     printf 'entregue_por: mergex\nestado: %s\nversionado: true\n' "$estado"
     printf 'branch: feature/ft-rec\nbranch_base: main\n'
     if [ "$legado" != 1 ]; then
-      printf 'base_validada_sha: %s\norigem_base: registrada_e0\nreconciliacoes: []\n' "$b0"
+      printf 'base_validada_sha: %s\norigem_base: %s\nreconciliacoes: []\n' "$b0" "${_FX_ORIGEM:-registrada_e0}"
       if [ "$fase" = aberto ]; then printf 'portao_sha: null\n'; else printf 'portao_sha: %s\n' "$portao"; fi
     fi
     printf 'commits:\n  - seq: 1\n    task: T-01.01\n    commit: %s\n' "$e1"
@@ -252,7 +252,7 @@ _fx_entrega() { # <legado:0|1> <e1_curto> <b0_sha> <fase> <portao_sha|->
 }
 
 FX_ESPECIAL="tests/ui/caso com espaço e ação d'água.test.tsx"
-_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas entrega_base_outro_formato entrega_base_refs_heads entrega_base_sha merge_pre_e0 merge_pre_e0_editado merge_plano_pre_e0 antigo_reverte preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
+_FX_VARIANTES=" base_removeu integracao_removeu renomeado resolucao_igual_base m_um_pai pais_trocados fora_primeiro_pai m_sem_integra_base m_com_metodo caminho_especial base_alterou diretorio substring_declarado tipo_mudou b0_fora_b1 b0_fora_p1 b0_ref entrega_kind entrega_trabalho entrega_sem_branch_base entrega_sem_chaves entrega_dup entrega_reconc_cheia entrega_bloco entrega_crlf entrega_bloco_vazia entrega_bloco_comentario entrega_bloco_escalar entrega_bloco_col0 entrega_bloco_estranho entrega_aspas_d entrega_aspas_s entrega_symlink plano_symlink merge_area_base plano_nl plano_tab duas_pastas runx entrega_no_merge criss_cross merge_previo base_com_pai lateral_reverte entrega_sem_base entrega_base_vazia entrega_base_null entrega_base_aspas entrega_base_outro_formato entrega_base_refs_heads entrega_base_sha merge_pre_e0 merge_pre_e0_editado merge_plano_pre_e0 merge_plano_pre_sprint antigo_reverte preflight_metodo preflight_e_arbitrario evidencia_feature evidencia_removida "
 
 # Reescreve o ENTREGA.md da fixture com um sed e o põe no índice (sem sed -i).
 _fx_entrega_sed() { # <expressão> | -e <expressão>...
@@ -276,6 +276,8 @@ _fx_commit_arvore() {
 # _fx_corpo <dir> <legado:0|1> <com_commit:0|1> <msg> <arquivo-de-shas> [variante]
 _fx_corpo() {
   local dir="$1" legado="$2" com_commit="$3" msg="$4" shas="$5" var="${6:-}"
+  # merge_plano_pre_sprint: a primeira sprint reancorada depois do PR de planejamento (DM-261)
+  local _FX_ORIGEM=registrada_e0; [ "$var" != merge_plano_pre_sprint ] || _FX_ORIGEM=registrada_sprint
   local e1 e1c pre2 FX_B0 FX_P1 FX_B1 FX_M lateral
   local fx_pasta=docs/sprintx/features/ft-rec fx_ferramenta=sprintx nl='
 ' tab='	'
@@ -352,7 +354,7 @@ _fx_corpo() {
         _fx_commit "$msg" ;;
       # merge_plano_pre_e0: antes do E0, a feature traz a branch do plano (fora da
       # base, sem trailer), como a sprint que nasce da branch do planejamento
-      merge_plano_pre_e0)
+      merge_plano_pre_e0|merge_plano_pre_sprint)
         fixture_switch_exato plano -c plano "$FX_B0"
         mkdir -p "$fx_pasta"
         printf '# Decisoes\n\nD-01: decisao do plano.\n' > "$fx_pasta/00-DECISOES.md"
