@@ -997,6 +997,54 @@ grupo_evidencia_revisao() {
   cd "$REPO" || return
 }
 
+# A pasta do próprio trabalho é método na V9 (portao-v9.sh). O inventário aceita o
+# arquivo comum dela que o merge trouxe de P1 sem mudar, como o 00-INDICE.md da raiz
+# de um plano legado (conselhos, onda-5). O que o merge mudou, link e a pasta de
+# outro trabalho continuam reprovando (DM-345).
+grupo_pasta_do_trabalho() {
+  local d r v p=docs/sprintx/features/ft-rec x
+  . "$REPO/scripts/ci/lib/fixture-reconciliacao.sh" || { falha "fixture ausente"; return; }
+
+  for x in "$p/00-INDICE.md" "$p/notas/historico.md"; do
+    d="$(mktemp -d)"; TMPS+=("$d")
+    FX_EVIDENCIA="$x" FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário $x não montou"; return; }
+    cd "$d" || return
+    r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+    v=(bash "$RB" --verificar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec)
+    git cat-file -e "$FX_B1:$x" 2>/dev/null && falha "controle: $x está em B1" || ok "controle: $x fora de B1"
+    [ "$(git rev-parse "$FX_M:$x")" = "$(git rev-parse "$FX_P1:$x")" ] && ok "controle: $x em M igual a P1" || falha "controle: $x mudou no merge"
+    registra_ok "pasta do trabalho: $x vindo de P1 não é produto" "$FX_NOVO1" "$FX_NOVO2"
+    rc_igual "pasta do trabalho: $x: --verificar confirma" 0 "${v[@]}"
+    cd "$REPO" || return
+  done
+
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$p/00-INDICE.md" FX_VARIANTE=evidencia_alterada_no_merge fx_cenario "$d" || { falha "cenário alterado no merge não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  [ "$(git rev-parse "$FX_M:$p/00-INDICE.md")" != "$(git rev-parse "$FX_P1:$p/00-INDICE.md")" ] && ok "controle: o merge alterou o índice" || falha "controle: o índice não mudou no merge"
+  reprova "pasta do trabalho alterada pelo merge" 4 "inventário: $p/00-INDICE.md" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  x=docs/sprintx/features/outro/00-INDICE.md
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$x" FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário outra pasta não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  reprova "pasta de outro trabalho" 4 "inventário: $x" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
+
+  x="$p/notas/link.md"
+  d="$(mktemp -d)"; TMPS+=("$d")
+  FX_EVIDENCIA="$x" FX_EVIDENCIA_LINK=1 FX_VARIANTE=evidencia_feature fx_cenario "$d" || { falha "cenário link não montou"; return; }
+  cd "$d" || return
+  r=(bash "$RB" --registrar --entrega "$FX_ENTREGA" --origem sprintx --trabalho ft-rec --)
+  out="$("${r[@]}" "$FX_NOVO1" "$FX_NOVO2" 2>&1)"; rcx=$?
+  [ "$rcx" != 0 ] && ok "link na pasta do trabalho reprova (rc=$rcx)" || falha "link na pasta do trabalho passou: $out"
+  ls docs/entregas/ft-rec/RECONCILIACAO-BASE-*.md >/dev/null 2>&1 && falha "link na pasta: gravou" || ok "link na pasta: nada gravado"
+  cd "$REPO" || return
+}
+
 _blocos() { # <arquivo>
   awk '
     NR == 1 { next }
