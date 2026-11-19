@@ -871,6 +871,14 @@ EOF
     falha "controle: o blob do ENTREGA.md mais antigo não é solto nem único ($blob)"
   fi
   cd "$REPO" || return
+  # uma pasta com o nome do ENTREGA.md num commit antigo não é blob ilegível: a busca
+  # acaba ali e o registro segue (CodeAnt no mergex#111)
+  d="$(mktemp -d)"; TMPS+=("$d"); FX_VARIANTE=merge_plano_pasta_entrega fx_cenario "$d" || { falha "merge_plano_pasta_entrega não montou"; return; }
+  cd "$d" || return
+  velho="$(git rev-list --first-parent "$FX_M^1" -- "$FX_ENTREGA" | tail -n 1)"
+  [ "$(git ls-tree "$velho" -- "$FX_ENTREGA" | cut -d' ' -f2)" = tree ]     && ok "controle: o commit mais antigo da busca tem uma pasta no lugar do ENTREGA.md" || falha "controle: merge_plano_pasta_entrega sem a pasta"
+  registra_ok "pasta com o nome do ENTREGA.md num commit antigo: a busca acaba e o registro segue" "$FX_NOVO1" "$FX_NOVO2"
+  cd "$REPO" || return
   # o merge "sem efeito" de um commit antigo da base, já contido na feature, não
   # trouxe base nenhuma: a reversão que ele faz é da feature, e ele não sai da
   # fila nem da prova 2 (CodeAnt no mergex#87)
