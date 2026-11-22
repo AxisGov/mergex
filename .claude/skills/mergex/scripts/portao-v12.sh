@@ -22,7 +22,7 @@
 #      `n/a`, sem chamar o `conferir`. Fora de um repositório Git (sem `--raiz`), só
 #      `versionado: false` é `n/a`; o resto é SEM_PROVA (não há HEAD para ler o modo).
 #   6. Núcleo sem `expx-revisao.mjs`: SEM_PROVA em `obrigatoria`, AVISO
-#      `revisao-nao-conferida` em `se_disponivel`.
+#      `revisao-nao-conferida` em `se_disponivel` (FALHA se houver retroativa divergente, item 8).
 #   7. `conferir` 0 / 3 / 1: OK / AVISO / FALHA (o modo já está no veredito de cada
 #      linha; `incompleta` é FALHA nos dois). Qualquer outro código (64 inclusive), ou
 #      saída que não seja exatamente uma linha `<task> ok|AVISO <motivo>|FALHA <motivo>`
@@ -250,24 +250,13 @@ $concluidas
 EOF
 [ -n "$ALVOS" ] || na 'nenhuma-task-com-commit'
 
-# 5. o conferir do núcleo instalado
-mjs="$RAIZ/.expx/marketplace/plugins/expx/nucleo/scripts/expx-revisao.mjs"
-if [ ! -f "$mjs" ]; then
-  if [ "$MODO" = se_disponivel ]; then
-    printf 'V12=AVISO\nmotivo=revisao-nao-conferida:nucleo-sem-expx-revisao\n'; exit 0
-  fi
-  sem_prova 'nucleo-sem-expx-revisao'
-fi
-command -v node >/dev/null 2>&1 || sem_prova 'node-ausente'
-raiz_node="$RAIZ"
-# node nativo no Windows não entende o caminho do MSYS
-if command -v cygpath >/dev/null 2>&1; then mjs="$(cygpath -w "$mjs")"; raiz_node="$(cygpath -w "$RAIZ")"; fi
-
 # 5a. revisão retroativa (DM-346): o commit do último item com o trailer `Revisao-retroativa`
 # só vale para a task se a evidência dele, lida no próprio commit, tiver `modo: retroativa` e
 # `commits_da_task` igual aos commits dos itens ANTERIORES da task (SHA completo, na ordem, sem
 # repetição: `commits_da_task --anteriores`). Senão a linha da task vira
 # `<task> FALHA retroativa-divergente`; a coerência do `conferir` continua medida no original.
+# Roda antes de procurar o núcleo: sem `expx-revisao.mjs` em `se_disponivel` o portão sairia em
+# AVISO, e a divergência tem de dar FALHA mesmo assim.
 DIVERGENTES=" "
 while IFS= read -r alvo; do
   [ -n "$alvo" ] || continue
@@ -283,6 +272,7 @@ while IFS= read -r alvo; do
   gravado=""
   if [ -n "$esperado" ] \
      && git -C "$RAIZ" show "$sha:docs/entregas/$TRABALHO/revisao/$id.json" > "$tmp/retro.json" 2>/dev/null; then
+    command -v node >/dev/null 2>&1 || sem_prova 'node-ausente'
     ev_node="$tmp/retro.json"
     if command -v cygpath >/dev/null 2>&1; then ev_node="$(cygpath -w "$ev_node")"; fi
     gravado="$(node -e '
@@ -296,6 +286,24 @@ while IFS= read -r alvo; do
 done <<EOF
 $ALVOS
 EOF
+
+# 5. o conferir do núcleo instalado
+mjs="$RAIZ/.expx/marketplace/plugins/expx/nucleo/scripts/expx-revisao.mjs"
+if [ ! -f "$mjs" ]; then
+  if [ "$MODO" = se_disponivel ]; then
+    if [ "$DIVERGENTES" != " " ]; then
+      printf 'V12=FALHA\n'
+      for id in $DIVERGENTES; do printf '%s FALHA retroativa-divergente\n' "$id"; done
+      exit 1
+    fi
+    printf 'V12=AVISO\nmotivo=revisao-nao-conferida:nucleo-sem-expx-revisao\n'; exit 0
+  fi
+  sem_prova 'nucleo-sem-expx-revisao'
+fi
+command -v node >/dev/null 2>&1 || sem_prova 'node-ausente'
+raiz_node="$RAIZ"
+# node nativo no Windows não entende o caminho do MSYS
+if command -v cygpath >/dev/null 2>&1; then mjs="$(cygpath -w "$mjs")"; raiz_node="$(cygpath -w "$RAIZ")"; fi
 
 set -- conferir --trabalho "$TRABALHO" --modo "$MODO" --raiz "$raiz_node"
 while IFS= read -r alvo; do

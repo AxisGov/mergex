@@ -190,11 +190,11 @@ prova() {
   printf '%s\n' $TASKS | awk '{ print $0 " ok" }' > "$TMP_DIR/esperado"
   cmp -s "$TMP_DIR/conferir" "$TMP_DIR/esperado" \
     || { RET_ERRO="conferir sobre o commit simulado fora da forma: $(tr '\n' ' ' < "$TMP_DIR/conferir")"; return 1; }
-  RET_HEAD="$head"; RET_PERMITIDOS="$permitidos"; RET_ERRO=""
+  RET_HEAD="$head"; RET_PERMITIDOS="$permitidos"; RET_TREE="$tree"; RET_ERRO=""
   return 0
 }
 
-RET_ERRO=""; RET_HEAD=""; RET_PERMITIDOS=""
+RET_ERRO=""; RET_HEAD=""; RET_PERMITIDOS=""; RET_TREE=""
 if [ "$MODO" = verificar ]; then
   prova || recusa "$RET_ERRO"
   printf 'ok=true\nhead=%s\ntasks=%s\nproxima=aplicar\n' "$RET_HEAD" "$TASKS"
@@ -211,6 +211,11 @@ LIBERA=1
 prova || recusa "$RET_ERRO"
 
 git add -- $RET_PERMITIDOS || recusa 'git add das evidencias falhou' 1
+# o que vai ao commit é o índice: ele tem de ser byte a byte a árvore que o conferir aprovou,
+# senão uma evidência reescrita depois da prova entraria sem revisão
+real="$(git write-tree 2>/dev/null)" || { git reset -q -- $RET_PERMITIDOS; recusa 'indice ilegivel depois do git add' 1; }
+[ "$real" = "$RET_TREE" ] \
+  || { git reset -q -- $RET_PERMITIDOS; recusa 'evidencia mudou depois da prova; rode --verificar de novo'; }
 git commit -q -F "$MENSAGEM" || { git reset -q -- $RET_PERMITIDOS; recusa 'commit da revisao retroativa falhou' 1; }
 NOVO="$(git rev-parse --verify -q 'HEAD^{commit}')" || recusa 'HEAD ilegivel depois do commit' 1
 [ "$(git rev-parse --verify -q 'HEAD^')" = "$RET_HEAD" ] || recusa 'o commit nao saiu sobre o HEAD provado' 1

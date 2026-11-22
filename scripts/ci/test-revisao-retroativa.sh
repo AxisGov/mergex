@@ -176,7 +176,8 @@ echo '== revisao retroativa: nucleo novo e CLI falsa =='
 if [ "$FALSA" = 0 ] || [ "$NOVO" = 0 ]; then
   for c in 'ultimo item null: elegivel' 'ultimo item invalida, commit compartilhado por duas tasks: elegivel' \
            '--aplicar: um commit so de evidencias, trailers e itens com revisao ok' \
-           'V12 depois do --aplicar: OK' 'V12 com evidencia adulterada: FALHA retroativa-divergente'; do
+           'V12 depois do --aplicar: OK' 'V12 com evidencia adulterada: FALHA retroativa-divergente' \
+           'evidencia reescrita depois da prova: --aplicar recusa sem commit'; do
     pula "$c"
   done
 else
@@ -227,6 +228,25 @@ Revisao-retroativa: T-01.01'
   [ "$rc" = 0 ] && grep -qx 'ok=true' "$aux/out" \
     && passa 'ultimo item invalida, commit compartilhado por duas tasks: elegivel' \
     || quebra "invalida elegivel ($(cat "$aux/revisar.out")): $(mostra)"
+
+  # evidência reescrita entre a prova e o git add: --aplicar recusa, sem commit e com o stage vazio
+  projeto corrida; escreve src/a.ts; commita T-01.01; item T-01.01 "$C" null; entrega
+  roda listar T-01.01; revisa_retro T-01.01 "$(cat "$aux/out")"
+  corrida="$(mktemp -d)"; real_node="$(command -v node)"
+  cat > "$corrida/node" <<EOS
+#!/usr/bin/env bash
+"$real_node" "\$@"; r=\$?
+case " \$* " in *" conferir "*) printf ' ' >> "$(evidencia T-01.01)" ;; esac
+exit \$r
+EOS
+  chmod +x "$corrida/node"
+  antes="$(g rev-parse HEAD)"
+  (cd "$P" && PATH="$corrida:$PATH" bash "$RETRO" --aplicar --entrega docs/entregas/w/ENTREGA.md --trabalho w \
+     -- T-01.01 > "$aux/out" 2> "$aux/err"); rc=$?
+  [ "$rc" = 3 ] && grep -q 'evidencia mudou depois da prova' "$aux/err" && [ "$(g rev-parse HEAD)" = "$antes" ] \
+    && [ -z "$(g diff --cached --name-only)" ] \
+    && passa 'evidencia reescrita depois da prova: --aplicar recusa sem commit' || quebra "corrida no aplicar: $(mostra)"
+  rm -rf "$corrida"
 fi
 
 echo

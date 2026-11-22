@@ -518,6 +518,21 @@ retro T-01.01 "[\"$(g rev-parse HEAD)\"]"; entrega; tarefas T-01.01:concluida
 roda
 [ "$rc" = 1 ] && tem 'T-01.01 FALHA retroativa-divergente' \
   && passa 'retroativa sem item anterior da task: FALHA retroativa-divergente' || quebra "retroativa sem item anterior: $(mostra)"
+# núcleo sem expx-revisao.mjs em se_disponivel: a divergente ainda é FALHA, a coerente segue AVISO
+projeto retro-sem-nucleo se_disponivel; g rm -q "$nucleo_rel/expx-revisao.mjs"; g commit -q -m 'sem revisao'
+escreve src/a.ts; commita T-01.01
+retro T-01.01 "[\"$(g rev-parse HEAD~1)\"]"; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && [ "$(primeira)" = 'V12=FALHA' ] && tem 'T-01.01 FALHA retroativa-divergente' && [ "$(linhas)" = 2 ] \
+  && passa 'se_disponivel sem expx-revisao.mjs e retroativa divergente: FALHA, nao AVISO' \
+  || quebra "retroativa divergente sem nucleo: $(mostra)"
+projeto retro-sem-nucleo-ok se_disponivel; g rm -q "$nucleo_rel/expx-revisao.mjs"; g commit -q -m 'sem revisao'
+escreve src/a.ts; commita T-01.01; c1="$(g rev-parse HEAD)"
+retro T-01.01 "[\"$c1\"]"; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=AVISO' ] && tem 'motivo=revisao-nao-conferida:nucleo-sem-expx-revisao' \
+  && passa 'se_disponivel sem expx-revisao.mjs e retroativa coerente: AVISO' \
+  || quebra "retroativa coerente sem nucleo: $(mostra)"
 
 echo '== V12: evidencias gravadas pela CLI falsa =='
 
