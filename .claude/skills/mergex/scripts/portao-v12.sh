@@ -27,6 +27,9 @@
 #      linha; `incompleta` é FALHA nos dois). Qualquer outro código (64 inclusive), ou
 #      saída que não seja exatamente uma linha `<task> ok|AVISO <motivo>|FALHA <motivo>`
 #      por task pedida, na ordem, coerente com o código: SEM_PROVA.
+#   8. Último item cujo commit traz `Revisao-retroativa` (DM-346, `revisao-retroativa.sh`): a
+#      evidência do commit tem de ter `modo: retroativa` e `commits_da_task` igual aos commits
+#      dos itens anteriores da task; senão `<task> FALHA retroativa-divergente` e V12=FALHA.
 #
 # Uso:
 #   portao-v12.sh --verificar --entrega <ENTREGA.md> --trabalho <slug> [--raiz <dir>] -- <tasks.md>...
@@ -260,6 +263,40 @@ raiz_node="$RAIZ"
 # node nativo no Windows não entende o caminho do MSYS
 if command -v cygpath >/dev/null 2>&1; then mjs="$(cygpath -w "$mjs")"; raiz_node="$(cygpath -w "$RAIZ")"; fi
 
+# 5a. revisão retroativa (DM-346): o commit do último item com o trailer `Revisao-retroativa`
+# só vale para a task se a evidência dele, lida no próprio commit, tiver `modo: retroativa` e
+# `commits_da_task` igual aos commits dos itens ANTERIORES da task (SHA completo, na ordem, sem
+# repetição: `commits_da_task --anteriores`). Senão a linha da task vira
+# `<task> FALHA retroativa-divergente`; a coerência do `conferir` continua medida no original.
+DIVERGENTES=" "
+while IFS= read -r alvo; do
+  [ -n "$alvo" ] || continue
+  id="${alvo%%=*}"; sha="${alvo#*=}"
+  msg="$(git -C "$RAIZ" show -s --format=%B "$sha" 2> "$tmp/err")" || { repassa; sem_prova "commit-ilegivel:$id"; }
+  trailers="$(printf '%s\n' "$msg" | git -C "$RAIZ" interpret-trailers --parse 2>/dev/null)"
+  retro="$(sed -n 's/^Revisao-retroativa:[[:space:]]*//p' <<<"$trailers")"
+  [ -n "$retro" ] || continue
+  esperado=""
+  case " $(awk '{ $1 = $1; print }' <<<"$retro") " in
+    *" $id "*) esperado="$(commits_da_task "$entrega_head" "$id" "$RAIZ" anteriores 2>/dev/null)" || esperado="" ;;
+  esac
+  gravado=""
+  if [ -n "$esperado" ] \
+     && git -C "$RAIZ" show "$sha:docs/entregas/$TRABALHO/revisao/$id.json" > "$tmp/retro.json" 2>/dev/null; then
+    ev_node="$tmp/retro.json"
+    if command -v cygpath >/dev/null 2>&1; then ev_node="$(cygpath -w "$ev_node")"; fi
+    gravado="$(node -e '
+      const fs = require("fs");
+      let j; try { j = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+      if (j.modo !== "retroativa" || !Array.isArray(j.commits_da_task)) process.exit(1);
+      process.stdout.write(j.commits_da_task.join(",") + "\n");
+    ' "$ev_node" 2>/dev/null)" || gravado=""
+  fi
+  [ -n "$esperado" ] && [ "$gravado" = "$esperado" ] || DIVERGENTES="$DIVERGENTES$id "
+done <<EOF
+$ALVOS
+EOF
+
 set -- conferir --trabalho "$TRABALHO" --modo "$MODO" --raiz "$raiz_node"
 while IFS= read -r alvo; do
   [ -z "$alvo" ] || set -- "$@" --task "$alvo"
@@ -299,6 +336,12 @@ case "$rc:$n_falha:$n_aviso" in
   3:0:*) veredito=AVISO ;;
   *) fora 'conferir-saida-fora-da-forma' ;;
 esac
+if [ "$DIVERGENTES" != " " ]; then
+  veredito=FALHA
+  awk -v div="$DIVERGENTES" '
+    { t = $1; if (index(div, " " t " ")) print t " FALHA retroativa-divergente"; else print }
+  ' "$tmp/out" > "$tmp/out.retro" && mv "$tmp/out.retro" "$tmp/out" || sem_prova 'saida-ilegivel'
+fi
 printf 'V12=%s\n' "$veredito"
 cat "$tmp/out"
 [ "$veredito" != FALHA ] || exit 1

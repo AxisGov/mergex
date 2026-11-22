@@ -186,6 +186,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-portao-v12.sh
 
+      - name: Test revisao retroativa (DM-346)
+        shell: bash
+        run: bash scripts/ci/test-revisao-retroativa.sh
+
       - name: Test E1 evidencia de revisao por task
         shell: bash
         run: bash scripts/ci/test-e1-evidencia-revisao.sh
