@@ -164,6 +164,29 @@ roda aplicar T-01.01
 [ "$rc" = 3 ] && [ "$(g log -1 --format=%s)" = 'docs: entrega' ] && [ -z "$(g diff --cached --name-only)" ] \
   && passa 'produto sujo: --aplicar recusa sem commit' || quebra "produto sujo no aplicar: $(mostra)"
 
+# sequência de commits inválida em outra task: recusa antes do commit (o --acrescentar a barraria depois)
+projeto rec-seq; escreve src/a.ts; commita T-01.01; c1="$(g rev-parse HEAD)"
+item T-01.01 "$C" null; item T-01.02 "$C" null; entrega
+awk '$0 == "  - task: T-01.02" { print "  - seq: 1"; print "    task: T-01.02"; next } { print }' \
+  "$(entrega_arq)" > "$aux/entrega.seq" && cat "$aux/entrega.seq" > "$(entrega_arq)"
+g add docs/entregas/w/ENTREGA.md && g commit -q -m 'docs: entrega com seq fora da sequencia'
+evidencia_escrita T-01.01 "$c1"
+roda verificar T-01.01
+[ "$rc" = 3 ] && grep -q 'sequencia de commits invalida' "$aux/err" \
+  && passa 'sequencia de commits invalida: recusa antes do commit' || quebra "sequencia invalida: $(mostra)"
+
+# ENTREGA.md sem permissão de escrita: recusa antes do commit
+projeto rec-ro; escreve src/a.ts; commita T-01.01; c1="$(g rev-parse HEAD)"; item T-01.01 "$C" null; entrega
+evidencia_escrita T-01.01 "$c1"; chmod a-w "$(entrega_arq)"
+if [ -w "$(entrega_arq)" ]; then
+  passa 'ENTREGA.md somente leitura: recusa (usuario ignora a permissao aqui; o CI em Linux cobre)'
+else
+  roda verificar T-01.01
+  [ "$rc" = 3 ] && grep -q 'ENTREGA.md sem permissao de escrita' "$aux/err" \
+    && passa 'ENTREGA.md somente leitura: recusa' || quebra "ENTREGA somente leitura: $(mostra)"
+fi
+chmod u+w "$(entrega_arq)"
+
 # ENTREGA do disco diverge do HEAD
 projeto rec-disco; escreve src/a.ts; commita T-01.01; c1="$(g rev-parse HEAD)"; item T-01.01 "$C" null; entrega
 evidencia_escrita T-01.01 "$c1"; printf '\nnota\n' >> "$(entrega_arq)"

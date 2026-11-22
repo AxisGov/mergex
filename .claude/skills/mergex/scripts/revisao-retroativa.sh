@@ -132,6 +132,11 @@ prova() {
     && [ "$(limpa "$(escalar "$TMP_DIR/entrega-head" trabalho_id)")" = "$TRABALHO" ] \
     || { RET_ERRO='contexto da entrega diverge'; return 1; }
   revs="$(revisoes "$TMP_DIR/entrega-head")" || { RET_ERRO="commits ilegivel: $ERRO"; return 1; }
+  # o que o --acrescentar exige depois do commit é provado antes dele: a sequência válida e o
+  # arquivo gravável. Senão o commit das evidências ficaria sem o item `ok` na ENTREGA.
+  bash "$SEQ_SH" --validar "$ENTREGA" > /dev/null 2> "$TMP_DIR/validar.err" \
+    || { RET_ERRO="sequencia de commits invalida: $(tr '\n' ' ' < "$TMP_DIR/validar.err")"; return 1; }
+  [ -w "$ENTREGA" ] || { RET_ERRO='ENTREGA.md sem permissao de escrita'; return 1; }
   command -v node >/dev/null 2>&1 || { RET_ERRO='node ausente'; return 1; }
   [ -f "$MJS" ] || { RET_ERRO='nucleo sem expx-revisao.mjs'; return 1; }
 
