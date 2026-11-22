@@ -95,7 +95,8 @@ done
 
 antes="$(cat "$E")"; todos=1
 for v in '' talvez OK incompleta 'incompleta:' 'indisponivel:a b' 'ok:x' 'achados:1' 'invalida:x' \
-         'null:x' 'incompleta:-x' 'indisponivel:é' 'incompleta:L1
+         'null:x' 'incompleta:-x' 'indisponivel:é' 'indisponivel:a+' 'indisponivel:+b' \
+         'indisponivel:a++b' 'indisponivel:a+-b' 'incompleta:L1
 x'; do
   bash "$SEQ" --acrescentar "$E" T-01.06 fedcba9 "$v" >/dev/null 2>&1; rc=$?
   { [ "$rc" = 1 ] && [ "$(cat "$E")" = "$antes" ]; } \
@@ -112,6 +113,11 @@ erro="$(bash "$SEQ" --acrescentar "$E" T-01.06 fedcba9 'ok:x' 2>&1 >/dev/null)"
   && ! bash "$SEQ" --revisao 'ok:x' >/dev/null 2>&1 \
   && ok '--revisao diz o valor como o --acrescentar o gravaria' \
   || falha '--revisao diz o valor como o --acrescentar o gravaria'
+
+[ "$(bash "$SEQ" --revisao 'indisponivel:cli-ausente+codex-ausente' 2>&1)" = 'indisponivel:cli-ausente+codex-ausente' ] \
+  && [ "$(bash "$SEQ" --revisao 'indisponivel:snapshot+codex-saida-invalida:x' 2>&1)" = 'indisponivel:snapshot+codex-saida-invalida' ] \
+  && ok '--revisao aceita os dois motivos da escala para o Codex juntos com +' \
+  || falha '--revisao aceita os dois motivos da escala para o Codex juntos com +'
 
 bash "$SEQ" --acrescentar "$E" T-01.06 fedcba9 ok extra >/dev/null 2>&1; rc=$?
 [ "$rc" = 64 ] && ok 'acrescentar com cinco argumentos: 64' || falha "acrescentar com cinco argumentos: rc=$rc"
@@ -317,7 +323,9 @@ else
   (cd "$R" && node "$(nativo "$R/$NUCLEO_REL/expx-revisao.mjs")" revisar --trabalho ft-r --task T-01.01 \
      --arquivos src/a.js > "$D/revisar.out" 2>&1)
   fechar "$R" -- src/a.js
-  [ "$RC" = 0 ] && [ "$(revisao_de "$R")" = indisponivel:cli-ausente ] \
+  # sem a CodeAnt o núcleo escala para o Codex: sem ele também, os dois motivos juntos com `+`
+  rev_cli="$(revisao_de "$R")"
+  [ "$RC" = 0 ] && case "$rev_cli" in indisponivel:cli-ausente|indisponivel:cli-ausente+?*) true ;; *) false ;; esac \
     && ok 'cli ausente: revisao: indisponivel:cli-ausente' \
     || falha "cli ausente — revisar=$(cat "$D/revisar.out") rc=$RC item=$(ultimo "$R") saida=$SAIDA"
 fi

@@ -398,10 +398,16 @@ revisao_do_item() { # <valor>
     *) ERRO="revisao fora da gramática: ${v:-<vazio>}"; return 1 ;;
   esac
   tipo="${v%%:*}"; classe="${v#*:}"; classe="${classe%%:*}"
-  case "$classe" in
-    ''|[!$CLASSE_OK]*|*[!$CLASSE_OK-]*)
-      ERRO="revisao fora da gramática: $v"; return 1 ;;
-  esac
+  # a escala para o Codex junta os dois motivos com `+` (`cli-ausente+codex-ausente`): cada
+  # parte segue a gramática da classe, e nenhuma vazia
+  local parte resto="$classe+"
+  while [ -n "$resto" ]; do
+    parte="${resto%%+*}"; resto="${resto#*+}"
+    case "$parte" in
+      ''|[!$CLASSE_OK]*|*[!$CLASSE_OK-]*)
+        ERRO="revisao fora da gramática: $v"; return 1 ;;
+    esac
+  done
   printf '%s:%s\n' "$tipo" "$classe"
 }
 
