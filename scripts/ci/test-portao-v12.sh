@@ -483,6 +483,57 @@ roda
 [ "$rc" = 1 ] && tem 'T-01.01 FALHA evidencia-invalida:versao' \
   && passa 'evidencia de versao antiga (expx_revisao 1) no commit: FALHA evidencia-invalida:versao' || quebra "versao antiga: $(mostra)"
 
+echo '== V12: revisao retroativa (DM-346) =='
+
+# retro <task> <commits_da_task JSON> [<modo>] — evidência escrita no teste e o commit com os
+# trailers da revisão retroativa; o item vai a ITENS com o SHA completo
+retro() {
+  mkdir -p "$P/docs/entregas/w/revisao"
+  printf '{"expx_revisao":2,"modo":"%s","commits_da_task":%s}\n' "${3:-retroativa}" "$2" > "$(evidencia "$1")"
+  g add -A && g commit -q -m "chore(mergex): revisao retroativa de $1" -m "Trabalho: w
+Revisao-retroativa: $1" && ITENS="$ITENS $1:$(g rev-parse HEAD)"
+}
+# commits_da_task diferente dos itens anteriores: FALHA retroativa-divergente, mesmo que o conferir diga outra coisa
+projeto retro-div obrigatoria; escreve src/a.ts; commita T-01.01
+retro T-01.01 "[\"$(g rev-parse HEAD~1)\"]"; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && [ "$(primeira)" = 'V12=FALHA' ] && tem 'T-01.01 FALHA retroativa-divergente' && [ "$(linhas)" = 2 ] \
+  && passa 'retroativa com commits_da_task divergente: FALHA retroativa-divergente' || quebra "retroativa divergente: $(mostra)"
+# evidência sem modo retroativa: divergente também
+projeto retro-modo obrigatoria; escreve src/a.ts; commita T-01.01; c1="$(g rev-parse HEAD)"
+retro T-01.01 "[\"$c1\"]" normal; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA retroativa-divergente' \
+  && passa 'retroativa sem modo retroativa na evidencia: FALHA retroativa-divergente' || quebra "retroativa sem modo: $(mostra)"
+# commits_da_task igual aos itens anteriores: a linha é a do conferir, nunca retroativa-divergente
+projeto retro-igual obrigatoria; escreve src/a.ts; commita T-01.01; c1="$(g rev-parse HEAD)"
+retro T-01.01 "[\"$c1\"]"; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" != 2 ] && ! grep -q 'retroativa-divergente' "$aux/out" && grep -q '^T-01.01 ' "$aux/out" \
+  && passa 'retroativa com commits_da_task igual aos itens anteriores: sem retroativa-divergente' \
+  || quebra "retroativa coerente: $(mostra)"
+# retroativo como único item da task: não há item anterior, divergente
+projeto retro-so obrigatoria; escreve src/a.ts; g add -A; g commit -q -m 'feat: sem item'
+retro T-01.01 "[\"$(g rev-parse HEAD)\"]"; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && tem 'T-01.01 FALHA retroativa-divergente' \
+  && passa 'retroativa sem item anterior da task: FALHA retroativa-divergente' || quebra "retroativa sem item anterior: $(mostra)"
+# núcleo sem expx-revisao.mjs em se_disponivel: a divergente ainda é FALHA, a coerente segue AVISO
+projeto retro-sem-nucleo se_disponivel; g rm -q "$nucleo_rel/expx-revisao.mjs"; g commit -q -m 'sem revisao'
+escreve src/a.ts; commita T-01.01
+retro T-01.01 "[\"$(g rev-parse HEAD~1)\"]"; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 1 ] && [ "$(primeira)" = 'V12=FALHA' ] && tem 'T-01.01 FALHA retroativa-divergente' && [ "$(linhas)" = 2 ] \
+  && passa 'se_disponivel sem expx-revisao.mjs e retroativa divergente: FALHA, nao AVISO' \
+  || quebra "retroativa divergente sem nucleo: $(mostra)"
+projeto retro-sem-nucleo-ok se_disponivel; g rm -q "$nucleo_rel/expx-revisao.mjs"; g commit -q -m 'sem revisao'
+escreve src/a.ts; commita T-01.01; c1="$(g rev-parse HEAD)"
+retro T-01.01 "[\"$c1\"]"; entrega; tarefas T-01.01:concluida
+roda
+[ "$rc" = 0 ] && [ "$(primeira)" = 'V12=AVISO' ] && tem 'motivo=revisao-nao-conferida:nucleo-sem-expx-revisao' \
+  && passa 'se_disponivel sem expx-revisao.mjs e retroativa coerente: AVISO' \
+  || quebra "retroativa coerente sem nucleo: $(mostra)"
+
 echo '== V12: evidencias gravadas pela CLI falsa =='
 
 if [ "$FALSA" = 0 ]; then
