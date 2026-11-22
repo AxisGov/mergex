@@ -242,6 +242,25 @@ coberto	$FX_NOVO1	001"
   v_ok "cadeia: caminho reconciliado de novo é coberto pela mais recente" "$esperado"
   cd "$REPO" || return
 
+  # cadeia em que o M2 fica com a versão da base num caminho do 001 (DM-347): a
+  # cobertura dele termina, sem reprovar e sem linha coberto; mexer depois no
+  # conteúdo ou só no modo volta a reprovar
+  d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }
+  fx_segunda_base "$d" acata || { falha "segunda base (acata) não montou"; return; }
+  cd "$d" || return
+  FX_ESTADO=superada fx_emite_reconciliacao "$d" 1 "$FX_B0" "$FX_M" "$FX_NOVO1" "$FX_NOVO2" || falha "acata: emissão do 001"
+  fx_emite_reconciliacao "$d" 2 "$FX_B1" "$FX_M2" "$FX_NOVO3" || falha "acata: emissão do 002"
+  fx_entrega_sincroniza "$d" || falha "acata: sincronização"
+  [ "$(git rev-parse "HEAD:$FX_NOVO1")" = "$(git rev-parse "$FX_B2:$FX_NOVO1")" ] \
+    && [ "$(git rev-parse "HEAD:$FX_NOVO1")" != "$(git rev-parse "$FX_M:$FX_NOVO1")" ] || falha "acata: NOVO1 em HEAD não é o de B2"
+  v_ok "cadeia: caminho do 001 que voltou à base atual sai da cobertura, ok" \
+    "$(printf 'ok=true\ncoberto\t%s\t001\ncoberto\t%s\t002' "$FX_NOVO2" "$FX_NOVO3")"
+  git update-index --chmod=+x "$FX_NOVO1"; git commit -q -m "NOVO1 executável, conteúdo da base"
+  v_motivo "cadeia: igual à base só no conteúdo, modo diferente, continua reprovando" 4 cobertura "$FX_NOVO1"
+  git update-index --chmod=-x "$FX_NOVO1"; echo "// depois de M2" >> "$FX_NOVO1"; git commit -qam "mexe em NOVO1 depois de M2"
+  v_motivo "cadeia: alterado depois de M2 e diferente da base continua reprovando" 4 cobertura "$FX_NOVO1"
+  cd "$REPO" || return
+
   # o plano de cada reconciliação é o da árvore do M dela: um commit de plano
   # entre M1 e M2 que declara NOVO3 vale para o 002
   d="$(mktemp -d)"; TMPS+=("$d"); fx_cenario "$d" || { falha "cenário não montou"; return; }

@@ -733,7 +733,7 @@ _fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
   printf 'export const casoFrequency = "base";\n' > "$novo3"
   git add "$novo3"
   case "$ajusta" in
-    reajusta|descarta)
+    reajusta|descarta|acata)
       printf 'export const casoCompliance = "base";\nexport const segundaBase = 2;\n' > "$novo1"
       git add "$novo1" ;;
     ressuscita) git rm -q "$novo1" ;;
@@ -745,7 +745,7 @@ _fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
   git merge --no-ff --no-commit main >/dev/null 2>&1 || true
   [ -f .git/MERGE_HEAD ]
   case "$ajusta" in
-    ajusta|reajusta|descarta|ressuscita|esconde)
+    ajusta|reajusta|descarta|ressuscita|esconde|acata)
       printf 'export const casoFrequency = "base";\nexport const ajusteFrequency = "ft-rec";\n' > "$novo3"
       git add "$novo3" ;;
   esac
@@ -755,6 +755,8 @@ _fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
       git add "$novo1" ;;
     # a resolução fica com a versão do M1: descarta a mudança (ou a remoção) da base
     descarta|ressuscita) git show "$m1:$novo1" > "$novo1"; git add "$novo1" ;;
+    # a resolução fica com a versão da base: o ajuste do M1 sai (DM-347)
+    acata) git show "$b2:$novo1" > "$novo1"; git add "$novo1" ;;
     # o merge muda um caminho do 001 que a base não tocou
     esconde)
       printf 'export const casoAttendance = "base";\nexport const ajusteAttendance = "ft-rec";\nexport const produtoEscondido = 1;\n' > "$novo2"
@@ -773,8 +775,9 @@ _fx_segunda_corpo() { # <dir> <ajusta> <msg> <arquivo-de-shas>
 # além disso B2 altera FX_NOVO1 (já reconciliado no 001) e M2 o ajusta de
 # novo (conflito resolvido pela fixture). Com `descarta`, B2 altera FX_NOVO1 e
 # M2 fica com a versão do M1; com `ressuscita`, B2 remove FX_NOVO1 e M2 o traz
-# de volta com a versão do M1; com `esconde`, B2 não toca FX_NOVO2 e M2 o muda.
-# Nesses três, M2 também ajusta FX_NOVO3. Exporta FX_B2,
+# de volta com a versão do M1; com `esconde`, B2 não toca FX_NOVO2 e M2 o muda;
+# com `acata`, B2 altera FX_NOVO1 e M2 fica com a versão de B2 (o ajuste do 001
+# sai). Nesses, M2 também ajusta FX_NOVO3. Exporta FX_B2,
 # FX_M2 e FX_NOVO3. Só cria commits: arquivos não rastreados ficam onde estão.
 fx_segunda_base() {
   local dir="$1" ajusta="${2:-}" msg rc
