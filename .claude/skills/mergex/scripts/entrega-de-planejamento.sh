@@ -44,9 +44,11 @@
 # pasta inexistente, ou por_sprint sem sprint aberta: 2, sem escopo nenhum.
 #
 # As ações de escrita são: `--registrar-pr` (E8), `--registrar-merge` (E9),
-# `--completar-base` (E9, migração de item merged), `--abrir-sprint` (E0) e
-# `--retomar-planejamento` (E0 da entrega por trabalho depois do merge do
-# planejamento: sprint_atual null e a base reancorada, DM-261 e DM-328).
+# `--registrar-planejamento-externo` (E9, planejamento histórico por fora do
+# método), `--completar-base` (E9, migração de item merged), `--abrir-sprint`
+# (E0) e `--retomar-planejamento` (E0 da entrega por trabalho depois do merge
+# do planejamento: sprint_atual null e a base reancorada, DM-261, DM-328 e
+# DM-348).
 # `--modo-efetivo` fixa a precedência plano > projeto antes
 # do primeiro registro. Todas reescrevem só as chaves de que são donas, conferem o
 # temporário com este mesmo leitor e recusam link simbólico.
@@ -60,6 +62,7 @@ uso() {
   [ -z "${1:-}" ] || printf 'entrega-de-planejamento: %s\n' "$1" >&2
   printf '%s\n' 'uso: entrega-de-planejamento.sh [--rev <commit>] --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --registrar-merge --merge-sha <sha> --base-sha <sha> --entrega <ENTREGA.md>' \
+    '     entrega-de-planejamento.sh --registrar-planejamento-externo --merge-sha <sha> --base-sha <sha> --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --completar-base <planejamento|NN> --merge-sha <sha> --base-sha <sha> --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --registrar-pr --url <url|null> --estado <estado> --entrega <ENTREGA.md>' \
     '     entrega-de-planejamento.sh --abrir-sprint <NN> --base-validada-sha <sha> --entrega <ENTREGA.md>' \
@@ -79,6 +82,7 @@ while [ "$#" -gt 0 ]; do
     --entrega) [ "$#" -ge 2 ] && [ -z "$ENTREGA" ] || uso; ENTREGA="$2"; shift 2 ;;
     --rev) [ "$#" -ge 2 ] && [ "$TEM_REV" = 0 ] || uso; REV="$2"; TEM_REV=1; shift 2 ;;
     --registrar-merge) acao registrar-merge; shift ;;
+    --registrar-planejamento-externo) acao registrar-planejamento-externo; shift ;;
     --completar-base) [ "$#" -ge 2 ] || uso; acao completar-base; ALVO_SPRINT="$2"; shift 2 ;;
     --registrar-pr) acao registrar-pr; shift ;;
     --abrir-sprint) [ "$#" -ge 2 ] || uso; acao abrir-sprint; NN="$2"; shift 2 ;;
@@ -106,12 +110,12 @@ sha_uso() { # <nome> <valor> <comprimento exigido, ou vazio para 40|64>
   if [ -n "${3:-}" ]; then [ "${#2}" = "$3" ] || uso "$1 inválido: $2"
   else [ "${#2}" = 40 ] || [ "${#2}" = 64 ] || uso "$1 inválido: $2"; fi
 }
-case "$ACAO" in registrar-merge|completar-base) ;; *) [ -z "$MERGE_SHA$BASE_SHA" ] || uso '--merge-sha e --base-sha só com --registrar-merge ou --completar-base' ;; esac
+case "$ACAO" in registrar-merge|registrar-planejamento-externo|completar-base) ;; *) [ -z "$MERGE_SHA$BASE_SHA" ] || uso '--merge-sha e --base-sha só com --registrar-merge, --registrar-planejamento-externo ou --completar-base' ;; esac
 [ "$ACAO" = registrar-pr ] || { [ "$TEM_URL" = 0 ] && [ -z "$ESTADO" ]; } || uso '--url e --estado só com --registrar-pr'
 case "$ACAO" in abrir-sprint|retomar-planejamento) ;; *) [ -z "$BASE_VALIDADA" ] || uso '--base-validada-sha só com --abrir-sprint ou --retomar-planejamento' ;; esac
 [ "$ACAO" = modo-efetivo ] || [ -z "$PLANO$PROJETO" ] || uso '--plano e --projeto só com --modo-efetivo'
 case "$ACAO" in
-  registrar-merge|completar-base)
+  registrar-merge|registrar-planejamento-externo|completar-base)
     sha_uso merge_sha "$MERGE_SHA"
     sha_uso base_sha "${BASE_SHA:-}" "${#MERGE_SHA}"
     if [ "$ACAO" = completar-base ]; then
@@ -152,7 +156,7 @@ libera_lock() {
   CRIEI=0
 }
 case "$ACAO" in
-  registrar-merge|completar-base|registrar-pr|abrir-sprint|retomar-planejamento)
+  registrar-merge|registrar-planejamento-externo|completar-base|registrar-pr|abrir-sprint|retomar-planejamento)
     LOCK_DIR="$ENTREGA.lock"
     # Um sinal entre o `mkdir` e a marca com o PID deixaria a trava órfã (CodeAnt no
     # conselhos-municipais#361, DM-338). Durante a aquisição o sinal só fica anotado; ele vale
@@ -198,7 +202,7 @@ case "$ACAO" in
 esac
 
 # antes de ler: um link quebrado também é link, e a recusa é a mesma
-case "$ACAO" in registrar-merge|completar-base|registrar-pr|abrir-sprint|retomar-planejamento)
+case "$ACAO" in registrar-merge|registrar-planejamento-externo|completar-base|registrar-pr|abrir-sprint|retomar-planejamento)
   [ ! -L "$ENTREGA" ] || recusa "$ENTREGA é link simbólico: o registro só grava um arquivo regular" ;;
 esac
 conteudo=""
@@ -551,6 +555,15 @@ confere_e_troca() {
 }
 
 case "$ACAO" in
+  registrar-planejamento-externo)
+    [ "$tem_m" = 1 ] && [ "$modo" = por_trabalho ] \
+      || recusa 'a entrega não está registrada como por_trabalho: planejamento externo só registra nela'
+    [ "$sprint" = null ] || recusa 'a entrega tem sprint_atual diferente de null: planejamento externo só registra a entrega sem sprint'
+    [ "$n_itens" = 0 ] || recusa 'a entrega já tem prs: planejamento externo só registra a entrega sem PRs'
+    grava 0 "" "entrega=por_trabalho;sprint_atual=null;pr_url=null;pr_estado=merged;atualizado_em=$hoje" planejamento
+    confere_e_troca 'planejamento=nao' "planejamento_merge_sha=$MERGE_SHA" \
+      "planejamento_base_sha=$BASE_SHA" 'entrega=por_trabalho' 'sprint_atual=null'
+    printf 'registrado=planejamento_externo\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA" ;;
   completar-base)
     [ "$a_pos" != 0 ] || recusa "não há item $ALVO_SPRINT em prs para completar base_sha"
     [ "$a_estado" = merged ] || recusa "$(nome_pr "$a_sprint") não está merged: base_sha histórica só completa item fechado"
