@@ -521,11 +521,13 @@ grava() {
     l ~ /^---[[:space:]]*$/ {
       if (dentro) { fecha_item(); anexa_novo() }
       for (i = 1; i <= nt; i++) if (!(to[i] in feito)) print to[i] ": " tv[to[i]] cr0
+      # a entrega antiga sem `prs:` ganha a chave com o item novo (DM-348)
+      if (novo != "" && !viu_prs) { print "prs:" cr0; anexa_novo() }
       fim = 1; print; next
     }
     l ~ /^[A-Za-z_][A-Za-z0-9_]*:/ {
       if (dentro) { fecha_item(); anexa_novo() }
-      dentro = (l ~ /^prs:/)
+      dentro = (l ~ /^prs:/); if (dentro) viu_prs = 1
       k = l; sub(/:.*/, "", k)
       if (k == "prs" && novo != "" && l ~ /^prs:[[:space:]]*\[\][[:space:]]*$/) {
         print "prs:" cr0; anexa_novo(); dentro = 0; next
@@ -558,9 +560,10 @@ confere_e_troca() {
 
 case "$ACAO" in
   registrar-planejamento-externo)
-    [ "$tem_m" = 1 ] && [ "$modo" = por_trabalho ] \
+    # a entrega antiga, sem `entrega:`, é lida como por_trabalho e também registra
+    [ "$tem_m" = 0 ] || [ "$modo" = por_trabalho ] \
       || recusa 'a entrega não está registrada como por_trabalho: planejamento externo só registra nela'
-    [ "$sprint" = null ] || recusa 'a entrega tem sprint_atual diferente de null: planejamento externo só registra a entrega sem sprint'
+    [ "$sprint" = null ] || [ -z "$sprint" ] || recusa 'a entrega tem sprint_atual diferente de null: planejamento externo só registra a entrega sem sprint'
     [ "$n_itens" = 0 ] || recusa 'a entrega já tem prs: planejamento externo só registra a entrega sem PRs'
     # o merge histórico está no repositório: o commit existe e a base é o 1o pai dele
     git rev-parse --verify -q "$MERGE_SHA^{commit}" >/dev/null 2>&1 \
