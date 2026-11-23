@@ -270,6 +270,18 @@ EOS
     && [ -z "$(g diff --cached --name-only)" ] \
     && passa 'evidencia reescrita depois da prova: --aplicar recusa sem commit' || quebra "corrida no aplicar: $(mostra)"
   rm -rf "$corrida"
+
+  # um hook pre-commit põe no índice um arquivo fora das evidências: o commit sai com outra árvore,
+  # e o --aplicar recusa sem acrescentar item nem nota
+  projeto gancho; escreve src/a.ts; commita T-01.01; item T-01.01 "$C" null; entrega
+  roda listar T-01.01; revisa_retro T-01.01 "$(cat "$aux/out")"
+  printf '#!/bin/sh\nprintf "const gancho = 2;\\n" > src/b.ts && git add src/b.ts\n' > "$P/.git/hooks/pre-commit"
+  chmod +x "$P/.git/hooks/pre-commit"
+  cp "$(entrega_arq)" "$aux/entrega.antes"
+  (cd "$P" && bash "$RETRO" --aplicar --entrega docs/entregas/w/ENTREGA.md --trabalho w \
+     -- T-01.01 > "$aux/out" 2> "$aux/err"); rc=$?
+  [ "$rc" = 1 ] && grep -q 'nao saiu com a arvore provada' "$aux/err" && cmp -s "$(entrega_arq)" "$aux/entrega.antes" \
+    && passa 'hook muda o indice no commit: --aplicar recusa sem item nem nota' || quebra "hook no commit: $(mostra)"
 fi
 
 echo
