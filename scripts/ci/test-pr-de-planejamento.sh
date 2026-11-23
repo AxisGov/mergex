@@ -930,6 +930,11 @@ sprint_atual: null
 prs: []"
   sed 's/^trabalho_id: login$/trabalho_id: plan/' "$d/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
     && mv "$aux/e.tmp" "$d/docs/entregas/plan/ENTREGA.md"
+  # `antiga`: a entrega de antes das chaves de modo (sem entrega, sprint_atual e prs)
+  if [ "${2:-}" = antiga ]; then
+    grep -Ev '^(entrega|sprint_atual|prs):' "$d/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+      && mv "$aux/e.tmp" "$d/docs/entregas/plan/ENTREGA.md"
+  fi
   g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): entrega' -m 'Trabalho: plan'
   printf 'b\n' > "$d/src/b.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'feat: b' -m 'Trabalho: plan'
 }
@@ -975,6 +980,17 @@ v9 "$aux/ex2"
 [ "$rc" = 3 ]
 confere 'DM-348: planejamento externo que traz produto junto da pasta do trabalho: v9_sem_prova' $?
 [ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
+repo_externo "$aux/ex4" antiga
+p="$(git -C "$aux/ex4" rev-parse 'main~1')"
+externo "$aux/ex4" "$p" "$(git -C "$aux/ex4" rev-parse "$p^1")"
+[ "$rc" = 0 ] && grep -qx 'registrado=planejamento_externo' "$aux/ext.out"
+confere 'DM-348: entrega antiga, sem as chaves de modo, registra o planejamento externo' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/ext.out" "$aux/ext.err"
+v9 "$aux/ex4"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+confere 'DM-348: entrega antiga com o planejamento externo registrado: a V9 passa' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
 
 repo_externo "$aux/ex3"
 (cd "$aux/ex3" && bash "$leitor" --registrar-planejamento-externo --entrega docs/entregas/plan/ENTREGA.md \
