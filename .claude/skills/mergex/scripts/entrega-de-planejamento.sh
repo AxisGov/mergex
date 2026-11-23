@@ -567,7 +567,7 @@ case "$ACAO" in
       || recusa "merge_sha $MERGE_SHA não é um commit deste repositório"
     [ "$(git rev-parse --verify -q "$MERGE_SHA^1" 2>/dev/null)" = "$BASE_SHA" ] \
       || recusa "base_sha $BASE_SHA não é o 1o pai do merge $MERGE_SHA"
-    grava novo "estado=merged;merge_sha=$MERGE_SHA;merge=humano;base_sha=$BASE_SHA"       "entrega=por_trabalho;sprint_atual=null;pr_url=null;pr_estado=merged;atualizado_em=$hoje" planejamento
+    grava novo "estado=merged;merge_sha=$MERGE_SHA;merge=humano;base_sha=$BASE_SHA"       "entrega=por_trabalho;sprint_atual=null;atualizado_em=$hoje" planejamento
     confere_e_troca 'planejamento=nao' "planejamento_merge_sha=$MERGE_SHA" \
       "planejamento_base_sha=$BASE_SHA" 'entrega=por_trabalho' 'sprint_atual=null'
     printf 'registrado=planejamento_externo\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA" ;;

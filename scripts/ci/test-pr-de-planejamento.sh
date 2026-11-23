@@ -951,9 +951,14 @@ confere 'DM-348: --registrar-merge continua recusando a entrega por trabalho' $?
 externo "$aux/ex1" "$p" "$(git -C "$aux/ex1" rev-parse "$p")"
 [ "$rc" != 0 ] && grep -q 'não é o 1o pai' "$aux/ext.err"
 confere 'DM-348: base que não é o 1o pai do merge: recusa' $?
+# o PR do próprio trabalho já aberto no E7: o registro externo não mexe nele
+e1="$aux/ex1/docs/entregas/plan/ENTREGA.md"
+sed 's|^pr_url: null|pr_url: https://example.test/pull/9|; s|^pr_estado: null|pr_estado: aberto|' "$e1" > "$aux/e.tmp" && mv "$aux/e.tmp" "$e1"
+g -C "$aux/ex1" add -A; g -C "$aux/ex1" commit -q -m 'docs(mergex): PR aberto' -m 'Trabalho: plan'
 externo "$aux/ex1" "$p" "$(git -C "$aux/ex1" rev-parse "$p^1")"
-[ "$rc" = 0 ] && grep -qx 'registrado=planejamento_externo' "$aux/ext.out"
-confere 'DM-348: --registrar-planejamento-externo grava o merge histórico' $?
+[ "$rc" = 0 ] && grep -qx 'registrado=planejamento_externo' "$aux/ext.out" \
+  && grep -qx 'pr_url: https://example.test/pull/9' "$e1" && grep -qx 'pr_estado: aberto' "$e1"
+confere 'DM-348: --registrar-planejamento-externo grava o merge histórico sem mexer no PR do trabalho' $?
 [ "$rc" = 0 ] || sed 's/^/        /' "$aux/ext.out" "$aux/ext.err"
 v9 "$aux/ex1"
 [ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
