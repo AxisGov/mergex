@@ -900,5 +900,82 @@ confere '09-revisao diz que o PR de planejamento nunca tem merge automatico' $?
 grep -q 'pulou a revisão por passar de 100 arquivos não é finding nem pendência' "$ref/09-revisao.md"
 confere '09-revisao diz que o pulo do app por mais de 100 arquivos nao e pendencia' $?
 
+echo '== Planejamento externo numa entrega por trabalho (DM-348) =='
+
+# repo_externo <dir> [extra] — o plano entra na main por um PR aberto por fora do método
+# (merge P); a entrega por trabalho nasce depois, com a base na main que contém P, sem prs.
+# `extra` = produto: P também traz src/z.ts num commit que toca a pasta do trabalho
+repo_externo() {
+  local d="$1" b
+  git init -q -b main "$d"; git -C "$d" config core.autocrlf false
+  mkdir -p "$d/src"; printf 'a\n' > "$d/src/a.ts"; g -C "$d" add -A; g -C "$d" commit -q -m base
+  git -C "$d" switch -q -c docs/plano
+  mkdir -p "$d/docs/sprintx/features/plan/sprint-01"
+  printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: plano' 'trabalho_id: plan' \
+    'tasks:' '  - id: T-01.01' '    status: pendente' '    arquivos:' '      cria: [src/b.ts]' \
+    '      altera: []' '---' > "$d/docs/sprintx/features/plan/sprint-01/tasks.md"
+  [ "${2:-}" != produto ] || printf 'z\n' > "$d/src/z.ts"
+  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(onda): plano documental'
+  g -C "$d" switch -q main; g -C "$d" merge -q --no-ff --no-edit docs/plano
+  printf 'o\n' > "$d/src/o.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'main depois do plano'
+  b="$(git -C "$d" rev-parse HEAD)"
+  git -C "$d" switch -q -c feature/plan
+  entrega "$d/docs/entregas/plan/ENTREGA.md" "base_validada_sha: $b
+origem_base: registrada_e0
+reconciliacoes: []
+branch: feature/plan
+branch_base: main
+entrega: por_trabalho
+sprint_atual: null
+prs: []"
+  sed 's/^trabalho_id: login$/trabalho_id: plan/' "$d/docs/entregas/plan/ENTREGA.md" > "$aux/e.tmp" \
+    && mv "$aux/e.tmp" "$d/docs/entregas/plan/ENTREGA.md"
+  g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): entrega' -m 'Trabalho: plan'
+  printf 'b\n' > "$d/src/b.ts"; g -C "$d" add -A; g -C "$d" commit -q -m 'feat: b' -m 'Trabalho: plan'
+}
+externo() { # <dir> <merge> <base> — registra e commita; saída em $aux/ext.out, código em $rc
+  (cd "$1" && bash "$leitor" --registrar-planejamento-externo --entrega docs/entregas/plan/ENTREGA.md \
+    --merge-sha "$2" --base-sha "$3") >"$aux/ext.out" 2>"$aux/ext.err"; rc=$?
+  [ "$rc" != 0 ] || { g -C "$1" add -A; g -C "$1" commit -q -m 'docs(mergex): planejamento externo' -m 'Trabalho: plan'; }
+}
+
+repo_externo "$aux/ex1"
+v9 "$aux/ex1"
+[ "$rc" = 3 ] && grep -q 'que toca a pasta do trabalho ou a entrega' "$aux/v9.out" "$aux/v9.err"
+confere 'DM-348: sem o registro, o plano externo na base da v9_sem_prova' $?
+p="$(git -C "$aux/ex1" rev-parse 'main~1')"
+(cd "$aux/ex1" && bash "$leitor" --registrar-merge --entrega docs/entregas/plan/ENTREGA.md \
+  --merge-sha "$p" --base-sha "$(git -C "$aux/ex1" rev-parse "$p^1")") >/dev/null 2>"$aux/err"
+[ "$?" != 0 ] && grep -q 'nada a registrar' "$aux/err"
+confere 'DM-348: --registrar-merge continua recusando a entrega por trabalho' $?
+externo "$aux/ex1" "$p" "$(git -C "$aux/ex1" rev-parse "$p")"
+[ "$rc" != 0 ] && grep -q 'não é o 1o pai' "$aux/ext.err"
+confere 'DM-348: base que não é o 1o pai do merge: recusa' $?
+externo "$aux/ex1" "$p" "$(git -C "$aux/ex1" rev-parse "$p^1")"
+[ "$rc" = 0 ] && grep -qx 'registrado=planejamento_externo' "$aux/ext.out"
+confere 'DM-348: --registrar-planejamento-externo grava o merge histórico' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/ext.out" "$aux/ext.err"
+v9 "$aux/ex1"
+[ "$rc" = 0 ] && grep -qx 'resultado=ok' "$aux/v9.out"
+confere 'DM-348: com o planejamento externo registrado, a V9 passa' $?
+[ "$rc" = 0 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+externo "$aux/ex1" "$p" "$(git -C "$aux/ex1" rev-parse "$p^1")"
+[ "$rc" != 0 ] && grep -q 'já tem prs' "$aux/ext.err"
+confere 'DM-348: segundo registro na entrega que já tem prs: recusa' $?
+
+repo_externo "$aux/ex2" produto
+p="$(git -C "$aux/ex2" rev-parse 'main~1')"
+externo "$aux/ex2" "$p" "$(git -C "$aux/ex2" rev-parse "$p^1")"
+v9 "$aux/ex2"
+[ "$rc" = 3 ]
+confere 'DM-348: planejamento externo que traz produto junto da pasta do trabalho: v9_sem_prova' $?
+[ "$rc" = 3 ] || sed 's/^/        /' "$aux/v9.out" "$aux/v9.err"
+
+repo_externo "$aux/ex3"
+(cd "$aux/ex3" && bash "$leitor" --registrar-planejamento-externo --entrega docs/entregas/plan/ENTREGA.md \
+  --merge-sha "$(printf 'f%.0s' $(seq 40))" --base-sha "$(printf 'e%.0s' $(seq 40))") >/dev/null 2>"$aux/err"
+[ "$?" != 0 ] && grep -q 'não é um commit deste repositório' "$aux/err"
+confere 'DM-348: merge_sha que não é commit do repositório: recusa' $?
+
 printf '\n%d ok, %d falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

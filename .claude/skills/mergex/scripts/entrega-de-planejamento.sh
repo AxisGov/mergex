@@ -506,10 +506,12 @@ grava() {
       for (i = 1; i <= ni; i++) { k = io[i]; if (!(k in visto)) print kind k ": " iv[k] cr0 }
       alvo_aberto = 0
     }
+    function nv(k) { return (alvo == "novo" && (k in iv)) ? iv[k] : "null" }
     function anexa_novo() {
       if (novo == "" || anexado) return
-      print "  - sprint: " novo cr0; print "    url: null" cr0; print "    estado: null" cr0
-      print "    merge_sha: null" cr0; print "    merge: null" cr0; print "    base_sha: null" cr0
+      # alvo `novo`: os itemsets valem para o item anexado (o planejamento externo nasce merged, DM-348)
+      print "  - sprint: " novo cr0; print "    url: " nv("url") cr0; print "    estado: " nv("estado") cr0
+      print "    merge_sha: " nv("merge_sha") cr0; print "    merge: " nv("merge") cr0; print "    base_sha: " nv("base_sha") cr0
       anexado = 1
     }
     BEGIN { ni = separa(itemsets, iv, io); nt = separa(topsets, tv, to) }
@@ -560,7 +562,12 @@ case "$ACAO" in
       || recusa 'a entrega não está registrada como por_trabalho: planejamento externo só registra nela'
     [ "$sprint" = null ] || recusa 'a entrega tem sprint_atual diferente de null: planejamento externo só registra a entrega sem sprint'
     [ "$n_itens" = 0 ] || recusa 'a entrega já tem prs: planejamento externo só registra a entrega sem PRs'
-    grava 0 "" "entrega=por_trabalho;sprint_atual=null;pr_url=null;pr_estado=merged;atualizado_em=$hoje" planejamento
+    # o merge histórico está no repositório: o commit existe e a base é o 1o pai dele
+    git rev-parse --verify -q "$MERGE_SHA^{commit}" >/dev/null 2>&1 \
+      || recusa "merge_sha $MERGE_SHA não é um commit deste repositório"
+    [ "$(git rev-parse --verify -q "$MERGE_SHA^1" 2>/dev/null)" = "$BASE_SHA" ] \
+      || recusa "base_sha $BASE_SHA não é o 1o pai do merge $MERGE_SHA"
+    grava novo "estado=merged;merge_sha=$MERGE_SHA;merge=humano;base_sha=$BASE_SHA"       "entrega=por_trabalho;sprint_atual=null;pr_url=null;pr_estado=merged;atualizado_em=$hoje" planejamento
     confere_e_troca 'planejamento=nao' "planejamento_merge_sha=$MERGE_SHA" \
       "planejamento_base_sha=$BASE_SHA" 'entrega=por_trabalho' 'sprint_atual=null'
     printf 'registrado=planejamento_externo\nmerge_sha=%s\nbase_sha=%s\n' "$MERGE_SHA" "$BASE_SHA" ;;
