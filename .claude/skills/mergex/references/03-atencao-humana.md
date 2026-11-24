@@ -496,7 +496,13 @@ Estrutura:
 2. As três seções, cada arquivo com caminho, tipo de mudança, tamanho e a justificativa com o critério.
 3. **Fontes consultadas e fontes ausentes** — o revisor precisa saber que dimensão não foi avaliada.
 
-Registre no `ENTREGA.md` a contagem por faixa (`atencao.olho_obrigatorio`,
+Depois de gravar o `ATENCAO.md`, rode:
+
+```bash
+bash .claude/skills/mergex/scripts/registrar-atencao.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md
+```
+
+O script registra no `ENTREGA.md` a contagem por faixa (`atencao.olho_obrigatorio`,
 `atencao.leitura_rapida`, `atencao.dispensavel`) **e a faixa por arquivo** em `faixa_atencao`,
 com o vocabulário do índice (`alta` \| `media` \| `baixa`) e não o nome da faixa em prosa.
 O mapeamento e as regras do campo estão em `references/00-schema.md`.
@@ -528,7 +534,7 @@ Esta saída vai inteira para a seção **"Onde eu quero seu olho"** da descriç�
 - [ ] Nenhuma justificativa é baseada em tamanho de diff.
 - [ ] Arquivos sem evidência suficiente estão em OLHO OBRIGATÓRIO, com a razão declarada.
 - [ ] As fontes ausentes estão listadas.
-- [ ] `ATENCAO.md` gravado; as contagens e a `faixa_atencao` por arquivo estão no `ENTREGA.md`.
+- [ ] `ATENCAO.md` gravado; rode `bash .claude/skills/mergex/scripts/registrar-atencao.sh --entrega docs/entregas/<trabalho_id>/ENTREGA.md` para gravar as contagens e a `faixa_atencao` por arquivo no `ENTREGA.md`.
 - [ ] Toda subida por O9 cita trabalho, data e artefato (`ver:`).
 - [ ] Nenhum arquivo desceu de faixa por causa do memox.
 - [ ] Nenhuma subida foi motivada por `coincidencias_arquivo`.
