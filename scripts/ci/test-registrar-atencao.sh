@@ -112,7 +112,8 @@ recusa_igual 'duas faixas' && passa 'arquivo em duas faixas recusa' || quebra "d
 
 projeto marcador; entrega por_trabalho '[]'; atencao
 printf '\n{{pendente}}\n' >> "$P/docs/entregas/w/ATENCAO.md"
-recusa_igual 'marcador' && passa 'marcador pendente recusa' || quebra "marcador: $(mostra)"
+recusa_igual 'marcador' && [ ! -e "$(E).registrar-atencao.trava" ] \
+  && passa 'marcador pendente recusa e não deixa a trava' || quebra "marcador: $(mostra)"
 
 projeto yaml; entrega por_trabalho '[]'; atencao
 printf 'x\n' > "$P/src/c: d.sh"; g -C "$P" add src; g -C "$P" commit -q -m c

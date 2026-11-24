@@ -48,9 +48,20 @@ fi
 
 # Um escritor por registro: a trava nasce em O_EXCL (set -C) antes da primeira leitura,
 # e duas gravações seguidas não apagam a mescla uma da outra.
+# O trap vem antes da trava e só apaga a que esta execução criou (NOSSA_TRAVA).
 TRAVA="$ARQ.registrar-atencao.trava"
+TMP_DIR=""; TMP_ARQ=""; NOSSA_TRAVA=""
+limpar() {
+  local rc="$1"
+  [ -z "$TMP_ARQ" ] || rm -f "$TMP_ARQ"; [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
+  [ -z "$NOSSA_TRAVA" ] || rm -f "$NOSSA_TRAVA"
+  exit "$rc"
+}
+trap 'limpar $?' EXIT
+trap 'exit 1' HUP INT TERM
 ( set -C; printf '%s\n' "$$" > "$TRAVA" ) 2>/dev/null \
   || recusa "outra gravação da atenção está em andamento ($TRAVA); se nenhuma está, apague a trava e rode de novo"
+NOSSA_TRAVA="$TRAVA"
 ID_REGISTRO="$(awk '/^trabalho_id:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$ARQ")"
 [ "$ID_REGISTRO" = "$TRABALHO" ] || recusa 'ENTREGA.md tem trabalho_id diferente do caminho'
 [ -n "$ATENCAO" ] || ATENCAO="${ENTREGA%/ENTREGA.md}/ATENCAO.md"
@@ -58,11 +69,7 @@ case "$ATENCAO" in /*) ATENCAO_ARQ="$ATENCAO" ;; *) ATENCAO_ARQ="$RAIZ/${ATENCAO
 [ -f "$ATENCAO_ARQ" ] && [ ! -L "$ATENCAO_ARQ" ] || recusa "ATENCAO.md ausente: $ATENCAO"
 grep -Fq '{{' "$ATENCAO_ARQ" && recusa 'ATENCAO.md ainda tem marcador {{...}}'
 
-TMP_DIR=""; TMP_ARQ=""
-limpar() { local rc="$1"; [ -z "$TMP_ARQ" ] || rm -f "$TMP_ARQ"; [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"; rm -f "$TRAVA"; exit "$rc"; }
-trap 'limpar $?' EXIT
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-registrar-atencao.XXXXXX")" || ambiente 'não foi possível criar temporário'
-trap 'exit 1' HUP INT TERM
 
 # O formato da classificação é deliberadamente estreito: somente linhas de tabela
 # cujo primeiro campo é um caminho entre crases, dentro das três seções do template.
