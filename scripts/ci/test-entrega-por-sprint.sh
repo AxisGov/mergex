@@ -1072,6 +1072,44 @@ pm "$d" e9-merge
 [ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge'
 r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
 confere 'e9-merge persiste o --completar-base da entrega por sprint entre o planejamento e a sprint 01' "$r"
+# DM-349 (conselhos, onda 4): o plano entrou na main por um PR de fora do método, e o
+# --registrar-planejamento-externo (DM-348) gravou o item novo de prs na entrega por
+# trabalho (prs vazio, sprint_atual null); o e9-merge recusava a gravação como "além do E9"
+d="$aux/externo"
+git init -q -b main "$d"; git -C "$d" config core.autocrlf false
+mkdir -p "$d/src"; printf 'a\n' > "$d/src/a.ts"; g -C "$d" add -A; g -C "$d" commit -q -m base
+git -C "$d" switch -q -c docs/plano
+mkdir -p "$d/docs/sprintx/features/plan"
+printf '%s\n' '---' 'expx_schema: 1' 'expx_tool: sprintx' 'kind: orquestrador' 'trabalho_id: plan' '---' \
+  > "$d/docs/sprintx/features/plan/ORQUESTRADOR.md"
+g -C "$d" add -A; g -C "$d" commit -q -m 'docs(onda): plano documental'
+g -C "$d" switch -q main; g -C "$d" merge -q --no-ff --no-edit docs/plano
+pmerge="$(git -C "$d" rev-parse HEAD)"; pbase="$(git -C "$d" rev-parse HEAD^1)"
+git -C "$d" switch -q -c feature/plan
+entrega "$d/$e9e" "base_validada_sha: $pmerge
+origem_base: registrada_e0
+reconciliacoes: []
+branch: feature/plan
+branch_base: main
+entrega: por_trabalho
+sprint_atual: null
+prs: []"
+g -C "$d" add -A; g -C "$d" commit -q -m 'docs(mergex): entrega' -m 'Trabalho: plan'
+(cd "$d" && bash "$leitor" --registrar-planejamento-externo --entrega "$e9e" \
+  --merge-sha "$pmerge" --base-sha "$pbase") >/dev/null 2>"$aux/err" || mostra "$aux/err"
+cp -R "$d" "$d-mao"
+pm "$d" e9-merge
+[ "$rc" = 0 ] && git -C "$d" log -1 --format=%B | grep -qx 'Metodo: e9-merge' && [ -z "$(git -C "$d" status --porcelain)" ] \
+  && [ "$(git -C "$d" diff --name-only HEAD~1 HEAD)" = "$e9e" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'DM-349: e9-merge persiste o --registrar-planejamento-externo da entrega por trabalho' "$r"
+# o mesmo registro com um campo de fora mexido à mão: recusa, sem commitar
+sed 's/^causa: null$/causa: editada à mão/' "$d-mao/$e9e" > "$aux/e.tmp" && mv "$aux/e.tmp" "$d-mao/$e9e"
+h="$(git -C "$d-mao" rev-parse HEAD)"; pm "$d-mao" e9-merge
+[ "$rc" = 1 ] && grep -q -- '--registrar-planejamento-externo gravam' "$aux/pm.err" \
+  && [ "$(git -C "$d-mao" rev-parse HEAD)" = "$h" ]
+r=$?; [ "$r" = 0 ] || mostra "$aux/pm.err"
+confere 'DM-349: e9-merge recusa o registro externo com outro campo mexido à mão, sem commitar' "$r"
 
 echo '== a abertura do E0 persistida antes da main seguinte (conselhos, onda 2; DM-328) =='
 
