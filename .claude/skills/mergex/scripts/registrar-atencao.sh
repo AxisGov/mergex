@@ -49,6 +49,12 @@ if ! RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)"; then
 fi
 ARQ="$RAIZ/$ENTREGA"
 [ -f "$ARQ" ] && [ ! -L "$ARQ" ] || recusa "$ENTREGA não é arquivo regular"
+# a pasta física é a do repositório: docs, entregas ou a pasta do trabalho como link
+# levariam a gravação (o mv) para fora dele
+RAIZ_REAL="$(cd "$RAIZ" && pwd -P)" || ambiente "não foi possível resolver $RAIZ"
+PASTA_REAL="$(cd "$(dirname "$ARQ")" && pwd -P)" || ambiente "não foi possível resolver a pasta de $ENTREGA"
+[ "$PASTA_REAL" = "$RAIZ_REAL/docs/entregas/$TRABALHO" ] \
+  || recusa "a pasta de $ENTREGA resolve para $PASTA_REAL, fora de $RAIZ_REAL/docs/entregas/$TRABALHO: link simbólico no caminho"
 # toda leitura de chave é do frontmatter: um exemplo YAML na prosa não conta
 FM_TXT="$(awk 'NR == 1 { if ($0 !~ /^---[ \t]*\r?$/) exit; next } /^---[ \t]*\r?$/ { exit } { sub(/\r$/, ""); print }' "$ARQ")"
 [ -n "$FM_TXT" ] || recusa "$ENTREGA não tem frontmatter"
@@ -206,6 +212,10 @@ _entrega_troca "$NOVO" arquivos_alterados "$ALTERADOS_YAML" \
 
 EVENTOS="$RAIZ/docs/eventos"
 mkdir -p "$EVENTOS" || ambiente 'não foi possível criar docs/eventos'
+[ "$(cd "$EVENTOS" && pwd -P)" = "$RAIZ_REAL/docs/eventos" ] \
+  || recusa 'docs/eventos resolve para fora do repositório: link simbólico no caminho'
+[ ! -L "$EVENTOS/$TRABALHO.jsonl" ] && [ ! -L "$EVENTOS/.gitignore" ] \
+  || recusa 'o rastro em docs/eventos é link simbólico'
 # o rastro é local (contrato expx-eventos): sem o ignore, ele suja a árvore e o
 # branch-limpa barra toda troca de branch; o mesmo ignore do expx_rastro dos hooks
 [ -f "$EVENTOS/.gitignore" ] || printf '# Rastro de eventos expx: local da maquina, nao versionado.\n*\n' > "$EVENTOS/.gitignore" \

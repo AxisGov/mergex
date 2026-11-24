@@ -102,6 +102,12 @@ roda
 [ "$rc" = 0 ] && [ "$(awk '/^---/{n++; next} n == 1 && /fantasma/' "$(E)")" = "" ] \
   && passa 'exemplo YAML na prosa não entra na mescla por sprint' || quebra "prosa: $(mostra)"
 
+projeto link; entrega por_trabalho '[]'; atencao
+mkdir -p "$aux/externa"; mv "$P/docs/entregas/w" "$aux/externa/w"; ln -s "$aux/externa/w" "$P/docs/entregas/w"
+cp "$aux/externa/w/ENTREGA.md" "$aux/antes"; roda
+[ "$rc" != 0 ] && cmp -s "$aux/antes" "$aux/externa/w/ENTREGA.md" && grep -q 'link simbólico no caminho' "$aux/err" \
+  && passa 'pasta do trabalho como link para fora recusa sem gravar lá' || quebra "link: $(mostra)"
+
 projeto falta; entrega por_trabalho '[]'; atencao
 sed -i '/`tests\/a.sh`/d' "$P/docs/entregas/w/ATENCAO.md"
 recusa_igual 'arquivo do diff sem faixa no ATENCAO.md: tests/a.sh' \
