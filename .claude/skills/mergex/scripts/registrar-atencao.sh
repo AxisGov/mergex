@@ -80,10 +80,38 @@ awk '
   dentro && /^[A-Za-z_][A-Za-z0-9_]*:/ { dentro=0 }
   dentro && /^[[:space:]]*-[[:space:]]*/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", s); gsub(/^["\047]|["\047]$/, "", s); print s }
 ' "$ARQ" > "$ALTERADOS"
-[ -s "$ALTERADOS" ] || recusa 'ENTREGA.md não declara arquivos_alterados'
+MODO_LIDO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$ARQ")"
+
+# O diff do E3 (03-atencao-humana.md, Passo 1): o que a branch fez desde que divergiu
+# da base. Todo arquivo dele tem faixa; num renomeado basta a ponta nova, e as duas
+# pontas entram em arquivos_alterados (00-schema.md).
+BASE="$(awk '/^branch_base:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); gsub(/^["\047]|["\047]$/, ""); print; exit }' "$ARQ")"
+case "$BASE" in ''|null) recusa 'ENTREGA.md sem branch_base: o diff do E3 não tem base' ;; esac
+git -C "$RAIZ" rev-parse --verify -q "$BASE^{commit}" >/dev/null || recusa "branch_base $BASE não é um commit deste repositório"
+DIFF="$TMP_DIR/diff"
+git -C "$RAIZ" -c core.quotePath=false diff --name-status -M "$BASE...HEAD" > "$DIFF" \
+  || ambiente "o Git não listou o diff $BASE...HEAD"
+EXIGIDOS="$TMP_DIR/exigidos"; DO_DIFF="$TMP_DIR/do_diff"
+awk -F '\t' '$1 ~ /^[RC]/ { print $3 > ex; print $2 > to; print $3 > to; next } NF >= 2 { print $2 > ex; print $2 > to }' \
+  ex="$EXIGIDOS" to="$DO_DIFF" "$DIFF"
+[ -s "$EXIGIDOS" ] || recusa "o diff $BASE...HEAD está vazio: não há o que registrar"
+while IFS= read -r arquivo; do
+  awk -F '\t' -v a="$arquivo" '$1 == a { achou = 1 } END { exit !achou }' "$CLASSIFICACAO" \
+    || recusa "arquivo do diff sem faixa no ATENCAO.md: $arquivo"
+done < "$EXIGIDOS"
 while IFS=$'\t' read -r arquivo faixa; do
-  grep -Fqx -- "$arquivo" "$ALTERADOS" || recusa "arquivo fora de arquivos_alterados: $arquivo"
+  grep -Fqx -- "$arquivo" "$DO_DIFF" || recusa "arquivo fora do diff $BASE...HEAD: $arquivo"
 done < "$CLASSIFICACAO"
+# o caminho vai sem aspas para o YAML (lista em fluxo e `arquivo:`): o que mudaria o sentido dele lá é recusado
+while IFS= read -r arquivo; do
+  case "$arquivo" in
+    *': '*|*' #'*|*,*|*'"'*|*"'"*|*'['*|*']'*|*'{'*|*'}'*|[-?:\&*!\|\>%@\`#]*|' '*|*' ') \
+      recusa "caminho que o YAML sem aspas não guarda: $arquivo" ;;
+  esac
+done < "$DO_DIFF"
+TODOS="$TMP_DIR/todos"
+if [ "$MODO_LIDO" = por_sprint ]; then cat "$ALTERADOS" "$DO_DIFF"; else cat "$DO_DIFF"; fi | LC_ALL=C sort -u > "$TODOS"
+ALTERADOS_YAML="arquivos_alterados: [$(awk 'NR > 1 { printf ", " } { printf "%s", $0 }' "$TODOS")]"
 
 MODO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$ARQ")"
 case "$MODO" in ''|por_trabalho) MODO=por_trabalho ;; por_sprint) ;; *) recusa 'ENTREGA.md tem entrega diferente de por_trabalho ou por_sprint' ;; esac
@@ -126,13 +154,18 @@ eval "$(awk '/^(_entrega_fecha|_entrega_troca|entrega_define)\(\) \{/,/^}$/' "$R
 HOJE="$(date +%Y-%m-%d)" || ambiente 'data do sistema indisponível'
 NOVO="$TMP_DIR/ENTREGA.md"
 cp "$ARQ" "$NOVO" || ambiente "não foi possível copiar $ENTREGA"
-_entrega_troca "$NOVO" atencao "$ATENCAO_YAML" \
+_entrega_troca "$NOVO" arquivos_alterados "$ALTERADOS_YAML" \
+  && _entrega_troca "$NOVO" atencao "$ATENCAO_YAML" \
   && _entrega_troca "$NOVO" faixa_atencao "$FAIXAS" \
   && entrega_define "$NOVO" atualizado_em "$HOJE" \
   || recusa "$ENTREGA: $ENTREGA_ERRO; nada foi gravado"
 
 EVENTOS="$RAIZ/docs/eventos"
 mkdir -p "$EVENTOS" || ambiente 'não foi possível criar docs/eventos'
+# o rastro é local (contrato expx-eventos): sem o ignore, ele suja a árvore e o
+# branch-limpa barra toda troca de branch; o mesmo ignore do expx_rastro dos hooks
+[ -f "$EVENTOS/.gitignore" ] || printf '# Rastro de eventos expx: local da maquina, nao versionado.\n*\n' > "$EVENTOS/.gitignore" \
+  || ambiente 'não foi possível criar docs/eventos/.gitignore'
 EVENTO="$TMP_DIR/evento.jsonl"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || ambiente 'hora do sistema indisponível'
 printf '{"ts":"%s","expx_eventos":1,"trabalho_id":"%s","ferramenta":"mergex","origem":"skill","evento":"veredito_emitido","fase":"e3","task":null,"agente":"revisor-diff","resultado":"ok","detalhe":"%s olho obrigatorio, %s leitura rapida, %s dispensavel","arquivos":[]}\n' \

@@ -504,7 +504,11 @@ bash .claude/skills/mergex/scripts/registrar-atencao.sh --entrega docs/entregas/
 
 O script registra no `ENTREGA.md` a contagem por faixa (`atencao.olho_obrigatorio`,
 `atencao.leitura_rapida`, `atencao.dispensavel`) **e a faixa por arquivo** em `faixa_atencao`,
-com o vocabulário do índice (`alta` \| `media` \| `baixa`) e não o nome da faixa em prosa.
+com o vocabulário do índice (`alta` \| `media` \| `baixa`) e não o nome da faixa em prosa, e
+grava `arquivos_alterados` a partir do diff `<branch_base>...HEAD` (em `por_sprint`, a união com o
+valor já gravado). Ele recusa, sem mexer no registro, quando um arquivo do diff ficou sem faixa
+(no renomeado, basta a ponta nova) ou quando o `ATENCAO.md` cita um caminho fora do diff. Também
+acrescenta o `veredito_emitido` abaixo ao rastro.
 O mapeamento e as regras do campo estão em `references/00-schema.md`.
 
 É `faixa_atencao` que fecha o ciclo com o memox: um arquivo que entra repetidamente em
