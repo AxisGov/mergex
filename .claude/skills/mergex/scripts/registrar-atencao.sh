@@ -143,6 +143,10 @@ while IFS= read -r arquivo; do
     *': '*|*' #'*|*,*|*'"'*|*"'"*|*'['*|*']'*|*'{'*|*'}'*|[-?:\&*!\|\>%@\`#]*|' '*|*' ') \
       recusa "caminho que o YAML sem aspas não guarda: $arquivo" ;;
   esac
+  # escalar que o YAML lê como booleano, nulo ou número, e não como texto
+  if printf '%s\n' "$arquivo" | grep -Eqi '^(y|n|yes|no|true|false|on|off|null|~)$|^[-+.0-9][-+.0-9_a-fA-FxXoO:]*$'; then
+    recusa "caminho que o YAML sem aspas não guarda: $arquivo"
+  fi
 done < "$DO_DIFF"
 TODOS="$TMP_DIR/todos"
 if [ "$MODO_LIDO" = por_sprint ]; then cat "$ALTERADOS" "$DO_DIFF"; else cat "$DO_DIFF"; fi | LC_ALL=C sort -u > "$TODOS"

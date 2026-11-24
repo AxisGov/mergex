@@ -121,6 +121,12 @@ printf '| `src/c: d.sh` | A |\n' >> "$P/docs/entregas/w/ATENCAO.md"
 recusa_igual 'o YAML sem aspas não guarda: src/c: d.sh' \
   && passa 'caminho que o YAML sem aspas não guarda recusa' || quebra "yaml: $(mostra)"
 
+projeto escalar; entrega por_trabalho '[]'; atencao
+printf 'x\n' > "$P/true"; printf 'y\n' > "$P/2024"; g -C "$P" add true 2024; g -C "$P" commit -q -m esc
+printf '| `true` | A |\n| `2024` | A |\n' >> "$P/docs/entregas/w/ATENCAO.md"
+recusa_igual 'o YAML sem aspas não guarda: ' \
+  && passa 'caminho que o YAML lê como booleano ou número recusa' || quebra "escalar: $(mostra)"
+
 projeto renomeado; entrega por_trabalho '[]'; atencao
 g -C "$P" mv src/b.sh src/b2.sh; g -C "$P" commit -q -m ren
 sed -i 's|`src/b.sh`|`src/b2.sh`|' "$P/docs/entregas/w/ATENCAO.md"
