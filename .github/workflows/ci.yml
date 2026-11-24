@@ -190,6 +190,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-revisao-retroativa.sh
 
+      - name: Test E3 registrar atencao (DM-350)
+        shell: bash
+        run: bash scripts/ci/test-registrar-atencao.sh
+
       - name: Test E1 evidencia de revisao por task
         shell: bash
         run: bash scripts/ci/test-e1-evidencia-revisao.sh
