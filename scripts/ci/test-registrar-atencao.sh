@@ -108,6 +108,13 @@ cp "$aux/externa/w/ENTREGA.md" "$aux/antes"; roda
 [ "$rc" != 0 ] && cmp -s "$aux/antes" "$aux/externa/w/ENTREGA.md" && grep -q 'link simbólico no caminho' "$aux/err" \
   && passa 'pasta do trabalho como link para fora recusa sem gravar lá' || quebra "link: $(mostra)"
 
+projeto aspas; entrega por_sprint $'\n  - arquivo: legado.txt\n    faixa: baixa' '[legado.txt]'; atencao
+sed -i 's/^entrega: por_sprint$/entrega: "por_sprint" # entrega por sprint/; s/^branch_base: main$/branch_base: main # base do E3/' "$(E)"
+roda
+[ "$rc" = 0 ] && grep -q 'arquivo: legado.txt' "$(E)" \
+  && [ -z "$(find "$P/docs/entregas/w" -name '.ENTREGA.md.atencao.*')" ] \
+  && passa 'valor entre aspas e com comentário é lido; o temporário não fica' || quebra "aspas: $(mostra)"
+
 projeto falta; entrega por_trabalho '[]'; atencao
 sed -i '/`tests\/a.sh`/d' "$P/docs/entregas/w/ATENCAO.md"
 recusa_igual 'arquivo do diff sem faixa no ATENCAO.md: tests/a.sh' \

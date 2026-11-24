@@ -58,8 +58,18 @@ PASTA_REAL="$(cd "$(dirname "$ARQ")" && pwd -P)" || ambiente "não foi possível
 # toda leitura de chave é do frontmatter: um exemplo YAML na prosa não conta
 FM_TXT="$(awk 'NR == 1 { if ($0 !~ /^---[ \t]*\r?$/) exit; next } /^---[ \t]*\r?$/ { exit } { sub(/\r$/, ""); print }' "$ARQ")"
 [ -n "$FM_TXT" ] || recusa "$ENTREGA não tem frontmatter"
+# escalar <chave>: o valor de topo do frontmatter, sem aspas e sem comentário no fim da linha
+escalar() {
+  awk -v k="$1" 'index($0, k ":") == 1 {
+    s = substr($0, length(k) + 2); sub(/^[[:space:]]+/, "", s)
+    if (s ~ /^"/) { sub(/^"/, "", s); sub(/".*$/, "", s) }
+    else if (s ~ /^\047/) { sub(/^\047/, "", s); sub(/\047.*$/, "", s) }
+    else { sub(/[[:space:]]+#.*$/, "", s); sub(/[[:space:]]+$/, "", s) }
+    print s; exit
+  }' <<<"$FM_TXT"
+}
 if [ "$SEM_GIT" = 1 ]; then
-  grep -Eq '^versionado:[[:space:]]*false[[:space:]]*$' <<<"$FM_TXT" \
+  [ "$(escalar versionado)" = false ] \
     || ambiente 'o Git não resolveu a raiz do repositório, e o ENTREGA.md não declara versionado: false'
 fi
 
@@ -81,7 +91,7 @@ trap 'limpar $?' EXIT
 trap 'exit 1' HUP INT TERM
 ( set -C; printf '%s\n' "$$" > "$TRAVA" ) 2>/dev/null \
   || recusa "outra gravação da atenção está em andamento ($TRAVA); se nenhuma está, apague a trava e rode de novo"
-ID_REGISTRO="$(awk '/^trabalho_id:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' <<<"$FM_TXT")"
+ID_REGISTRO="$(escalar trabalho_id)"
 [ "$ID_REGISTRO" = "$TRABALHO" ] || recusa 'ENTREGA.md tem trabalho_id diferente do caminho'
 [ -n "$ATENCAO" ] || ATENCAO="${ENTREGA%/ENTREGA.md}/ATENCAO.md"
 case "$ATENCAO" in /*) ATENCAO_ARQ="$ATENCAO" ;; *) ATENCAO_ARQ="$RAIZ/${ATENCAO#./}" ;; esac
@@ -121,7 +131,7 @@ awk '
   dentro && /^[A-Za-z_][A-Za-z0-9_]*:/ { dentro=0 }
   dentro && /^[[:space:]]*-[[:space:]]*/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", s); gsub(/^["\047]|["\047]$/, "", s); print s }
 ' <<<"$FM_TXT" > "$ALTERADOS"
-MODO_LIDO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' <<<"$FM_TXT")"
+MODO_LIDO="$(escalar entrega)"
 
 # O diff do E3 (03-atencao-humana.md, Passo 1): o que a branch fez desde que divergiu
 # da base. Todo arquivo dele tem faixa; num renomeado basta a ponta nova, e as duas
@@ -131,7 +141,7 @@ if [ "$SEM_GIT" = 1 ]; then
   # sem diff: a classificação já é dos arquivos declarados nas tasks
   cut -f1 "$CLASSIFICACAO" > "$DO_DIFF"
 else
-  BASE="$(awk '/^branch_base:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); gsub(/^["\047]|["\047]$/, ""); print; exit }' <<<"$FM_TXT")"
+  BASE="$(escalar branch_base)"
   case "$BASE" in ''|null) recusa 'ENTREGA.md sem branch_base: o diff do E3 não tem base' ;; esac
   git -C "$RAIZ" rev-parse --verify -q "$BASE^{commit}" >/dev/null || recusa "branch_base $BASE não é um commit deste repositório"
   DIFF="$TMP_DIR/diff"
@@ -163,7 +173,7 @@ TODOS="$TMP_DIR/todos"
 if [ "$MODO_LIDO" = por_sprint ]; then cat "$ALTERADOS" "$DO_DIFF"; else cat "$DO_DIFF"; fi | LC_ALL=C sort -u > "$TODOS"
 ALTERADOS_YAML="arquivos_alterados: [$(awk 'NR > 1 { printf ", " } { printf "%s", $0 }' "$TODOS")]"
 
-MODO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' <<<"$FM_TXT")"
+MODO="$(escalar entrega)"
 case "$MODO" in ''|por_trabalho) MODO=por_trabalho ;; por_sprint) ;; *) recusa 'ENTREGA.md tem entrega diferente de por_trabalho ou por_sprint' ;; esac
 
 NOVAS="$TMP_DIR/novas.tsv"
@@ -225,7 +235,9 @@ TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || ambiente 'hora do sistema indisponível'
 printf '{"ts":"%s","expx_eventos":1,"trabalho_id":"%s","ferramenta":"mergex","origem":"skill","evento":"veredito_emitido","fase":"e3","task":null,"agente":"revisor-diff","resultado":"ok","detalhe":"%s olho obrigatorio, %s leitura rapida, %s dispensavel","arquivos":[]}\n' \
   "$TS" "$TRABALHO" "$OLHO" "$LEITURA" "$DISPENSAVEL" > "$EVENTO" || ambiente 'não foi possível montar o evento'
 
-TMP_ARQ="$ARQ.atencao.$$"
+# o temporário nasce novo e exclusivo (mktemp) na mesma pasta: um link pré-criado
+# com nome previsível não desvia a gravação
+TMP_ARQ="$(mktemp "$PASTA_REAL/.ENTREGA.md.atencao.XXXXXX")" || { TMP_ARQ=""; ambiente "não foi possível criar o temporário ao lado de $ENTREGA"; }
 { cp -p "$ARQ" "$TMP_ARQ" && cat "$NOVO" > "$TMP_ARQ" && mv "$TMP_ARQ" "$ARQ"; } \
   || { rm -f "$TMP_ARQ"; TMP_ARQ=""; ambiente "não foi possível gravar $ENTREGA; o arquivo não foi alterado"; }
 TMP_ARQ=""
