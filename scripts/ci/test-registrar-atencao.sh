@@ -96,6 +96,12 @@ grep -q 'arquivo: legado.txt' "$(E)" \
   && [ "$rc" = 0 ] \
   && passa 'por_sprint mescla faixas pelo caminho inteiro e acumula arquivos_alterados' || quebra "por_sprint: $(mostra)"
 
+projeto prosa; entrega por_sprint '[]' '[]'; atencao
+printf '\n```yaml\nfaixa_atencao:\n  - arquivo: fantasma.sh\n    faixa: alta\narquivos_alterados: [fantasma.sh]\n```\n' >> "$(E)"
+roda
+[ "$rc" = 0 ] && [ "$(awk '/^---/{n++; next} n == 1 && /fantasma/' "$(E)")" = "" ] \
+  && passa 'exemplo YAML na prosa não entra na mescla por sprint' || quebra "prosa: $(mostra)"
+
 projeto falta; entrega por_trabalho '[]'; atencao
 sed -i '/`tests\/a.sh`/d' "$P/docs/entregas/w/ATENCAO.md"
 recusa_igual 'arquivo do diff sem faixa no ATENCAO.md: tests/a.sh' \

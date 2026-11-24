@@ -49,8 +49,11 @@ if ! RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)"; then
 fi
 ARQ="$RAIZ/$ENTREGA"
 [ -f "$ARQ" ] && [ ! -L "$ARQ" ] || recusa "$ENTREGA não é arquivo regular"
+# toda leitura de chave é do frontmatter: um exemplo YAML na prosa não conta
+FM_TXT="$(awk 'NR == 1 { if ($0 !~ /^---[ \t]*\r?$/) exit; next } /^---[ \t]*\r?$/ { exit } { sub(/\r$/, ""); print }' "$ARQ")"
+[ -n "$FM_TXT" ] || recusa "$ENTREGA não tem frontmatter"
 if [ "$SEM_GIT" = 1 ]; then
-  grep -Eq '^versionado:[[:space:]]*false[[:space:]]*\r?$' "$ARQ" \
+  grep -Eq '^versionado:[[:space:]]*false[[:space:]]*$' <<<"$FM_TXT" \
     || ambiente 'o Git não resolveu a raiz do repositório, e o ENTREGA.md não declara versionado: false'
 fi
 
@@ -70,7 +73,7 @@ trap 'exit 1' HUP INT TERM
 ( set -C; printf '%s\n' "$$" > "$TRAVA" ) 2>/dev/null \
   || recusa "outra gravação da atenção está em andamento ($TRAVA); se nenhuma está, apague a trava e rode de novo"
 NOSSA_TRAVA="$TRAVA"
-ID_REGISTRO="$(awk '/^trabalho_id:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$ARQ")"
+ID_REGISTRO="$(awk '/^trabalho_id:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' <<<"$FM_TXT")"
 [ "$ID_REGISTRO" = "$TRABALHO" ] || recusa 'ENTREGA.md tem trabalho_id diferente do caminho'
 [ -n "$ATENCAO" ] || ATENCAO="${ENTREGA%/ENTREGA.md}/ATENCAO.md"
 case "$ATENCAO" in /*) ATENCAO_ARQ="$ATENCAO" ;; *) ATENCAO_ARQ="$RAIZ/${ATENCAO#./}" ;; esac
@@ -109,8 +112,8 @@ awk '
   /^arquivos_alterados:[[:space:]]*$/ { dentro=1; next }
   dentro && /^[A-Za-z_][A-Za-z0-9_]*:/ { dentro=0 }
   dentro && /^[[:space:]]*-[[:space:]]*/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", s); gsub(/^["\047]|["\047]$/, "", s); print s }
-' "$ARQ" > "$ALTERADOS"
-MODO_LIDO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$ARQ")"
+' <<<"$FM_TXT" > "$ALTERADOS"
+MODO_LIDO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' <<<"$FM_TXT")"
 
 # O diff do E3 (03-atencao-humana.md, Passo 1): o que a branch fez desde que divergiu
 # da base. Todo arquivo dele tem faixa; num renomeado basta a ponta nova, e as duas
@@ -120,7 +123,7 @@ if [ "$SEM_GIT" = 1 ]; then
   # sem diff: a classificação já é dos arquivos declarados nas tasks
   cut -f1 "$CLASSIFICACAO" > "$DO_DIFF"
 else
-  BASE="$(awk '/^branch_base:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); gsub(/^["\047]|["\047]$/, ""); print; exit }' "$ARQ")"
+  BASE="$(awk '/^branch_base:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); gsub(/^["\047]|["\047]$/, ""); print; exit }' <<<"$FM_TXT")"
   case "$BASE" in ''|null) recusa 'ENTREGA.md sem branch_base: o diff do E3 não tem base' ;; esac
   git -C "$RAIZ" rev-parse --verify -q "$BASE^{commit}" >/dev/null || recusa "branch_base $BASE não é um commit deste repositório"
   DIFF="$TMP_DIR/diff"
@@ -144,7 +147,7 @@ while IFS= read -r arquivo; do
       recusa "caminho que o YAML sem aspas não guarda: $arquivo" ;;
   esac
   # escalar que o YAML lê como booleano, nulo ou número, e não como texto
-  if printf '%s\n' "$arquivo" | grep -Eqi '^(y|n|yes|no|true|false|on|off|null|~)$|^[-+.0-9][-+.0-9_a-fA-FxXoO:]*$'; then
+  if grep -Eqi '^(y|n|yes|no|true|false|on|off|null|~)$|^[-+.0-9][-+.0-9_a-fA-FxXoO:]*$' <<<"$arquivo"; then
     recusa "caminho que o YAML sem aspas não guarda: $arquivo"
   fi
 done < "$DO_DIFF"
@@ -152,7 +155,7 @@ TODOS="$TMP_DIR/todos"
 if [ "$MODO_LIDO" = por_sprint ]; then cat "$ALTERADOS" "$DO_DIFF"; else cat "$DO_DIFF"; fi | LC_ALL=C sort -u > "$TODOS"
 ALTERADOS_YAML="arquivos_alterados: [$(awk 'NR > 1 { printf ", " } { printf "%s", $0 }' "$TODOS")]"
 
-MODO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$ARQ")"
+MODO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' <<<"$FM_TXT")"
 case "$MODO" in ''|por_trabalho) MODO=por_trabalho ;; por_sprint) ;; *) recusa 'ENTREGA.md tem entrega diferente de por_trabalho ou por_sprint' ;; esac
 
 NOVAS="$TMP_DIR/novas.tsv"
@@ -169,7 +172,7 @@ if [ "$MODO" = por_sprint ]; then
     dentro && arq != "" && /^[[:space:]]+faixa:[[:space:]]*/ {
       s=$0; sub(/^[[:space:]]+faixa:[[:space:]]*/, "", s); sub(/\r$/, "", s); print arq "\t" s; arq=""
     }
-  ' "$ARQ" > "$ANTIGAS"
+  ' <<<"$FM_TXT" > "$ANTIGAS"
   # o caminho é comparado inteiro: `a.sh` antigo fica mesmo que `src/a.sh` seja novo
   awk -F '\t' 'NR == FNR { novo[$1] = 1; next } !($1 in novo) { print }' "$NOVAS" "$ANTIGAS" >> "$LISTA"
 fi
