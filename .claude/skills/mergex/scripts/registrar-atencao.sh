@@ -59,20 +59,22 @@ fi
 
 # Um escritor por registro: a trava nasce em O_EXCL (set -C) antes da primeira leitura,
 # e duas gravações seguidas não apagam a mescla uma da outra.
-# O trap vem antes da trava e só apaga a que esta execução criou (NOSSA_TRAVA).
+# O trap vem antes da trava e só apaga a trava que guarda o PID desta execução:
+# um sinal entre a criação e qualquer atribuição não deixa a trava órfã, e a recusa
+# por trava alheia não apaga a dos outros.
 TRAVA="$ARQ.registrar-atencao.trava"
-TMP_DIR=""; TMP_ARQ=""; NOSSA_TRAVA=""
+TMP_DIR=""; TMP_ARQ=""
 limpar() {
-  local rc="$1"
+  local rc="$1" dono=""
   [ -z "$TMP_ARQ" ] || rm -f "$TMP_ARQ"; [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
-  [ -z "$NOSSA_TRAVA" ] || rm -f "$NOSSA_TRAVA"
+  if [ -f "$TRAVA" ]; then IFS= read -r dono < "$TRAVA" 2>/dev/null || dono=""; fi
+  [ "$dono" != "$$" ] || rm -f "$TRAVA"
   exit "$rc"
 }
 trap 'limpar $?' EXIT
 trap 'exit 1' HUP INT TERM
 ( set -C; printf '%s\n' "$$" > "$TRAVA" ) 2>/dev/null \
   || recusa "outra gravação da atenção está em andamento ($TRAVA); se nenhuma está, apague a trava e rode de novo"
-NOSSA_TRAVA="$TRAVA"
 ID_REGISTRO="$(awk '/^trabalho_id:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' <<<"$FM_TXT")"
 [ "$ID_REGISTRO" = "$TRABALHO" ] || recusa 'ENTREGA.md tem trabalho_id diferente do caminho'
 [ -n "$ATENCAO" ] || ATENCAO="${ENTREGA%/ENTREGA.md}/ATENCAO.md"
