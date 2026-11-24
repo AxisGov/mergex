@@ -230,6 +230,14 @@ mkdir -p "$EVENTOS" || ambiente 'não foi possível criar docs/eventos'
 # branch-limpa barra toda troca de branch; o mesmo ignore do expx_rastro dos hooks
 [ -f "$EVENTOS/.gitignore" ] || printf '# Rastro de eventos expx: local da maquina, nao versionado.\n*\n' > "$EVENTOS/.gitignore" \
   || ambiente 'não foi possível criar docs/eventos/.gitignore'
+# e o Git confirma, antes de qualquer gravação, que o rastro fica fora da árvore:
+# um .gitignore que já existia e não o ignora, ou o rastro já versionado, recusam
+if [ "$SEM_GIT" = 0 ]; then
+  git -C "$RAIZ" check-ignore -q --no-index "docs/eventos/$TRABALHO.jsonl" \
+    || recusa "docs/eventos/$TRABALHO.jsonl não é ignorado pelo Git: o rastro sujaria a árvore; ignore docs/eventos/ (o .gitignore com * dentro dela)"
+  ! git -C "$RAIZ" ls-files --error-unmatch "docs/eventos/$TRABALHO.jsonl" >/dev/null 2>&1 \
+    || recusa "docs/eventos/$TRABALHO.jsonl está versionado: o rastro é local e não pode ser commitado"
+fi
 EVENTO="$TMP_DIR/evento.jsonl"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || ambiente 'hora do sistema indisponível'
 printf '{"ts":"%s","expx_eventos":1,"trabalho_id":"%s","ferramenta":"mergex","origem":"skill","evento":"veredito_emitido","fase":"e3","task":null,"agente":"revisor-diff","resultado":"ok","detalhe":"%s olho obrigatorio, %s leitura rapida, %s dispensavel","arquivos":[]}\n' \

@@ -115,6 +115,11 @@ roda
   && [ -z "$(find "$P/docs/entregas/w" -name '.ENTREGA.md.atencao.*')" ] \
   && passa 'valor entre aspas e com comentário é lido; o temporário não fica' || quebra "aspas: $(mostra)"
 
+projeto naoignora; entrega por_trabalho '[]'; atencao
+mkdir -p "$P/docs/eventos"; printf '# do time\n*.log\n' > "$P/docs/eventos/.gitignore"
+recusa_igual 'não é ignorado pelo Git' && [ ! -e "$P/docs/eventos/w.jsonl" ] \
+  && passa '.gitignore do rastro que não o ignora recusa antes de gravar' || quebra "nao ignora: $(mostra)"
+
 projeto falta; entrega por_trabalho '[]'; atencao
 sed -i '/`tests\/a.sh`/d' "$P/docs/entregas/w/ATENCAO.md"
 recusa_igual 'arquivo do diff sem faixa no ATENCAO.md: tests/a.sh' \
