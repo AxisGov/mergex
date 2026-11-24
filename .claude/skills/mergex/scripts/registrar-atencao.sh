@@ -53,6 +53,7 @@ trap 'exit 1' HUP INT TERM
 # cujo primeiro campo é um caminho entre crases, dentro das três seções do template.
 CLASSIFICACAO="$TMP_DIR/classificacao.tsv"
 awk '
+  { sub(/\r$/, "") }
   /^##[[:space:]]+OLHO OBRIGAT/ { faixa="alta"; next }
   /^##[[:space:]]+LEITURA R/ { faixa="media"; next }
   /^##[[:space:]]+DISPENS/ { faixa="baixa"; next }
@@ -69,6 +70,7 @@ if awk -F '\t' 'seen[$1]++ { exit 1 }' "$CLASSIFICACAO"; then :; else recusa 'ar
 # Lê a lista YAML tanto na forma curta quanto na forma com um caminho por linha.
 ALTERADOS="$TMP_DIR/alterados"
 awk '
+  { sub(/\r$/, "") }
   /^arquivos_alterados:[[:space:]]*\[/ {
     s=$0; sub(/^[^\[]*\[/, "", s); sub(/\].*$/, "", s); n=split(s, a, ",")
     for (i=1; i<=n; i++) { gsub(/^[[:space:]"\047]+|[[:space:]"\047]+$/, "", a[i]); if (a[i] != "") print a[i] }
@@ -101,9 +103,8 @@ if [ "$MODO" = por_sprint ]; then
       s=$0; sub(/^[[:space:]]+faixa:[[:space:]]*/, "", s); sub(/\r$/, "", s); print arq "\t" s; arq=""
     }
   ' "$ARQ" > "$ANTIGAS"
-  while IFS=$'\t' read -r arquivo faixa; do
-    grep -Fq "${arquivo}"$'\t' "$NOVAS" || printf '%s\t%s\n' "$arquivo" "$faixa" >> "$LISTA"
-  done < "$ANTIGAS"
+  # o caminho é comparado inteiro: `a.sh` antigo fica mesmo que `src/a.sh` seja novo
+  awk -F '\t' 'NR == FNR { novo[$1] = 1; next } !($1 in novo) { print }' "$NOVAS" "$ANTIGAS" >> "$LISTA"
 fi
 cat "$NOVAS" >> "$LISTA"
 

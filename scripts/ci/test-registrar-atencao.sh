@@ -8,7 +8,7 @@ REGISTRAR="$REPO/.claude/skills/mergex/scripts/registrar-atencao.sh"
 OK=0; FALHOU=0
 passa() { OK=$((OK+1)); printf '  ok    %s\n' "$1"; }
 quebra() { FALHOU=$((FALHOU+1)); printf '  FALHA %s\n' "$1"; }
-aux="$(mktemp -d "$REPO/.tmp.registrar-atencao.XXXXXX")"; trap 'rm -rf "$aux"' EXIT
+aux="$(mktemp -d "${TMPDIR:-/tmp}/test-registrar-atencao.XXXXXX")"; trap 'rm -rf "$aux"' EXIT
 P=""
 
 projeto() {
@@ -75,8 +75,9 @@ grep -q 'olho_obrigatorio: 1' "$P/docs/entregas/w/ENTREGA.md" \
   && [ "$rc" = 0 ] \
   && passa 'por_trabalho grava contagens e lista inteira' || quebra "por_trabalho: $(mostra)"
 
-projeto sprint; entrega por_sprint $'\n  - arquivo: legado.txt\n    faixa: baixa\n  - arquivo: src/a.sh\n    faixa: baixa'; atencao; roda
+projeto sprint; entrega por_sprint $'\n  - arquivo: legado.txt\n    faixa: baixa\n  - arquivo: a.sh\n    faixa: media\n  - arquivo: src/a.sh\n    faixa: baixa'; atencao; roda
 grep -q 'arquivo: legado.txt' "$P/docs/entregas/w/ENTREGA.md" \
+  && grep -qx '  - arquivo: a.sh' "$P/docs/entregas/w/ENTREGA.md" \
   && [ "$(grep -c 'arquivo: src/a.sh' "$P/docs/entregas/w/ENTREGA.md")" = 1 ] \
   && awk '/arquivo: src\/a.sh/{f=1; next} f && /faixa: alta/{ok=1} END {exit !ok}' "$P/docs/entregas/w/ENTREGA.md" \
   && [ "$rc" = 0 ] \
@@ -100,8 +101,8 @@ roda
 [ "$rc" != 0 ] && passa 'marcador pendente recusa' || quebra "marcador: $(mostra)"
 
 projeto crlf; entrega por_trabalho '[]'; atencao
-awk '{printf "%s\\r\\n", $0}' "$P/docs/entregas/w/ENTREGA.md" > "$aux/crlf"
-mv "$aux/crlf" "$P/docs/entregas/w/ENTREGA.md"
+awk '{printf "%s\r\n", $0}' "$P/docs/entregas/w/ENTREGA.md" > "$aux/crlf.tmp"
+mv "$aux/crlf.tmp" "$P/docs/entregas/w/ENTREGA.md"
 roda
 [ "$rc" = 0 ] && ! grep -q $'[^\r]$' "$P/docs/entregas/w/ENTREGA.md" \
   && passa 'ENTREGA em CRLF permanece em CRLF' || quebra "CRLF: $(mostra)"
