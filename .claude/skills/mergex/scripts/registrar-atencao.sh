@@ -123,7 +123,10 @@ ALTERADOS="$TMP_DIR/alterados"
 awk '
   { sub(/\r$/, "") }
   /^arquivos_alterados:[[:space:]]*\[/ {
-    s=$0; sub(/^[^\[]*\[/, "", s); sub(/\].*$/, "", s); n=split(s, a, ",")
+    s=$0; sub(/^[^\[]*\[/, "", s); sub(/\].*$/, "", s)
+    # na lista em fluxo, aspas podem guardar vírgula: separar por vírgula mudaria os caminhos
+    if (s ~ /["\047]/) { print "\001ASPAS"; next }
+    n=split(s, a, ",")
     for (i=1; i<=n; i++) { gsub(/^[[:space:]"\047]+|[[:space:]"\047]+$/, "", a[i]); if (a[i] != "") print a[i] }
     next
   }
@@ -132,6 +135,10 @@ awk '
   dentro && /^[[:space:]]*-[[:space:]]*/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", s); gsub(/^["\047]|["\047]$/, "", s); print s }
 ' <<<"$FM_TXT" > "$ALTERADOS"
 MODO_LIDO="$(escalar entrega)"
+# por_trabalho substitui a lista; só a mescla por sprint precisa reler a antiga
+if [ "$MODO_LIDO" = por_sprint ] && grep -q $'^\001ASPAS$' "$ALTERADOS"; then
+  recusa 'arquivos_alterados em lista com aspas: o script não a relê com segurança; deixe um caminho por item, sem aspas'
+fi
 
 # O diff do E3 (03-atencao-humana.md, Passo 1): o que a branch fez desde que divergiu
 # da base. Todo arquivo dele tem faixa; num renomeado basta a ponta nova, e as duas
@@ -158,7 +165,10 @@ else
     grep -Fqx -- "$arquivo" "$DO_DIFF" || recusa "arquivo fora do diff $BASE...HEAD: $arquivo"
   done < "$CLASSIFICACAO"
 fi
-# o caminho vai sem aspas para o YAML (lista em fluxo e `arquivo:`): o que mudaria o sentido dele lá é recusado
+TODOS="$TMP_DIR/todos"
+if [ "$MODO_LIDO" = por_sprint ]; then cat "$ALTERADOS" "$DO_DIFF"; else cat "$DO_DIFF"; fi | LC_ALL=C sort -u > "$TODOS"
+# o caminho vai sem aspas para o YAML (lista em fluxo e `arquivo:`): o que mudaria o sentido
+# dele lá é recusado, inclusive nos caminhos já gravados que a mescla por sprint reescreve
 while IFS= read -r arquivo; do
   case "$arquivo" in
     *': '*|*' #'*|*,*|*'"'*|*"'"*|*'['*|*']'*|*'{'*|*'}'*|[-?:\&*!\|\>%@\`#]*|' '*|*' ') \
@@ -168,9 +178,7 @@ while IFS= read -r arquivo; do
   if grep -Eqi '^(y|n|yes|no|true|false|on|off|null|~)$|^[-+.0-9][-+.0-9_a-fA-FxXoO:]*$' <<<"$arquivo"; then
     recusa "caminho que o YAML sem aspas não guarda: $arquivo"
   fi
-done < "$DO_DIFF"
-TODOS="$TMP_DIR/todos"
-if [ "$MODO_LIDO" = por_sprint ]; then cat "$ALTERADOS" "$DO_DIFF"; else cat "$DO_DIFF"; fi | LC_ALL=C sort -u > "$TODOS"
+done < "$TODOS"
 ALTERADOS_YAML="arquivos_alterados: [$(awk 'NR > 1 { printf ", " } { printf "%s", $0 }' "$TODOS")]"
 
 MODO="$(escalar entrega)"

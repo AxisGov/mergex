@@ -120,6 +120,13 @@ mkdir -p "$P/docs/eventos"; printf '# do time\n*.log\n' > "$P/docs/eventos/.giti
 recusa_igual 'não é ignorado pelo Git' && [ ! -e "$P/docs/eventos/w.jsonl" ] \
   && passa '.gitignore do rastro que não o ignora recusa antes de gravar' || quebra "nao ignora: $(mostra)"
 
+projeto virgula; entrega por_sprint '[]' '["a,b.sh"]'; atencao
+recusa_igual 'arquivos_alterados em lista com aspas' \
+  && passa 'lista em fluxo com aspas recusa a mescla por sprint' || quebra "virgula: $(mostra)"
+projeto virgula2; entrega por_trabalho '[]' '["a,b.sh"]'; atencao; roda
+[ "$rc" = 0 ] && grep -qx 'arquivos_alterados: \[src/a.sh, src/b.sh, tests/a.sh\]' "$(E)" \
+  && passa 'por_trabalho substitui a lista antiga com aspas' || quebra "virgula2: $(mostra)"
+
 projeto falta; entrega por_trabalho '[]'; atencao
 sed -i '/`tests\/a.sh`/d' "$P/docs/entregas/w/ATENCAO.md"
 recusa_igual 'arquivo do diff sem faixa no ATENCAO.md: tests/a.sh' \
