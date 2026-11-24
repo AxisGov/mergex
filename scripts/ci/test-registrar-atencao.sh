@@ -127,6 +127,23 @@ roda
 [ "$rc" = 0 ] && grep -qx 'arquivos_alterados: \[src/a.sh, src/b.sh, src/b2.sh, tests/a.sh\]' "$(E)" \
   && passa 'renomeado: a ponta nova tem faixa e as duas entram em arquivos_alterados' || quebra "renomeado: $(mostra)"
 
+P="$aux/semgit"; mkdir -p "$P/docs/entregas/w"; entrega por_trabalho '[]'; atencao
+sed -i 's/^kind: entrega$/kind: entrega\nversionado: false/' "$(E)"
+roda
+[ "$rc" = 0 ] && grep -qx 'arquivos_alterados: \[src/a.sh, src/b.sh, tests/a.sh\]' "$(E)" \
+  && grep -q 'olho_obrigatorio: 1' "$(E)" \
+  && passa 'sem versionador (versionado: false): grava a partir da classificação' || quebra "sem git: $(mostra)"
+sed -i '/^versionado: false$/d' "$(E)"
+cp "$(E)" "$aux/antes"; roda
+[ "$rc" != 0 ] && cmp -s "$aux/antes" "$(E)" && grep -q 'versionado: false' "$aux/err" \
+  && passa 'sem Git e sem versionado: false recusa' || quebra "sem git sem marca: $(mostra)"
+
+projeto trava; entrega por_trabalho '[]'; atencao
+printf '1\n' > "$(E).registrar-atencao.trava"
+recusa_igual 'outra gravação da atenção está em andamento' && [ -f "$(E).registrar-atencao.trava" ] \
+  && rm -f "$(E).registrar-atencao.trava" && roda && [ "$rc" = 0 ] && [ ! -e "$(E).registrar-atencao.trava" ] \
+  && passa 'trava de outra gravação recusa e fica; a gravação própria tira a sua' || quebra "trava: $(mostra)"
+
 projeto crlf; entrega por_trabalho '[]'; atencao
 awk '{printf "%s\r\n", $0}' "$(E)" > "$aux/crlf.tmp"
 mv "$aux/crlf.tmp" "$(E)"

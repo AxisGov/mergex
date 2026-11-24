@@ -33,9 +33,24 @@ case "$ENTREGA" in docs/entregas/*/ENTREGA.md) ;; *) uso '--entrega deve ser doc
 TRABALHO="${ENTREGA#docs/entregas/}"; TRABALHO="${TRABALHO%/ENTREGA.md}"
 case "$TRABALHO" in ''|*/*|*[!A-Za-z0-9._-]*|.*) uso 'trabalho inválido' ;; esac
 
-RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || ambiente 'o Git não resolveu a raiz do repositório'
+# Sem versionador o E3 classifica os arquivos declarados nas tasks (03-atencao-humana.md),
+# e arquivos_alterados é essa união (00-schema.md): vale só com `versionado: false` gravado.
+SEM_GIT=0
+if ! RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  RAIZ="$(pwd -P)"; SEM_GIT=1
+fi
 ARQ="$RAIZ/$ENTREGA"
 [ -f "$ARQ" ] && [ ! -L "$ARQ" ] || recusa "$ENTREGA não é arquivo regular"
+if [ "$SEM_GIT" = 1 ]; then
+  grep -Eq '^versionado:[[:space:]]*false[[:space:]]*\r?$' "$ARQ" \
+    || ambiente 'o Git não resolveu a raiz do repositório, e o ENTREGA.md não declara versionado: false'
+fi
+
+# Um escritor por registro: a trava nasce em O_EXCL (set -C) antes da primeira leitura,
+# e duas gravações seguidas não apagam a mescla uma da outra.
+TRAVA="$ARQ.registrar-atencao.trava"
+( set -C; printf '%s\n' "$$" > "$TRAVA" ) 2>/dev/null \
+  || recusa "outra gravação da atenção está em andamento ($TRAVA); se nenhuma está, apague a trava e rode de novo"
 ID_REGISTRO="$(awk '/^trabalho_id:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$ARQ")"
 [ "$ID_REGISTRO" = "$TRABALHO" ] || recusa 'ENTREGA.md tem trabalho_id diferente do caminho'
 [ -n "$ATENCAO" ] || ATENCAO="${ENTREGA%/ENTREGA.md}/ATENCAO.md"
@@ -43,10 +58,10 @@ case "$ATENCAO" in /*) ATENCAO_ARQ="$ATENCAO" ;; *) ATENCAO_ARQ="$RAIZ/${ATENCAO
 [ -f "$ATENCAO_ARQ" ] && [ ! -L "$ATENCAO_ARQ" ] || recusa "ATENCAO.md ausente: $ATENCAO"
 grep -Fq '{{' "$ATENCAO_ARQ" && recusa 'ATENCAO.md ainda tem marcador {{...}}'
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-registrar-atencao.XXXXXX")" || ambiente 'não foi possível criar temporário'
-TMP_ARQ=""
-limpar() { local rc="$1"; [ -z "$TMP_ARQ" ] || rm -f "$TMP_ARQ"; rm -rf "$TMP_DIR"; exit "$rc"; }
+TMP_DIR=""; TMP_ARQ=""
+limpar() { local rc="$1"; [ -z "$TMP_ARQ" ] || rm -f "$TMP_ARQ"; [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"; rm -f "$TRAVA"; exit "$rc"; }
 trap 'limpar $?' EXIT
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mergex-registrar-atencao.XXXXXX")" || ambiente 'não foi possível criar temporário'
 trap 'exit 1' HUP INT TERM
 
 # O formato da classificação é deliberadamente estreito: somente linhas de tabela
@@ -85,23 +100,28 @@ MODO_LIDO="$(awk '/^entrega:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(
 # O diff do E3 (03-atencao-humana.md, Passo 1): o que a branch fez desde que divergiu
 # da base. Todo arquivo dele tem faixa; num renomeado basta a ponta nova, e as duas
 # pontas entram em arquivos_alterados (00-schema.md).
-BASE="$(awk '/^branch_base:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); gsub(/^["\047]|["\047]$/, ""); print; exit }' "$ARQ")"
-case "$BASE" in ''|null) recusa 'ENTREGA.md sem branch_base: o diff do E3 não tem base' ;; esac
-git -C "$RAIZ" rev-parse --verify -q "$BASE^{commit}" >/dev/null || recusa "branch_base $BASE não é um commit deste repositório"
-DIFF="$TMP_DIR/diff"
-git -C "$RAIZ" -c core.quotePath=false diff --name-status -M "$BASE...HEAD" > "$DIFF" \
-  || ambiente "o Git não listou o diff $BASE...HEAD"
 EXIGIDOS="$TMP_DIR/exigidos"; DO_DIFF="$TMP_DIR/do_diff"
-awk -F '\t' '$1 ~ /^[RC]/ { print $3 > ex; print $2 > to; print $3 > to; next } NF >= 2 { print $2 > ex; print $2 > to }' \
-  ex="$EXIGIDOS" to="$DO_DIFF" "$DIFF"
-[ -s "$EXIGIDOS" ] || recusa "o diff $BASE...HEAD está vazio: não há o que registrar"
-while IFS= read -r arquivo; do
-  awk -F '\t' -v a="$arquivo" '$1 == a { achou = 1 } END { exit !achou }' "$CLASSIFICACAO" \
-    || recusa "arquivo do diff sem faixa no ATENCAO.md: $arquivo"
-done < "$EXIGIDOS"
-while IFS=$'\t' read -r arquivo faixa; do
-  grep -Fqx -- "$arquivo" "$DO_DIFF" || recusa "arquivo fora do diff $BASE...HEAD: $arquivo"
-done < "$CLASSIFICACAO"
+if [ "$SEM_GIT" = 1 ]; then
+  # sem diff: a classificação já é dos arquivos declarados nas tasks
+  cut -f1 "$CLASSIFICACAO" > "$DO_DIFF"
+else
+  BASE="$(awk '/^branch_base:[[:space:]]*/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); gsub(/^["\047]|["\047]$/, ""); print; exit }' "$ARQ")"
+  case "$BASE" in ''|null) recusa 'ENTREGA.md sem branch_base: o diff do E3 não tem base' ;; esac
+  git -C "$RAIZ" rev-parse --verify -q "$BASE^{commit}" >/dev/null || recusa "branch_base $BASE não é um commit deste repositório"
+  DIFF="$TMP_DIR/diff"
+  git -C "$RAIZ" -c core.quotePath=false diff --name-status -M "$BASE...HEAD" > "$DIFF" \
+    || ambiente "o Git não listou o diff $BASE...HEAD"
+  awk -F '\t' '$1 ~ /^[RC]/ { print $3 > ex; print $2 > to; print $3 > to; next } NF >= 2 { print $2 > ex; print $2 > to }' \
+    ex="$EXIGIDOS" to="$DO_DIFF" "$DIFF"
+  [ -s "$EXIGIDOS" ] || recusa "o diff $BASE...HEAD está vazio: não há o que registrar"
+  while IFS= read -r arquivo; do
+    awk -F '\t' -v a="$arquivo" '$1 == a { achou = 1 } END { exit !achou }' "$CLASSIFICACAO" \
+      || recusa "arquivo do diff sem faixa no ATENCAO.md: $arquivo"
+  done < "$EXIGIDOS"
+  while IFS=$'\t' read -r arquivo faixa; do
+    grep -Fqx -- "$arquivo" "$DO_DIFF" || recusa "arquivo fora do diff $BASE...HEAD: $arquivo"
+  done < "$CLASSIFICACAO"
+fi
 # o caminho vai sem aspas para o YAML (lista em fluxo e `arquivo:`): o que mudaria o sentido dele lá é recusado
 while IFS= read -r arquivo; do
   case "$arquivo" in
