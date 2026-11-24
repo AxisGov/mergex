@@ -37,6 +37,14 @@ case "$TRABALHO" in ''|*/*|*[!A-Za-z0-9._-]*|.*) uso 'trabalho inválido' ;; esa
 # e arquivos_alterados é essa união (00-schema.md): vale só com `versionado: false` gravado.
 SEM_GIT=0
 if ! RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  # só é "sem versionador" se não há repositório nenhum acima: um .git que o Git não
+  # conseguiu ler (permissão, dono duvidoso) é erro de ambiente, não modo sem Git
+  d="$(pwd -P)"
+  while :; do
+    [ ! -e "$d/.git" ] || ambiente "o Git não leu o repositório em $d; corrija o acesso e rode de novo"
+    [ "$d" != / ] && [ -n "$d" ] || break
+    d="$(dirname "$d")"
+  done
   RAIZ="$(pwd -P)"; SEM_GIT=1
 fi
 ARQ="$RAIZ/$ENTREGA"

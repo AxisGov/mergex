@@ -134,6 +134,11 @@ roda
 [ "$rc" = 0 ] && grep -qx 'arquivos_alterados: \[src/a.sh, src/b.sh, tests/a.sh\]' "$(E)" \
   && grep -q 'olho_obrigatorio: 1' "$(E)" \
   && passa 'sem versionador (versionado: false): grava a partir da classificação' || quebra "sem git: $(mostra)"
+printf 'gitdir: /nao/existe\n' > "$P/.git"
+cp "$(E)" "$aux/antes"; roda
+[ "$rc" = 1 ] && cmp -s "$aux/antes" "$(E)" && grep -q 'o Git não leu o repositório' "$aux/err" \
+  && passa 'repositório que o Git não lê não vira modo sem versionador' || quebra "git ilegível: $(mostra)"
+rm -f "$P/.git"
 sed -i '/^versionado: false$/d' "$(E)"
 cp "$(E)" "$aux/antes"; roda
 [ "$rc" != 0 ] && cmp -s "$aux/antes" "$(E)" && grep -q 'versionado: false' "$aux/err" \
