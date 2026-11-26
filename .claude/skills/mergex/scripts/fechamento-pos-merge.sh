@@ -125,7 +125,7 @@ done <<<"$(g remote 2>/dev/null)"
 
 command -v gh >/dev/null 2>&1 || para 5 "sem a ferramenta gh: o merge não foi provado"
 command -v jq >/dev/null 2>&1 || para 5 "sem jq: a resposta do serviço não se lê"
-RESP="$(gh pr view "$PR_URL" --json url,state,mergeCommit,headRefName,baseRefName,isCrossRepository,commits 2>/dev/null)" \
+RESP="$(gh pr view "$PR_URL" --json url,state,mergeCommit,headRefName,baseRefName,isCrossRepository 2>/dev/null)" \
   || para 5 "o serviço não respondeu sobre $PR_URL"
 campo() { printf '%s' "$RESP" | jq -r "$1 // empty" 2>/dev/null; }
 ESTADO="$(campo .state)"
@@ -185,21 +185,20 @@ if [ "$PR_URL_DE" = argumento ]; then
     || para 6 "o merge de --pr $PR_URL não traz o $EM que está na base: o PR não é o desta entrega"
   # Quem trouxe: o último commit da linha principal que mudou o arquivo. No merge
   # commit e no squash é o próprio merge. No rebase merge pode ser um commit
-  # anterior do PR, se o último não toca o ENTREGA.md: então ele tem de estar entre
-  # os commits do PR (os N últimos da linha principal, N o número de commits do
-  # PR) e ter a data de autoria e o título de um deles, que o rebase preserva.
+  # anterior do PR, se o último não toca o ENTREGA.md: então o merge tem um pai só
+  # e o serviço tem de dizer que esse commit entrou na base por este PR
+  # (commits/<sha>/pulls). Título e data não bastam: a branch reaproveitada leva
+  # os commits originais de um PR anterior para o seguinte (DM-353).
   TROUXE="$(g log -1 --first-parent --format=%H "$MERGE" -- "$EM" 2>/dev/null)"
   [ -n "$TROUXE" ] && [ "$NO_MERGE" != "$(g rev-parse -q --verify "$TROUXE^1:$EM" 2>/dev/null)" ] \
     || para 6 "o merge de --pr $PR_URL não muda o $EM: o PR não é o que trouxe esta entrega"
   if [ "$TROUXE" != "$MERGE" ]; then
-    N_PR="$(printf '%s' "$RESP" | jq -r '.commits | if type == "array" then length else empty end' 2>/dev/null)"
-    DO_PR="$(printf '%s' "$RESP" | jq -r '.commits[] | "\(.authoredDate | fromdateiso8601)\t\(.messageHeadline)"' 2>/dev/null)"
-    ESTE="$(g log -1 --format='%at%x09%s' "$TROUXE" 2>/dev/null)"
-    DISTANCIA="$(g rev-list --first-parent --count "$TROUXE..$MERGE" 2>/dev/null)"
     [ "$(g rev-list --parents -n 1 "$MERGE" 2>/dev/null | wc -w | tr -d ' ')" = 2 ] \
-      && [[ "$N_PR" =~ ^[1-9][0-9]*$ ]] && [[ "$DISTANCIA" =~ ^[0-9]+$ ]] && [ "$DISTANCIA" -lt "$N_PR" ] \
-      && [ -n "$ESTE" ] && grep -qxF -- "$ESTE" <<<"$DO_PR" \
-      || para 6 "o merge de --pr $PR_URL não muda o $EM, e o commit que o mudou ($TROUXE) não é um dos commits do PR: o PR não é o que trouxe esta entrega"
+      || para 6 "o merge de --pr $PR_URL não muda o $EM, e o commit que o mudou ($TROUXE) veio por outro caminho: o PR não é o que trouxe esta entrega"
+    PRS_DO_COMMIT="$(gh api "repos/$REPO_PR/commits/$TROUXE/pulls" 2>/dev/null | jq -r '.[].number' 2>/dev/null)" \
+      || para 5 "o serviço não disse por qual PR o commit $TROUXE entrou na base"
+    grep -qxF -- "${PR_URL##*/}" <<<"$PRS_DO_COMMIT" \
+      || para 6 "o merge de --pr $PR_URL não muda o $EM, e o commit que o mudou ($TROUXE) não entrou na base por este PR: o PR não é o que trouxe esta entrega"
   fi
 fi
 

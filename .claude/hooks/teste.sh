@@ -399,6 +399,11 @@ caso "-F F:/msg.txt limpo: passa"                comum/sem-segredo.sh "$(bash_js
 caso "-F \"F:\\msg.txt\" limpo (aspas): passa"   comum/sem-segredo.sh "$(bash_json 'git commit -F "F:\msg.txt"')" 0
 caso "-F F:\\msg.txt sem aspas: barra"           comum/sem-segredo.sh "$(bash_json 'git commit -F F:\msg.txt')" 2
 caso "cd F:/limpo && git commit: passa"          comum/sem-segredo.sh "$(bash_json 'cd F:/limpo && git commit -m x')" 0
+# Sem aspas, a barra invertida é escape do shell: `F:/limpo\ x` é `F:/limpo x` para o
+# Git, e convertê-la em separador varreria `F:/limpo` (t-13, B1). Barra.
+caso "git -C F:/limpo\\ x commit sem aspas: barra" comum/sem-segredo.sh "$(bash_json 'git -C F:/limpo\ x commit -m x')" 2
+mkdir -p "$SEG_T/unidade-f/m"; printf 'mensagem comum\n' > "$SEG_T/unidade-f/m/sg.txt"
+caso "-F F:/m\\sg.txt sem aspas: barra"           comum/sem-segredo.sh "$(bash_json 'git commit -F F:/m\sg.txt')" 2
 printf 'mensagem com %s\n' "$SK" > "$SEG_T/unidade-f/msg.txt"
 caso "-F F:/msg.txt com segredo: barra"          comum/sem-segredo.sh "$(bash_json 'git commit -F F:/msg.txt')" 2
 PATH="$PATH_SEM_UNI"; rm -rf "$UNI_BIN" "$SEG_T/unidade-f"
@@ -474,6 +479,9 @@ rm -rf "$OUTRO_T"
 printf 'mensagem comum\n' > "$SEG_T/msg.txt"; printf 'mensagem com %s\n' "$SK" > "$SEG_T/a b/msg.txt"
 caso "cd sub && git commit -F msg.txt (o do sub): barra" comum/sem-segredo.sh "$(bash_json "cd 'a b' && git commit -F msg.txt")" 2
 caso "git -C sub commit -F msg.txt (o do sub): barra"    comum/sem-segredo.sh "$(bash_json "git -C 'a b' commit -F msg.txt")" 2
+# Espaço escapado no argumento de opção global: antes, `git -C a\ b commit` nem era
+# reconhecido como commit, e o hook saía 0 sem varrer (t-13, achado na revisão).
+caso "git -C a\\ b commit (espaço escapado): barra"      comum/sem-segredo.sh "$(bash_json 'git -C a\ b commit -F msg.txt')" 2
 rm -f "$SEG_T/msg.txt" "$SEG_T/a b/msg.txt"; rmdir "$SEG_T/a b"
 # O link nao e seguido, mas o texto do alvo vira o blob: e varrido.
 ln -s "CHAVE=$SK" "$SEG_T/link-alvo"
