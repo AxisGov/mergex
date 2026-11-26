@@ -79,6 +79,9 @@ if [ "$MODO" = registro ]; then
   [[ "$PR_URL" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+$ ]] \
     || para 3 "pr_url com caractere fora do registro: $PR_URL"
   [[ "$BRANCH_ENTREGA" =~ ^[A-Za-z0-9._/-]+$ ]] || para 3 "branch com caractere fora do registro: $BRANCH_ENTREGA"
+  # Por sprint, o merge de cada PR já se registra no E9 (e9-merge): o registro é de entrega por trabalho.
+  [ "$(catalogo_fm "$ENTREGA" entrega)" != por_sprint ] \
+    || para 3 "entrega por_sprint: o merge de cada sprint se registra no E9 (--checkpoint e9-merge), não aqui"
 fi
 
 # O PR tem de ser deste repositório: um pr_url de outro lugar provaria o merge errado.
@@ -150,6 +153,15 @@ if [ "$MODO" = fechamento ]; then SUFIXO="$OC-fechamento"; CHAVE=expxFechamento
 else SUFIXO="$TRABALHO-registro-pos-merge"; CHAVE=expxRegistroPosMerge; fi
 BRANCH="docs/$SUFIXO"
 g check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || para 64 "o id não dá nome de branch: $BRANCH"
+REL="docs/entregas/$TRABALHO/POS-MERGE.md"
+if [ "$MODO" = registro ]; then
+  # Antes de qualquer efeito: o que só a base diz.
+  [[ "$BASE_PR" =~ ^[A-Za-z0-9._/-]+$ ]] || para 3 "base do PR com caractere fora do registro: $BASE_PR"
+  g cat-file -e "$REF_BASE:docs/entregas/$TRABALHO/ENTREGA.md" 2>/dev/null \
+    || para 7 "a base não traz docs/entregas/$TRABALHO/ENTREGA.md: o merge não é desta entrega"
+  ! g cat-file -e "$REF_BASE:$REL" 2>/dev/null \
+    || para 8 "a base já traz $REL: o merge desta entrega já está registrado"
+fi
 PRINCIPAL="$(g worktree list --porcelain | sed -n '1s/^worktree //p')"
 DESTINO="$PRINCIPAL/../${PRINCIPAL##*/}--$SUFIXO"
 
@@ -190,14 +202,18 @@ fi
 
 # O registro: um commit só, com POS-MERGE.md, sobre a base que contém a entrega.
 w() { git -C "$DESTINO" "$@"; }
-REL="docs/entregas/$TRABALHO/POS-MERGE.md"
+trailer() { w log -1 --format="%(trailers:key=$1,valueonly,unfold)" "$2" 2>/dev/null | sed '/^$/d'; }
 w cat-file -e "HEAD:docs/entregas/$TRABALHO/ENTREGA.md" 2>/dev/null \
-  || para 7 "a base não traz docs/entregas/$TRABALHO/ENTREGA.md: o merge não é desta entrega"
+  || para 7 "a branch $BRANCH não traz docs/entregas/$TRABALHO/ENTREGA.md: confira antes de seguir"
 if w cat-file -e "HEAD:$REL" 2>/dev/null; then
-  # Retomada: o commit do registro já existe e é deste merge.
-  COMMIT="$(w log -1 --format=%H -- "$REL" 2>/dev/null)"
-  [ "$(w log -1 --format='%(trailers:key=Merge,valueonly,unfold)' "$COMMIT" 2>/dev/null | sed '/^$/d')" = "$MERGE" ] \
-    || para 8 "$REL já existe na branch de outro jeito: confira antes de seguir"
+  # Retomada: o HEAD é o commit do registro, deste merge, sobre a base, só com ele.
+  COMMIT="$(w rev-parse HEAD)"
+  { [ "$(trailer Merge "$COMMIT")" = "$MERGE" ] && [ "$(trailer Registro-pos-merge-de "$COMMIT")" = "$PR_URL" ] \
+      && [ "$(w rev-list --count "$COMMIT^@" 2>/dev/null)" = 1 ] \
+      && g merge-base --is-ancestor "$COMMIT^" "$REF_BASE" 2>/dev/null \
+      && [ "$(w diff-tree --no-commit-id -r --name-only "$COMMIT")" = "$REL" ] \
+      && [ -z "$(w status --porcelain 2>/dev/null)" ]; } \
+    || para 8 "a branch $BRANCH tem $REL de outro jeito, ou andou depois dele: confira antes de seguir"
 else
   # Sem o registro, a branch ainda é a base (ou uma base anterior, numa retomada).
   g merge-base --is-ancestor "$(w rev-parse HEAD)" "$REF_BASE" 2>/dev/null \
@@ -206,6 +222,8 @@ else
   ARQ="$DESTINO/$REL"
   [ ! -L "$DESTINO/docs/entregas/$TRABALHO" ] && [ ! -e "$ARQ" ] && [ ! -L "$ARQ" ] \
     || para 8 "$REL ou a pasta dele já existem de outro jeito: confira antes de seguir"
+  # Falha no meio não deixa o arquivo para trás: a próxima execução recomeça do zero.
+  desfaz() { w reset -q -- ":(literal)$REL" 2>/dev/null; rm -f "$ARQ"; para 8 "$1"; }
   QUANDO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   {
     printf -- '---\nexpx_schema: 1\nexpx_tool: mergex\nkind: registro_pos_merge\n'
@@ -215,11 +233,11 @@ else
     printf 'O PR %s foi mesclado em `%s` pelo commit `%s`. O serviço e a base foram conferidos por `fechamento-pos-merge.sh` em %s.\n\n' \
       "$PR_URL" "$BASE_PR" "$MERGE" "$QUANDO"
     printf 'O `ENTREGA.md` ao lado continua com o retrato do E7 (DM-317). O estado final da entrega é este registro (DM-351).\n'
-  } > "$ARQ" || para 8 "$REL não foi gravado"
-  w add -- ":(literal)$REL" || para 8 "$REL não entrou no índice"
+  } > "$ARQ" || desfaz "$REL não foi gravado"
+  w add -f -- ":(literal)$REL" || desfaz "$REL não entrou no índice"
   printf 'docs: registra o merge da entrega %s\n\nRegistro-pos-merge-de: %s\nMerge: %s\n' "$TRABALHO" "$PR_URL" "$MERGE" \
     | w commit -q -F - -- ":(literal)$REL" >/dev/null \
-    || { w reset -q -- ":(literal)$REL" 2>/dev/null; rm -f "$ARQ"; para 8 "o commit do registro falhou (confira user.name e user.email)"; }
+    || desfaz "o commit do registro falhou (confira user.name e user.email)"
   COMMIT="$(w rev-parse HEAD)"
 fi
 printf 'worktree=%s\nbranch=%s\nmerge=%s\npr=%s\ncommit=%s\n' "$DESTINO" "$BRANCH" "$MERGE" "$PR_URL" "$COMMIT"

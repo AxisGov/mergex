@@ -60,7 +60,13 @@ afirma "pr_url fora do alfabeto do registro: rc 3" 3 "$(roda X=1)"; sem_efeito "
 cp "$T/bak" "$T/r/docs/entregas/$TRAB/ENTREGA.md"; rm -f "$T/r/docs/entregas/$TRAB/ENTREGA.md.tmp"
 mkdir -p "$T/r/docs/entregas/solta"; sed "s#^branch: .*#branch: feature/solta#" "$T/bak" > "$T/r/docs/entregas/solta/ENTREGA.md"
 afirma "entrega que a base não traz: rc 7" 7 "$(CASO_TRAB=solta GH_HEAD=feature/solta roda X=1)"
-g worktree remove --force "$T/r--solta-registro-pos-merge" 2>/dev/null; g branch -q -D docs/solta-registro-pos-merge 2>/dev/null; rm -rf "$T/r/docs/entregas/solta"
+g show-ref --verify -q refs/heads/docs/solta-registro-pos-merge || [ -e "$T/r--solta-registro-pos-merge" ] \
+  || [ -n "$(g config --get branch.docs/solta-registro-pos-merge.expxRegistroPosMerge)" ]
+afirma "entrega que a base não traz: não cria nada" 1 "$?"
+rm -rf "$T/r/docs/entregas/solta"
+sed 's#^pr_estado: .*#entrega: por_sprint#' "$T/bak" > "$T/r/docs/entregas/$TRAB/ENTREGA.md"
+afirma "entrega por_sprint: rc 3" 3 "$(roda X=1)"; sem_efeito "por_sprint"
+cp "$T/bak" "$T/r/docs/entregas/$TRAB/ENTREGA.md"
 
 echo "sem identidade no Git, o commit falha sem deixar o registro pela metade"
 rc=0; ( cd "$T/r" && env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
@@ -110,6 +116,7 @@ git -C "$W" -c user.name=t -c user.email=t@t commit -q -am 'docs: edita a entreg
 rc=0; ( cd "$W" && printf 'refs/heads/%s %s refs/heads/%s %s\n' "$REG" "$EDITA" "$REG" 0000000000000000000000000000000000000000 \
   | bash "$SK/portao-push.sh" --pre-push origin https://github.com/o/r.git >"$T/push2" 2>&1 ) || rc=$?
 afirma "controle: editar o ENTREGA.md é barrado no pre-push" 1 "$([ "$rc" = 0 ] && echo 0 || echo 1)"
+afirma "branch que andou depois do registro: rc 8" 8 "$(roda X=1)"
 git -C "$W" reset -q --hard "$COMMIT"
 
 echo "registro que andou de outro jeito"
@@ -123,6 +130,10 @@ limpa
 g worktree add -q -b "$REG" "$W" "$MERGE"; g config "branch.$REG.expxRegistroPosMerge" "$MERGE"; printf 'x\n' > "$W/sujo"
 afirma "worktree com alteração: rc 8" 8 "$(roda X=1)"
 limpa
+# O registro já mesclado na base: nada a fazer, e nada se cria.
+mkdir -p "$T/r/docs/entregas/$TRAB"; printf 'x\n' > "$T/r/$REL"; g add "$REL"; g commit -q -m registro; g push -q origin main
+afirma "base que já traz o registro: rc 8" 8 "$(roda X=1)"; sem_efeito "registro na base"
+g reset -q --hard "$MERGE"; g push -q -f origin main 2>/dev/null; g fetch -q origin
 
 echo "a ocorrência da runx segue sem registro"
 mkdir -p "$T/r/docs/entregas/OC-2026-0001-a"; sed "s#^branch: .*#branch: fix/OC-2026-0001-a#" "$T/bak" > "$T/r/docs/entregas/OC-2026-0001-a/ENTREGA.md"
