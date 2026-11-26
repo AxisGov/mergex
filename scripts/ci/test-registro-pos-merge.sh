@@ -39,6 +39,8 @@ cat > "$T/bin/gh" <<'GH'
 if [ "$1" = api ]; then
   [ -z "${GH_API_FALHA:-}" ] || exit 1
   [ "$2" = --hostname ] && [ "$3" = github.com ] && [[ "$4" =~ ^repos/o/r/commits/[0-9a-f]{40}/pulls$ ]] || exit 1
+  # A resposta vale só para o commit esperado; para qualquer outro, nenhum PR.
+  if [ -n "${GH_PULLS_SHA:-}" ] && [ "$4" != "repos/o/r/commits/$GH_PULLS_SHA/pulls" ]; then printf '[]\n'; exit 0; fi
   printf '%s\n' "${GH_PULLS:-[]}"; exit 0
 fi
 printf '{"url":"%s","state":"%s","mergeCommit":%s,"headRefName":"%s","baseRefName":"main","isCrossRepository":%s}\n' \
@@ -206,7 +208,7 @@ sed -e "s#^pr_url: .*#pr_url: null#" -e "s#^branch: .*#branch: feature/rb#" "$T/
 g add "docs/entregas/$ID3"; g commit -q -m 'rb: entrega'; C_RB1="$(g rev-parse HEAD)"
 printf 'rb\n' > "$T/r/src/rb.js"; g add src/rb.js; g commit -q -m 'rb: ajuste'; C_RB2="$(g rev-parse HEAD)"
 g push -q origin main; g fetch -q origin
-rb() { CASO_TRAB=$ID3 CASO_PR="${2:-$P3}" GH_HEAD=feature/rb GH_MERGE="$(oid "$C_RB2")" roda GH_PULLS="$1" ${3:+"$3"}; }
+rb() { CASO_TRAB=$ID3 CASO_PR="${2:-$P3}" GH_HEAD=feature/rb GH_MERGE="$(oid "$C_RB2")" roda GH_PULLS="$1" GH_PULLS_SHA="$C_RB1" ${3:+"$3"}; }
 afirma "rebase: o serviço não liga o commit a PR nenhum: rc 6" 6 "$(rb '[]')"
 afirma "rebase: o commit entrou por outro PR: rc 6" 6 "$(rb '[{"number":390}]')"
 # A branch reaproveitada: o PR 393, mesclado por squash depois do 391 (rebase), leva

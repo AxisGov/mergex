@@ -482,8 +482,9 @@ caso "git -C sub commit -F msg.txt (o do sub): barra"    comum/sem-segredo.sh "$
 # Espaço escapado no argumento de opção global: antes, `git -C a\ b commit` nem era
 # reconhecido como commit, e o hook saía 0 sem varrer (t-13, achado na revisão).
 caso "git -C a\\ b commit (espaço escapado): barra"      comum/sem-segredo.sh "$(bash_json 'git -C a\ b commit -F msg.txt')" 2
-printf 'mensagem comum\n' > "$SEG_T/msg.txt"
+printf 'mensagem comum\n' > "$SEG_T/msg.txt"; mkdir -p "$SEG_T/m"; printf 'mensagem comum\n' > "$SEG_T/m/sg.txt"; printf 'mensagem comum\n' > "$SEG_T/m\\sg.txt"
 caso "-F m\\sg.txt sem aspas (o Git abre msg.txt): barra" comum/sem-segredo.sh "$(bash_json 'git commit -F m\sg.txt')" 2
+rm -f "$SEG_T/m/sg.txt" "$SEG_T/m\\sg.txt"; rmdir "$SEG_T/m"
 rm -f "$SEG_T/msg.txt" "$SEG_T/a b/msg.txt"; rmdir "$SEG_T/a b"
 # O link nao e seguido, mas o texto do alvo vira o blob: e varrido.
 ln -s "CHAVE=$SK" "$SEG_T/link-alvo"
