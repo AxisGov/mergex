@@ -167,6 +167,17 @@ g merge-base --is-ancestor "$MERGE" "$REF_BASE" 2>/dev/null \
   || para 7 "o merge $MERGE não está em $REMOTO/$BASE_PR"
 [ -z "$BASE_SHA" ] || g merge-base --is-ancestor "$BASE_SHA" "$REF_BASE" 2>/dev/null \
   || para 6 "a base da entrega, $BASE_SHA, não está em $REMOTO/$BASE_PR"
+if [ "$PR_URL_DE" = argumento ]; then
+  # O PR do argumento só se liga à entrega pelo nome da branch, que se reaproveita
+  # (o PR de planejamento sai da mesma branch). O merge tem de ter trazido o
+  # ENTREGA.md que está na base: igual ao da base e diferente do pai da base.
+  EM="docs/entregas/$TRABALHO/ENTREGA.md"
+  NO_MERGE="$(g rev-parse -q --verify "$MERGE:$EM" 2>/dev/null)"
+  [ -n "$NO_MERGE" ] && [ "$NO_MERGE" = "$(g rev-parse -q --verify "$REF_BASE:$EM" 2>/dev/null)" ] \
+    || para 6 "o merge de --pr $PR_URL não traz o $EM que está na base: o PR não é o desta entrega"
+  [ "$NO_MERGE" != "$(g rev-parse -q --verify "$MERGE^1:$EM" 2>/dev/null)" ] \
+    || para 6 "o merge de --pr $PR_URL não muda o $EM: o PR não é o que trouxe esta entrega (num rebase merge, o último commit tem de tocá-lo)"
+fi
 
 if [ "$MODO" = fechamento ]; then SUFIXO="$OC-fechamento"; CHAVE=expxFechamento
 else SUFIXO="$TRABALHO-registro-pos-merge"; CHAVE=expxRegistroPosMerge; fi

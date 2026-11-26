@@ -149,23 +149,35 @@ afirma "OC: rc 0, sem commit=" "" "$(CASO_TRAB=OC-2026-0001-a GH_HEAD=fix/OC-202
 echo "--pr: o PR que o E7 não gravou (aberto fora do fluxo)"
 P2=https://github.com/o/r/pull/381; ID=1e5
 mkdir -p "$T/r/docs/entregas/$ID"
-sed -e "s#^pr_url: .*#pr_url: null#" -e "s#^branch: .*#branch: feature/n#" "$T/bak" > "$T/r/docs/entregas/$ID/ENTREGA.md"
-g add "docs/entregas/$ID"; g commit -q -m 'entrega sem pr'; g push -q origin main; g fetch -q origin
-afirma "sem pr_url e sem --pr: rc 3" 3 "$(CASO_TRAB=$ID GH_HEAD=feature/n roda X=1)"
+# A história da branch reaproveitada: o planejamento traz uma versão do ENTREGA.md, o
+# PR de código traz a final, e um commit depois não o toca.
+sed -e "s#^pr_url: .*#pr_url: null#" -e "s#^branch: .*#branch: feature/n#" -e "s#^portao: .*#portao: null#" "$T/bak" > "$T/r/docs/entregas/$ID/ENTREGA.md"
+g add "docs/entregas/$ID"; g commit -q -m 'planejamento'; C_PLAN="$(g rev-parse HEAD)"
+sed -i 's#^portao: .*#portao: pronto#' "$T/r/docs/entregas/$ID/ENTREGA.md"
+g commit -q -am 'entrega sem pr'; C_ENT="$(g rev-parse HEAD)"
+printf 'z\n' > "$T/r/src/z.js"; g add src/z.js; g commit -q -m depois; C_DEP="$(g rev-parse HEAD)"
+g push -q origin main; g fetch -q origin
+oid() { printf '{"oid":"%s"}' "$1"; }
+nada_id() { g show-ref --verify -q "refs/heads/docs/$ID-registro-pos-merge" && return 1; [ ! -e "$T/r--$ID-registro-pos-merge" ]; }
+afirma "sem pr_url e sem --pr: rc 3" 3 "$(CASO_TRAB=$ID GH_HEAD=feature/n GH_MERGE="$(oid "$C_ENT")" roda X=1)"
 grep -qF -- '--pr' "$T/erro"; afirma "a mensagem indica o --pr" 0 "$?"
-afirma "--pr de PR de outra branch: rc 6" 6 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/outra roda X=1)"
+afirma "--pr de PR de outra branch: rc 6" 6 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/outra GH_MERGE="$(oid "$C_ENT")" roda X=1)"
+afirma "--pr com merge anterior à entrega: rc 6" 6 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n roda X=1)"
+afirma "--pr do planejamento (versão antiga do ENTREGA.md): rc 6" 6 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n GH_MERGE="$(oid "$C_PLAN")" roda X=1)"
+afirma "--pr com merge que não traz o ENTREGA.md: rc 6" 6 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n GH_MERGE="$(oid "$C_DEP")" roda X=1)"
+nada_id; afirma "--pr recusado: não cria nada" 0 "$?"
 afirma "--pr na ocorrência da runx: rc 64" 64 "$(CASO_TRAB=OC-2026-0001-a CASO_PR=$P2 GH_HEAD=fix/OC-2026-0001-a roda X=1)"
 afirma "--pr diferente do pr_url gravado: rc 6" 6 "$(CASO_PR=$P2 roda X=1)"
 afirma "--pr igual ao pr_url gravado: rc 0" 0 "$(CASO_PR=$URL roda X=1)"
-afirma "--pr da branch da entrega: rc 0" 0 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n roda X=1)"
+afirma "--pr do merge que trouxe a entrega: rc 0" 0 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n GH_MERGE="$(oid "$C_ENT")" roda X=1)"
 W2="$T/r--$ID-registro-pos-merge"; R2="$W2/docs/entregas/$ID/POS-MERGE.md"
 afirma "pr_url_de: argumento" "pr_url_de: argumento" "$(grep -m1 '^pr_url_de:' "$R2")"
 afirma "pr_url é o do argumento" "pr_url: \"$P2\"" "$(grep -m1 '^pr_url:' "$R2")"
 afirma "id que o YAML leria como número vai entre aspas" "trabalho_id: \"1e5\"" "$(grep -m1 '^trabalho_id:' "$R2")"
 afirma "trailer com o PR do argumento" "$P2" "$(git -C "$W2" log -1 --format='%(trailers:key=Registro-pos-merge-de,valueonly)' | sed '/^$/d')"
 afirma "ENTREGA.md sem pr_url continua intacto" "" "$(git -C "$W2" diff HEAD^ -- "docs/entregas/$ID/ENTREGA.md")"
-afirma "--pr: rodar de novo retoma: rc 0" 0 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n roda X=1)"
-afirma "--pr: retomar sem o --pr não registra outro PR: rc 3" 3 "$(CASO_TRAB=$ID GH_HEAD=feature/n roda X=1)"
+afirma "--pr: rodar de novo retoma: rc 0" 0 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n GH_MERGE="$(oid "$C_ENT")" roda X=1)"
+afirma "--pr: retomar sem o --pr não registra outro PR: rc 3" 3 "$(CASO_TRAB=$ID GH_HEAD=feature/n GH_MERGE="$(oid "$C_ENT")" roda X=1)"
 
 printf '\n%s ok, %s falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
