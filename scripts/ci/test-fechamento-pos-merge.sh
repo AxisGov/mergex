@@ -45,8 +45,8 @@ mkdir "$T/bin"
 cat > "$T/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [ -z "${GH_FALHA:-}" ] || exit 1
-printf '{"url":"%s","state":"%s","mergeCommit":%s,"headRefName":"%s","baseRefName":"%s"}\n' \
-  "${GH_URL:-$3}" "${GH_ESTADO:-MERGED}" "${GH_MERGE:-null}" "${GH_HEAD:-}" "${GH_BASE:-main}"
+printf '{"url":"%s","state":"%s","mergeCommit":%s,"headRefName":"%s","baseRefName":"%s","isCrossRepository":%s}\n' \
+  "${GH_URL:-$3}" "${GH_ESTADO:-MERGED}" "${GH_MERGE:-null}" "${GH_HEAD:-}" "${GH_BASE:-main}" "${GH_FORK:-false}"
 GH
 chmod +x "$T/bin/gh"
 roda() { ( cd "$T/r" && env PATH="$T/bin:$PATH" GH_HEAD="${GH_HEAD:-$BR}" GH_MERGE="${GH_MERGE:-{\"oid\":\"$MERGE\"\}}" "$@" bash "$SCRIPT" --trabalho "${CASO_TRAB:-$TRAB}" >"$T/saida" 2>"$T/erro" ); printf '%s' "$?"; }
@@ -59,6 +59,7 @@ afirma "PR fechado sem merge: rc 4" 4 "$(roda GH_ESTADO=CLOSED)"; sem_efeito "PR
 afirma "serviço falha: rc 5" 5 "$(roda GH_FALHA=1)"; sem_efeito "serviço falha"
 afirma "sem merge informado: rc 5" 5 "$(GH_MERGE=null roda X=1)"; sem_efeito "sem merge informado"
 afirma "outra branch no PR: rc 6" 6 "$(roda GH_HEAD=fix/outra)"; sem_efeito "outra branch"
+afirma "PR de fork com a mesma branch: rc 6" 6 "$(roda GH_FORK=true)"; sem_efeito "fork"
 afirma "outra base no PR: rc 6" 6 "$(roda GH_BASE=develop)"; sem_efeito "outra base"
 afirma "outra url na resposta: rc 6" 6 "$(roda GH_URL=https://github.com/o/r/pull/10)"; sem_efeito "outra url"
 afirma "merge fora da base: rc 7" 7 "$(GH_MERGE="{\"oid\":\"$FORA_BASE\"}" roda X=1)"; sem_efeito "merge fora da base"
