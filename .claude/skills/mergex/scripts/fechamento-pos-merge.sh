@@ -209,7 +209,7 @@ if w cat-file -e "HEAD:$REL" 2>/dev/null; then
   # Retomada: o HEAD é o commit do registro, deste merge, sobre a base, só com ele.
   COMMIT="$(w rev-parse HEAD)"
   { [ "$(trailer Merge "$COMMIT")" = "$MERGE" ] && [ "$(trailer Registro-pos-merge-de "$COMMIT")" = "$PR_URL" ] \
-      && [ "$(w rev-list --count "$COMMIT^@" 2>/dev/null)" = 1 ] \
+      && [ "$(w rev-list --parents -n 1 "$COMMIT" 2>/dev/null | wc -w | tr -d ' ')" = 2 ] \
       && g merge-base --is-ancestor "$COMMIT^" "$REF_BASE" 2>/dev/null \
       && [ "$(w diff-tree --no-commit-id -r --name-only "$COMMIT")" = "$REL" ] \
       && [ -z "$(w status --porcelain 2>/dev/null)" ]; } \

@@ -24,7 +24,9 @@ mkdir -p "$T/r/docs/entregas/$TRAB" "$T/r/src"
 printf -- '---\nkind: entrega\ntrabalho_id: %s\nbranch: %s\nbranch_base: main\npr_url: %s\npr_estado: rascunho\nportao: bloqueado\n---\n' "$TRAB" "$BR" "$URL" > "$T/r/docs/entregas/$TRAB/ENTREGA.md"
 printf 'a\n' > "$T/r/src/a.js"
 mkdir -p "$T/r/.expx"; printf '{"expx_hooks":1,"hooks":{"pr-so-com-portao":{"modo":"bloqueio"}}}\n' > "$T/r/.expx/hooks.json"
-g add .;g commit -q -m base; g push -q origin main; g fetch -q origin
+# A base tem história: o merge não é raiz, como em qualquer repositório real.
+g commit -q --allow-empty -m anterior
+g add .; g commit -q -m base; g push -q origin main; g fetch -q origin
 MERGE="$(g rev-parse HEAD)"
 g remote set-head origin main >/dev/null 2>&1 || g symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
 
