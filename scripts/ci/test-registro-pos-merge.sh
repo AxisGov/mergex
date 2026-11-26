@@ -113,7 +113,7 @@ afirma "controle: editar o ENTREGA.md é barrado no pre-push" 1 "$([ "$rc" = 0 ]
 git -C "$W" reset -q --hard "$COMMIT"
 
 echo "registro que andou de outro jeito"
-git -C "$W" -c user.name=t -c user.email=t@t commit -q --amend -m 'docs: outro' 
+git -C "$W" -c user.name=t -c user.email=t@t commit -q --amend -m 'docs: outro'
 afirma "commit do registro sem o trailer deste merge: rc 8" 8 "$(roda X=1)"
 limpa
 mkdir -p "$T/r/src"; g worktree add -q -b "$REG" "$W" "$MERGE"; g config "branch.$REG.expxRegistroPosMerge" "$MERGE"
