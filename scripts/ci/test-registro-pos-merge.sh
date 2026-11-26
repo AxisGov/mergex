@@ -179,5 +179,13 @@ afirma "ENTREGA.md sem pr_url continua intacto" "" "$(git -C "$W2" diff HEAD^ --
 afirma "--pr: rodar de novo retoma: rc 0" 0 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n GH_MERGE="$(oid "$C_ENT")" roda X=1)"
 afirma "--pr: retomar sem o --pr não registra outro PR: rc 3" 3 "$(CASO_TRAB=$ID GH_HEAD=feature/n GH_MERGE="$(oid "$C_ENT")" roda X=1)"
 
+
+echo "--pr: planejamento ainda corrente não fecha a entrega"
+ID2=plano-x
+mkdir -p "$T/r/docs/entregas/$ID2"
+sed -e "s#^pr_url: .*#pr_url: null\nsprint_atual: planejamento#" -e "s#^branch: .*#branch: feature/p#" "$T/bak" > "$T/r/docs/entregas/$ID2/ENTREGA.md"
+g add "docs/entregas/$ID2"; g commit -q -m 'planejamento por fora'; C_P2="$(g rev-parse HEAD)"; g push -q origin main; g fetch -q origin
+afirma "--pr do planejamento corrente: rc 3" 3 "$(CASO_TRAB=$ID2 CASO_PR=https://github.com/o/r/pull/390 GH_HEAD=feature/p GH_MERGE="$(oid "$C_P2")" roda X=1)"
+g show-ref --verify -q "refs/heads/docs/$ID2-registro-pos-merge"; afirma "planejamento corrente: não cria nada" 1 "$?"
 printf '\n%s ok, %s falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

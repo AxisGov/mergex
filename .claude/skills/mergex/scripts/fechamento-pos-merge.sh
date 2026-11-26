@@ -22,7 +22,7 @@
 # `--pr <url>` (só no registro) informa o PR quando o E7 não o gravou: o
 # ENTREGA.md com `pr_url: null`, de PR aberto fora do fluxo. A prova é a mesma:
 # o PR tem de ser da branch e da base do ENTREGA.md, mesclado, com o merge na
-# base. Com `pr_url` gravado, `--pr` diferente dá rc 6. O registro anota de onde
+# base, e o merge tem de ter trazido o ENTREGA.md que está na base. Com `pr_url` gravado, `--pr` diferente dá rc 6. O registro anota de onde
 # veio o PR em `pr_url_de` (`entrega` ou `argumento`).
 #
 # Sem efeito até a última conferência: consulta o serviço, confere que o PR é o
@@ -101,6 +101,9 @@ if [ "$MODO" = registro ]; then
   # Por sprint, o merge de cada PR já se registra no E9 (e9-merge): o registro é de entrega por trabalho.
   [ "$(catalogo_fm "$ENTREGA" entrega)" != por_sprint ] \
     || para 3 "entrega por_sprint: o merge de cada sprint se registra no E9 (--checkpoint e9-merge), não aqui"
+  # Com o planejamento ainda corrente, o merge que existe é o do planejamento, não o da entrega.
+  [ "$(catalogo_fm "$ENTREGA" sprint_atual)" != planejamento ] \
+    || para 3 "sprint_atual: planejamento: o código desta entrega ainda não foi mesclado, e o merge do planejamento não a fecha"
 fi
 
 # O PR tem de ser deste repositório: um pr_url de outro lugar provaria o merge errado.
