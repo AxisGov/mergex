@@ -34,8 +34,8 @@ mkdir "$T/bin"
 cat > "$T/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [ -z "${GH_FALHA:-}" ] || exit 1
-printf '{"url":"%s","state":"%s","mergeCommit":%s,"headRefName":"%s","baseRefName":"main"}\n' \
-  "${GH_URL:-$3}" "${GH_ESTADO:-MERGED}" "${GH_MERGE:-null}" "${GH_HEAD:-}"
+printf '{"url":"%s","state":"%s","mergeCommit":%s,"headRefName":"%s","baseRefName":"main","isCrossRepository":%s,"commits":%s}\n' \
+  "${GH_URL:-$3}" "${GH_ESTADO:-MERGED}" "${GH_MERGE:-null}" "${GH_HEAD:-}" "${GH_FORK:-false}" "${GH_COMMITS:-[]}"
 GH
 chmod +x "$T/bin/gh"
 IDENT=(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t)
@@ -56,6 +56,8 @@ echo "sem o merge provado, nada acontece"
 afirma "PR aberto: rc 4" 4 "$(roda GH_ESTADO=OPEN)"; sem_efeito "PR aberto"
 afirma "serviço falha: rc 5" 5 "$(roda GH_FALHA=1)"; sem_efeito "serviço falha"
 afirma "PR de outra branch: rc 6" 6 "$(GH_HEAD=feature/outra roda X=1)"; sem_efeito "outra branch"
+afirma "PR de fork com a mesma branch: rc 6" 6 "$(roda GH_FORK=true)"; sem_efeito "fork"
+afirma "serviço que não diz se é fork: rc 6" 6 "$(roda GH_FORK=null)"; sem_efeito "fork não dito"
 cp "$T/r/docs/entregas/$TRAB/ENTREGA.md" "$T/bak"
 sed -i.tmp 's#^pr_url: .*#pr_url: https://github.com/o/r"x/pull/379#' "$T/r/docs/entregas/$TRAB/ENTREGA.md"
 afirma "pr_url fora do alfabeto do registro: rc 3" 3 "$(roda X=1)"; sem_efeito "pr_url com aspa"
@@ -187,5 +189,34 @@ sed -e "s#^pr_url: .*#pr_url: null\nsprint_atual: planejamento#" -e "s#^branch: 
 g add "docs/entregas/$ID2"; g commit -q -m 'planejamento por fora'; C_P2="$(g rev-parse HEAD)"; g push -q origin main; g fetch -q origin
 afirma "--pr do planejamento corrente: rc 3" 3 "$(CASO_TRAB=$ID2 CASO_PR=https://github.com/o/r/pull/390 GH_HEAD=feature/p GH_MERGE="$(oid "$C_P2")" roda X=1)"
 g show-ref --verify -q "refs/heads/docs/$ID2-registro-pos-merge"; afirma "planejamento corrente: não cria nada" 1 "$?"
+
+echo "--pr: rebase merge em que o último commit não toca o ENTREGA.md"
+# O rebase reaplica os commits do PR na linha principal com a mesma autoria e o mesmo
+# título; o serviço lista os commits do PR. `cm` é a entrada de um deles na resposta.
+cm() { TZ=UTC g log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format='{"oid":"%H","authoredDate":"%ad","messageHeadline":"%s"}' "$1"; }
+ID3=rb-x; P3=https://github.com/o/r/pull/391
+mkdir -p "$T/r/docs/entregas/$ID3"
+sed -e "s#^pr_url: .*#pr_url: null#" -e "s#^branch: .*#branch: feature/rb#" "$T/bak" > "$T/r/docs/entregas/$ID3/ENTREGA.md"
+g add "docs/entregas/$ID3"; g commit -q -m 'rb: entrega'; C_RB1="$(g rev-parse HEAD)"
+printf 'rb\n' > "$T/r/src/rb.js"; g add src/rb.js; g commit -q -m 'rb: ajuste'; C_RB2="$(g rev-parse HEAD)"
+g push -q origin main; g fetch -q origin
+rb() { CASO_TRAB=$ID3 CASO_PR=$P3 GH_HEAD=feature/rb GH_MERGE="$(oid "$C_RB2")" roda GH_COMMITS="$1"; }
+afirma "rebase: o PR só tem o último commit: rc 6" 6 "$(rb "[$(cm "$C_RB2")]")"
+afirma "rebase: o commit que trouxe tem outro título no PR: rc 6" 6 "$(rb "[$(cm "$C_RB1" | sed 's/rb: entrega/outro/'),$(cm "$C_RB2")]")"
+afirma "rebase: o commit que trouxe fica antes dos N do PR: rc 6" 6 "$(rb "[$(cm "$C_RB1")]")"
+afirma "rebase: o serviço não lista os commits: rc 6" 6 "$(rb null)"
+g show-ref --verify -q "refs/heads/docs/$ID3-registro-pos-merge"; afirma "rebase recusado: não cria nada" 1 "$?"
+afirma "rebase: o commit do PR trouxe o ENTREGA.md: rc 0" 0 "$(rb "[$(cm "$C_RB1"),$(cm "$C_RB2")]")"
+afirma "rebase: o registro aponta o merge do serviço" "$C_RB2" "$(g config --get "branch.docs/$ID3-registro-pos-merge.expxRegistroPosMerge")"
+
+echo "--pr: merge commit, com a base andando ao lado"
+ID4=mc-x; P4=https://github.com/o/r/pull/392
+g checkout -q -b lado-mc
+mkdir -p "$T/r/docs/entregas/$ID4"
+sed -e "s#^pr_url: .*#pr_url: null#" -e "s#^branch: .*#branch: feature/mc#" "$T/bak" > "$T/r/docs/entregas/$ID4/ENTREGA.md"
+g add "docs/entregas/$ID4"; g commit -q -m 'mc: entrega'; C_MC1="$(g rev-parse HEAD)"
+g checkout -q main; printf 'mc\n' > "$T/r/src/mc.js"; g add src/mc.js; g commit -q -m 'mc: base anda'
+g merge -q --no-ff -m 'Merge lado-mc' lado-mc; C_MC="$(g rev-parse HEAD)"; g push -q origin main; g fetch -q origin
+afirma "merge commit que trouxe o ENTREGA.md: rc 0" 0 "$(CASO_TRAB=$ID4 CASO_PR=$P4 GH_HEAD=feature/mc GH_MERGE="$(oid "$C_MC")" roda GH_COMMITS="[$(cm "$C_MC1")]")"
 printf '\n%s ok, %s falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]

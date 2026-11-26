@@ -49,6 +49,7 @@ integracao_arquivo_do_comando() {
     -e 's/.*--file=\([^[:space:]]*\).*/\1/p' | awk 'NR == 1')"
   [ -n "$arq" ] || return 0
   arq="$(printf '%s' "$arq" | sed "s/^['\"]//; s/['\"]$//")"
+  case "$arq" in [A-Za-z]:/*) arq="$(expx_caminho_local "$arq")" ;; esac
   case "$arq" in /*) : ;; *) arq="$RAIZ/$arq" ;; esac
   printf '%s' "$arq"
 }

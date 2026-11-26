@@ -22,7 +22,8 @@
 # `--pr <url>` (só no registro) informa o PR quando o E7 não o gravou: o
 # ENTREGA.md com `pr_url: null`, de PR aberto fora do fluxo. A prova é a mesma:
 # o PR tem de ser da branch e da base do ENTREGA.md, mesclado, com o merge na
-# base, e o merge tem de ter trazido o ENTREGA.md que está na base. Com `pr_url` gravado, `--pr` diferente dá rc 6. O registro anota de onde
+# base, e o merge tem de ter trazido o ENTREGA.md que está na base (no rebase
+# merge, um dos commits do PR, DM-353). PR de fork não passa, nos dois modos. Com `pr_url` gravado, `--pr` diferente dá rc 6. O registro anota de onde
 # veio o PR em `pr_url_de` (`entrega` ou `argumento`).
 #
 # Sem efeito até a última conferência: consulta o serviço, confere que o PR é o
@@ -124,13 +125,17 @@ done <<<"$(g remote 2>/dev/null)"
 
 command -v gh >/dev/null 2>&1 || para 5 "sem a ferramenta gh: o merge não foi provado"
 command -v jq >/dev/null 2>&1 || para 5 "sem jq: a resposta do serviço não se lê"
-RESP="$(gh pr view "$PR_URL" --json url,state,mergeCommit,headRefName,baseRefName 2>/dev/null)" \
+RESP="$(gh pr view "$PR_URL" --json url,state,mergeCommit,headRefName,baseRefName,isCrossRepository,commits 2>/dev/null)" \
   || para 5 "o serviço não respondeu sobre $PR_URL"
 campo() { printf '%s' "$RESP" | jq -r "$1 // empty" 2>/dev/null; }
 ESTADO="$(campo .state)"
 [ -n "$ESTADO" ] || para 5 "resposta ilegível do serviço sobre $PR_URL"
 [ "$(campo .url)" = "$PR_URL" ] || para 6 "o serviço devolveu outro PR: $(campo .url)"
 [ "$(campo .headRefName)" = "$BRANCH_ENTREGA" ] || para 6 "o PR é da branch $(campo .headRefName), e a entrega é de $BRANCH_ENTREGA"
+# O nome da branch só identifica a entrega dentro do próprio repositório: um fork
+# pode ter uma branch com o mesmo nome. Sem o campo, também recusa.
+[ "$(printf '%s' "$RESP" | jq -r '.isCrossRepository' 2>/dev/null)" = false ] \
+  || para 6 "o PR $PR_URL não vem de uma branch deste repositório (fork, ou o serviço não disse): a branch $BRANCH_ENTREGA não o liga à entrega"
 # `branch_base` é a base efetiva do E0: nome, ref do remoto ou SHA. O PR só diz o nome.
 BASE_PR="$(campo .baseRefName)"
 BASE_SHA=""
@@ -178,8 +183,24 @@ if [ "$PR_URL_DE" = argumento ]; then
   NO_MERGE="$(g rev-parse -q --verify "$MERGE:$EM" 2>/dev/null)"
   [ -n "$NO_MERGE" ] && [ "$NO_MERGE" = "$(g rev-parse -q --verify "$REF_BASE:$EM" 2>/dev/null)" ] \
     || para 6 "o merge de --pr $PR_URL não traz o $EM que está na base: o PR não é o desta entrega"
-  [ "$NO_MERGE" != "$(g rev-parse -q --verify "$MERGE^1:$EM" 2>/dev/null)" ] \
-    || para 6 "o merge de --pr $PR_URL não muda o $EM: o PR não é o que trouxe esta entrega (num rebase merge, o último commit tem de tocá-lo)"
+  # Quem trouxe: o último commit da linha principal que mudou o arquivo. No merge
+  # commit e no squash é o próprio merge. No rebase merge pode ser um commit
+  # anterior do PR, se o último não toca o ENTREGA.md: então ele tem de estar entre
+  # os commits do PR (os N últimos da linha principal, N o número de commits do
+  # PR) e ter a data de autoria e o título de um deles, que o rebase preserva.
+  TROUXE="$(g log -1 --first-parent --format=%H "$MERGE" -- "$EM" 2>/dev/null)"
+  [ -n "$TROUXE" ] && [ "$NO_MERGE" != "$(g rev-parse -q --verify "$TROUXE^1:$EM" 2>/dev/null)" ] \
+    || para 6 "o merge de --pr $PR_URL não muda o $EM: o PR não é o que trouxe esta entrega"
+  if [ "$TROUXE" != "$MERGE" ]; then
+    N_PR="$(printf '%s' "$RESP" | jq -r '.commits | if type == "array" then length else empty end' 2>/dev/null)"
+    DO_PR="$(printf '%s' "$RESP" | jq -r '.commits[] | "\(.authoredDate | fromdateiso8601)\t\(.messageHeadline)"' 2>/dev/null)"
+    ESTE="$(g log -1 --format='%at%x09%s' "$TROUXE" 2>/dev/null)"
+    DISTANCIA="$(g rev-list --first-parent --count "$TROUXE..$MERGE" 2>/dev/null)"
+    [ "$(g rev-list --parents -n 1 "$MERGE" 2>/dev/null | wc -w | tr -d ' ')" = 2 ] \
+      && [[ "$N_PR" =~ ^[1-9][0-9]*$ ]] && [[ "$DISTANCIA" =~ ^[0-9]+$ ]] && [ "$DISTANCIA" -lt "$N_PR" ] \
+      && [ -n "$ESTE" ] && grep -qxF -- "$ESTE" <<<"$DO_PR" \
+      || para 6 "o merge de --pr $PR_URL não muda o $EM, e o commit que o mudou ($TROUXE) não é um dos commits do PR: o PR não é o que trouxe esta entrega"
+  fi
 fi
 
 if [ "$MODO" = fechamento ]; then SUFIXO="$OC-fechamento"; CHAVE=expxFechamento

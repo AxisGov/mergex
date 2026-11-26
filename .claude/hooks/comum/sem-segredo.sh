@@ -69,6 +69,10 @@ case "$FERRAMENTA" in
       if [ "$aspas" = 0 ]; then
         case "$t" in '~') t="$HOME" ;; '~/'*) t="$HOME/${t#\~/}" ;; '~'*) t="" ;; esac
       fi
+      case "$t" in
+        [A-Za-z]:/*) t="$(expx_caminho_local "$t")" ;;
+        [A-Za-z]:\\*) [ "$aspas" = 0 ] || t="$(expx_caminho_local "$t")" ;;
+      esac
       case "$t" in ''|-|*'$'*|*'`'*|*\\*)
         MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - diretório que não se resolve: ${1}
 "; return ;;
@@ -171,9 +175,16 @@ $CMD"
       arq_f="${arg_f#--file=}"; arq_f="${arq_f#--file}"
       case "$arq_f" in -*F*) arq_f="${arq_f#*F}" ;; esac
       arq_f="${arq_f#"${arq_f%%[![:space:]]*}"}"
-      case "$arq_f" in \"*\") arq_f="${arq_f#\"}"; arq_f="${arq_f%\"}" ;; \'*\') arq_f="${arq_f#\'}"; arq_f="${arq_f%\'}" ;; esac
+      aspas_f=0
+      case "$arq_f" in \"*\") arq_f="${arq_f#\"}"; arq_f="${arq_f%\"}"; aspas_f=1 ;; \'*\') arq_f="${arq_f#\'}"; arq_f="${arq_f%\'}"; aspas_f=1 ;; esac
       case "$arq_f" in ''|-) MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - ${arg_f}
 "; continue ;; esac
+      # `F:/...` também é absoluto (Windows). `F:\...` só entre aspas: sem elas o
+      # shell come a barra invertida, e o Git abriria outro arquivo.
+      case "$arq_f" in
+        [A-Za-z]:/*) arq_f="$(expx_caminho_local "$arq_f")" ;;
+        [A-Za-z]:\\*) [ "$aspas_f" = 0 ] || arq_f="$(expx_caminho_local "$arq_f")" ;;
+      esac
       lido_f=0
       while IFS= read -r base_f; do
         [ -n "$base_f" ] || continue

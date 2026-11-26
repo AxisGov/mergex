@@ -383,6 +383,25 @@ printf 'mensagem com %s\n' "$SK" > "$SEG_T/msg.txt"
 caso "git -C . commit -F msg.txt: barra"          comum/sem-segredo.sh "$(bash_json 'git -C . commit -F msg.txt')" 2
 caso "git -c user.name=x commit -F msg.txt: barra" comum/sem-segredo.sh "$(bash_json 'git -c user.name=x commit -F msg.txt')" 2
 rm -f "$SEG_T/msg.txt"
+# Caminho de unidade do Windows é absoluto (conselhos, depois da 0.14.29): `-F F:/...`
+# era lido como relativo, não se achava, e o commit limpo era barrado. O `cygpath`
+# do Git Bash é simulado: `F:/x` e `F:\x` viram `$SEG_T/unidade-f/x`.
+UNI_BIN="$(mktemp -d)"; mkdir -p "$SEG_T/unidade-f/limpo"; git -C "$SEG_T/unidade-f/limpo" init -q -b feature/uni
+cat > "$UNI_BIN/cygpath" <<'CYG'
+#!/usr/bin/env bash
+[ "$1" = -u ] && shift; [ "$1" = -- ] && shift
+c="${1//\\//}"; d="${c%%:*}"
+printf '%s/unidade-%s%s' "$UNI_RAIZ" "$(printf %s "$d" | tr A-Z a-z)" "${c#?:}"
+CYG
+export UNI_RAIZ="$SEG_T"; chmod +x "$UNI_BIN/cygpath"; PATH_SEM_UNI="$PATH"; PATH="$UNI_BIN:$PATH"
+printf 'mensagem comum\n' > "$SEG_T/unidade-f/msg.txt"
+caso "-F F:/msg.txt limpo: passa"                comum/sem-segredo.sh "$(bash_json 'git commit -F F:/msg.txt')" 0
+caso "-F \"F:\\msg.txt\" limpo (aspas): passa"   comum/sem-segredo.sh "$(bash_json 'git commit -F "F:\msg.txt"')" 0
+caso "-F F:\\msg.txt sem aspas: barra"           comum/sem-segredo.sh "$(bash_json 'git commit -F F:\msg.txt')" 2
+caso "cd F:/limpo && git commit: passa"          comum/sem-segredo.sh "$(bash_json 'cd F:/limpo && git commit -m x')" 0
+printf 'mensagem com %s\n' "$SK" > "$SEG_T/unidade-f/msg.txt"
+caso "-F F:/msg.txt com segredo: barra"          comum/sem-segredo.sh "$(bash_json 'git commit -F F:/msg.txt')" 2
+PATH="$PATH_SEM_UNI"; rm -rf "$UNI_BIN" "$SEG_T/unidade-f"
 printf 'antes\n%s\ndepois\n' "$SK" > "$SEG_T/chave.pem"; seg_git add chave.pem
 caso "git --git-dir=.git -c a=b commit com segredo preparado: barra" comum/sem-segredo.sh "$(bash_json 'git --git-dir=.git -c a=b commit -m x')" 2
 caso "git -C . commit com segredo preparado: barra" comum/sem-segredo.sh "$(bash_json 'git -C . commit -m x')" 2
