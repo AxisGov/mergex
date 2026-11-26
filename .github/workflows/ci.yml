@@ -248,6 +248,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-fechamento-pos-merge.sh
 
+      - name: Registro do merge de entrega que não é da runx (DM-351)
+        shell: bash
+        run: bash scripts/ci/test-registro-pos-merge.sh
+
       - name: Lint consumidor precoce sob pipefail
         shell: bash
         run: bash scripts/ci/lint-consumidor-precoce.sh

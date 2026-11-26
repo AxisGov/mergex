@@ -64,7 +64,7 @@ afirma "outra url na resposta: rc 6" 6 "$(roda GH_URL=https://github.com/o/r/pul
 afirma "merge fora da base: rc 7" 7 "$(GH_MERGE="{\"oid\":\"$FORA_BASE\"}" roda X=1)"; sem_efeito "merge fora da base"
 afirma "entrega sem pr_url: rc 3" 3 "$(CASO_TRAB=OC-2026-0008-rua roda X=1)"
 afirma "entrega ausente: rc 3" 3 "$(CASO_TRAB=OC-2026-0009-nao roda X=1)"
-afirma "id que não é de ocorrência: rc 64" 64 "$(CASO_TRAB=feature-x roda X=1)"
+afirma "id que não é de ocorrência, sem entrega: rc 3 (o registro da DM-351)" 3 "$(CASO_TRAB=feature-x roda X=1)"
 afirma "id de ocorrência sem os quatro dígitos: rc 64" 64 "$(CASO_TRAB=OC-2026-7-rua roda X=1)"
 SEM_GH="$T/semgh"; mkdir "$SEM_GH"; for c in bash git jq sed awk tr cat dirname mktemp; do ln -s "$(command -v "$c")" "$SEM_GH/$c"; done
 rc=0; ( cd "$T/r" && PATH="$SEM_GH" bash "$SCRIPT" --trabalho "$TRAB" >/dev/null 2>&1 ) || rc=$?
