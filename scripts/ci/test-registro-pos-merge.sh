@@ -39,7 +39,7 @@ printf '{"url":"%s","state":"%s","mergeCommit":%s,"headRefName":"%s","baseRefNam
 GH
 chmod +x "$T/bin/gh"
 IDENT=(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t)
-roda() { ( cd "$T/r" && env PATH="$T/bin:$PATH" "${IDENT[@]}" GH_HEAD="${GH_HEAD:-$BR}" GH_MERGE="${GH_MERGE:-{\"oid\":\"$MERGE\"\}}" "$@" bash "$SCRIPT" --trabalho "${CASO_TRAB:-$TRAB}" >"$T/saida" 2>"$T/erro" ); printf '%s' "$?"; }
+roda() { ( cd "$T/r" && env PATH="$T/bin:$PATH" "${IDENT[@]}" GH_HEAD="${GH_HEAD:-$BR}" GH_MERGE="${GH_MERGE:-{\"oid\":\"$MERGE\"\}}" "$@" bash "$SCRIPT" --trabalho "${CASO_TRAB:-$TRAB}" ${CASO_PR:+--pr "$CASO_PR"} >"$T/saida" 2>"$T/erro" ); printf '%s' "$?"; }
 W="$T/r--$TRAB-registro-pos-merge"
 nada_criado() { g show-ref --verify -q "refs/heads/$REG" && return 1; [ ! -e "$W" ] || return 1; [ -z "$(g config --get "branch.$REG.expxRegistroPosMerge")" ]; }
 sem_efeito() { nada_criado; afirma "$1: não cria nada" 0 "$?"; }
@@ -93,7 +93,9 @@ afirma "o commit toca só o POS-MERGE.md" "A	$REL" "$(git -C "$W" diff-tree --no
 afirma "trailer Merge" "$MERGE" "$(git -C "$W" log -1 --format='%(trailers:key=Merge,valueonly)' | sed '/^$/d')"
 afirma "trailer Registro-pos-merge-de" "$URL" "$(git -C "$W" log -1 --format='%(trailers:key=Registro-pos-merge-de,valueonly)' | sed '/^$/d')"
 afirma "sem trailer Trabalho (não seleciona a entrega no portão)" "" "$(git -C "$W" log -1 --format='%(trailers:key=Trabalho,valueonly)' | sed '/^$/d')"
-fm() { sed -n "s/^$1: //p" "$W/$REL" | head -1; }
+fm() { sed -n "s/^$1: //p" "$W/$REL" | head -1 | sed 's/^"\(.*\)"$/\1/'; }
+afirma "trabalho_id entre aspas no YAML" "trabalho_id: \"$TRAB\"" "$(grep -m1 '^trabalho_id:' "$W/$REL")"
+afirma "pr_url_de: entrega" entrega "$(fm pr_url_de)"
 afirma "kind" registro_pos_merge "$(fm kind)"
 afirma "pr_estado" merged "$(fm pr_estado)"
 afirma "merge" "$MERGE" "$(fm merge)"
@@ -143,6 +145,27 @@ g reset -q --hard "$MERGE"; g push -q -f origin main 2>/dev/null; g fetch -q ori
 echo "a ocorrência da runx segue sem registro"
 mkdir -p "$T/r/docs/entregas/OC-2026-0001-a"; sed "s#^branch: .*#branch: fix/OC-2026-0001-a#" "$T/bak" > "$T/r/docs/entregas/OC-2026-0001-a/ENTREGA.md"
 afirma "OC: rc 0, sem commit=" "" "$(CASO_TRAB=OC-2026-0001-a GH_HEAD=fix/OC-2026-0001-a roda X=1 >/dev/null; grep '^commit=' "$T/saida")"
+
+echo "--pr: o PR que o E7 não gravou (aberto fora do fluxo)"
+P2=https://github.com/o/r/pull/381; ID=1e5
+mkdir -p "$T/r/docs/entregas/$ID"
+sed -e "s#^pr_url: .*#pr_url: null#" -e "s#^branch: .*#branch: feature/n#" "$T/bak" > "$T/r/docs/entregas/$ID/ENTREGA.md"
+g add "docs/entregas/$ID"; g commit -q -m 'entrega sem pr'; g push -q origin main; g fetch -q origin
+afirma "sem pr_url e sem --pr: rc 3" 3 "$(CASO_TRAB=$ID GH_HEAD=feature/n roda X=1)"
+grep -qF -- '--pr' "$T/erro"; afirma "a mensagem indica o --pr" 0 "$?"
+afirma "--pr de PR de outra branch: rc 6" 6 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/outra roda X=1)"
+afirma "--pr na ocorrência da runx: rc 64" 64 "$(CASO_TRAB=OC-2026-0001-a CASO_PR=$P2 GH_HEAD=fix/OC-2026-0001-a roda X=1)"
+afirma "--pr diferente do pr_url gravado: rc 6" 6 "$(CASO_PR=$P2 roda X=1)"
+afirma "--pr igual ao pr_url gravado: rc 0" 0 "$(CASO_PR=$URL roda X=1)"
+afirma "--pr da branch da entrega: rc 0" 0 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n roda X=1)"
+W2="$T/r--$ID-registro-pos-merge"; R2="$W2/docs/entregas/$ID/POS-MERGE.md"
+afirma "pr_url_de: argumento" "pr_url_de: argumento" "$(grep -m1 '^pr_url_de:' "$R2")"
+afirma "pr_url é o do argumento" "pr_url: \"$P2\"" "$(grep -m1 '^pr_url:' "$R2")"
+afirma "id que o YAML leria como número vai entre aspas" "trabalho_id: \"1e5\"" "$(grep -m1 '^trabalho_id:' "$R2")"
+afirma "trailer com o PR do argumento" "$P2" "$(git -C "$W2" log -1 --format='%(trailers:key=Registro-pos-merge-de,valueonly)' | sed '/^$/d')"
+afirma "ENTREGA.md sem pr_url continua intacto" "" "$(git -C "$W2" diff HEAD^ -- "docs/entregas/$ID/ENTREGA.md")"
+afirma "--pr: rodar de novo retoma: rc 0" 0 "$(CASO_TRAB=$ID CASO_PR=$P2 GH_HEAD=feature/n roda X=1)"
+afirma "--pr: retomar sem o --pr não registra outro PR: rc 3" 3 "$(CASO_TRAB=$ID GH_HEAD=feature/n roda X=1)"
 
 printf '\n%s ok, %s falha(s)\n' "$ok" "$falhou"
 [ "$falhou" = 0 ]
