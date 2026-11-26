@@ -179,6 +179,10 @@ $CMD"
       case "$arq_f" in \"*\") arq_f="${arq_f#\"}"; arq_f="${arq_f%\"}"; aspas_f=1 ;; \'*\') arq_f="${arq_f#\'}"; arq_f="${arq_f%\'}"; aspas_f=1 ;; esac
       case "$arq_f" in ''|-) MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - ${arg_f}
 "; continue ;; esac
+      # Sem aspas, a barra invertida é escape do shell: o Git abre outro nome (`a\b`
+      # é `ab`), e o hook leria `a\b`. Na dúvida, barra (t-14).
+      case "$aspas_f:$arq_f" in 0:*\\*) MSG_NAO_VARRIDA="${MSG_NAO_VARRIDA}  - ${arg_f}
+"; continue ;; esac
       # `F:/...` também é absoluto (Windows). Com barra invertida, só entre aspas:
       # sem elas o shell come a barra, e o Git abriria outro arquivo (`F:/a\ b`).
       case "$arq_f" in

@@ -35,7 +35,12 @@ cat > "$T/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [ -z "${GH_FALHA:-}" ] || exit 1
 # `gh api repos/<r>/commits/<sha>/pulls`: os PRs pelos quais o commit entrou na base.
-if [ "$1" = api ]; then [ -z "${GH_API_FALHA:-}" ] || exit 1; printf '%s\n' "${GH_PULLS:-[]}"; exit 0; fi
+# Só a forma que o GitHub aceita: host à parte e `repos/<dono>/<repo>/...` (t-14).
+if [ "$1" = api ]; then
+  [ -z "${GH_API_FALHA:-}" ] || exit 1
+  [ "$2" = --hostname ] && [ "$3" = github.com ] && [[ "$4" =~ ^repos/o/r/commits/[0-9a-f]{40}/pulls$ ]] || exit 1
+  printf '%s\n' "${GH_PULLS:-[]}"; exit 0
+fi
 printf '{"url":"%s","state":"%s","mergeCommit":%s,"headRefName":"%s","baseRefName":"main","isCrossRepository":%s}\n' \
   "${GH_URL:-$3}" "${GH_ESTADO:-MERGED}" "${GH_MERGE:-null}" "${GH_HEAD:-}" "${GH_FORK:-false}"
 GH

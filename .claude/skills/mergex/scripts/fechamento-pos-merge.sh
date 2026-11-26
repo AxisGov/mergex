@@ -94,6 +94,8 @@ esac
 case "$BRANCH_ENTREGA:$BASE" in :*|*:|null:*|*:null) para 3 "ENTREGA.md sem branch ou branch_base" ;; esac
 [[ "$PR_URL" =~ ^https://([^/]+)/([^/]+/[^/]+)/pull/[0-9]+$ ]] || para 3 "pr_url fora da forma esperada: $PR_URL"
 REPO_PR="$(printf '%s/%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')"
+# Para a API do serviço: o host à parte, e `dono/repositório` no caminho.
+HOST_PR="${BASH_REMATCH[1]}"; DONO_REPO_PR="${BASH_REMATCH[2]}"
 if [ "$MODO" = registro ]; then
   # Esses valores vão para o frontmatter do registro: só o alfabeto que o YAML lê sem aspas.
   [[ "$PR_URL" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+$ ]] \
@@ -195,7 +197,7 @@ if [ "$PR_URL_DE" = argumento ]; then
   if [ "$TROUXE" != "$MERGE" ]; then
     [ "$(g rev-list --parents -n 1 "$MERGE" 2>/dev/null | wc -w | tr -d ' ')" = 2 ] \
       || para 6 "o merge de --pr $PR_URL não muda o $EM, e o commit que o mudou ($TROUXE) veio por outro caminho: o PR não é o que trouxe esta entrega"
-    PRS_DO_COMMIT="$(gh api "repos/$REPO_PR/commits/$TROUXE/pulls" 2>/dev/null | jq -r '.[].number' 2>/dev/null)" \
+    PRS_DO_COMMIT="$(gh api --hostname "$HOST_PR" "repos/$DONO_REPO_PR/commits/$TROUXE/pulls" 2>/dev/null | jq -r '.[].number' 2>/dev/null)" \
       || para 5 "o serviço não disse por qual PR o commit $TROUXE entrou na base"
     grep -qxF -- "${PR_URL##*/}" <<<"$PRS_DO_COMMIT" \
       || para 6 "o merge de --pr $PR_URL não muda o $EM, e o commit que o mudou ($TROUXE) não entrou na base por este PR: o PR não é o que trouxe esta entrega"
