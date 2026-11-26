@@ -69,6 +69,9 @@ rm -rf "$T/r/docs/entregas/solta"
 sed 's#^pr_estado: .*#entrega: por_sprint#' "$T/bak" > "$T/r/docs/entregas/$TRAB/ENTREGA.md"
 afirma "entrega por_sprint: rc 3" 3 "$(roda X=1)"; sem_efeito "por_sprint"
 cp "$T/bak" "$T/r/docs/entregas/$TRAB/ENTREGA.md"
+sed 's#^pr_url: .*#pr_url: https://github.com/o/r/pull/380#' "$T/bak" > "$T/r/docs/entregas/$TRAB/ENTREGA.md"
+afirma "ENTREGA.md local apontando outro PR mesclado: rc 6" 6 "$(roda GH_URL=https://github.com/o/r/pull/380)"; sem_efeito "ENTREGA.md local editado"
+cp "$T/bak" "$T/r/docs/entregas/$TRAB/ENTREGA.md"
 
 echo "sem identidade no Git, o commit falha sem deixar o registro pela metade"
 rc=0; ( cd "$T/r" && env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \

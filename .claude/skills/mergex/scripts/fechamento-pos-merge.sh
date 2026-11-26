@@ -159,6 +159,10 @@ if [ "$MODO" = registro ]; then
   [[ "$BASE_PR" =~ ^[A-Za-z0-9._/-]+$ ]] || para 3 "base do PR com caractere fora do registro: $BASE_PR"
   g cat-file -e "$REF_BASE:docs/entregas/$TRABALHO/ENTREGA.md" 2>/dev/null \
     || para 7 "a base não traz docs/entregas/$TRABALHO/ENTREGA.md: o merge não é desta entrega"
+  # O pr_url, a branch e a base saíram do ENTREGA.md local: ele tem de ser o da base, ou um
+  # arquivo editado atribuiria a esta entrega o merge de outro PR.
+  [ "$(g hash-object -- "$ENTREGA" 2>/dev/null)" = "$(g rev-parse -q --verify "$REF_BASE:docs/entregas/$TRABALHO/ENTREGA.md" 2>/dev/null)" ] \
+    || para 6 "o docs/entregas/$TRABALHO/ENTREGA.md local difere do da base $REMOTO/$BASE_PR: atualize a árvore antes de registrar"
   ! g cat-file -e "$REF_BASE:$REL" 2>/dev/null \
     || para 8 "a base já traz $REL: o merge desta entrega já está registrado"
 fi
