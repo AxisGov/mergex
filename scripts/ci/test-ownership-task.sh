@@ -365,6 +365,43 @@ espera 'DM-356 classificação sai 0' 0 "$RC"
 saida="$(bash "$OWNERSHIP" --uniao "$D" sprintx ft-piloto)"; rc=$?
 espera 'DM-356 união vazia sai 0' 0 "$rc"
 espera 'DM-356 união vazia' '' "$saida"
+
+echo
+echo '14. DM-358: id de task entre aspas (duplas e simples)'
+for aspa in '"' "'"; do
+  if [ "$aspa" = '"' ]; then nome=duplas; else nome=simples; fi
+  Q="$(novo_tmp)"
+  S="$Q/docs/sprintx/features/ft-piloto/sprint-01/tasks.md"
+  mkdir -p "${S%/tasks.md}"
+  printf '%s\n' '---' 'kind: plano' 'tasks:' \
+    "  - id: ${aspa}T-01.01${aspa}" '    arquivos:' '      cria: [src/a.ts]' '      altera: []' \
+    "  - id: ${aspa}T-01.02${aspa}" '    arquivos:' '      cria: []' '      altera: []' \
+    "  - id: ${aspa}T-01.03${aspa}" '    arquivos:' '      cria:' '        - src/c.ts' '      altera: []' \
+    '---' > "$S"
+  classifica "$Q" T-01.01 src/a.ts src/c.ts
+  espera "DM-358 $nome: arquivo da atual" na_task_atual "$(situacao_de "$SAIDA" src/a.ts)"
+  espera "DM-358 $nome: arquivo da irmã (lista em bloco)" arquivo_de_task_irma \
+    "$(situacao_de "$SAIDA" src/c.ts)"
+  espera "DM-358 $nome: id da irmã sai sem aspas" T-01.03 \
+    "$(printf '%s\n' "$SAIDA" | awk -F'\t' '$2 == "src/c.ts" { print $3 }')"
+  espera "DM-358 $nome: plano normal com irmã sai 2" 2 "$RC"
+  saida="$(bash "$OWNERSHIP" --sem-arquivos "$S")"; rc=$?
+  espera "DM-358 $nome: --sem-arquivos sai 0" 0 "$rc"
+  espera "DM-358 $nome: só a T-01.02 é sem arquivos, sem aspas" \
+    "$(printf 'T-01.02\t%s' "$S")" "$saida"
+  bash "$OWNERSHIP" --task-sem-arquivos "$Q" sprintx ft-piloto T-01.02 >/dev/null 2>&1
+  espera "DM-358 $nome: --task-sem-arquivos reconhece" 0 "$?"
+  bash "$OWNERSHIP" --task-sem-arquivos "$Q" sprintx ft-piloto T-01.01 >/dev/null 2>&1
+  espera "DM-358 $nome: task com arquivos não é sem arquivos" 1 "$?"
+  classifica "$Q" T-01.02 src/fora.ts
+  espera "DM-358 $nome: sem arquivos classifica desvio" desvio "$(situacao_de "$SAIDA" src/fora.ts)"
+  espera "DM-358 $nome: sem arquivos sai 0" 0 "$RC"
+done
+printf '%s\n' '---' 'kind: plano' 'tasks:' '  - id: "T-01.01' '    arquivos:' \
+  '      cria: [src/a.ts]' '      altera: []' '---' > "$S"
+classifica "$Q" T-01.01 src/a.ts
+espera 'DM-358 aspa sem par não vira dono: falha fechado' 1 "$RC"
+
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = "0" ]
