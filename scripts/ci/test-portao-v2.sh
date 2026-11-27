@@ -192,6 +192,38 @@ else
   pula "caso hook fora da lista barra (sem jq)"
 fi
 
+# ---------------------------------------------------------------------------
+echo
+echo "6. Fluxo com aspas (DM-358)"
+# ---------------------------------------------------------------------------
+lista_padrao
+printf 'tests/%s.test.ts\tlinux\tfalha so de ambiente\t2026-11-27\n' 'a,b' "d'agua" >> "$TSV"
+
+plano vermelha "$(fluxo '"tests/a,b.test.ts", tests/ambiente.test.ts')"
+verifica "caso virgula entre aspas duplas" AVISO 0
+plano vermelha "$(fluxo "tests/ambiente.test.ts, 'tests/a,b.test.ts'")"
+verifica "caso virgula entre aspas simples" AVISO 0
+plano vermelha "$(fluxo "tests/d'agua.test.ts")"
+verifica "caso aspa no meio de item sem aspas e literal" AVISO 0
+plano vermelha "$(fluxo 'tests/a,b.test.ts')"
+verifica "caso virgula sem aspas separa os itens" FALHA 1
+
+# invalida <descrição> <miolo do fluxo> — FALHA pelo motivo certo
+invalida() {
+  local saida rc=0
+  plano vermelha "$(fluxo "$2")"
+  saida="$(bash "$V2" --verificar --raiz "$R" --base main "$T" 2>/dev/null)" || rc=$?
+  case "$saida" in
+    V2=FALHA*suite_falhas-invalida*) [ "$rc" = 1 ] && { ok "$1 → suite_falhas-invalida"; return 0; } ;;
+  esac
+  falha "$1 — obteve rc=$rc '$(tr '\n\t' '| ' <<<"$saida")', esperava suite_falhas-invalida"
+}
+invalida "caso aspa aberta sem fecho" '"tests/ambiente.test.ts'
+invalida "caso aspa solta no fim" 'tests/ambiente.test.ts"'
+invalida "caso aspas trocadas" "'tests/ambiente.test.ts\""
+invalida "caso texto depois do fecho" '"tests/ambiente.test.ts" x'
+invalida "caso segundo item sem fecho" "tests/ambiente.test.ts, 'tests/a,b.test.ts"
+
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADO"
