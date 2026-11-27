@@ -792,6 +792,9 @@ exige_task_sem_arquivos() { # <ação>
 encerra_sem_arquivos() { # <task>
   [ -z "$STAGING" ] || return 0
   task_sem_arquivos "$1" || return 0
+  # A verificacao pedida pelo chamador roda mesmo sem commit: a task sem
+  # arquivos existe justamente para rodar algo (CodeAnt no #124).
+  verifica "${VERIFICACAO:-}"
   printf 'sem_arquivos=true\n'
   printf 'task=%s\n' "$1"
   printf 'mergex E1: a task %s declara `cria: []` e `altera: []` e nenhum arquivo de produto mudou: nenhum commit foi criado e ENTREGA.commits não mudou.\n' "$1"
