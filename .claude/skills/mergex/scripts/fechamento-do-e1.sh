@@ -795,6 +795,18 @@ encerra_sem_arquivos() { # <task>
   # A verificacao pedida pelo chamador roda mesmo sem commit: a task sem
   # arquivos existe justamente para rodar algo (CodeAnt no #124).
   verifica "${VERIFICACAO:-}"
+  if [ -n "${VERIFICACAO:-}" ]; then
+    # A verificacao nao pode deixar produto alterado para tras: sem commit, a
+    # mudanca ficaria fora do historico e da ENTREGA (CodeAnt no #124).
+    inventaria_arvore
+    separa_metodo
+    separa_evidencia "$1"
+    [ -z "$PRODUTO" ] || para 4 'PARADO — a verificação alterou arquivos de produto' \
+      "Task sem arquivos: $1" \
+      'Arquivo(s) que mudaram durante a verificação:' \
+      "$(printf '%s\n' "$PRODUTO" | sed '/^$/d; s/^/  - /')" \
+      'Nenhum commit foi criado. Desfaça a mudança ou declare os arquivos na task.'
+  fi
   printf 'sem_arquivos=true\n'
   printf 'task=%s\n' "$1"
   printf 'mergex E1: a task %s declara `cria: []` e `altera: []` e nenhum arquivo de produto mudou: nenhum commit foi criado e ENTREGA.commits não mudou.\n' "$1"

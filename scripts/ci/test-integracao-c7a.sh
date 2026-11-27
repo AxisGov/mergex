@@ -401,6 +401,9 @@ if grupo L; then
   saida="$(cd "$Ld" && bash "$FECHA" --fechar --entrega "$ENTREGA" --task T-01.01 --mensagem "$D/msg-l.txt" --verificacao true 2>&1)"; rc=$?
   igual "L — --fechar sem arquivos com verificacao que passa sai 0" "$rc" 0
   igual "L — verificacao que passa nao cria commit" "$(commits_de "$Ld")" 1
+  saida="$(cd "$Ld" && bash "$FECHA" --fechar --entrega "$ENTREGA" --task T-01.01 --mensagem "$D/msg-l.txt" --verificacao 'echo x >> src/a.js' 2>&1)"; rc=$?
+  igual "L — verificacao que altera produto sai 4" "$rc" 4
+  case "$saida" in *src/a.js*) ok "L — o aviso nomeia o arquivo alterado" ;; *) falha "L — saída: $saida" ;; esac
 fi
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s)\n' "$OK" "$FALHOU"
