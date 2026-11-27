@@ -205,6 +205,9 @@ jobs:
       - name: Test E2 V11
         shell: bash
         run: bash scripts/ci/test-portao-v11.sh
+      - name: Test E2 V2
+        shell: bash
+        run: bash scripts/ci/test-portao-v2.sh
 
       - name: Test R3 predecessores da sprintx
         shell: bash

@@ -288,6 +288,25 @@ for falhas in 'v12' 'v12 v1'; do
 done
 
 echo
+# ---------------------------------------------------------------------------
+echo "12. --token: o item de falhas_portao de um resultado; AVISO não entra (DM-357)"
+# ---------------------------------------------------------------------------
+# token <resultado> <item esperado, vazio para nenhum>
+token() {
+  local obtido rc=0
+  obtido="$(bash "$CAUSA" --token v2 "$1" 2>/dev/null)" || rc=$?
+  if [ "$rc" = 0 ] && [ "$obtido" = "$2" ]; then ok "--token v2 $1 → '${2:-nada}'"
+  else falha "--token v2 $1 — rc=$rc, obteve '$obtido', esperava '$2'"; fi
+}
+token V2=FALHA v2
+token V2=SEM_PROVA v2_sem_prova
+token V2=AVISO ''
+token V2=OK ''
+token n/a ''
+if bash "$CAUSA" --token v2 V2=TALVEZ >/dev/null 2>&1; then falha "--token aceitou resultado desconhecido"
+else ok "--token recusa resultado desconhecido"; fi
+
+echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = "0" ]

@@ -123,11 +123,23 @@ Para cada task `concluida` do escopo, leia o campo `suite`:
 | `parcial` | OK — os testes afetados pela task passaram |
 | `verde` | OK — a suíte inteira passou |
 | `vermelha` | **FALHA** |
+| `vermelha` com `suite_falhas` só de testes da lista desta plataforma, nenhum no diff | **AVISO** (DM-357) |
 | `nao_executada` | **FALHA** — `concluida` sem teste executado é inconsistência do registro |
 
 `parcial` e `verde` são registros válidos, e é assim que a skill de origem trabalha: na task roda o subconjunto afetado, e a suíte inteira é cobrada uma vez, ao fechar a sprint. Reprovar `parcial` aqui obrigaria a skill de origem a escrever `verde` onde ela não rodou a suíte inteira — o portão passaria a premiar registro falso, que é o oposto do que ele existe para fazer.
 
 `vermelha` e `nao_executada` são FALHA. Nomeie a task.
+
+**A única exceção é a falha de ambiente (DM-357).** A lista é do projeto e versionada, em `.expx/falhas-de-ambiente.tsv`: uma linha por teste, `caminho<TAB>plataforma<TAB>motivo<TAB>desde`. `#` comenta, linha com motivo vazio não vale e o caminho casa exato. A task `vermelha` é **AVISO** só quando `suite_falhas` existe e não é vazia, **todo** caminho dela está na lista para a plataforma atual (`EXPX_PLATAFORMA`, senão `uname -s`) e **nenhum** aparece em `git diff --name-only <branch_base>...HEAD`: teste tocado pelo trabalho perde a absolvição. Quem decide é o script, e a primeira linha da saída é o resultado:
+
+```bash
+bash .claude/skills/mergex/scripts/portao-v2.sh --verificar --base <branch_base> <tasks.md>...
+bash .claude/skills/mergex/scripts/causa-do-portao.sh --token v2 <primeira linha da saída>
+```
+
+`V2=FALHA` vira `v2`, `V2=SEM_PROVA` vira `v2_sem_prova`; `V2=OK`, `V2=AVISO` e `n/a` não imprimem nada. O AVISO vai para a seção de avisos, com a task e os testes, e **não entra em `falhas_portao`**. O hook `commit-por-task` chama o mesmo script com `--staged`, que soma o índice ao diff.
+
+**Timeout por máquina carregada NÃO entra na lista.** Reexecute o teste isolado; verde, registre `parcial`.
 
 **O trabalho inteiro continua precisando da suíte inteira.** Além do registro por task, procure a **evidência da suíte inteira no fechamento de cada sprint do escopo** (na entrega `por_sprint`, a da sprint do PR), onde a skill de origem a registra, com a saída da execução colada. **Onde procurar depende do formato da sprint:**
 
@@ -143,6 +155,8 @@ Para cada task `concluida` do escopo, leia o campo `suite`:
 | Sprint concluída com a execução registrada e verde | OK |
 | Sprint concluída com execução registrada vermelha | **FALHA** — nomeie a sprint |
 | Sprint concluída sem nenhum registro de execução | **AVISO**, nomeando a sprint e onde ele deveria estar |
+
+No fechamento, registro vermelho cujo `suite_falhas` só tem falha de ambiente é **AVISO**, pela mesma regra da task. Confira os caminhos dele com `bash .claude/skills/mergex/scripts/portao-v2.sh --conferir-falhas --base <branch_base> <caminho>...`; lista vazia ou `V2=FALHA` mantém a FALHA.
 
 **Nunca reescreva tasks `parcial` para `verde`** para satisfazer esta verificação, e nunca invente a evidência: o que falta nesses casos é a execução, não o registro.
 
