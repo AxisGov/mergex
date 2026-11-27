@@ -591,5 +591,25 @@ else
 fi
 
 echo
+echo '== DM-356: V12 e V11 na mesma fixture sem arquivos =='
+projeto dm356 obrigatoria
+base356="$(g rev-parse HEAD)"
+entrega true "base_validada_sha: $base356"
+cat > "$aux/tasks.md" <<'YAML'
+---
+kind: tasks
+tasks:
+  - id: T-01.01
+    status: concluida
+    arquivos:
+      cria: []
+      altera: []
+---
+YAML
+roda
+[ "$rc" = 0 ] && tem 'V12=n/a' && passa 'DM-356 V12 sem item é n/a' || quebra "DM-356 V12: $(mostra)"
+out356="$(bash "$REPO/.claude/skills/mergex/scripts/prova-de-commit.sh" --verificar "$P/docs/entregas/w/ENTREGA.md" "$aux/tasks.md")"; rc356=$?
+[ "$rc356" = 0 ] && case "$out356" in *'motivo=tasks-sem-arquivos'*) true ;; *) false ;; esac \
+  && passa 'DM-356 V11 dispensa na mesma fixture' || quebra "DM-356 V11: $out356"
 echo "$OK ok, $FALHOU falha(s)"
 [ "$FALHOU" = 0 ]

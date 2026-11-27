@@ -377,6 +377,22 @@ if grupo K; then
 fi
 
 echo
+if grupo L; then
+  echo 'L. DM-356: fechar e preparar sem caminhos'
+  for modo in --fechar --preparar; do
+    Ld="$D/l-${modo#--}"; repo "$Ld"
+    sed -i.bak 's/altera: \[src\/a.js, src\/comum.js\]/altera: []/' "$Ld/$PLANO"
+    rm -f "$Ld/$PLANO.bak"
+    mensagem "$D/msg-l.txt" T-01.01
+    saida="$(cd "$Ld" && bash "$FECHA" "$modo" --entrega "$ENTREGA" --task T-01.01 --mensagem "$D/msg-l.txt" 2>&1)"; rc=$?
+    igual "L — $modo sem arquivos sai 0" "$rc" 0
+    case "$saida" in *sem_arquivos=true*) ok "L — $modo informa dispensa" ;; *) falha "L — saída: $saida" ;; esac
+    case "$saida" in *token=*) falha "L — $modo emitiu token" ;; *) ok "L — $modo sem token" ;; esac
+    igual "L — $modo sem commit" "$(commits_de "$Ld")" 1
+    igual "L — $modo sem item" "$(itens_de "$Ld")" ''
+    [ -d "$(trava_de "$Ld")" ] && falha "L — $modo deixou trava" || ok "L — $modo liberou trava"
+  done
+fi
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = "0" ]

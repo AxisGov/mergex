@@ -567,6 +567,50 @@ bloco_v11 'escopo=trabalho' ''
   || falha "bloco da V11 fora do planejamento sem tasks.md — rc=$rc saida=$(tr '\n' '|' < "$D/b11.out")"
 
 echo
+echo '21. DM-356: task sem arquivos e trailers no intervalo'
+R356="$D/dm356"; git init -q -b main "$R356"
+git -C "$R356" -c user.name=Teste -c user.email=t@t commit -q --allow-empty -m base -m 'Task: T-01.01'
+base356="$(git -C "$R356" rev-parse HEAD)"
+git -C "$R356" -c user.name=Teste -c user.email=t@t commit -q --allow-empty -m trabalho -m 'Task: T-01.020'
+git -C "$R356" -c user.name=Teste -c user.email=t@t commit -q --allow-empty -m trabalho -m 'Task: T-01.01
+
+Texto fora do bloco final.'
+cat > "$R356/tasks.md" <<'YAML'
+---
+kind: plano
+tasks:
+  - id: T-01.01
+    status: concluida
+    arquivos:
+      cria: []
+      altera: []
+  - id: T-01.02
+    status: concluida
+    arquivos:
+      cria: []
+      altera: []
+---
+YAML
+entrega "$R356/ENTREGA.md" true
+sed -i.bak "/^branch_base:/a base_validada_sha: $base356" "$R356/ENTREGA.md"
+out356="$(bash "$PROVA" --verificar "$R356/ENTREGA.md" "$R356/tasks.md")"; rc356=$?
+[ "$rc356" = 0 ] && case "$out356" in *'motivo=tasks-sem-arquivos'*'sem_arquivos'*) true ;; *) false ;; esac \
+  && ok 'DM-356 sem trailer, anterior à base e prefixo não contam' || falha "DM-356 dispensa: $out356"
+git -C "$R356" -c user.name=Teste -c user.email=t@t commit -q --allow-empty -m trabalho -m 'Task: T-01.01'
+out356="$(bash "$PROVA" --verificar "$R356/ENTREGA.md" "$R356/tasks.md")"; rc356=$?
+[ "$rc356" = 1 ] && case "$out356" in *T-01.01*sem_arquivos*T-01.02*) true ;; *) false ;; esac \
+  && ok 'DM-356 trailer falha junto de task dispensada' || falha "DM-356 trailer: $out356"
+awk '/id: T-01.01/ { primeira=1 } /id: T-01.02/ { primeira=0 } primeira && /altera: \[\]/ { next } { print }' "$R356/tasks.md" > "$R356/tasks-novo.md"
+mv "$R356/tasks-novo.md" "$R356/tasks.md"
+out356="$(bash "$PROVA" --verificar "$R356/ENTREGA.md" "$R356/tasks.md")"; rc356=$?
+[ "$rc356" = 1 ] && case "$out356" in *T-01.01*sem_arquivos*T-01.02*) true ;; *) false ;; esac \
+  && ok 'DM-356 chave ausente falha junto de dispensada' || falha "DM-356 chave: $out356"
+sed -i.bak "s/$base356/$(git -C "$R356" rev-parse HEAD)/" "$R356/ENTREGA.md"
+verifica SEM_PROVA 'DM-356 base igual ao HEAD' "$R356/ENTREGA.md" "$R356/tasks.md"
+sed -i.bak "s/$(git -C "$R356" rev-parse HEAD)/0000000000000000000000000000000000000000/" "$R356/ENTREGA.md"
+verifica SEM_PROVA 'DM-356 base fora da história' "$R356/ENTREGA.md" "$R356/tasks.md"
+cp "$R356/ENTREGA.md" "$D/sem-git-entrega.md"
+verifica SEM_PROVA 'DM-356 repositório fora do Git' "$D/sem-git-entrega.md" "$R356/tasks.md"
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = "0" ]
