@@ -351,6 +351,20 @@ bash "$OWNERSHIP" --uniao "$D" >/dev/null 2>&1
 espera "--uniao com uso inválido" 64 "$?"
 
 echo
+echo '13. DM-356: listas vazias explícitas, CRLF e prosa'
+S="$D/docs/sprintx/features/ft-piloto/sprint-03/tasks.md"
+mkdir -p "${S%/tasks.md}"
+printf '%s\r\n' '---' 'kind: plano' 'tasks:' '  - id: T-03.01' '    arquivos:' '      cria: []' '      altera: []' '  - id: T-03.02' '    arquivos:' '      cria: []' '---' 'altera: []' > "$S"
+rm -f "$D/docs/sprintx/features/ft-piloto/sprint-04/tasks.md"
+saida="$(bash "$OWNERSHIP" --sem-arquivos "$S")"; rc=$?
+espera 'DM-356 lista somente listas explícitas em CRLF' 0 "$rc"
+espera 'DM-356 ignora chave ausente e prosa' "$(printf 'T-03.01\t%s' "$S")" "$saida"
+classifica "$D" T-03.01 src/fora.ts
+espera 'DM-356 classifica desvio' desvio "$(situacao_de "$SAIDA" src/fora.ts)"
+espera 'DM-356 classificação sai 0' 0 "$RC"
+saida="$(bash "$OWNERSHIP" --uniao "$D" sprintx ft-piloto)"; rc=$?
+espera 'DM-356 união vazia sai 0' 0 "$rc"
+espera 'DM-356 união vazia' '' "$saida"
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), 0 pulado(s)\n' "$OK" "$FALHOU"
 [ "$FALHOU" = "0" ]

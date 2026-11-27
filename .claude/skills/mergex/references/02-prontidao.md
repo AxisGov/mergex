@@ -291,11 +291,14 @@ esac
 
 `$escopo` e `$tasks_do_escopo` são os do bloco de "O escopo das tasks". No PR de planejamento a lista vem vazia, e o `prova-de-commit.sh` sem nenhum `tasks.md` responde `V11=SEM_PROVA` (`nenhum-tasks-md-informado`); por isso a guarda vem antes dele, e o resultado é `n/a` (seção "Entrega de planejamento"). Fora do planejamento, lista vazia continua `SEM_PROVA`.
 
-Falha: qualquer task `concluida` sem item que a prove. **Nomeie cada uma** (id e o `tasks.md` onde está). A saída do script é a lista, uma task por linha.
+Falha: qualquer task `concluida` sem item que a prove, exceto a task sem arquivos dispensada abaixo. **Nomeie cada uma** (id e o `tasks.md` onde está). A saída do script é a lista, uma task por linha.
 
 | Situação | Resultado |
 |---|---|
 | Toda task `concluida` tem item com `task` igual e `commit` válido | OK |
+| Task sem arquivos e sem item, sem trailer `Task:` no intervalo | Dispensada; `n/a` se todas forem dispensadas, senão `OK` ou `FALHA` pelas demais |
+| Task sem arquivos e sem item, com trailer `Task:` no intervalo | **FALHA** — o commit existe e falta o registro |
+| Base igual ao HEAD, fora da história ou Git ilegível | **FALHA**, registrada como `v11_sem_prova` |
 | Alguma task `concluida` sem item que a prove | **FALHA** — nomeie a(s) task(s) |
 | Nenhuma task `concluida` no plano | `n/a` — a V11 não tem alvo; a razão é da V1 |
 | `versionado: false` | `n/a` — sem versionador o schema já define `commits: []` |
@@ -307,7 +310,9 @@ Falha: qualquer task `concluida` sem item que a prove. **Nomeie cada uma** (id e
 
 **A V11 não lê `seq`.** Desde a chave de ordem (`references/00-schema.md`, "A ordem de registro"), a V11 continua respondendo exatamente a mesma pergunta, sobre os mesmos três tipos de lista: totalmente legada (sem `seq` em item nenhum), moderna e mista válida. Ela **não** exige `seq` em leitura histórica, **não** falha porque a sequência está quebrada — isso é violação de contrato do `ENTREGA.md`, não causa de negócio do portão — e **não** lê `seq` como quantidade de commits esperada para a task. Os dois scripts compartilham o mesmo leitor de `commits` justamente para que só exista uma interpretação da lista; o que a V11 usa dele é a leitura crua.
 
-**A V11 não audita o `git log`.** `ENTREGA.commits` é a evidência canônica do E1 neste contrato, e é sobre ela que a V11 decide. A lacuna que ela fecha é `tasks.md` ↔ `ENTREGA.commits`; provar que o SHA existe, que é ancestral do HEAD ou que pertence à branch é outra verificação, que nenhum ponto do contrato vigente exige.
+**A V11 não audita o `git log` para provar commit; a única leitura é a da task sem arquivos.** Uma task é sem arquivos quando seu frontmatter declara literalmente `cria: []` e `altera: []` no bloco `arquivos`. Sem item, ela é dispensada somente se nenhum trailer `Task: <id>` exato existir no intervalo `base..HEAD`. A base é `base_validada_sha` da entrega ou, na ausência da chave, o merge-base único com `branch_base`. Base igual ao HEAD, fora da história, clone raso ou Git ilegível resulta em `SEM_PROVA`. A saída inclui `sem_arquivos`, o id e o plano; se todas forem dispensadas, retorna `n/a` com `motivo=tasks-sem-arquivos`. Menções fora do bloco final e trailers anteriores à base não contam.
+
+`ENTREGA.commits` é a evidência canônica do E1. Provar que o SHA do item existe ou pertence à branch é outra verificação.
 
 Na recuperação, essas provas adicionais pertencem ao escritor `--registrar-existente`, não à leitura V11. O ciclo esperado é: antes do registro, V11 falha; após o append, passa na worktree; após `persistir-metodo pre-e2`, passa também ao ler `ENTREGA.md` de `git show HEAD`. A certificação terminal depende dessa última evidência durável.
 
@@ -483,7 +488,7 @@ O trabalho fica na branch, commitado até onde estava correto. Nada é desfeito,
 | `portao-v9.sh` devolve `v9_sem_prova` (código `3`) | `FALHA` em V9, registrada como `v9_sem_prova`, com os `motivo` do script. Raso: `git fetch --unshallow` e o E2 de novo |
 | Barreira `reconciliacao-base` reprovada | E2 não emite `PRONTO`; relate os `motivo`; persistência pendente se resolve com o checkpoint explícito `reconciliacao-base`, fora do portão |
 | Verificação impossível de rodar | Marque `FALHA`, nunca `OK`, e registre `vN_sem_prova` em `falhas_portao`. Ausência de prova não é prova |
-| Task `concluida` sem item em `ENTREGA.commits` | `FALHA` em V11. Sem commit existente: E1 tardio normal. Com commit existente e append perdido: `--registrar-existente`, nunca um segundo commit. |
+| Task `concluida` sem item em `ENTREGA.commits` | `FALHA` em V11, salvo a dispensa de task sem arquivos sem trailer. Sem commit existente: E1 tardio normal. Com commit existente e append perdido: `--registrar-existente`, nunca um segundo commit. |
 | `ENTREGA.md` sem a chave `commits`, ou ilegível | `FALHA` em V11, registrada como `v11_sem_prova` |
 | `portao-v12.sh` devolve `V12=FALHA` (código `1`) | `FALHA` em V12, com as linhas `T-… FALHA <motivo>` do `conferir`. `evidencia-ausente`: revisar a task e commitar a evidência com ela; `incompleta:L1`: dividir a task; `incompleta:L2`: uma task anterior divide o arquivo; `incompleta:<outro>` (`lote-falhou`, `perfil`, `pulado`…): revisar a task de novo, com a rota do contrato `expx-revisao`; `indisponivel:<motivo>`: a CLI de revisão não rodou, revisar de novo quando estiver disponível; `achados-abertos:<n>`: corrigir ou o desenvolvedor rejeitar cada achado; `evidencia-invalida:*`, `evidencia-nao-bate:*` ou `commit-inexistente:*`: a evidência no commit não prova a revisão daquele código, revisar a task de novo e registrar o commit novo (nunca editar a evidência à mão) |
 | `portao-v12.sh` devolve `V12=SEM_PROVA` (código `2`) | `FALHA` em V12, registrada como `v12_sem_prova`, com o `motivo=` do script (núcleo, node ou configuração que não lê; saída do `conferir` fora da forma) |
