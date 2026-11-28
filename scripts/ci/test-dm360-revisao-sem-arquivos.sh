@@ -78,6 +78,24 @@ tasks:
       altera: []
     teste_integracao: cobre integracao
     teste_funcional: cobre fluxo
+  - id: T-1.1
+    titulo: Um digito
+    status: concluida
+    suite: verde
+    arquivos:
+      cria: []
+      altera: []
+    teste_integracao: cobre integracao
+    teste_funcional: cobre fluxo
+  - id: T-001.02
+    titulo: Tres digitos
+    status: concluida
+    suite: verde
+    arquivos:
+      cria: []
+      altera: []
+    teste_integracao: cobre integracao
+    teste_funcional: cobre fluxo
 ---
 YAML
     cat > "$PASTA_REL/ORQUESTRADOR.md" <<YAML
@@ -127,6 +145,8 @@ evidencia "$R" T-01.01.json          # task com arquivos, não é a atual
 evidencia "$R" T-01.02.json          # task sem arquivos
 evidencia "$R" T-01.02.json.tmp      # nome fora do contrato
 evidencia "$R" T-01.0a.json          # task sem arquivos com id fora do formato
+evidencia "$R" T-1.1.json            # um dígito: o E1 não aceita como evidência
+evidencia "$R" T-001.02.json         # três dígitos: idem
 for cp in pre-e2 pre-e6 e8; do
   igual "$cp: só revisao/T-01.02.json" "$REVISAO_REL/T-01.02.json " \
     "$(metodo "$R" --listar "$cp" 2>/dev/null | so_revisao)"
@@ -144,6 +164,10 @@ sujo "$R" "$REVISAO_REL/T-01.02.json.tmp" && ok 'T-01.02.json.tmp fica na árvor
   || falha 'T-01.02.json.tmp foi commitado'
 sujo "$R" "$REVISAO_REL/T-01.0a.json" && ok 'id fora do formato fica na árvore' \
   || falha 'id fora do formato foi commitado'
+for x in T-1.1 T-001.02; do
+  sujo "$R" "$REVISAO_REL/$x.json" && ok "$x.json fica na árvore" \
+    || falha "$x.json foi commitado"
+done
 metodo "$R" --verificar pre-e2 >/dev/null 2>&1
 igual 'depois do pre-e2 o método está limpo' 0 "$?"
 

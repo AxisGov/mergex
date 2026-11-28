@@ -196,7 +196,13 @@ EOF
   [ "$rc" = 0 ] || return 0
   while IFS= read -r linha; do
     id="${linha%%"$tab"*}"
-    [[ $id =~ ^T-[0-9]+\.[0-9]+$ ]] || continue # guarda:REVISAO-NOME-LITERAL
+    # o mesmo nome que o E1 aceita como evidência (`nome_de_evidencia`): T-NN.MM com dois
+    # dígitos em cada parte, ou o legado T-<dígitos>. `T-1.1` e `T-001.02` continuam produto.
+    case "$id" in # guarda:REVISAO-NOME-LITERAL
+      T-[0123456789][0123456789].[0123456789][0123456789]) ;;
+      T-*) case "${id#T-}" in ''|*[!0123456789]*) continue ;; esac ;;
+      *) continue ;;
+    esac
     printf '%s\n' "docs/entregas/$trabalho/revisao/$id.json"
   done <<EOF
 $saida
