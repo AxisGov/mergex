@@ -12,7 +12,8 @@
 #
 # Exceção única (DM-357): `vermelha` cujo `suite_falhas` só tem testes da lista
 # versionada `.expx/falhas-de-ambiente.tsv` para esta plataforma, nenhum deles
-# tocado pelo índice nem por `<branch_base>...HEAD`, passa com aviso. Quem
+# tocado pelo índice, pela árvore (rastreados não preparados, DM-361) nem por
+# `<branch_base>...HEAD`, passa com aviso. Quem
 # decide é o `portao-v2.sh` da skill (a V2 do portão), chamado com `--staged`;
 # este hook não lê `suite_falhas` nem a lista. Sem `branch_base` que resolva,
 # ou sem o script, barra como sempre.
@@ -56,8 +57,51 @@ RAIZ="$(expx_raiz "${CWD:-$PWD}")"
 MODO="$(expx_modo "$HOOK" "$PADRAO" "$RAIZ")"
 [ "$MODO" = "desligado" ] && exit 0
 
-# O que está em preparação. Nada preparado: não é assunto deste hook.
-PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
+# leva_arvore <comando> — 0 quando um `git commit` do comando tem `--all`, `-a`
+# ou `a` em flag curta combinada (`-am`, `-aF`). O texto entre aspas sai antes:
+# um `-a` na mensagem não é flag. `-i`, `-o` e pathspec não são interpretados
+# (limite registrado na DM-361).
+leva_arvore() {
+  printf '%s\n' "$1" | awk '
+    {
+      n = length($0); junta = 0
+      for (i = 1; i <= n; i++) {
+        c = substr($0, i, 1)
+        if (q != "") {
+          if (q == "\"" && c == "\\") i++
+          else if (c == q) q = ""
+          continue
+        }
+        if (c == "\\") { if (i == n) junta = 1; else { i++; printf "Q" }; continue }
+        if (c == "\"" || c == "\047") { q = c; printf "Q"; continue }
+        printf "%s", c
+      }
+      if (q == "") { if (junta) printf " "; else printf "\n" }
+    }
+  ' | awk '
+    {
+      m = split($0, seg, /[;&|()]+/)
+      for (k = 1; k <= m; k++) {
+        if (!match(seg[k], /git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)/)) continue
+        na = split(substr(seg[k], RSTART + RLENGTH), a, /[[:space:]]+/)
+        for (j = 1; j <= na; j++) {
+          if (a[j] == "--") break
+          if (a[j] == "--all" || a[j] ~ /^-[einopqsvz]*a[A-Za-z]*$/) achou = 1
+        }
+      }
+    }
+    END { exit (achou ? 0 : 1) }
+  '
+}
+
+# O que vai entrar no commit: o índice ou, com `-a`/`--all`, tudo o que mudou nos
+# rastreados desde o HEAD. Nada: não é assunto deste hook.
+if leva_arvore "$CMD"; then
+  PREP="$(git -C "$RAIZ" diff HEAD --name-only 2>/dev/null)" \
+    || PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
+else
+  PREP="$(git -C "$RAIZ" diff --cached --name-only 2>/dev/null)"
+fi
 [ -n "$PREP" ] || exit 0
 
 # Contexto defensivo do commit manual: a branch ativa casa com exatamente uma
@@ -453,7 +497,7 @@ fi
 # --------------------------------------------------------------------------
 # v2_so_ambiente <task> — 0 quando o portao-v2.sh daria AVISO à task: suíte
 # vermelha só por testes da `.expx/falhas-de-ambiente.tsv` desta plataforma,
-# nenhum deles no índice nem em `<branch_base>...HEAD`. A regra e o leitor de
+# nenhum deles no índice, na árvore nem em `<branch_base>...HEAD`. A regra e o leitor de
 # `suite_falhas` são só do script; aqui só se monta a chamada. Qualquer outra
 # resposta (FALHA, SEM_PROVA, script ausente, base que não resolve) é 1, e o
 # hook barra como antes. V2_SAIDA guarda a resposta para a mensagem.
@@ -518,7 +562,7 @@ O que fazer:
 $(awk 'NR == 2' <<<"$V2_SAIDA")
 
 Todos os testes de suite_falhas estão em .expx/falhas-de-ambiente.tsv para
-esta plataforma e nenhum deles foi tocado por este trabalho (índice e
+esta plataforma e nenhum deles foi tocado por este trabalho (índice, árvore e
 branch_base...HEAD). O commit segue; a suíte inteira continua cobrada no
 fechamento da sprint (DM-357)." >&2
       continue

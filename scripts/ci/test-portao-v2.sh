@@ -257,6 +257,35 @@ printf 'tests/ambiente.test.ts\tdesconhecida\tmotivo\t\n' > "$TSV"
 # O valor explícito exercita a mesma plataforma devolvida por uname desconhecido.
 EXPX_PLATAFORMA=desconhecida confere_dm359 'plataforma desconhecida não absolve' FALHA 'fora-da-lista(desconhecida)' '' --verificar --raiz "$R" --base main "$T"
 
+# ---------------------------------------------------------------------------
+echo
+echo "8. Cerquilha entre aspas e árvore com --staged (DM-361)"
+# ---------------------------------------------------------------------------
+lista_padrao
+printf 'tests/a #b.test.ts\tlinux\tfalha so de ambiente\t2026-11-28\n' >> "$TSV"
+# em_bloco <linha(s) de item, já indentadas>
+em_bloco() { printf '    suite_falhas:\n%s' "$1"; }
+
+plano vermelha "$(fluxo '"tests/a #b.test.ts"')"
+verifica "caso cerquilha entre aspas no fluxo" AVISO 0
+plano vermelha "$(fluxo "'tests/a #b.test.ts', tests/ambiente.test.ts") # nota [x]"
+verifica "caso comentario depois do colchete" AVISO 0
+plano vermelha "$(em_bloco '      - "tests/a #b.test.ts"')"
+verifica "caso cerquilha entre aspas no bloco" AVISO 0
+plano vermelha "$(em_bloco "      - 'tests/a #b.test.ts' # nota")"
+verifica "caso comentario depois das aspas no bloco" AVISO 0
+plano vermelha "$(printf '    suite_falhas: # nota\n      - tests/ambiente.test.ts # nota')"
+verifica "caso comentario na chave e no item sem aspas" AVISO 0
+invalida "caso comentario antes do colchete" 'tests/ambiente.test.ts #x'
+# o primeiro `]` fora de aspas fecha a lista, como no hook da sprintx (revisão da 0.14.35)
+invalida "caso texto depois do primeiro colchete" 'tests/ambiente.test.ts]lixo'
+
+plano vermelha "$(fluxo tests/indice.test.ts)"
+printf 'na arvore\n' > "$R/tests/indice.test.ts"
+confere_dm359 'alterado so na arvore com --staged' FALHA 'tocado-pelo-diff: tests/indice.test.ts' '' --verificar --raiz "$R" --base main --staged "$T"
+verifica "caso a arvore nao conta sem --staged" AVISO 0
+git -C "$R" checkout -q -- tests/indice.test.ts
+
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADO"
