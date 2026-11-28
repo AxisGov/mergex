@@ -224,6 +224,39 @@ invalida "caso aspas trocadas" "'tests/ambiente.test.ts\""
 invalida "caso texto depois do fecho" '"tests/ambiente.test.ts" x'
 invalida "caso segundo item sem fecho" "tests/ambiente.test.ts, 'tests/a,b.test.ts"
 
+# ---------------------------------------------------------------------------
+echo
+echo "7. Lista alterada na entrega e plataforma desconhecida (DM-359)"
+# ---------------------------------------------------------------------------
+# A base alternativa contém uma entrada; a feature altera outra linha.
+git -C "$R" checkout -q -b base-dm359 main
+printf 'tests/ambiente.test.ts\tlinux\tmotivo\t\n' > "$TSV"
+git -C "$R" add .expx/falhas-de-ambiente.tsv
+git -C "$R" commit -qm 'lista na base'
+git -C "$R" checkout -q -b feature-dm359
+printf 'tests/outro.test.ts\tlinux\tmotivo\t\n' >> "$TSV"
+git -C "$R" add .expx/falhas-de-ambiente.tsv
+git -C "$R" commit -qm 'altera lista'
+
+confere_dm359() {
+  local descricao="$1" esperado="$2" trecho="$3" ausente="$4" saida rc=0
+  shift 4
+  saida="$(bash "$V2" "$@" 2>/dev/null)" || rc=$?
+  if [ "${saida%%$'\n'*}" = "V2=$esperado" ] &&
+     { { [ "$esperado" = AVISO ] && [ "$rc" = 0 ]; } || { [ "$esperado" = FALHA ] && [ "$rc" = 1 ]; }; } &&
+     [[ "$saida" == *"$trecho"* ]] && { [ -z "$ausente" ] || [[ "$saida" != *"$ausente"* ]]; }; then
+    ok "$descricao"
+  else falha "$descricao — rc=$rc: $saida"; fi
+}
+plano vermelha "$(fluxo tests/outro.test.ts)"
+confere_dm359 'entrada nova no diff' AVISO 'lista-alterada-na-entrega: tests/outro.test.ts' '' --verificar --raiz "$R" --base base-dm359 "$T"
+plano vermelha "$(fluxo tests/ambiente.test.ts)"
+confere_dm359 'entrada da base sem sufixo' AVISO 'falha-de-ambiente' 'lista-alterada-na-entrega' --verificar --raiz "$R" --base base-dm359 "$T"
+confere_dm359 'lista criada na entrega' AVISO 'lista-alterada-na-entrega: tests/ambiente.test.ts' '' --conferir-falhas --raiz "$R" --base main tests/ambiente.test.ts
+printf 'tests/ambiente.test.ts\tdesconhecida\tmotivo\t\n' > "$TSV"
+# O valor explícito exercita a mesma plataforma devolvida por uname desconhecido.
+EXPX_PLATAFORMA=desconhecida confere_dm359 'plataforma desconhecida não absolve' FALHA 'fora-da-lista(desconhecida)' '' --verificar --raiz "$R" --base main "$T"
+
 echo
 echo "---------------------------------------------"
 printf '%d ok, %d falha(s), %d pulado(s)\n' "$OK" "$FALHOU" "$PULADO"
