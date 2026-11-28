@@ -208,6 +208,9 @@ jobs:
       - name: Test E2 V2
         shell: bash
         run: bash scripts/ci/test-portao-v2.sh
+      - name: Test DM-360 revisao da task sem arquivos
+        shell: bash
+        run: bash scripts/ci/test-dm360-revisao-sem-arquivos.sh
 
       - name: Test R3 predecessores da sprintx
         shell: bash
