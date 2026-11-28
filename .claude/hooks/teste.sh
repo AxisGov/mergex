@@ -1085,6 +1085,13 @@ mkdir -p .expx
 # Formato do ecossistema: hooks.<nome>.modo
 echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"bloqueio"}}}' > .expx/hooks.json
 caso "duas tasks, em bloqueio"  mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 2
+# DM-361: com -a/--all, o que está só na árvore entra no commit
+git reset -q
+caso "indice vazio sem -a: nao e assunto"   mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 0
+caso "-a na mensagem nao e flag"            mergex/commit-por-task.sh "$(bash_json 'git commit -m "usa -a aqui"')" 0
+caso "-am, indice vazio, duas tasks: barra" mergex/commit-por-task.sh "$(bash_json 'git commit -am x')" 2
+caso "--all, indice vazio, duas tasks: barra" mergex/commit-por-task.sh "$(bash_json 'git commit --all -m x')" 2
+git add src/a.ts src/b.ts
 echo '{"expx_hooks":1,"hooks":{"commit-por-task":{"modo":"desligado"}}}' > .expx/hooks.json
 caso "desligado nao age"        mergex/commit-por-task.sh "$(bash_json 'git commit -m x')" 0
 # Forma antiga, aceita para não quebrar arquivo já escrito à mão

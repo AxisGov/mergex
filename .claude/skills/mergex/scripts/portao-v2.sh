@@ -16,7 +16,8 @@
 #                                    plataforma atual, com motivo;
 #                                 3. NENHUM desses caminhos aparece em
 #                                    `git diff --name-only <base>...HEAD`
-#                                    (e no índice, com --staged);
+#                                    (com --staged, nem no índice nem nos
+#                                    rastreados alterados na árvore);
 #                               senão FALHA.
 #   suite ausente ou outro valor -> FALHA
 #
@@ -24,6 +25,8 @@
 # linhas `caminho<TAB>plataforma<TAB>motivo<TAB>desde`. `#` no começo comenta,
 # linha em branco é ignorada, motivo vazio invalida a linha, CR de fim de linha
 # some, e o caminho casa EXATO (sem normalizar `./` nem barra invertida).
+# No tasks.md, o ` #` de dentro das aspas de `suite_falhas` é parte do caminho;
+# comentário vale fora delas, depois do fecho das aspas ou do `]` (DM-361).
 # Timeout por máquina carregada NÃO entra na lista: a reexecução isolada verde
 # é registrada como `parcial`.
 #
@@ -39,8 +42,10 @@
 #   portao-v2.sh --plataforma
 #
 #   --raiz    onde ficam o repositório e `.expx/` (padrão: a raiz do Git do cwd)
-#   --staged  soma ao diff o que está no índice (`git diff --cached`); é o que
-#             o hook commit-por-task usa antes do commit existir
+#   --staged  soma ao diff o que está no índice (`git diff --cached`) e os
+#             rastreados alterados e não preparados (`git diff`), que `-a`, `-i`,
+#             `-o` ou pathspec levam ao commit: na dúvida, conta (DM-361). É o
+#             que o hook commit-por-task usa antes do commit existir
 #   --task    avalia só essa task, qualquer que seja o status (o hook); ausente
 #             em todos os tasks.md é SEM_PROVA
 #
@@ -100,7 +105,15 @@ tasks_de() {
   b="$(bloco "$1" tasks)"
   confere_bloco "$b" || { printf 'portao-v2: %s: %s\n' "$ERRO" "$1" >&2; return 1; }
   printf '%s\n' "$b" | awk '
-    function limpo(v) {
+    # limpo(v) — o valor sem comentário e sem aspas. Valor entre aspas, seguido
+    # só de espaço e comentário, sai inteiro, com o ` #` de dentro (DM-361).
+    function limpo(v,   t, q, j) {
+      t = v; sub(/^[[:space:]]+/, "", t)
+      q = substr(t, 1, 1)
+      if (q == "\"" || q == "\047") {
+        j = index(substr(t, 2), q)
+        if (j && substr(t, j + 2) ~ /^([[:space:]]+(#.*)?)?$/) return substr(t, 2, j - 1)
+      }
       sub(/[[:space:]]+#.*$/, "", v)
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
       if (length(v) >= 2 && (v ~ /^".*"$/ || v ~ /^\047.*\047$/)) v = substr(v, 2, length(v) - 2)
@@ -133,6 +146,24 @@ tasks_de() {
       }
       return 1
     }
+    # corta_fluxo(s) — `s` começa com `[`: devolve até o `]` que fecha, fora de
+    # aspas, seguido só de espaço e comentário (DM-361). Sem esse `]`, ou com
+    # ` #` antes dele fora de aspas, devolve `[`, que cai em `invalida`.
+    function corta_fluxo(s,   i, n, c, aspa, inicio) {
+      n = length(s); aspa = ""; inicio = 1
+      for (i = 2; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (aspa != "") { if (c == aspa) aspa = ""; continue }
+        if (inicio && (c == "\"" || c == "\047")) { aspa = c; inicio = 0; continue }
+        # o primeiro `]` fora de aspas fecha a lista, como no hook da sprintx:
+        # `[a]lixo]` é inválida, não o item `a]lixo`
+        if (c == "]") { if (substr(s, i + 1) ~ /^([[:space:]]+#.*)?[[:space:]]*$/) return substr(s, 1, i); break }
+        if (c == "#" && substr(s, i - 1, 1) ~ /[[:space:]]/) break
+        if (c == ",") inicio = 1
+        else if (c !~ /[[:space:]]/) inicio = 0
+      }
+      return "["
+    }
     /^\001/ { next }
     /^[[:space:]]*-[[:space:]]*id:/ {
       despeja()
@@ -152,7 +183,10 @@ tasks_de() {
     /^[[:space:]]*suite:/  { v = $0; sub(/^[^:]*:/, "", v); su = limpo(v); next }
     /^[[:space:]]*suite_falhas:/ {
       rlista = recuo($0)
-      v = $0; sub(/^[^:]*:/, "", v); v = limpo(v)
+      v = $0; sub(/^[^:]*:/, "", v)
+      t = v; sub(/^[[:space:]]+/, "", t)
+      if (t ~ /^\[/) v = corta_fluxo(t)
+      else v = limpo(v)
       marca = "lista"; itens = ""
       if (v == "") { lista = 1; next }
       if (v ~ /^\[.*\]$/ && fluxo(substr(v, 2, length(v) - 2))) next
@@ -221,6 +255,11 @@ carrega_diff() {
   if [ "$STAGED" = 1 ]; then
     if ! saida="$(git -C "$RAIZ" diff --cached --name-only --no-renames -z | tr '\000' '\n')"; then
       DIFF_RC=1; DIFF_MOTIVO="indice-ilegivel"; return 1
+    fi
+    TOCADOS="$TOCADOS
+$saida"
+    if ! saida="$(git -C "$RAIZ" diff --name-only --no-renames -z | tr '\000' '\n')"; then
+      DIFF_RC=1; DIFF_MOTIVO="arvore-ilegivel"; return 1
     fi
     TOCADOS="$TOCADOS
 $saida"

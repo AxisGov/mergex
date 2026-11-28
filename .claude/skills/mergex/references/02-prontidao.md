@@ -139,7 +139,7 @@ bash .claude/skills/mergex/scripts/portao-v2.sh --verificar --base <branch_base>
 bash .claude/skills/mergex/scripts/causa-do-portao.sh --token v2 <primeira linha da saída>
 ```
 
-`V2=FALHA` vira `v2`, `V2=SEM_PROVA` vira `v2_sem_prova`; `V2=OK`, `V2=AVISO` e `n/a` não imprimem nada. O AVISO vai para a seção de avisos, com a task e os testes, e **não entra em `falhas_portao`**. O hook `commit-por-task` chama o mesmo script com `--staged`, que soma o índice ao diff.
+`V2=FALHA` vira `v2`, `V2=SEM_PROVA` vira `v2_sem_prova`; `V2=OK`, `V2=AVISO` e `n/a` não imprimem nada. O AVISO vai para a seção de avisos, com a task e os testes, e **não entra em `falhas_portao`**. O hook `commit-por-task` chama o mesmo script com `--staged`, que soma ao diff o índice e os rastreados alterados na árvore. Em `suite_falhas`, o ` #` de dentro das aspas é parte do caminho, e o comentário só vale depois do fecho das aspas ou do `]` (DM-361).
 
 **Aspas na lista e no id (DM-358).** `suite_falhas` vale em bloco (`- caminho`) ou em fluxo (`[a, b]`). No fluxo, a vírgula separa os itens; o caminho que tem vírgula vai entre aspas duplas ou simples (`["tests/a,b.test.ts", tests/c.test.ts]`), e as aspas saem do item. Aspa no meio de item sem aspas é literal. Par desbalanceado ou texto depois do fecho invalida a lista inteira (`suite_falhas-invalida`, FALHA). O `id` da task também vale entre aspas duplas ou simples (`- id: "T-01.01"`) e é lido sem elas.
 
